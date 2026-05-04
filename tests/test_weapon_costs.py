@@ -53,7 +53,10 @@ def test_weapon_cost_uses_cached_value_for_default_queries(monkeypatch):
         recorded_calls.append((args, kwargs))
         return 99.0
 
-    monkeypatch.setattr(costs, "_weapon_cost", fake_weapon_cost)
+    # ``_weapon_cost`` is called by ``weapon_cost_components`` via lexical lookup
+    # inside ``costs.weapons`` — patch the name there, not on the re-exported
+    # facade or on ``_engine`` (where the name is a stale copy after extraction).
+    monkeypatch.setattr(costs.weapons, "_weapon_cost", fake_weapon_cost)
 
     assert costs.weapon_cost(weapon, unit_quality=4, unit_flags=[]) == pytest.approx(12.5)
     assert recorded_calls == []
@@ -67,7 +70,7 @@ def test_weapon_cost_falls_back_when_modifiers_present(monkeypatch):
         recorded_calls.append((args, kwargs))
         return 7.0
 
-    monkeypatch.setattr(costs, "_weapon_cost", fake_weapon_cost)
+    monkeypatch.setattr(costs.weapons, "_weapon_cost", fake_weapon_cost)
 
     result = costs.weapon_cost(weapon, unit_quality=3, unit_flags=[])
     assert recorded_calls  # quality mismatch triggers recomputation

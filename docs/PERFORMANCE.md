@@ -46,6 +46,22 @@ Cały zapis rostera (`/update`) z odświeżeniem badge'y mieści się w **<400 m
 
 ## Historia (najnowsze na górze)
 
+### 2026-05-01 — Ekstrakcja weapons.py + abilities.py
+- Sekcja 5 wyciągnięta do `abilities.py`, sekcja 6 do `weapons.py`.
+- `__init__.py` eksponuje `weapons` i `abilities` submoduły dla monkeypatcha.
+- `test_weapon_costs.py` patch target: `_engine._weapon_cost` → `weapons._weapon_cost`.
+- Performance bez zmian: total ~334 ms, Chmiera ~74 ms (szum vs. poprzedni baseline).
+- Test suite: 143/143 passed.
+
+### 2026-04-30 — Rozbicie costs.py na pakiet
+- `app/services/costs.py` → `app/services/costs/{__init__.py, _engine.py, primitives.py}`.
+- Sekcja 4 (TRAIT & ABILITY PARSING UTILS) wyciągnięta do `primitives.py`.
+- Pozostałe sekcje pozostają w `_engine.py` jako monolit — ekstrakcja
+  pozostałych submodułów jest follow-up'em (patrz HANDOFF.md).
+- Performance bez zmian: Chmiera 65 ms, Leman Russ 47 ms (różnica w granicach
+  noise vs. poprzedni baseline).
+- Test suite: 143/143 passed.
+
 ### 2026-04-30 — D1 + E2 + E3
 - `@lru_cache` na `ability_identifier` i `normalize_name`.
 - Hoist role-independent precompute z `_compute_total` do `roster_unit_role_totals`.

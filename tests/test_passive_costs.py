@@ -564,8 +564,18 @@ def test_roster_totals_apply_open_transport_dynamic_cost_when_payload_cost_is_ze
             traits=[],
         )
 
-    monkeypatch.setattr(costs, "compute_passive_state", _mock_passive_state)
-    monkeypatch.setattr(costs, "ability_cost_from_name", lambda *args, **kwargs: 0.0)
+    # Patch on role_totals because roster_unit_role_totals (now in role_totals.py)
+    # resolves compute_passive_state via role_totals' own module globals, not
+    # via costs._engine.  Patching costs._engine.compute_passive_state no longer
+    # affects calls inside roster_unit_role_totals after the Section 9 extraction.
+    #
+    # The former ability_cost_from_name patch is intentionally removed: it was
+    # targeting costs._engine and had no effect (ability_cost_components_from_name
+    # resolves ability_cost_from_name via abilities.py globals).  The transport
+    # cost delta is recomputed dynamically in _effective_passive_cost regardless
+    # of what _passive_entries stores as entry["cost"], so no ability-cost mock
+    # is needed.
+    monkeypatch.setattr(costs.role_totals, "compute_passive_state", _mock_passive_state)
 
     totals_with_transport = costs.roster_unit_role_totals(
         roster_unit,

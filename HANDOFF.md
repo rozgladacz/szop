@@ -1,81 +1,123 @@
 # HANDOFF
 
-> Plik prowadzony zgodnie z AGENTS.md (linia 57). Aktualizuj po każdym
-> znaczącym kroku. Po zakończeniu wątku — zostaw stan końcowy lub wyczyść
-> sekcje "W toku" / "Hipotezy".
-
-## Aktualny cel
-*(jedno zdanie — co próbujemy osiągnąć w bieżącej sesji)*
-
-—
-
-## Pliki dotknięte w bieżącej sesji
-*(ścieżka — krótki opis zmiany)*
-
-—
-
-## Hipotezy / pytania otwarte
-*(co zakładamy, czego jeszcze nie zweryfikowaliśmy)*
-
-—
-
-## W toku
-*(kroki rozpoczęte ale niedokończone — z numerami linii / nazwami funkcji)*
-
-—
-
-## Jak zweryfikować
-*(konkretne komendy / scenariusze do odpalenia po wznowieniu)*
-
-—
+> **Protokół przy ZMIANIE ZADANIA:** Na początku nowego zadania (jeśli
+> sekcja BIEŻĄCE ZADANIE opisuje inny cel) — nadpisz całą sekcję
+> BIEŻĄCE ZADANIE. Sekcji WIEDZA PROJEKTU nie czyść — to trwała
+> referencja. Dopisz wpis do Logu.
+>
+> **Protokół przy KONTYNUACJI:** Aktualizuj PRZED każdym podetapem,
+> nie po sesji — kontekst może się skończyć w trakcie pracy.
 
 ---
 
-## Log sesji (dopisuj na górze)
+# BIEŻĄCE ZADANIE
+*(Nadpisz tę sekcję przy każdej zmianie zadania)*
 
-### 2026-04-30 — Optymalizacja cost engine (D1+E2+E3)
+## Cel
+**BRAK AKTYWNEGO ZADANIA** — restrukturyzacja `costs/` zakończona 2026-05-02.
+Czekam na nowe polecenie użytkownika.
 
-**Cel:** Sprowadzić `calculate_roster_unit_quote(include_item_costs=True)`
-na dużych oddziałach (Chimera/Leman Russ na rosters/10) z kilkunastu sekund
-do <100 ms.
+## W toku
+—
 
-**Zmiany:**
-- `app/services/costs.py:525` — `@lru_cache(maxsize=4096)` na `normalize_name`.
-- `app/services/costs.py:699` — `@lru_cache(maxsize=4096)` na `ability_identifier`
-  (~18 700 wywołań/quote → cache hit ratio ~99.5%).
-- `app/services/costs.py:2061-2185` — w `roster_unit_role_totals`:
-  - hoist `_sorted_ability_links`, `_link_by_ability_id`, `_ability_id_to_ident`,
-    `_base_active_set_precomputed`, `_selected_active_set_precomputed` poza
-    `_compute_total` (były role-independent, ale liczone 2× na każdy quote).
-  - eliminacja O(N²) `next(...)` lookup w pętli ability (linie 2168-2176 sprzed zmiany).
-  - memoizacja `_passive_entries` i `_ability_cost_map` po fingerprint cech
-    (warrior i strzelec różnią się jedną cechą → cache hit na drugim wywołaniu).
-- `app/services/costs.py:2270` — `ability_identifier(slug)` w pętli passive_diff
-  było wywoływane 2× na entry, teraz 1×.
+## Pliki dotknięte
+—
 
-**Baseline (przed → po) na rosters/10:**
-| Oddział | Przed | Po |
-|---|---|---|
-| Leman Russ | 4480 ms | **41 ms** |
-| Chmiera | ~kilkanaście s (raport użytkownika) | **55 ms** |
-| Pozostałe | — | 9–36 ms |
+## Hipotezy / pytania otwarte
+—
 
-Cały roster ~14 s → ~300 ms (≈50× szybciej). Badge-only refresh: 3 ms/oddział.
+## Jak zweryfikować
+```bash
+python -m pytest tests/ -q   # 143/143 — baseline po zakończeniu restrukturyzacji
+```
+
+---
+
+# WIEDZA PROJEKTU
+*(Nie czyść przy zmianie zadania — aktualizuj tylko gdy architektura się zmienia)*
+
+## Pakiet `app/services/costs/` — mapa submodułów
+
+| Plik | Linie | Zawartość |
+|------|-------|-----------|
+| `_engine.py` | ~300 | Stałe, tabele, dataclassy (`PassiveState`, `AbilityCostComponents`), `_roster_unit_classification`, stubs importów |
+| `primitives.py` | ~310 | Sekcja 4: `ability_identifier`, `normalize_name`, `_strip_role_traits` |
+| `weapons.py` | ~317 | Sekcja 6: `_weapon_cost`, `weapon_cost_components`, `weapon_cost` |
+| `abilities.py` | ~372 | Sekcja 5: `passive_cost`, `base_model_cost`, `ability_cost_from_name` |
+| `passive_state.py` | ~347 | Sekcja 3: `compute_passive_state`, helpery army/passive |
+| `unit_helpers.py` | ~351 | Sekcja 7: `ability_cost`, `unit_default_weapons`, `normalize_roster_unit_loadout` |
+| `role_totals.py` | ~471 | Sekcja 9: `roster_unit_role_totals` |
+| `quote.py` | ~314 | Sekcja 8: `calculate_roster_unit_quote` (SSOT core) |
+| `roster.py` | ~127 | Sekcja 10: `roster_unit_cost`, `recalculate_roster_costs` |
+
+## Monkeypatching guide
+
+- `costs.weapons._weapon_cost` — formuła kosztu broni
+- `costs.role_totals.compute_passive_state` — passive state wewnątrz role totals
+- `costs.quote.compute_passive_state` — passive state wewnątrz quote
+- `costs.quote.roster_unit_role_totals` — role totals wewnątrz quote
+
+## Performance baseline (rosters/10)
+
+- Total: ~334 ms, Chmiera: ~70 ms (po optymalizacjach 2026-04-30)
+- Badge-only refresh (`include_item_costs=False`): ~3 ms/oddział
+
+---
+
+# LOG SESJI
+*(Dopisuj na górze. Zachowaj max ~5 ostatnich wpisów — starsze usuń lub skróć do jednej linii.)*
+
+
+
+### 2026-05-02 — Ekstrakcja role_totals.py + quote.py; naprawa błędów poprzedniej sesji
+
+**Cel:** Dokończyć restrukturyzację — sekcje 8 i 9 ostatnie żywe bloki w `_engine.py`.
+
+**Diagoza zmarnowanego kontekstu (poprzednia sesja):**
+1. `Write` tool z 400-liniowym ciałem `roster_unit_role_totals` — weszło do kontekstu.
+2. `Edit` zastąpił tylko 6 pierwszych linii sekcji → ciało zostało jako `_roster_unit_role_totals_DELETED`.
+3. Sesja skończyła się przed aktualizacją HANDOFF.md.
+
+**Wykonane:**
+- `role_totals.py` — już istniał z poprzedniej sesji (310 linii, poprawny).
+- `_engine.py` — Python text-surgery usunął martwą `_roster_unit_role_totals_DELETED` (~409 linii).
+- `quote.py` — Python text-surgery skopiował sekcję 8 z `_engine.py`; ciało nigdy nie weszło do kontekstu.
+- `_engine.py` sekcja 8 → stub `from .quote import calculate_roster_unit_quote`.
+- `__init__.py` — dodano `role_totals`, `quote`; zaktualizowany docstring.
+- `tests/test_passive_costs.py:572` — patch zmieniony na `costs.role_totals.compute_passive_state`; zbędna łatka `ability_cost_from_name` (nigdy nie działała — `ability_cost_components_from_name` rozwiązuje `ability_cost_from_name` przez własne globals `abilities.py`, nie przez `role_totals`) usunięta z wyjaśnieniem.
+- `AGENTS.md` — nowa sekcja "Przenoszenie dużych bloków kodu", poprawka HANDOFF zasady, stała referencja `costs.py` → `costs/_engine.py`.
 
 **Weryfikacja:**
-- `pytest tests/ -q` → 140/140 passed.
-- `make profile ROSTER=10` (po wprowadzeniu w 6.2) — patrz `docs/PERFORMANCE.md`.
+- `python -m pytest tests/ -q` → **143/143 passed**.
 
-**Pominięte świadomie:**
-- E1 (refactor pętli `passive_deltas` w `calculate_roster_unit_quote:1860-1873`)
-  — nieuzasadnione przy obecnych <100 ms na worst-case.
-- D2/D3 (memoizacja `weapon_cost_components` / `ability_cost_components_from_name`)
-  — pozostają hot, ale ich łączny koszt jest <50 ms na cały roster.
+---
 
-**Wcześniejsze fazy ukończone (ten i poprzedni dzień):**
-- A1 — usunięty duplikat quote w `_roster_unit_export_data` (rosters.py).
-- B1 — `scheduleRender()` z RAF batching (app.js).
-- B2 — debounce quote 250 → 400 ms (app.js).
+### 2026-05-01 — Ekstrakcja passive_state.py + unit_helpers.py + roster.py
+
+> *Wpis dopisany retrospektywnie — sesja wybiła limit kontekstu przed aktualizacją HANDOFF.md.*
+
+**Cel:** Wyciągnąć sekcje 3, 7, 10.
+
+**Wykonane:**
+- `passive_state.py` — `compute_passive_state`, `army_rules`, `normalize_roster_unit_count`, helpery payload/counts.
+- `unit_helpers.py` — `unit_default_weapons`, `ability_cost`, `ability_uses_order_like_cost`, `normalize_roster_unit_loadout`, `unit_total_cost`.
+- `roster.py` — `roster_unit_cost`, `recalculate_roster_costs`, `roster_total`, `ensure_cached_costs`, `update_cached_costs`.
+- `_engine.py` sekcje 3, 7, 10 → stuby importów.
+- `__init__.py` — dodano `passive_state`, `unit_helpers`, `roster`.
+
+**Weryfikacja:**
+- `pytest tests/ -q` → 143/143. Profile: Chmiera ~70 ms, total ~352 ms.
+
+---
+
+### 2026-05-01 — Ekstrakcja weapons.py + abilities.py
+`weapons.py` (sekcja 6), `abilities.py` (sekcja 5+6 shims). Kluczowe: mutual dependency rozwiązana kolejnością (weapons first, abilities importuje weapon_cost). Patch `costs.weapons._weapon_cost` zamiast `costs._engine._weapon_cost`. 143/143.
+
+### 2026-04-30 — Rozbicie costs.py → pakiet costs/
+`costs.py` → `costs/_engine.py` (git mv) + `__init__.py` (re-eksport API) + `primitives.py` (sekcja 4). Wzorzec ekstrakcji z re-importem przez globals `_engine` potwierdzony. 143/143.
+
+### 2026-04-30 — Optymalizacja cost engine
+`lru_cache` na `normalize_name` + `ability_identifier`. Hoisting + memoizacja w `roster_unit_role_totals`. Wynik: Leman Russ 4480 ms → 41 ms, Chmiera kilkanaście s → 55 ms. Badge-only: 3 ms. 143/143.
 
 **Pominięte i odłożone:**
 - A2 — `selectinload(Weapon.parent).selectinload(Weapon.parent)` w `_unit_eager_options`

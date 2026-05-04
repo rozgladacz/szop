@@ -54,7 +54,37 @@ Zależności:
 - Nie przebudowuj architektury bez potrzeby.
 - Preferuj małe, odwracalne zmiany.
 - Before writing any code, list every layer this change touches (data model, backend payload, JS render, CSS, tests). Then implement each layer and run tests. After tests pass, walk me through how you verified each layer end-to-end.
-- As you work on a prolonged task, maintain a `HANDOFF.md` file with: current goal, files changed so far, hypotheses tested, what's still pending, and how to verify. Update it after every significant step so I can resume if interrupted.
+- As you work on a prolonged task, maintain a `HANDOFF.md` file. **Update HANDOFF.md BEFORE starting each major sub-task** (not only at end of session) — context windows can be exhausted mid-work, and an end-of-session update may never happen. Treat it as a pre-step checkpoint, not a post-step summary.
+- `HANDOFF.md` has two distinct zones — treat them differently:
+  - **BIEŻĄCE ZADANIE** (volatile): overwrite entirely at the start of each new unrelated task. Set "Cel" to the new task; clear "W toku", "Pliki dotknięte", "Hipotezy", "Jak zweryfikować".
+  - **WIEDZA PROJEKTU** (stable): never clear on task switch — only update when architecture genuinely changes (e.g. new module added, performance baseline revised).
+- **Task-switch protocol**: when the user gives a task that differs from the current "Cel" in HANDOFF.md — (1) add a log entry closing the previous task, (2) overwrite BIEŻĄCE ZADANIE with the new task before writing any code.
+- **Plan file as BIEŻĄCE ZADANIE**: when an active plan file exists (plan mode → execute flow), treat the plan file as the source of truth for current task state — do NOT duplicate "W toku" / steps / files into HANDOFF.md. Only update HANDOFF.md in WIEDZA PROJEKTU (if architecture changed) and LOG SESJI (brief closing entry after task is done). For direct tasks without a plan file (hotfix, quick bugfix), use BIEŻĄCE ZADANIE in HANDOFF.md as usual.
+
+## Przenoszenie dużych bloków kodu między plikami
+Gdy przenosisz blok kodu > 100 linii do nowego pliku (np. ekstrakcja submodułu):
+- **Nie używaj narzędzia `Write` z pełną treścią funkcji** — całe ciało trafia do kontekstu rozmowy i zużywa budżet na rzecz, która nie wnosi wartości analitycznej.
+- **Używaj Bash + Python text-surgery:** odczytaj plik, wytnij blok po granicach tekstowych (unikalny komentarz sekcji lub `def`), zapisz do nowego pliku (z nagłówkiem dopisanym przez Python), usuń z oryginału. Ciało funkcji NIGDY nie wchodzi do kontekstu Claude.
+
+```python
+# Wzorzec: ekstrakcja sekcji z _engine.py → nowy_modul.py
+import pathlib
+src = pathlib.Path('app/services/costs/_engine.py')
+text = src.read_text(encoding='utf-8')
+
+start = text.index('\n# === SECTION: NazwaSekcji')
+end   = text.index('\n# === SECTION: NastepnaSekcja')
+body  = text[start:end]
+
+header = '"""Docstring nowego modułu."""\n\nfrom __future__ import annotations\n...\n'
+pathlib.Path('app/services/costs/nowy_modul.py').write_text(header + body.lstrip('\n'), encoding='utf-8')
+
+stub = '\nfrom .nowy_modul import (\n    funkcja1,\n    funkcja2,\n)\n'
+src.write_text(text[:start] + stub + text[end:], encoding='utf-8')
+```
+
+- Po ekstrakcji: zaktualizuj `__init__.py` (dodaj moduł do `from . import ...`), uruchom `pytest -q`.
+- Jeśli nowy moduł importuje z `_engine`, a `_engine` importuje z nowego modułu → circular import jest OK, bo stałe/_dataclassy są definiowane w `_engine` PRZED stubem `from .nowy_modul import`.
 - If the user says 'nie', 'wrong', 'cofnij', or equivalent: **stop, revert the last change, ask for clarification** before attempting a new approach.
 
 ## Testy i weryfikacja
@@ -77,7 +107,7 @@ Zależności:
 - **Duże usunięcia z monolitycznych plików (app.js, rosters.py, armies.py):** podziel na osobne commity per kategoria (np. stałe, funkcje kosztowe, helpery UI). Jeden commit nie powinien usuwać więcej niż ~150 linii z jednego pliku bez weryfikacji każdej usuwanej funkcji przez `grep`.
 
 ## Komentarze sekcji
-Pliki `app/static/js/app.js`, `app/services/costs.py`, `app/routers/rosters.py` mają komentarze sekcji w formacie:
+Pliki `app/static/js/app.js`, `app/services/costs/_engine.py`, `app/routers/rosters.py` mają komentarze sekcji w formacie:
 - JS: `// === SECTION: Nazwa — opis ===`
 - Python: `# === SECTION: Nazwa — opis ===`
 

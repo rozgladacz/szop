@@ -647,21 +647,28 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Jeżeli cel jest Przyszpilony, wykonuje podwójną liczbę ataków.",
     ),
     AbilityDefinition(
+        slug="sterowany",
+        name="Sterowany",
+        type="weapon",
+        description=(
+            "Zanim wykonasz atak tą bronią, dla każdego powiązanego znacznika "
+            "ustaw go w zasięgu broni od jego obecnej pozycji albo wykonaj atak z jego pozycji i go odrzuć. "
+            "Następnie wykonaj zwykły atak albo ustaw nowy znacznik w zasięgu. "
+            "Możesz mieć dwa znaczniki na planszy, są wspólne dla całego oddziału. Po wystawianiu rozstaw jeden znacznik."
+        ),
+    ),
+    AbilityDefinition(
         slug="porazenie",
         name="Porażenie",
         type="weapon",
-        description=(
-            "Podczas sprawdzania kto wygrał walkę wręcz, "
-            "rany zadane tą bronią liczą się podwójnie."
-        ),
+        description="Podczas sprawdzania kto wygrał walkę wręcz, rany zadane tą bronią liczą się podwójnie.",
     ),
     AbilityDefinition(
         slug="zguba",
         name="Zguba",
         type="weapon",
         description=(
-            "Zmniejsz liczbę odzyskanych ran w tej aktywacji, "
-            "o liczbę ran otrzymanych tą bronią. "
+            "Zmniejsz liczbę odzyskanych ran w tej aktywacji o liczbę ran otrzymanych tą bronią. "
             "Modele pokonane tą bronią nie mogą wrócić do gry."
         ),
     ),
