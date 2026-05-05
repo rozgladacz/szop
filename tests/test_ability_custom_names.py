@@ -201,3 +201,26 @@ def test_definition_payload_has_separate_long_range_aura_entry():
 def test_meczennik_aura_has_fixed_cost():
     assert costs.ability_cost_from_name("Męczennik") == 5.0
 
+
+def test_passive_mistrzostwo_has_weapon_dropdown():
+    """passive_definitions_for_army must expose mistrzostwo with value_choices for the JS picker."""
+    from app.routers.armies import passive_definitions_for_army
+
+    defs = passive_definitions_for_army(None)
+    mistrzostwo = next((d for d in defs if d.get("slug") == "mistrzostwo"), None)
+
+    assert mistrzostwo is not None, "mistrzostwo missing from passive_definitions"
+    assert mistrzostwo.get("requires_value") is True, "requires_value must be True"
+    choices = mistrzostwo.get("value_choices", [])
+    assert len(choices) > 0, "value_choices must be non-empty for JS picker to show dropdown"
+    # Each choice must have value and label for the JS picker to build <option> elements
+    for choice in choices:
+        assert "value" in choice and choice["value"], f"choice missing value: {choice}"
+        assert "label" in choice and choice["label"], f"choice missing label: {choice}"
+    # Excluded weapon slugs must not appear in choices
+    excluded = ability_registry.EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS
+    for choice in choices:
+        assert choice["value"] not in excluded, (
+            f"excluded weapon slug {choice['value']!r} found in mistrzostwo value_choices"
+        )
+

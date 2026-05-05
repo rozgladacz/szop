@@ -52,7 +52,19 @@
       "Bash(python -m pytest tests/ -q --tb=no -q)",
       "Bash(python -m pytest tests/ --tb=no -q)",
       "Bash(python -m pytest tests/ -q --tb=no)",
-      "Bash(python -c \"from app.services.costs._engine import _RULESET_FALLBACK_PATH; print\\(_RULESET_FALLBACK_PATH\\); print\\('exists:', _RULESET_FALLBACK_PATH.exists\\(\\)\\)\")"
+      "Bash(python -c \"from app.services.costs._engine import _RULESET_FALLBACK_PATH; print\\(_RULESET_FALLBACK_PATH\\); print\\('exists:', _RULESET_FALLBACK_PATH.exists\\(\\)\\)\")",
+      "Bash(python -c *)",
+      "Bash(python _patch_abilities.py)",
+      "Bash(python -m pytest tests/test_passive_costs.py tests/test_ability_costs.py -x -q)",
+      "Bash(python -m pytest tests/test_passive_costs.py -x -q)",
+      "Bash(python -m pytest tests/ -x -q --ignore=tests/e2e)",
+      "Bash(python -m pytest tests/test_mistrzostwo_costs.py -v)",
+      "Bash(python -m pytest --tb=no -q)",
+      "Bash(python _patch_inch.py)",
+      "Bash(python -m pytest --tb=short -q)",
+      "mcp__Claude_in_Chrome__tabs_context_mcp",
+      "Bash(python -m pytest -q)",
+      "Bash(python -m pytest tests/test_ability_custom_names.py::test_passive_mistrzostwo_has_weapon_dropdown -v)"
     ]
   }
 }

@@ -40,9 +40,11 @@ from .primitives import (
     extract_number,
     morale_modifier,
     normalize_name,
+    normalize_range_value,
+    split_traits,
     toughness_modifier,
 )
-from .weapons import weapon_cost
+from .weapons import _weapon_cost, weapon_cost
 
 
 def passive_cost(
@@ -150,6 +152,49 @@ def _parse_aura_value(name: str, value: str | None) -> tuple[str, float]:
             ability_ref = desc[4:].lstrip(": -–").strip()
     slug = ability_catalog.slug_for_name(ability_ref) or ability_identifier(ability_ref)
     return slug, aura_range
+
+
+def _mistrzostwo_aura_cost(weapon_slug: str) -> float:
+    q = 4
+    delta1 = abs(
+        _weapon_cost(q, 24, 1, 2, [weapon_slug], []) - _weapon_cost(q, 24, 1, 2, [], [])
+    )
+    delta2 = abs(
+        _weapon_cost(q, 0, 2, 2, [weapon_slug], []) - _weapon_cost(q, 0, 2, 2, [], [])
+    )
+    return max(delta1, delta2)
+
+
+def _mistrzostwo_weapon_cost(
+    weapon_slug: str,
+    weapons: Sequence[models.Weapon],
+    quality: int,
+    unit_traits: Sequence[str],
+) -> float:
+    total = 0.0
+    for wpn in weapons:
+        range_v = normalize_range_value(
+            getattr(wpn, "effective_range", None) or getattr(wpn, "range", "")
+        )
+        existing = list(split_traits(
+            getattr(wpn, "effective_tags", None) or getattr(wpn, "tags", "")
+        ))
+        attacks = float(
+            getattr(wpn, "effective_attacks", None)
+            if getattr(wpn, "effective_attacks", None) is not None
+            else getattr(wpn, "attacks", 1.0)
+        )
+        ap = int(
+            getattr(wpn, "effective_ap", None)
+            if getattr(wpn, "effective_ap", None) is not None
+            else getattr(wpn, "ap", 0)
+        )
+        if weapon_slug in {normalize_name(t) for t in existing}:
+            continue
+        cost_without = _weapon_cost(quality, range_v, attacks, ap, existing, list(unit_traits))
+        cost_with = _weapon_cost(quality, range_v, attacks, ap, existing + [weapon_slug], list(unit_traits))
+        total += abs(cost_with - cost_without)
+    return total
 
 
 def base_model_cost(
@@ -290,11 +335,20 @@ def ability_cost_components_from_name(
                 multiplier = value
         base_result = capacity * (multiplier + 0.25)
     elif desc.startswith("aura"):
-        ability_slug, aura_range = _parse_aura_value(name, value)
-        cost = passive_cost(ability_slug, 8.0, True)
-        if abs(aura_range - 12.0) < 1e-6:
-            cost *= 2.0
-        base_result = cost
+        if value and value.startswith("mistrzostwo:"):
+            parts = value.split("|", 1)
+            w_slug = parts[0][len("mistrzostwo:"):].strip()
+            aura_range_val = extract_number(parts[1]) if len(parts) == 2 else 6.0
+            cost = _mistrzostwo_aura_cost(w_slug) * 8.0
+            if abs(aura_range_val - 12.0) < 1e-6:
+                cost *= 2.0
+            base_result = cost
+        else:
+            ability_slug, aura_range = _parse_aura_value(name, value)
+            cost = passive_cost(ability_slug, 8.0, True)
+            if abs(aura_range - 12.0) < 1e-6:
+                cost *= 2.0
+            base_result = cost
     elif desc.startswith("mag"):
         base_result = 8.0 * extract_number(value or name)
     elif desc == "przekaznik":
@@ -313,8 +367,12 @@ def ability_cost_components_from_name(
         base_result = 45.0
     elif desc.startswith("rozkaz") or desc.startswith("klatwa") or desc.startswith("oznaczenie"):
         ability_ref = value or (desc.split(":", 1)[1].strip() if ":" in desc else "")
-        ability_slug = ability_catalog.slug_for_name(ability_ref) or ability_identifier(ability_ref)
-        base_result = passive_cost(ability_slug, 10.0, True)
+        if ability_ref.startswith("mistrzostwo:"):
+            w_slug = ability_ref[len("mistrzostwo:"):].strip()
+            base_result = _mistrzostwo_aura_cost(w_slug) * 10.0
+        else:
+            ability_slug = ability_catalog.slug_for_name(ability_ref) or ability_identifier(ability_ref)
+            base_result = passive_cost(ability_slug, 10.0, True)
     elif desc == "radio":
         base_result = 3.0
     elif slug == "ociezalosc":
@@ -323,6 +381,14 @@ def ability_cost_components_from_name(
         base_result = 30.0
     elif slug == "meczennik":
         base_result = 5.0
+    elif slug == "mistrzostwo":
+        weapon_slug = ability_identifier(value or "")
+        if weapons and weapon_slug and quality is not None:
+            base_result = _mistrzostwo_weapon_cost(
+                weapon_slug, weapons, int(quality), list(unit_abilities or [])
+            )
+        else:
+            base_result = 0.0
     else:
         tou_value = float(toughness) if toughness is not None else 1.0
         definition = ability_catalog.find_definition(slug) if slug else None

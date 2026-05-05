@@ -96,8 +96,22 @@ src.write_text(text[:start] + stub + text[end:], encoding='utf-8')
 - Na początku analizy wymagań oceń, czy zlecone zadanie dezaktualizuje istniejące testy. Jeśli tak — popraw lub usuń je jako pierwszy krok, zanim zmienisz kod produkcyjny. Nieaktualne testy blokują pracę i generują fałszywe błędy.
 
 ## String Handling
-- NEVER use typographic/smart quotes (U+201C, U+201D, U+2018, U+2019) as Python string delimiters. The codebase uses these characters as inch notation (e.g., 12") inside string literals — only use straight ASCII quotes (" or ') as delimiters. When using the Edit tool, double-check that quote characters in `new_string` match the original delimiter style.
+
+### Inch symbol
+- The canonical inch symbol in this codebase is **`INCH`** — a constant defined in `app/data/abilities.py` with value U+201D (RIGHT DOUBLE QUOTATION MARK).
+- **In ability descriptions** (`app/data/abilities.py`): U+201D is embedded directly in strings — do not touch.
+- **In new code** (f-strings, labels, tests): ALWAYS use `INCH` or the Python escape `"”"`. Never write a bare ASCII `"` as an inch symbol.
+  - Correct: `f'{name}(12{INCH})'` or `f'{name}(12”)'`
+  - Wrong: `f'{name}(12")'` — the Edit tool may convert `"..."` into curly-quote pairs, breaking Python string delimiters (SyntaxError).
+
+### Editing `app/data/abilities.py`
+- Blocks containing embedded U+201D in descriptions → **only Python script via Bash** (`Write` the script, run via `Bash`). Never use the Edit tool on those blocks.
+- Blocks without inch strings (new standalone function/constant) → Edit tool OK, provided single-quoted delimiters (`'...'`) are used throughout.
 - **Encoding gate:** before any `Edit` or `Write` that modifies a `.py` file, verify `open(file, encoding='utf-8')` succeeds. Abort if it raises — never silently replace characters.
+
+### Delimiters
+- NEVER use typographic/smart quotes (U+201C `"`, U+201D `"`, U+2018, U+2019) as Python string delimiters.
+- Delimiters must be straight ASCII only: `'...'` or `"..."`.
 
 ## Konwencje zmian
 - Nie zmieniaj formatowania poza zakresem zadania.

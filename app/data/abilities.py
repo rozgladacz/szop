@@ -1,17 +1,22 @@
 from __future__ import annotations
 
-# WAŻNE – notacja calowa w opisach zdolności
-# Opisy używają znaku U+201D (prawy cudzysłów „") jako symbolu cala, np. 12" czy 30".
-# Jest to zwykły znak Unicode wewnątrz stringa – NIE kończy on stringa w Pythonie,
-# ponieważ delimitery stringów to zwykłe proste cudzysłowy ASCII U+0022 (").
-# Przy edycji tego pliku należy korzystać ze skryptu Python (read/write),
-# a NIE z narzędzi tekstowych, które mogą zamienić ASCII " na typograficzne „" –
-# taka zamiana psuje składnię Pythona (SyntaxError: invalid character U+201D).
+# WAŻNE – notacja calowa
+# ------------------------------------------------------------------
+# Opisy zd.: wbudowany U+201D (”) bezpośrednio w stringu – NIE ruszać.
+# Nowy kod (etykiety, f-stringi): używaj stałej INCH lub ” (U+201D).
+# Nigdy gołego ASCII " w kontekście "..." – Edit tool zamienia go na
+# U+201C/U+201D i psuje delimitery Pythona (SyntaxError).
+# Edycja bloków z opisami (U+201D): TYLKO skrypt Python przez Bash.
+# Edycja bloków bez opisów: Edit tool OK – single-quoted delimitery.
+# ------------------------------------------------------------------
 
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence
 import re
 import unicodedata
+
+# Cal w etykietach generowanych przez kod – używaj tej stałej lub ”.
+INCH = "”"  # U+201D RIGHT DOUBLE QUOTATION MARK
 
 @dataclass(frozen=True)
 class AbilityDefinition:
@@ -400,6 +405,14 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
             "Co najmniej połowa jego broni musi być przypisana do strefy i może atakować tylko cele które w pełni się w niej znajdują. Pozostałe muszą atakować jeden oddział."
         ),
     ),
+    AbilityDefinition(
+        slug="mistrzostwo",
+        name="Mistrzostwo",
+        type="passive",
+        description="Każda twoja broń ma zdolność X.",
+        value_label="X",
+        value_type="text",
+    ),
     # Active abilities
     AbilityDefinition(
         slug="mag",
@@ -698,14 +711,34 @@ def find_definition(slug: str) -> AbilityDefinition | None:
 
 
 def display_with_value(definition: AbilityDefinition, value: str | None) -> str:
+    if definition.slug == "mistrzostwo":
+        value_text = (value or "").strip()
+        weapon_slug = slug_for_name(value_text) or value_text
+        weapon_def = find_definition(weapon_slug) if weapon_slug else None
+        weapon_label = weapon_def.name if weapon_def else value_text
+        return f"{definition.name}({weapon_label})" if weapon_label else definition.display_name()
     if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
         value_text = (value or "").strip()
+        if value_text.startswith("mistrzostwo:"):
+            weapon_slug = value_text[len("mistrzostwo:"):].strip()
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            return f"{definition.name}: Mistrzostwo: {weapon_label}" if weapon_label else f"{definition.name}: Mistrzostwo"
         ability_slug = slug_for_name(value_text) or value_text
         ability_def = find_definition(ability_slug) if ability_slug else None
         ability_label = ability_def.name if ability_def else value_text
         return f"{definition.name}: {ability_label}" if ability_label else definition.display_name()
     if definition.slug == "aura":
         value_text = (value or "").strip()
+        if value_text.startswith("mistrzostwo:"):
+            parts = value_text.split("|", 1)
+            weapon_slug = parts[0][len("mistrzostwo:"):].strip()
+            aura_range_str = parts[1].strip() if len(parts) == 2 else ""
+            is_long_range = aura_range_str.strip() == "12"
+            prefix = f'{definition.name}(12")' if is_long_range else definition.name
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            return f"{prefix}: Mistrzostwo: {weapon_label}" if weapon_label else f"{prefix}: Mistrzostwo"
         ability_ref = ""
         aura_range = ""
         if value_text:
@@ -743,7 +776,26 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
     if not value_text:
         return description
 
+    if definition.slug == "mistrzostwo":
+        weapon_slug = slug_for_name(value_text) or value_text
+        weapon_def = find_definition(weapon_slug) if weapon_slug else None
+        weapon_label = weapon_def.name if weapon_def else value_text
+        weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
+        replaced = description.replace("X", weapon_label)
+        if weapon_description:
+            return f"{replaced.strip()} ({weapon_description})".strip()
+        return replaced.strip()
+
     if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
+        if value_text.startswith("mistrzostwo:"):
+            weapon_slug = value_text[len("mistrzostwo:"):].strip()
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
+            replaced = description.replace("X", f"Mistrzostwo({weapon_label})")
+            if weapon_description:
+                return f"{replaced.strip()} ({weapon_description})".strip()
+            return replaced.strip()
         ability_slug = slug_for_name(value_text) or value_text
         ability_def = find_definition(ability_slug) if ability_slug else None
         ability_label = ability_def.name if ability_def else value_text
@@ -754,6 +806,23 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
         return replaced.strip()
 
     if definition.slug == "aura":
+        if value_text.startswith("mistrzostwo:"):
+            parts = value_text.split("|", 1)
+            weapon_slug = parts[0][len("mistrzostwo:"):].strip()
+            range_ref = parts[1].strip() if len(parts) == 2 else ""
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
+            range_clean = range_ref.strip()
+            prefix = (
+                'Modele w oddziałach w zasięgu 12" otrzymują zdolność:'
+                if range_clean == "12"
+                else "Modele w twoim oddziale otrzymują zdolność:"
+            )
+            detail = f"Mistrzostwo({weapon_label})"
+            if weapon_description:
+                detail += f" ({weapon_description})"
+            return f"{prefix} {detail}".strip()
         ability_ref = ""
         range_ref = ""
         parts = value_text.split("|", 1)

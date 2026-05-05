@@ -102,17 +102,22 @@ def _parse_bool(value: str | None) -> bool:
 
 
 def _base_passive_definitions() -> list[dict]:
-    return sorted(
-        (
-            entry
-            for entry in (
-                ability_catalog.to_dict(definition)
-                for definition in ability_catalog.definitions_by_type("passive")
-            )
-            if not _is_hidden_trait(entry.get("slug"))
-        ),
-        key=lambda entry: entry.get("display_name", "").casefold(),
-    )
+    # Weapon choices for Mistrzostwo — built once at startup from in-memory catalog.
+    mistrzostwo_choices = [
+        {"value": w.slug, "label": w.name, "description": w.description}
+        for w in ability_catalog.definitions_by_type("weapon")
+        if w.slug not in ability_registry.EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS
+    ]
+    entries: list[dict] = []
+    for definition in ability_catalog.definitions_by_type("passive"):
+        entry = ability_catalog.to_dict(definition)
+        if _is_hidden_trait(entry.get("slug")):
+            continue
+        if definition.slug == "mistrzostwo":
+            entry["value_choices"] = mistrzostwo_choices
+            entry["value_kind"] = "weapon"
+        entries.append(entry)
+    return sorted(entries, key=lambda e: e.get("display_name", "").casefold())
 
 
 _BASE_PASSIVE_DEFINITIONS = _base_passive_definitions()
