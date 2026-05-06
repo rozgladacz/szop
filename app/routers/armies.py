@@ -744,6 +744,7 @@ def _passive_payload(unit: models.Unit | None) -> list[dict]:
     quality = getattr(unit, "quality", 4) or 4
     defense = getattr(unit, "defense", 4) or 4
     toughness = getattr(unit, "toughness", 1) or 1
+    default_weapons = unit.default_weapons if unit else []
     result: list[dict] = []
     for item in payload:
         if not item:
@@ -754,7 +755,8 @@ def _passive_payload(unit: models.Unit | None) -> list[dict]:
         name = item.get("label") or item.get("slug") or ""
         value = item.get("value")
         item["cost"] = costs.ability_cost_from_name(
-            name, value, quality=quality, defense=defense, toughness=toughness
+            name, value, quality=quality, defense=defense, toughness=toughness,
+            weapons=default_weapons,
         )
         result.append(item)
     return result
