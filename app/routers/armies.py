@@ -102,17 +102,22 @@ def _parse_bool(value: str | None) -> bool:
 
 
 def _base_passive_definitions() -> list[dict]:
-    return sorted(
-        (
-            entry
-            for entry in (
-                ability_catalog.to_dict(definition)
-                for definition in ability_catalog.definitions_by_type("passive")
-            )
-            if not _is_hidden_trait(entry.get("slug"))
-        ),
-        key=lambda entry: entry.get("display_name", "").casefold(),
-    )
+    # Weapon choices for Mistrzostwo — built once at startup from in-memory catalog.
+    mistrzostwo_choices = [
+        {"value": w.slug, "label": w.name, "description": w.description}
+        for w in ability_catalog.definitions_by_type("weapon")
+        if w.slug not in ability_registry.EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS
+    ]
+    entries: list[dict] = []
+    for definition in ability_catalog.definitions_by_type("passive"):
+        entry = ability_catalog.to_dict(definition)
+        if _is_hidden_trait(entry.get("slug")):
+            continue
+        if definition.slug == "mistrzostwo":
+            entry["value_choices"] = mistrzostwo_choices
+            entry["value_kind"] = "weapon"
+        entries.append(entry)
+    return sorted(entries, key=lambda e: e.get("display_name", "").casefold())
 
 
 _BASE_PASSIVE_DEFINITIONS = _base_passive_definitions()
@@ -739,6 +744,7 @@ def _passive_payload(unit: models.Unit | None) -> list[dict]:
     quality = getattr(unit, "quality", 4) or 4
     defense = getattr(unit, "defense", 4) or 4
     toughness = getattr(unit, "toughness", 1) or 1
+    default_weapons = unit.default_weapons if unit else []
     result: list[dict] = []
     for item in payload:
         if not item:
@@ -749,7 +755,8 @@ def _passive_payload(unit: models.Unit | None) -> list[dict]:
         name = item.get("label") or item.get("slug") or ""
         value = item.get("value")
         item["cost"] = costs.ability_cost_from_name(
-            name, value, quality=quality, defense=defense, toughness=toughness
+            name, value, quality=quality, defense=defense, toughness=toughness,
+            weapons=default_weapons,
         )
         result.append(item)
     return result
