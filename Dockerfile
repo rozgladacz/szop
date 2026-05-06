@@ -23,6 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Kopiowanie kodu aplikacji
 COPY app/ ./app/
+COPY seeds/ ./seeds/
 
 # Entrypoint
 COPY scripts/docker-entrypoint.sh /entrypoint.sh

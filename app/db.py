@@ -412,6 +412,14 @@ def init_db() -> None:
     db_path = Path(DB_URL.split("///")[-1]) if DB_URL.startswith("sqlite") else None
     first_start = db_path is not None and not db_path.exists()
 
+    if first_start:
+        import shutil
+        _seed = Path(__file__).resolve().parents[1] / "seeds" / "opr.db.seed"
+        if _seed.exists():
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(_seed, db_path)
+            logger.info("Zainicjalizowano bazę z seeda: %s", _seed)
+
     Base.metadata.create_all(bind=engine)
     _migrate_schema()
 
