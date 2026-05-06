@@ -4,6 +4,7 @@ import logging
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -12,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import models
-from .config import DEBUG, SECRET_KEY
+from .config import DEBUG, SECRET_KEY, SESSION_HTTPS_ONLY, TRUSTED_HOSTS
 from .db import get_db, init_db
 from .paths import STATIC_DIR, TEMPLATES_DIR
 from .routers import admin, armories, armies, auth, export, export_xlsx, rosters, users
@@ -22,7 +23,19 @@ from .services import costs
 logger = logging.getLogger(__name__)
 
 app = FastAPI(debug=DEBUG)
-app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY)
+
+# Trusted-host guard — zapobiega atakom Host-header injection gdy za reverse proxy.
+# Domyślnie "*" (wszystkie hosty dozwolone) — zawężamy przez TRUSTED_HOSTS w .env.
+if TRUSTED_HOSTS != ["*"]:
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=TRUSTED_HOSTS)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SECRET_KEY,
+    # https_only=True aktywować gdy SESSION_HTTPS_ONLY=true (np. za Tailscale serve TLS)
+    https_only=SESSION_HTTPS_ONLY,
+    same_site="lax",
+)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
