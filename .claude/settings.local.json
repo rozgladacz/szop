@@ -64,7 +64,10 @@
       "Bash(python -m pytest --tb=short -q)",
       "mcp__Claude_in_Chrome__tabs_context_mcp",
       "Bash(python -m pytest -q)",
-      "Bash(python -m pytest tests/test_ability_custom_names.py::test_passive_mistrzostwo_has_weapon_dropdown -v)"
+      "Bash(python -m pytest tests/test_ability_custom_names.py::test_passive_mistrzostwo_has_weapon_dropdown -v)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git merge *)"
     ]
   }
 }
