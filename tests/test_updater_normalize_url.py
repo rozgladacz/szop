@@ -2,8 +2,8 @@ from app.services.updater import _normalize_url
 
 
 def test_normalize_url_accepts_equivalent_https_and_ssh():
-    https_url = "https://github.com/rozgladacz/OPR"
-    ssh_url = "git@github.com:rozgladacz/OPR.git"
+    https_url = "https://github.com/rozgladacz/szop"
+    ssh_url = "git@github.com:rozgladacz/szop.git"
     assert _normalize_url(https_url) == _normalize_url(ssh_url)
 
 

@@ -13,7 +13,7 @@ from . import db_restore
 
 logger = logging.getLogger(__name__)
 
-BACKUP_FILENAME_PREFIX = "opr-backup-"
+BACKUP_FILENAME_PREFIX = "szop-backup-"
 BACKUP_FILENAME_SUFFIX = ".db"
 _TIMESTAMP_FORMAT = "%Y%m%d-%H%M%S"
 

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Entrypoint dla kontenera OPR.
+# Entrypoint dla kontenera SZOP.
 # Uruchamiany jako root, tworzy katalogi danych, następnie przełącza na użytkownika 'app'.
 set -e
 

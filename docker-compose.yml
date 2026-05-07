@@ -1,6 +1,6 @@
 services:
-  opr-app:
-    image: ghcr.io/rozgladacz/opr:latest
+  szop-app:
+    image: ghcr.io/rozgladacz/szop:latest
     restart: unless-stopped
     ports:
       # Tylko loopback — Tailscale serve wystawia port 443 na tailnet.
@@ -12,8 +12,8 @@ services:
       # Usuń jeśli nie chcesz możliwości aktualizacji przez UI.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      UPDATE_COMPOSE_FILE: /srv/opr/docker-compose.yml
-      UPDATE_SERVICE_NAME: opr-app
+      UPDATE_COMPOSE_FILE: /srv/szop/docker-compose.yml
+      UPDATE_SERVICE_NAME: szop-app
     env_file:
       - path: .env
         required: false   # .env jest opcjonalny — wszystko ma rozsądne defaulty
@@ -25,8 +25,8 @@ services:
       start_period: 20s
       retries: 3
 
-  opr-backup:
-    image: ghcr.io/rozgladacz/opr:latest
+  szop-backup:
+    image: ghcr.io/rozgladacz/szop:latest
     restart: unless-stopped
     entrypoint: ["python", "-m", "app.scripts.backup_loop"]
     volumes:
@@ -35,5 +35,5 @@ services:
       - path: .env
         required: false
     depends_on:
-      opr-app:
+      szop-app:
         condition: service_healthy

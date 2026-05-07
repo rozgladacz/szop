@@ -10,7 +10,7 @@ make profile ROSTER=13        # alternatywny roster testowy
 ```
 
 Wymagania:
-- `data/opr.db` (produkcyjna baza — patrz AGENTS.md sekcja "Baza danych").
+- `data/szop.db` (produkcyjna baza — patrz AGENTS.md sekcja "Baza danych").
 - `PYTHONIOENCODING=utf-8` (ustawione automatycznie przez Makefile).
 
 ---
