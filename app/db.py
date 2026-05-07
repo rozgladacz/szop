@@ -414,7 +414,7 @@ def init_db() -> None:
 
     if first_start:
         import shutil
-        _seed = Path(__file__).resolve().parents[1] / "seeds" / "opr.db.seed"
+        _seed = Path(__file__).resolve().parents[1] / "seeds" / "szop.db.seed"
         if _seed.exists():
             db_path.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(_seed, db_path)
@@ -631,7 +631,7 @@ def init_db() -> None:
             sword = session.execute(select(models.Weapon).where(models.Weapon.name == "Miecz energetyczny")).scalar_one()
 
             unit1 = models.Unit(
-                name="Piechur OPR",
+                name="Piechur SZOP",
                 quality=4,
                 defense=4,
                 toughness=3,
@@ -641,7 +641,7 @@ def init_db() -> None:
                 typical_models=1,
             )
             unit2 = models.Unit(
-                name="Szermierz OPR",
+                name="Szermierz SZOP",
                 quality=3,
                 defense=3,
                 toughness=3,

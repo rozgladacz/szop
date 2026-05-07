@@ -67,7 +67,8 @@
       "Bash(python -m pytest tests/test_ability_custom_names.py::test_passive_mistrzostwo_has_weapon_dropdown -v)",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git merge *)"
+      "Bash(git merge *)",
+      "Bash(python -m pytest -q --tb=short)"
     ]
   }
 }

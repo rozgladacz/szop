@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Project Context
-- This is an OPR (One Page Rules) wargame tooling project. Tests live alongside Python rule logic; weapon/ability costs and rule parameters are SSOT-driven. After rule changes, verify both backend payloads and JS rendering layers.
+- This is the SZOP wargame tooling project (autorski system inspirowany One Page Rules). Tests live alongside Python rule logic; weapon/ability costs and rule parameters are SSOT-driven. After rule changes, verify both backend payloads and JS rendering layers.
 
 ## Testing
 - ALWAYS run the full test suite (e.g., `pytest` or `make test`) after making code changes, before declaring a task complete. Do not wait for the user to ask.
@@ -31,8 +31,8 @@ Zależności:
 - Traktuj bazę jako środowisko testowe, ale współdzielone.
 - Nie wykonuj destrukcyjnych operacji bez wyraźnego polecenia. Zawsze trzymaj kopię zapasową.
 - Jeśli zadanie wymaga migracji lub zmian danych, opisz ich wpływ i przygotuj proces migracji.
-- Przed zakończeniem prac i udostępnieniem Preview do akceptacji podłącz bazę z danymi produkcyjnymi (`data/opr.db`). Preview z pustą bazą nie nadaje się do weryfikacji przez użytkownika.
-- Zawsze trzymaj kopię oryginalnej bazy (`data/opr.db.backup` lub commit w git), aby móc ją przywrócić po testach. Wersja w git jest źródłem prawdy — przywracaj przez `git show <commit>:data/opr.db > data/opr.db`.
+- Przed zakończeniem prac i udostępnieniem Preview do akceptacji podłącz bazę z danymi produkcyjnymi (`data/szop.db`). Preview z pustą bazą nie nadaje się do weryfikacji przez użytkownika.
+- Zawsze trzymaj kopię oryginalnej bazy (`data/szop.db.backup` lub commit w git), aby móc ją przywrócić po testach. Wersja w git jest źródłem prawdy — przywracaj przez `git show <commit>:seeds/szop.db.seed > data/szop.db`.
 
 ## Użytkownicy i uprawnienia
 - System ma mieć dwa poziomy dostępu:

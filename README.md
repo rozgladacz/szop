@@ -1,6 +1,6 @@
-# OPR Army Builder
+# SZOP - Kreator armii
 
-Serwerowa aplikacja FastAPI do budowania armii w systemie Moje OPR, modyfikacji One Page Rules. Projekt zawiera backend z szablonami Jinja2, podstawową autoryzacją sesyjną, przykładowymi danymi i mechanizmem kalkulacji kosztów jednostek.
+Serwerowa aplikacja FastAPI do budowania armii w systemie **SZOP (Szybkie Zasady Ogólnych Potyczek)** — autorskim systemie inspirowanym One Page Rules. Projekt zawiera backend z szablonami Jinja2, podstawową autoryzacją sesyjną, przykładowymi danymi i mechanizmem kalkulacji kosztów jednostek.
 
 ---
 
@@ -32,8 +32,8 @@ Szczegółowa instrukcja krok po kroku: **[DEPLOY.md](DEPLOY.md)**
 Skrócona wersja:
 
 ```bash
-mkdir -p /srv/opr && cd /srv/opr
-curl -fsSL https://raw.githubusercontent.com/rozgladacz/OPR/main/docker-compose.yml -o docker-compose.yml
+mkdir -p /srv/szop && cd /srv/szop
+curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/docker-compose.yml -o docker-compose.yml
 docker compose up -d
 tailscale serve --bg --https=443 http://127.0.0.1:8000
 ```
@@ -55,7 +55,7 @@ Kluczowe zmienne:
 | Zmienna | Domyślna | Opis |
 |---|---|---|
 | `SECRET_KEY` | auto-gen | Klucz sesji |
-| `DB_URL` | `sqlite:///./data/opr.db` | URL bazy danych |
+| `DB_URL` | `sqlite:///./data/szop.db` | URL bazy danych |
 | `DEBUG` | `false` | Tryb debugowania |
 | `SESSION_HTTPS_ONLY` | `false` | Ustaw `true` za Tailscale serve |
 | `BACKUP_RETENTION_DAYS` | `14` | Retencja automatycznych backupów |
@@ -65,7 +65,7 @@ Kluczowe zmienne:
 
 ## Backup i przywracanie bazy
 
-**Automatyczny backup:** kontener `opr-backup` (docker-compose) robi codzienną kopię o 03:00 do `data/backups/`. Retencja 14 dni (konfigurowalnie przez `BACKUP_RETENTION_DAYS`).
+**Automatyczny backup:** kontener `szop-backup` (docker-compose) robi codzienną kopię o 03:00 do `data/backups/`. Retencja 14 dni (konfigurowalnie przez `BACKUP_RETENTION_DAYS`).
 
 **Przez panel admina** (`/admin`):
 - **Pobierz bazę danych** — tworzy spójną kopię przez `VACUUM INTO` i pobiera jako plik `.db`
@@ -79,7 +79,7 @@ Szczegóły i procedura przywracania: [DEPLOY.md — Kopia zapasowa](DEPLOY.md#k
 
 Przez panel admina: `/admin` → **„Aktualizuj"** — pobiera nowy obraz z GHCR i restartuje kontener.
 
-Lub ręcznie: `cd /srv/opr && docker compose pull && docker compose up -d`
+Lub ręcznie: `cd /srv/szop && docker compose pull && docker compose up -d`
 
 Procedura wydawania nowych wersji (dla maintainera): [RELEASE.md](RELEASE.md)
 

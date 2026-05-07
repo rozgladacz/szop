@@ -34,7 +34,7 @@ git push origin v1.2.3
 **Co się dzieje automatycznie** (GitHub Actions `.github/workflows/release.yml`):
 1. Uruchamia testy (`pytest`) — release nie przejdzie gdy testy nie zdają
 2. Buduje obraz Docker z `APP_VERSION=1.2.3`
-3. Publikuje do GHCR jako `ghcr.io/rozgladacz/opr:1.2.3`, `ghcr.io/rozgladacz/opr:1.2`, `ghcr.io/rozgladacz/opr:latest`
+3. Publikuje do GHCR jako `ghcr.io/rozgladacz/szop:1.2.3`, `ghcr.io/rozgladacz/szop:1.2`, `ghcr.io/rozgladacz/szop:latest`
 4. Tworzy GitHub Release z auto-generowanymi notatkami z commitów
 
 ---
@@ -67,7 +67,7 @@ Jeśli release zawiera breaking changes (zmiana API, inne zachowanie UI, wymagan
 
 Po pierwszym release należy ręcznie ustawić widoczność pakietu na **publiczną**:
 
-1. GitHub → Profil → Packages → `opr`
+1. GitHub → Profil → Packages → `szop`
 2. Package settings → **Change visibility** → Public
 
 Bez tego `docker compose pull` na serwerze wymaga logowania do GHCR.
@@ -86,7 +86,7 @@ Auto-generowane notatki z commitów są wystarczające dla większości release'
 
 ## Instalacja / aktualizacja
 
-cd /srv/opr && docker compose pull && docker compose up -d
+cd /srv/szop && docker compose pull && docker compose up -d
 ```
 
 ---

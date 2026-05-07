@@ -46,21 +46,21 @@ def _load_or_create_secret(env_name: str, file_name: str) -> str:
 
 
 SECRET_KEY = _load_or_create_secret("SECRET_KEY", ".secret_key")
-DB_URL = os.getenv("DB_URL", "sqlite:///./data/opr.db")
+DB_URL = os.getenv("DB_URL", "sqlite:///./data/szop.db")
 DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes"}
 LOCAL_COST_ENGINE_ENABLED = os.getenv("LOCAL_COST_ENGINE_ENABLED", "false").lower() in {
     "1",
     "true",
     "yes",
 }
-UPDATE_REPO_URL = os.getenv("UPDATE_REPO_URL", "https://github.com/rozgladacz/OPR")
+UPDATE_REPO_URL = os.getenv("UPDATE_REPO_URL", "https://github.com/rozgladacz/szop")
 UPDATE_BRANCH = os.getenv("UPDATE_BRANCH", "main")
 UPDATE_REPO_PATH = os.getenv("UPDATE_REPO_PATH", ".")
 UPDATE_REF = os.getenv("UPDATE_REF", "")
 UPDATE_DOCKERFILE = os.getenv("UPDATE_DOCKERFILE", "Dockerfile")
 UPDATE_COMPOSE_FILE = os.getenv("UPDATE_COMPOSE_FILE", "docker-compose.yml")
-UPDATE_SERVICE_NAME = os.getenv("UPDATE_SERVICE_NAME", "opr-app")
-UPDATE_IMAGE = os.getenv("UPDATE_IMAGE", "ghcr.io/rozgladacz/opr:latest")
+UPDATE_SERVICE_NAME = os.getenv("UPDATE_SERVICE_NAME", "szop-app")
+UPDATE_IMAGE = os.getenv("UPDATE_IMAGE", "ghcr.io/rozgladacz/szop:latest")
 UPDATE_WEBHOOK_TOKEN = _load_or_create_secret("UPDATE_WEBHOOK_TOKEN", ".webhook_token")
 APP_VERSION = os.getenv("APP_VERSION", "dev")
 

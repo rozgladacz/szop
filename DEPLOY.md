@@ -1,6 +1,6 @@
 # Instrukcja wdrożenia — administrator serwera
 
-Dokument opisuje jak uruchomić i utrzymywać **OPR Army Builder** na prywatnym serwerze Linux z Tailscale.
+Dokument opisuje jak uruchomić i utrzymywać **SZOP - Kreator armii** na prywatnym serwerze Linux z Tailscale.
 
 ---
 
@@ -21,18 +21,18 @@ Dokument opisuje jak uruchomić i utrzymywać **OPR Army Builder** na prywatnym 
 
 ```bash
 # 1. Utwórz katalog roboczy
-mkdir -p /srv/opr && cd /srv/opr
+mkdir -p /srv/szop && cd /srv/szop
 
 # 2. Pobierz docker-compose.yml z repozytorium
-curl -fsSL https://raw.githubusercontent.com/rozgladacz/OPR/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/docker-compose.yml -o docker-compose.yml
 
 # 3. (Opcjonalnie) pobierz przykładowy .env i dostosuj
-# curl -fsSL https://raw.githubusercontent.com/rozgladacz/OPR/main/.env.example -o .env
+# curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/.env.example -o .env
 
 # 4. Uruchom aplikację
 docker compose up -d
 
-# 5. Udostępnij przez Tailscale HTTPS (zastąp 'opr' swoją nazwą hosta)
+# 5. Udostępnij przez Tailscale HTTPS (zastąp 'szop' swoją nazwą hosta)
 tailscale serve --bg --https=443 http://127.0.0.1:8000
 ```
 
@@ -53,7 +53,7 @@ Zaloguj się jako admin → `/admin` → kliknij **„Aktualizuj"**. Kontener po
 ### Ręcznie przez terminal
 
 ```bash
-cd /srv/opr
+cd /srv/szop
 docker compose pull
 docker compose up -d
 ```
@@ -63,7 +63,7 @@ docker compose up -d
 Edytuj `docker-compose.yml`, zmień `image:`:
 
 ```yaml
-image: ghcr.io/rozgladacz/opr:v1.2.3   # konkretna wersja
+image: ghcr.io/rozgladacz/szop:v1.2.3   # konkretna wersja
 ```
 
 Następnie:
@@ -76,7 +76,7 @@ docker compose up -d
 
 ```bash
 # Edytuj docker-compose.yml → zmień tag obrazu na poprzednią wersję
-# np. image: ghcr.io/rozgladacz/opr:v1.1.0
+# np. image: ghcr.io/rozgladacz/szop:v1.1.0
 docker compose up -d
 ```
 
@@ -86,27 +86,27 @@ docker compose up -d
 
 ### Automatyczna (sidecar backup)
 
-Kontener `opr-backup` robi kopię codziennie o 03:00 lokalnego czasu do katalogu `./data/backups/`. Pliki starsze niż 14 dni są automatycznie kasowane.
+Kontener `szop-backup` robi kopię codziennie o 03:00 lokalnego czasu do katalogu `./data/backups/`. Pliki starsze niż 14 dni są automatycznie kasowane.
 
 ```
-/srv/opr/data/backups/
-├── opr-backup-20260501-030000.db
-├── opr-backup-20260502-030000.db
+/srv/szop/data/backups/
+├── szop-backup-20260501-030000.db
+├── szop-backup-20260502-030000.db
 └── ...
 ```
 
 ### Ręczna przez panel admina
 
-`/admin` → sekcja **„Kopie zapasowe"** → **„Pobierz bazę danych"**. Plik `opr-backup-YYYYMMDD-HHMMSS.db` zostanie pobrany.
+`/admin` → sekcja **„Kopie zapasowe"** → **„Pobierz bazę danych"**. Plik `szop-backup-YYYYMMDD-HHMMSS.db` zostanie pobrany.
 
 ### Skopiowanie pliku poza serwer
 
 ```bash
 # Z innego hosta (przez Tailscale SSH lub SSH):
-scp root@serwer:/srv/opr/data/backups/opr-backup-*.db ./local-backups/
+scp root@serwer:/srv/szop/data/backups/szop-backup-*.db ./local-backups/
 
 # Lub rsync (synchronizacja katalogu):
-rsync -az root@serwer:/srv/opr/data/backups/ ./local-backups/
+rsync -az root@serwer:/srv/szop/data/backups/ ./local-backups/
 ```
 
 ---
@@ -120,24 +120,24 @@ rsync -az root@serwer:/srv/opr/data/backups/ ./local-backups/
 ### Ręcznie przez terminal
 
 ```bash
-cd /srv/opr
+cd /srv/szop
 
 # Zatrzymaj aplikację
-docker compose stop opr-app
+docker compose stop szop-app
 
 # Podmień plik bazy (zachowaj backup!)
-cp data/opr.db data/opr.db.bak
-cp /ścieżka/do/backupu.db data/opr.db
+cp data/szop.db data/szop.db.bak
+cp /ścieżka/do/backupu.db data/szop.db
 
 # Uruchom ponownie
-docker compose start opr-app
+docker compose start szop-app
 ```
 
 ---
 
 ## Konfiguracja (.env)
 
-Plik `.env` w katalogu `/srv/opr/` jest **opcjonalny** — aplikacja działa bez niego z rozsądnymi wartościami domyślnymi, w tym automatycznie generowanymi sekretami.
+Plik `.env` w katalogu `/srv/szop/` jest **opcjonalny** — aplikacja działa bez niego z rozsądnymi wartościami domyślnymi, w tym automatycznie generowanymi sekretami.
 
 Kluczowe zmienne (skopiuj z `.env.example`):
 
@@ -147,7 +147,7 @@ Kluczowe zmienne (skopiuj z `.env.example`):
 | `UPDATE_WEBHOOK_TOKEN` | auto-gen | Token webhooka update. Auto-generowany do `data/.webhook_token`. |
 | `SESSION_HTTPS_ONLY` | `false` | Ustaw `true` gdy serwujesz przez Tailscale serve (HTTPS). |
 | `BACKUP_RETENTION_DAYS` | `14` | Liczba dni przechowywania backupów. |
-| `TRUSTED_HOSTS` | `*` | Dozwolone hosty (np. `opr.tailnet.ts.net,localhost`). |
+| `TRUSTED_HOSTS` | `*` | Dozwolone hosty (np. `szop.tailnet.ts.net,localhost`). |
 
 ---
 
@@ -157,7 +157,7 @@ Jeśli chcesz wywoływać aktualizację z zewnętrznego skryptu/CI:
 
 ```bash
 # Token jest zapisany w wolumenie danych
-cat /srv/opr/data/.webhook_token
+cat /srv/szop/data/.webhook_token
 
 # Wywołanie webhook:
 curl -X POST https://<host>.ts.net/admin/update/webhook \
@@ -169,13 +169,13 @@ curl -X POST https://<host>.ts.net/admin/update/webhook \
 ## Diagnostyka
 
 ```bash
-cd /srv/opr
+cd /srv/szop
 
 # Logi aplikacji (live)
-docker compose logs -f opr-app
+docker compose logs -f szop-app
 
 # Logi backup sidecar
-docker compose logs -f opr-backup
+docker compose logs -f szop-backup
 
 # Status kontenerów
 docker compose ps
@@ -187,7 +187,7 @@ cat data/update_logs.jsonl | tail -20
 rm -f data/.update.lock
 
 # Sprawdzenie healthcheck
-docker inspect opr-app | grep -A5 '"Health"'
+docker inspect szop-app | grep -A5 '"Health"'
 ```
 
 ---
@@ -215,10 +215,10 @@ tailscale serve reset
 
 ## Backup kontener nie startuje?
 
-Kontener `opr-backup` czeka aż `opr-app` przejdzie healthcheck (`service_healthy`). Jeśli `opr-app` nie przechodzi healthchecku, sprawdź:
+Kontener `szop-backup` czeka aż `szop-app` przejdzie healthcheck (`service_healthy`). Jeśli `szop-app` nie przechodzi healthchecku, sprawdź:
 
 ```bash
-docker compose logs opr-app | tail -30
+docker compose logs szop-app | tail -30
 ```
 
 ---
@@ -226,7 +226,7 @@ docker compose logs opr-app | tail -30
 ## Reinstalacja (czyste środowisko)
 
 ```bash
-cd /srv/opr
+cd /srv/szop
 docker compose down
 # UWAGA: poniższe usuwa bazę danych i backupy!
 # Zrób kopię data/ przed kontynuacją.
