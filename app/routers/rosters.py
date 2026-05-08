@@ -1728,15 +1728,6 @@ def _selected_passive_entries(
             continue
         if slug_value in seen_slugs or (identifier and identifier in seen_identifiers):
             continue
-        selected.append(
-            {
-                "slug": slug_value,
-                "label": slug_value,
-                "description": "",
-                "selected": True,
-                "count": 1,
-            }
-        )
         seen_slugs.add(slug_value)
         if identifier:
             seen_identifiers.add(identifier)
@@ -1890,32 +1881,28 @@ def _selected_ability_entries(
     for key, value in counts.items():
         if key in seen or value <= 0:
             continue
-        ability_id_str, variant = _split_ability_loadout_key(key)
-        ability_id_value: Any = ability_id_str
-        try:
-            ability_id_value = int(ability_id_str)
-        except (TypeError, ValueError):
-            try:
-                ability_id_value = int(float(ability_id_str))
-            except (TypeError, ValueError):
-                ability_id_value = ability_id_str
-        fallback = {
-            "ability_id": ability_id_value,
-            "label": str(key),
-            "description": "",
-            "count": value,
-            "value": variant,
-            "loadout_key": key,
-        }
-        custom_name = name_map.get(str(key))
-        if isinstance(custom_name, str):
-            normalized = custom_name.strip()
-            if normalized:
-                fallback["custom_name"] = normalized
-
-        selected.append(fallback)
+        seen.add(key)
 
     return selected
+
+
+def _ability_base_label(entry: dict) -> str:
+    base = entry.get("label") or entry.get("raw") or entry.get("slug") or ""
+    custom = str(entry.get("custom_name") or "").strip()
+    if custom:
+        return f"{custom} [{base}]" if base else custom
+    return base
+
+
+def _expand_ability_labels(entries: list[dict]) -> list[str]:
+    labels: list[str] = []
+    for entry in entries:
+        if not entry:
+            continue
+        label = _ability_base_label(entry)
+        if label:
+            labels.extend([label] * max(_coerce_int(entry.get("count"), 0), 1))
+    return labels
 
 
 def _ability_label_with_count(entry: dict) -> str:
@@ -2668,12 +2655,14 @@ def _loadout_weapon_details(
             continue
         details.append(
             {
+                "weapon_id": option.get("id"),
                 "name": option.get("name") or "Broń",
                 "count": total_count,
                 "range": option.get("range"),
                 "attacks": option.get("attacks"),
                 "ap": option.get("ap"),
                 "traits": option.get("traits"),
+                "is_primary": bool(option.get("is_primary", False)),
             }
         )
     return details
@@ -2784,26 +2773,20 @@ def _roster_unit_export_data(
         for entry in selected_passives
         if entry
     ]
-    active_labels = [
-        _ability_label_with_count(entry)
-        for entry in selected_actives
-        if entry
-    ]
-    aura_labels = [
-        _ability_label_with_count(entry)
-        for entry in selected_auras
-        if entry
-    ]
+    active_labels = _expand_ability_labels(selected_actives)
+    aura_labels = _expand_ability_labels(selected_auras)
+    # Single quote call services both totals_map (when not pre-supplied)
+    # and selected_total. Previous version called _internal_roster_unit_quote
+    # twice with identical args — wasted ~40-80ms per unit on exports.
+    quote = _internal_roster_unit_quote(roster_unit, loadout)
     totals_map: Mapping[str, float]
     if isinstance(totals, Mapping):
         totals_map = totals
     else:
-        quote = _internal_roster_unit_quote(roster_unit, loadout)
         totals_map = {
             "wojownik": float(quote.get("warrior_total") or 0.0),
             "strzelec": float(quote.get("shooter_total") or 0.0),
         }
-    quote = _internal_roster_unit_quote(roster_unit, loadout)
     total_value = float(quote.get("selected_total") or 0.0)
     rounded_total = utils.round_points(total_value)
 
@@ -2821,6 +2804,20 @@ def _roster_unit_export_data(
         elif unit_cache is not None and cache_key is not None:
             unit_cache.setdefault(cache_key, {})["default_summary"] = default_summary
 
+    def _build_descs(entries: list[dict]) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for entry in entries:
+            if not entry:
+                continue
+            lbl = _ability_label_with_count(entry)
+            desc = str(entry.get("description") or "").strip()
+            if lbl and desc:
+                result[lbl] = desc
+                base_lbl = str(entry.get("label") or "").strip()
+                if base_lbl and base_lbl not in result:
+                    result[base_lbl] = desc
+        return result
+
     return {
         "instance": roster_unit,
         "unit": unit,
@@ -2833,6 +2830,8 @@ def _roster_unit_export_data(
         "passive_labels": [label for label in passive_labels if label],
         "active_labels": [label for label in active_labels if label],
         "aura_labels": [label for label in aura_labels if label],
+        "active_descs": _build_descs(selected_actives),
+        "aura_descs": _build_descs(selected_auras),
         "weapon_details": weapon_details,
         "weapon_summary": weapon_summary,
         "default_summary": default_summary,

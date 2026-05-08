@@ -1,9 +1,22 @@
 from __future__ import annotations
 
+# WAŻNE – notacja calowa
+# ------------------------------------------------------------------
+# Opisy zd.: wbudowany U+201D (”) bezpośrednio w stringu – NIE ruszać.
+# Nowy kod (etykiety, f-stringi): używaj stałej INCH lub ” (U+201D).
+# Nigdy gołego ASCII " w kontekście "..." – Edit tool zamienia go na
+# U+201C/U+201D i psuje delimitery Pythona (SyntaxError).
+# Edycja bloków z opisami (U+201D): TYLKO skrypt Python przez Bash.
+# Edycja bloków bez opisów: Edit tool OK – single-quoted delimitery.
+# ------------------------------------------------------------------
+
 from dataclasses import dataclass
 from typing import Iterable, List, Sequence
 import re
 import unicodedata
+
+# Cal w etykietach generowanych przez kod – używaj tej stałej lub ”.
+INCH = "”"  # U+201D RIGHT DOUBLE QUOTATION MARK
 
 @dataclass(frozen=True)
 class AbilityDefinition:
@@ -125,9 +138,11 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Samolot",
         type="passive",
         description=(
-            "Wysoki. Podczas ruchu ignoruje teren i musi przemieścić się 30”-36” się w jednej linii. Nie blokuje ruchu ani widzenia innych jednostek."
-            "Nie może być przyszpilony, kontrolować punktów, szarżować, ani być celem szarży lub broni Niebezpośredniej. "
-            "Jednostki strzelające do niego mają -12” zasięgu i -1 do trafienia."
+            "Wysoki. Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. "
+            "Nie może być przyszpilony, kontrolować punktów, szarżować, ani być celem szarży. "
+            "Nie blokuje ruchu ani widzenia innych jednostek, a podczas ruchu ignoruje teren. "
+            "Ma osłonę a jednostki strzelające do niego mają -12” zasięgu. "
+            "Nie może być atakowany bronią Niebezpośrednią."
         ),
     ),
     AbilityDefinition(
@@ -150,6 +165,12 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Nieustraszony",
         type="passive",
         description="Wykonuje jeden test przegrupowania mniej.",
+    ),
+    AbilityDefinition(
+        slug="niestrudzony",
+        name="Niestrudzony",
+        type="passive",
+        description="Może wykonywać tę samą akcję wielokrotnie w rundzie.",
     ),
     AbilityDefinition(
         slug="niestrudzony",
@@ -384,6 +405,14 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
             "Co najmniej połowa jego broni musi być przypisana do strefy i może atakować tylko cele które w pełni się w niej znajdują. Pozostałe muszą atakować jeden oddział."
         ),
     ),
+    AbilityDefinition(
+        slug="mistrzostwo",
+        name="Mistrzostwo",
+        type="passive",
+        description="Każda twoja broń ma zdolność X.",
+        value_label="X",
+        value_type="text",
+    ),
     # Active abilities
     AbilityDefinition(
         slug="mag",
@@ -598,13 +627,19 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Można nią wykonywać ataki wręcz.",
     ),
     AbilityDefinition(
-        slug="brutalny",
-        name="Brutalny",
+        slug="finezja",
+        name="Finezja",
         type="weapon",
         description=(
             "Wynik udanego rzutu na trafienie możesz traktować "
             "jak wynik rzutu na obronę."
         ),
+    ),
+    AbilityDefinition(
+        slug="brutalny",
+        name="Brutalny",
+        type="weapon",
+        description="W teście obrony nie ma automatycznych sukcesów.",
     ),
     AbilityDefinition(
         slug="podkrecenie",
@@ -625,21 +660,28 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Jeżeli cel jest Przyszpilony, wykonuje podwójną liczbę ataków.",
     ),
     AbilityDefinition(
+        slug="sterowany",
+        name="Sterowany",
+        type="weapon",
+        description=(
+            "Zanim wykonasz atak tą bronią, dla każdego powiązanego znacznika "
+            "ustaw go w zasięgu broni od jego obecnej pozycji albo wykonaj atak z jego pozycji i go odrzuć. "
+            "Następnie wykonaj zwykły atak albo ustaw nowy znacznik w zasięgu. "
+            "Możesz mieć dwa znaczniki na planszy, są wspólne dla całego oddziału. Po wystawianiu rozstaw jeden znacznik."
+        ),
+    ),
+    AbilityDefinition(
         slug="porazenie",
         name="Porażenie",
         type="weapon",
-        description=(
-            "Podczas sprawdzania kto wygrał walkę wręcz, "
-            "rany zadane tą bronią liczą się podwójnie."
-        ),
+        description="Podczas sprawdzania kto wygrał walkę wręcz, rany zadane tą bronią liczą się podwójnie.",
     ),
     AbilityDefinition(
         slug="zguba",
         name="Zguba",
         type="weapon",
         description=(
-            "Zmniejsz liczbę odzyskanych ran w tej aktywacji, "
-            "o liczbę ran otrzymanych tą bronią. "
+            "Zmniejsz liczbę odzyskanych ran w tej aktywacji o liczbę ran otrzymanych tą bronią. "
             "Modele pokonane tą bronią nie mogą wrócić do gry."
         ),
     ),
@@ -669,14 +711,34 @@ def find_definition(slug: str) -> AbilityDefinition | None:
 
 
 def display_with_value(definition: AbilityDefinition, value: str | None) -> str:
+    if definition.slug == "mistrzostwo":
+        value_text = (value or "").strip()
+        weapon_slug = slug_for_name(value_text) or value_text
+        weapon_def = find_definition(weapon_slug) if weapon_slug else None
+        weapon_label = weapon_def.name if weapon_def else value_text
+        return f"{definition.name}({weapon_label})" if weapon_label else definition.display_name()
     if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
         value_text = (value or "").strip()
+        if value_text.startswith("mistrzostwo:"):
+            weapon_slug = value_text[len("mistrzostwo:"):].strip()
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            return f"{definition.name}: Mistrzostwo: {weapon_label}" if weapon_label else f"{definition.name}: Mistrzostwo"
         ability_slug = slug_for_name(value_text) or value_text
         ability_def = find_definition(ability_slug) if ability_slug else None
         ability_label = ability_def.name if ability_def else value_text
         return f"{definition.name}: {ability_label}" if ability_label else definition.display_name()
     if definition.slug == "aura":
         value_text = (value or "").strip()
+        if value_text.startswith("mistrzostwo:"):
+            parts = value_text.split("|", 1)
+            weapon_slug = parts[0][len("mistrzostwo:"):].strip()
+            aura_range_str = parts[1].strip() if len(parts) == 2 else ""
+            is_long_range = aura_range_str.strip() == "12"
+            prefix = f'{definition.name}(12")' if is_long_range else definition.name
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            return f"{prefix}: Mistrzostwo: {weapon_label}" if weapon_label else f"{prefix}: Mistrzostwo"
         ability_ref = ""
         aura_range = ""
         if value_text:
@@ -714,7 +776,26 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
     if not value_text:
         return description
 
+    if definition.slug == "mistrzostwo":
+        weapon_slug = slug_for_name(value_text) or value_text
+        weapon_def = find_definition(weapon_slug) if weapon_slug else None
+        weapon_label = weapon_def.name if weapon_def else value_text
+        weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
+        replaced = description.replace("X", weapon_label)
+        if weapon_description:
+            return f"{replaced.strip()} ({weapon_description})".strip()
+        return replaced.strip()
+
     if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
+        if value_text.startswith("mistrzostwo:"):
+            weapon_slug = value_text[len("mistrzostwo:"):].strip()
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
+            replaced = description.replace("X", f"Mistrzostwo({weapon_label})")
+            if weapon_description:
+                return f"{replaced.strip()} ({weapon_description})".strip()
+            return replaced.strip()
         ability_slug = slug_for_name(value_text) or value_text
         ability_def = find_definition(ability_slug) if ability_slug else None
         ability_label = ability_def.name if ability_def else value_text
@@ -725,6 +806,23 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
         return replaced.strip()
 
     if definition.slug == "aura":
+        if value_text.startswith("mistrzostwo:"):
+            parts = value_text.split("|", 1)
+            weapon_slug = parts[0][len("mistrzostwo:"):].strip()
+            range_ref = parts[1].strip() if len(parts) == 2 else ""
+            weapon_def = find_definition(weapon_slug)
+            weapon_label = weapon_def.name if weapon_def else weapon_slug
+            weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
+            range_clean = range_ref.strip()
+            prefix = (
+                'Modele w oddziałach w zasięgu 12" otrzymują zdolność:'
+                if range_clean == "12"
+                else "Modele w twoim oddziale otrzymują zdolność:"
+            )
+            detail = f"Mistrzostwo({weapon_label})"
+            if weapon_description:
+                detail += f" ({weapon_description})"
+            return f"{prefix} {detail}".strip()
         ability_ref = ""
         range_ref = ""
         parts = value_text.split("|", 1)

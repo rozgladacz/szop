@@ -12,7 +12,14 @@ from uuid import uuid4
 
 from fastapi import BackgroundTasks
 
-from ..config import DATA_DIR, UPDATE_COMPOSE_FILE, UPDATE_REPO_PATH, UPDATE_SERVICE_NAME
+from ..config import (
+    APP_VERSION,
+    DATA_DIR,
+    UPDATE_COMPOSE_FILE,
+    UPDATE_IMAGE,
+    UPDATE_REPO_PATH,
+    UPDATE_SERVICE_NAME,
+)
 from . import updater
 
 logger = logging.getLogger(__name__)
@@ -26,6 +33,8 @@ _LAST_STATE_FILE = DATA_DIR / "update_last_state.json"
 _RATE_LIMIT = timedelta(minutes=5)
 _LOCK_STALE_AFTER = timedelta(hours=1)
 _MAX_STATE_LOG_ENTRIES = 50
+_LOG_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+_LOG_KEEP_LINES = 1000
 
 
 class UpdateBlockedError(RuntimeError):
@@ -96,6 +105,22 @@ def _write_status(status: UpdateStatus) -> None:
     _append_state(status)
 
 
+def _rotate_log_if_needed() -> None:
+    """Truncate log file to last _LOG_KEEP_LINES when it exceeds _LOG_MAX_BYTES."""
+    try:
+        if _LOG_FILE.stat().st_size <= _LOG_MAX_BYTES:
+            return
+        lines = _LOG_FILE.read_text(encoding="utf-8").splitlines(keepends=True)
+        trimmed = lines[-_LOG_KEEP_LINES:]
+        tmp = _LOG_FILE.with_suffix(".tmp")
+        tmp.write_text("".join(trimmed), encoding="utf-8")
+        os.replace(tmp, _LOG_FILE)
+    except FileNotFoundError:
+        pass
+    except OSError:
+        logger.warning("Nie udało się wyrotować pliku logów aktualizacji.")
+
+
 def _append_log(status: UpdateStatus) -> None:
     message = status.detail or status.error or status.status
     entry = {
@@ -108,6 +133,7 @@ def _append_log(status: UpdateStatus) -> None:
     _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     with _LOG_FILE.open("a", encoding="utf-8") as log_file:
         log_file.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    _rotate_log_if_needed()
 
 
 def _read_state(path: Path) -> dict[str, Any] | None:
@@ -393,28 +419,23 @@ def run_update_service_sequence(task_id: str, *, claim_slot: bool = True) -> Non
             progress=0,
         )
 
+        # Pobierz najnowszy obraz z rejestru (GHCR) — nie wymaga gita ani build-toolchainu.
         _run_update_command(
             task_id,
-            "Wykonywanie: git pull",
-            ["git", "pull"],
-            20,
-        )
-        _run_update_command(
-            task_id,
-            "Wykonywanie: docker compose build",
+            f"Wykonywanie: docker compose pull {UPDATE_SERVICE_NAME}",
             [
                 "docker",
                 "compose",
                 "-f",
                 UPDATE_COMPOSE_FILE,
-                "build",
+                "pull",
                 UPDATE_SERVICE_NAME,
             ],
-            60,
+            50,
         )
         _run_update_command(
             task_id,
-            "Wykonywanie: docker compose up -d",
+            f"Wykonywanie: docker compose up -d {UPDATE_SERVICE_NAME}",
             [
                 "docker",
                 "compose",
@@ -430,7 +451,7 @@ def run_update_service_sequence(task_id: str, *, claim_slot: bool = True) -> Non
         set_status(
             task_id=task_id,
             status="success",
-            detail="Usługa została zaktualizowana.",
+            detail=f"Usługa została zaktualizowana (poprzednia wersja: {APP_VERSION}).",
             progress=100,
         )
     except UpdateServiceError as exc:

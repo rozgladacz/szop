@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .. import config, models
 from ..paths import TEMPLATES_DIR
-from ..security import get_current_user
+from ..security import get_current_user, verify_password
 from ..services import update_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -48,6 +48,16 @@ def _status_messages(status_key: str | None, detail: str | None) -> tuple[str | 
     return None, None
 
 
+def _is_default_admin_password(user: models.User) -> bool:
+    """Return True when the admin account still uses the factory-default 'admin' password."""
+    if user.username != "admin" or not user.password_hash:
+        return False
+    try:
+        return verify_password("admin", user.password_hash)
+    except Exception:
+        return False
+
+
 @router.get("", response_class=HTMLResponse, name="admin_dashboard")
 def admin_dashboard(
     request: Request, current_user: models.User = Depends(current_user_dep)
@@ -65,6 +75,8 @@ def admin_dashboard(
             "user": current_user,
             "message": message,
             "error": error,
+            "warn_default_password": _is_default_admin_password(current_user),
+            "app_version": config.APP_VERSION,
         },
     )
 

@@ -8,9 +8,20 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..data import abilities as ability_catalog
+from ..data.abilities import INCH  # U+201D inch symbol -- use in labels, never bare ASCII "
 from . import costs as _costs
 
 LONG_RANGE_AURA_SLUG = "aura_12"
+
+# Maps virtual UI slugs (generated in definition_payload) back to real DB ability slugs.
+_VIRTUAL_SLUG_MAP: dict[str, str] = {
+    LONG_RANGE_AURA_SLUG: "aura",
+    "aura_mistrzostwo": "aura",
+    "aura_mistrzostwo_12": "aura",
+    "rozkaz_mistrzostwo": "rozkaz",
+    "klatwa_mistrzostwo": "klatwa",
+    "oznaczenie_mistrzostwo": "oznaczenie",
+}
 ABILITY_NAME_MAX_LENGTH = 60
 EXCLUDED_AURA_SLUGS: set[str] = {
     "zasadzka",
@@ -46,6 +57,15 @@ EXCLUDED_ORDER_AND_MARK_SLUGS: set[str] = {
     "zdobywca",
 }
 
+EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS: set[str] = {
+    "rozprysk",
+    "zabojczy",
+    "zuzywalny",
+    "podkrecenie",
+    "sterowany",
+    "szturmowa",
+}
+
 EXCLUDED_AURA_AND_ORDER_SLUGS: set[str] = {
     *EXCLUDED_AURA_SLUGS,
     *EXCLUDED_ORDER_AND_MARK_SLUGS,
@@ -55,6 +75,7 @@ EXCLUDED_AURA_AND_ORDER_SLUGS: set[str] = {
     "waagh",
     "odrodzenie",
     "wrak",
+    "mistrzostwo",
 }
 
 
@@ -175,6 +196,10 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
         .all()
     )
     ability_by_slug = {ability_slug(ability): ability for ability in records}
+    mistrzostwo_weapon_defs = [
+        w for w in ability_catalog.definitions_by_type("weapon")
+        if w.slug not in EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS
+    ]
     payload: list[dict] = []
     for definition in definitions:
         entry = ability_catalog.to_dict(definition)
@@ -195,6 +220,16 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
                 for passive in order_definitions
             ]
             entry["value_kind"] = "passive"
+        elif definition.slug == "mistrzostwo":
+            entry["value_choices"] = [
+                {
+                    "value": w.slug,
+                    "label": w.name,
+                    "description": w.description,
+                }
+                for w in mistrzostwo_weapon_defs
+            ]
+            entry["value_kind"] = "weapon"
         elif definition.slug == "aura":
             aura_definitions = [
                 passive
@@ -221,8 +256,8 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
         if definition.slug == "aura":
             long_range_entry = dict(entry)
             long_range_entry["slug"] = LONG_RANGE_AURA_SLUG
-            long_range_entry["name"] = f'{definition.name}(12")'
-            long_range_entry["display_name"] = f'{definition.name}(12")'
+            long_range_entry["name"] = f'{definition.name}(12{INCH})'
+            long_range_entry["display_name"] = f'{definition.name}(12{INCH})'
             long_range_entry["value_choices"] = [
                 {
                     "value": f"{passive.slug}|12",
@@ -232,6 +267,41 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
                 for passive in aura_definitions
             ]
             payload.append(long_range_entry)
+            for range_suffix, slug_suffix, name_prefix in [
+                ("|6", "aura_mistrzostwo", definition.name),
+                ("|12", "aura_mistrzostwo_12", f'{definition.name}(12{INCH})'),
+            ]:
+                m_entry = dict(entry)
+                m_entry["slug"] = slug_suffix
+                m_entry["name"] = f"{name_prefix}: Mistrzostwo"
+                m_entry["display_name"] = f"{name_prefix}: Mistrzostwo"
+                m_entry["value_choices"] = [
+                    {
+                        "value": f"mistrzostwo:{w.slug}{range_suffix}",
+                        "label": w.name,
+                        "description": w.description,
+                    }
+                    for w in mistrzostwo_weapon_defs
+                ]
+                m_entry["value_kind"] = "weapon"
+                m_entry["cost_hint"] = 0.0
+                payload.append(m_entry)
+        if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
+            m_entry = dict(entry)
+            m_entry["slug"] = f"{definition.slug}_mistrzostwo"
+            m_entry["name"] = f"{definition.name}: Mistrzostwo"
+            m_entry["display_name"] = f"{definition.name}: Mistrzostwo"
+            m_entry["value_choices"] = [
+                {
+                    "value": f"mistrzostwo:{w.slug}",
+                    "label": w.name,
+                    "description": w.description,
+                }
+                for w in mistrzostwo_weapon_defs
+            ]
+            m_entry["value_kind"] = "weapon"
+            m_entry["cost_hint"] = 0.0
+            payload.append(m_entry)
     cache[ability_type] = payload
     return payload
 
@@ -356,8 +426,7 @@ def build_unit_abilities(
             ability = by_id.get(int(ability_id))
         if ability is None:
             slug = item.get("slug")
-            if slug == LONG_RANGE_AURA_SLUG:
-                slug = "aura"
+            slug = _VIRTUAL_SLUG_MAP.get(slug, slug)
             if slug:
                 ability = by_slug.get(str(slug))
         if ability is None:

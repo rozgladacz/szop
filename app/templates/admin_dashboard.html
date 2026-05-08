@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Panel administratora - OPR{% endblock %}
+{% block title %}Panel administratora - SZOP{% endblock %}
 {% block content %}
 <div class="d-flex flex-wrap justify-content-between align-items-center mb-4 gap-3">
   <div>
@@ -7,6 +7,14 @@
     <p class="text-muted mb-0">Zarządzanie aplikacją i zadaniami administracyjnymi.</p>
   </div>
 </div>
+
+{% if warn_default_password %}
+<div class="alert alert-warning alert-dismissible fade show" role="alert">
+  <strong>Uwaga:</strong> Konto <code>admin</code> nadal używa domyślnego hasła <code>admin</code>.
+  Zmień hasło w sekcji <a href="/users" class="alert-link">Zarządzanie użytkownikami</a> przed udostępnieniem aplikacji innym osobom.
+  <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Zamknij"></button>
+</div>
+{% endif %}
 
 {% if message %}
 <div class="alert alert-success" role="alert">

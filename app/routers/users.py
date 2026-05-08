@@ -1,10 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-import tempfile
-from pathlib import Path
-import time
-from datetime import datetime
 from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
@@ -12,27 +7,16 @@ from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
-from starlette.background import BackgroundTask
 
 from .. import models
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user, hash_password
+from ..services import backup as backup_service
 from ..services import db_restore
 
 router = APIRouter(prefix="/users", tags=["users"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-def _cleanup_temp_file(path: Path) -> None:
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        try:
-            path.unlink(missing_ok=True)
-            break
-        except FileNotFoundError:
-            break
-        except PermissionError:
-            time.sleep(0.1)
 
 
 def _require_admin(user: models.User) -> None:
@@ -119,39 +103,16 @@ def list_users(
 def download_backup(current_user: models.User = Depends(get_current_user())) -> FileResponse:
     _require_admin(current_user)
     try:
-        db_path = db_restore.resolve_sqlite_path()
+        backup_path = backup_service.create_backup()
     except db_restore.DBRestoreError as exc:  # pragma: no cover - guarded by config
-        raise HTTPException(
-            status_code=400,
-            detail=str(exc),
-        ) from exc
-    if not db_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="Plik bazy danych nie został znaleziony.",
-        )
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except backup_service.BackupError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=db_path.suffix or ".db") as tmp:
-        temp_path = Path(tmp.name)
-
-    try:
-        db_restore._copy_sqlite_with_sidecars(db_path, temp_path)
-    except db_restore.DBRestoreError as exc:
-        _cleanup_temp_file(temp_path)
-        raise HTTPException(
-            status_code=500,
-            detail=str(exc),
-        ) from exc
-
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
-    download_name = f"opr-backup-{timestamp}{temp_path.suffix}"
-
-    background = BackgroundTask(_cleanup_temp_file, temp_path)
     return FileResponse(
-        temp_path,
-        filename=download_name,
+        backup_path,
+        filename=backup_path.name,
         media_type="application/octet-stream",
-        background=background,
     )
 
 

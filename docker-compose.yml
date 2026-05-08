@@ -1,0 +1,39 @@
+services:
+  szop-app:
+    image: ghcr.io/rozgladacz/szop:latest
+    restart: unless-stopped
+    ports:
+      # Tylko loopback — Tailscale serve wystawia port 443 na tailnet.
+      # Na czas testów lokalnych zmień na "8000:8000" aby był dostępny na LAN.
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/app/data
+      # Docker socket — pozwala panelowi admina na "docker compose pull + up".
+      # Usuń jeśli nie chcesz możliwości aktualizacji przez UI.
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      UPDATE_COMPOSE_FILE: /srv/szop/docker-compose.yml
+      UPDATE_SERVICE_NAME: szop-app
+    env_file:
+      - path: .env
+        required: false   # .env jest opcjonalny — wszystko ma rozsądne defaulty
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/auth/login')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+
+  szop-backup:
+    image: ghcr.io/rozgladacz/szop:latest
+    restart: unless-stopped
+    entrypoint: ["python", "-m", "app.scripts.backup_loop"]
+    volumes:
+      - ./data:/app/data
+    env_file:
+      - path: .env
+        required: false
+    depends_on:
+      szop-app:
+        condition: service_healthy

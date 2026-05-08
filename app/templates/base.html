@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>{% block title %}OPR Army Builder{% endblock %}</title>
+    <title>{% block title %}SZOP - Kreator armii{% endblock %}</title>
     <link rel="icon" href="{{ url_for('static', path='/favicon.svg') }}" type="image/svg+xml" />
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
@@ -16,7 +16,7 @@
   <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4 sticky-lg-top">
       <div class="container-fluid">
-        <a class="navbar-brand" href="/">OPR Builder</a>
+        <a class="navbar-brand" href="/">SZOP</a>
         <button
           class="navbar-toggler"
           type="button"
@@ -36,7 +36,7 @@
             <li class="nav-item">
               <a
                 class="nav-link"
-                href="{{ url_for('static', path='/docs/Moje_OPR.pdf') }}"
+                href="{{ url_for('static', path='/docs/SZOP.pdf') }}"
                 download
               >Pobierz zasady</a>
             </li>
