@@ -9,6 +9,18 @@ from tests.node_runtime import resolve_node_binary
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 APP_JS_PATH = ROOT_DIR / "app/static/js/app.js"
+MODULE_PATHS = [
+    ROOT_DIR / "app/static/js/modules/refresh_priority.js",
+    ROOT_DIR / "app/static/js/modules/payload_adapters.js",
+    ROOT_DIR / "app/static/js/modules/text_parsing.js",
+    ROOT_DIR / "app/static/js/modules/ui_pickers.js",
+    ROOT_DIR / "app/static/js/modules/spell_weapon_cost_preview.js",
+    ROOT_DIR / "app/static/js/modules/spell_ability_forms.js",
+    ROOT_DIR / "app/static/js/modules/roster_rendering.js",
+    ROOT_DIR / "app/static/js/modules/loadout_state.js",
+    ROOT_DIR / "app/static/js/modules/editor_renderers.js",
+    ROOT_DIR / "app/static/js/modules/roster_adders.js",
+]
 
 
 def test_roster_refresh_priority_prefers_newer_authoritative_updates() -> None:
@@ -16,6 +28,7 @@ def test_roster_refresh_priority_prefers_newer_authoritative_updates() -> None:
         f"""
         const fs = require('fs');
         const vm = require('vm');
+        const modulePaths = {json.dumps([str(path) for path in MODULE_PATHS])};
         const code = fs.readFileSync({json.dumps(str(APP_JS_PATH))}, 'utf8');
         const sandbox = {{
           console,
@@ -27,6 +40,9 @@ def test_roster_refresh_priority_prefers_newer_authoritative_updates() -> None:
         }};
         sandbox.window.window = sandbox.window;
         vm.createContext(sandbox);
+        modulePaths.forEach((modulePath) => {{
+          vm.runInContext(fs.readFileSync(modulePath, 'utf8'), sandbox, {{ filename: modulePath }});
+        }});
         vm.runInContext(code, sandbox);
 
         const unitCosts = [12.5, 8.5, 20.0];

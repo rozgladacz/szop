@@ -5,6 +5,7 @@
 // ============================================================
 const abilityDefinitionsCache = new Map();
 const ARMY_RULE_OFF_PREFIX = '__army_off__';
+const ABILITY_NAME_MAX_LENGTH = window.SZOPTextParsing?.ABILITY_NAME_MAX_LENGTH || 60;
 
 const normalizeRosterRefreshCycleToken = window.SZOPRefreshPriority
   ? window.SZOPRefreshPriority.normalizeRosterRefreshCycleToken
@@ -55,6 +56,31 @@ const resolveRosterRefreshPriority = window.SZOPRefreshPriority
     }
     return { apply: true, token, state: nextState };
   };
+
+const payloadAdapters = window.SZOPPayloadAdapters || {
+  adaptQuotePayload(payload, requestedRosterUnitId) {
+    const selectedTotal = Number(payload?.selected_total);
+    const responseRosterUnitId = payload?.roster_unit_id ?? payload?.unit_id ?? requestedRosterUnitId;
+    return {
+      total: selectedTotal,
+      rosterUnitId: responseRosterUnitId !== undefined && responseRosterUnitId !== null
+        ? String(responseRosterUnitId)
+        : String(requestedRosterUnitId || ''),
+      loadout: payload?.loadout && typeof payload.loadout === 'object' ? payload.loadout : null,
+      itemCosts: payload?.item_costs && typeof payload.item_costs === 'object' ? payload.item_costs : null,
+      selectedRole: typeof payload?.selected_role === 'string' ? payload.selected_role : null,
+    };
+  },
+  adaptItemCosts(itemCosts) {
+    return itemCosts && typeof itemCosts === 'object' ? itemCosts : null;
+  },
+  adaptWeaponOptions(options) {
+    return Array.isArray(options) ? options : [];
+  },
+  adaptAbilityEntries(entries) {
+    return Array.isArray(entries) ? entries : [];
+  },
+};
 
 
 
@@ -745,627 +771,38 @@ function initAbilityPickers() {
 
 // ============================================================
 // SECTION: TEXT PARSING UTILS
-// splitTraits, normalizeName, extractNumber, abilityIdentifier,
-// passiveIdentifier, parseFlagString, normalizeRangeValue,
-// stripOptionalFlagSuffix
+// Extracted to app/static/js/modules/text_parsing.js
 // ============================================================
-const ABILITY_NAME_MAX_LENGTH = 60;
-const ABILITY_ALIASES = new Map([
-  ['nieustepliwy', 'przygotowanie'],
-]);
-
-function splitTraits(text) {
-  if (!text) {
-    return [];
-  }
-  if (Array.isArray(text)) {
-    return text;
-  }
-  return String(text)
-    .split(/[,;]/)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
-}
-
-function normalizeName(text) {
-  if (text === undefined || text === null) {
-    return '';
-  }
-  let value = String(text);
-  try {
-    value = value.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  } catch (err) {
-    value = value
-      .replace(/ą/g, 'a')
-      .replace(/ć/g, 'c')
-      .replace(/ę/g, 'e')
-      .replace(/ł/g, 'l')
-      .replace(/ń/g, 'n')
-      .replace(/ó/g, 'o')
-      .replace(/ś/g, 's')
-      .replace(/ż/g, 'z')
-      .replace(/ź/g, 'z');
-  }
-  value = value.replace(/[-_]/g, ' ');
-  value = value.replace(/[!?]+$/g, '');
-  value = value.replace(/\s+/g, ' ').trim();
-  return value.toLowerCase();
-}
-
-function extractNumber(text) {
-  if (text === undefined || text === null) {
-    return 0;
-  }
-  const match = String(text).match(/[0-9]+(?:[.,][0-9]+)?/);
-  if (!match) {
-    return 0;
-  }
-  return Number(match[0].replace(',', '.'));
-}
-
-function abilityIdentifier(text) {
-  if (text === undefined || text === null) {
-    return '';
-  }
-  let base = String(text).trim();
-  if (!base) {
-    return '';
-  }
-  if (base.startsWith(ARMY_RULE_OFF_PREFIX)) {
-    base = base.slice(ARMY_RULE_OFF_PREFIX.length).trim();
-  }
-  ['(', '=', ':'].forEach((separator) => {
-    if (base.includes(separator)) {
-      base = base.split(separator, 1)[0].trim();
-    }
-  });
-  base = base.replace(/[“”]/g, '"');
-  while (base.endsWith('?') || base.endsWith('!')) {
-    base = base.slice(0, -1).trim();
-  }
-  const normalized = normalizeName(base);
-  return ABILITY_ALIASES.get(normalized) || normalized;
-}
-
-function passiveIdentifier(text) {
-  const ident = abilityIdentifier(text);
-  if (ident) {
-    return ident;
-  }
-  const norm = normalizeName(text);
-  let trimmed = norm;
-  while (trimmed.endsWith('?') || trimmed.endsWith('!')) {
-    trimmed = trimmed.slice(0, -1).trim();
-  }
-  if (trimmed) {
-    return trimmed;
-  }
-  return norm;
-}
-
-function parseFlagString(text) {
-  if (!text) {
-    return {};
-  }
-  const entries = String(text)
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  const result = {};
-  entries.forEach((entry) => {
-    const separatorIndex = entry.indexOf('=');
-    if (separatorIndex >= 0) {
-      const key = entry.slice(0, separatorIndex).trim();
-      const value = entry.slice(separatorIndex + 1).trim();
-      if (key) {
-        result[key] = value;
-      }
-    } else {
-      result[entry] = true;
-    }
-  });
-  return result;
-}
-
-function normalizeRangeValue(value) {
-  if (value === undefined || value === null) {
-    return 0;
-  }
-  if (typeof value === 'number') {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric <= 0) {
-      return 0;
-    }
-    return Math.round(numeric);
-  }
-  const text = String(value).trim();
-  if (!text) {
-    return 0;
-  }
-  const lowered = text.toLowerCase();
-  if (['wręcz', 'wrecz', 'melee', 'm'].includes(lowered)) {
-    return 0;
-  }
-  const numeric = extractNumber(text);
-  if (!Number.isFinite(numeric) || numeric <= 0) {
-    return 0;
-  }
-  return Math.round(numeric);
-}
-
-function stripOptionalFlagSuffix(name) {
-  let normalized = String(name || '').trim();
-  while (normalized.endsWith('?') || normalized.endsWith('!')) {
-    normalized = normalized.slice(0, -1).trim();
-  }
-  return normalized;
-}
-
+const {
+  splitTraits,
+  normalizeName,
+  extractNumber,
+  abilityIdentifier,
+  passiveIdentifier,
+  parseFlagString,
+  normalizeRangeValue,
+  stripOptionalFlagSuffix,
+} = window.SZOPTextParsing;
 
 // ============================================================
 // SECTION: SPELL WEAPON COST PREVIEW
-// initSpellWeaponCostPreview — podgląd kosztu broni zaklęcia,
-// wywołuje POST /armies/{id}/spells/weapon-cost-preview
+// Extracted to app/static/js/modules/spell_weapon_cost_preview.js
 // ============================================================
-function initSpellWeaponCostPreview() {
-  document.querySelectorAll('form[data-spell-weapon-form]').forEach((form) => {
-    const costValueEl = form.querySelector('[data-spell-weapon-cost]');
-    if (!costValueEl) {
-      return;
-    }
-
-    const armyId = form.dataset.armyId || '';
-    if (!armyId) {
-      return;
-    }
-
-    let spellPreviewTimer = null;
-    let spellPreviewController = null;
-
-    const collectTraits = () => {
-      const hidden = form.querySelector('#weapon-abilities');
-      if (!hidden) {
-        return [];
-      }
-      try {
-        const payload = JSON.parse(hidden.value || '[]');
-        if (!Array.isArray(payload)) {
-          return [];
-        }
-        return payload
-          .map((entry) => {
-            if (!entry || typeof entry !== 'object') {
-              return '';
-            }
-            const raw = String(entry.raw || '').trim();
-            if (raw) {
-              return raw;
-            }
-            return String(entry.label || '').trim();
-          })
-          .filter((entry) => entry.length > 0);
-      } catch (err) {
-        return [];
-      }
-    };
-
-    const collectFormValues = () => {
-      const rangeInput = form.querySelector('input[name="range"]');
-      const attacksInput = form.querySelector('input[name="attacks"]');
-      const apInput = form.querySelector('input[name="ap"]');
-      return {
-        range: rangeInput ? rangeInput.value : '',
-        attacks: attacksInput ? attacksInput.value : '',
-        ap: apInput ? apInput.value : '',
-        abilities: collectTraits(),
-      };
-    };
-
-    const updatePreview = () => {
-      if (spellPreviewTimer) {
-        window.clearTimeout(spellPreviewTimer);
-      }
-      if (spellPreviewController) {
-        spellPreviewController.abort();
-        spellPreviewController = null;
-      }
-      spellPreviewTimer = window.setTimeout(() => {
-        spellPreviewTimer = null;
-        const formValues = collectFormValues();
-        spellPreviewController = new AbortController();
-        const signal = spellPreviewController.signal;
-        fetch(`/armies/${armyId}/spells/weapon-cost-preview`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(formValues),
-          credentials: 'same-origin',
-          signal,
-        })
-          .then((res) => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
-          .then((data) => {
-            if (spellPreviewController && spellPreviewController.signal === signal) {
-              spellPreviewController = null;
-            }
-            const cost = data?.spell_cost;
-            if (cost != null) {
-              costValueEl.textContent = String(cost);
-            }
-          })
-          .catch((err) => {
-            if (err && err.name === 'AbortError') {
-              return;
-            }
-            console.error('Nie udało się pobrać podglądu kosztu broni zaklęcia', err);
-          });
-      }, 300);
-    };
-
-    updatePreview();
-
-    ['input', 'change'].forEach((eventName) => {
-      form.addEventListener(eventName, (event) => {
-        const target = event.target;
-        if (!(target instanceof Element)) {
-          return;
-        }
-        if (
-          target.matches('#name')
-          || target.matches('#notes')
-          || target.matches('.ability-picker-select')
-          || target.matches('.ability-picker-value-input')
-          || target.matches('.ability-picker-value-select')
-          || target.matches('.ability-picker-add')
-          || target.closest('.ability-picker-list')
-          || target.matches('.range-picker-select')
-          || target.matches('.range-picker-custom')
-          || target.matches('.number-picker-select')
-          || target.matches('.number-picker-custom')
-          || target.matches('input[name="range"]')
-          || target.matches('input[name="attacks"]')
-          || target.matches('input[name="ap"]')
-        ) {
-          updatePreview();
-        }
-      });
-    });
-
-    const abilitiesInput = form.querySelector('#weapon-abilities');
-    if (abilitiesInput) {
-      const observer = new MutationObserver(() => {
-        updatePreview();
-      });
-      observer.observe(abilitiesInput, { attributes: true, attributeFilter: ['value'] });
-      abilitiesInput.addEventListener('input', updatePreview);
-      abilitiesInput.addEventListener('change', updatePreview);
-    }
-  });
-}
+const {
+  initSpellWeaponCostPreview,
+} = window.SZOPSpellWeaponCostPreview;
 
 // ============================================================
-// SECTION: UI PICKERS — NUMBER, RANGE, WEAPON DEFAULTS
-// initNumberPicker, initNumberPickers, initRangePicker,
-// initRangePickers, initWeaponDefaults
-//
-// UWAGA: To są helpery UI (spinners, zakresy) — NIE silnik kosztów.
-// Wywoływane w łańcuchu DOMContentLoaded. Ich brak = ReferenceError
-// który cicho blokuje całą inicjalizację strony.
-// NIE usuwać przy cleanup kosztowym.
+// SECTION: UI PICKERS - NUMBER, RANGE, WEAPON DEFAULTS
+// Extracted to app/static/js/modules/ui_pickers.js
 // ============================================================
-function initNumberPicker(root) {
-  const selectEl = root.querySelector('.number-picker-select');
-  const customInput = root.querySelector('.number-picker-custom');
-  const hiddenInput = root.querySelector('.number-picker-value');
-  const initialValue = root.dataset.selected || '';
-
-  const syncHidden = (value) => {
-    const text = value !== undefined && value !== null ? String(value) : '';
-    if (hiddenInput) {
-      hiddenInput.value = text;
-    }
-    root.dataset.selected = text;
-  };
-
-  const hideCustom = () => {
-    if (customInput) {
-      customInput.classList.add('d-none');
-      customInput.value = '';
-    }
-  };
-
-  const showCustom = () => {
-    if (customInput) {
-      customInput.classList.remove('d-none');
-    }
-  };
-
-  const findMatchingOption = (value) => {
-    if (!selectEl) {
-      return '';
-    }
-    const textValue = String(value).trim();
-    if (!textValue) {
-      return '';
-    }
-    const numeric = Number(textValue);
-    let matched = '';
-    Array.from(selectEl.options || []).forEach((option) => {
-      if (!option.value || option.value === '__custom__') {
-        if (!matched && option.value === textValue) {
-          matched = option.value;
-        }
-        return;
-      }
-      if (option.value === textValue) {
-        matched = option.value;
-        return;
-      }
-      const optionNumeric = Number(option.value);
-      if (Number.isFinite(optionNumeric) && Number.isFinite(numeric) && optionNumeric === numeric) {
-        matched = option.value;
-      }
-    });
-    return matched;
-  };
-
-  const setValue = (rawValue) => {
-    const textValue = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
-    if (!textValue) {
-      if (selectEl) {
-        selectEl.value = '';
-      }
-      hideCustom();
-      syncHidden('');
-      return;
-    }
-    const matched = findMatchingOption(textValue);
-    if (matched) {
-      if (selectEl) {
-        selectEl.value = matched;
-      }
-      hideCustom();
-      syncHidden(matched);
-      return;
-    }
-    if (selectEl) {
-      selectEl.value = '__custom__';
-    }
-    showCustom();
-    if (customInput) {
-      customInput.value = textValue;
-    }
-    syncHidden(textValue);
-  };
-
-  if (selectEl) {
-    selectEl.addEventListener('change', () => {
-      const value = selectEl.value;
-      if (value === '__custom__') {
-        showCustom();
-        if (customInput && !customInput.value) {
-          customInput.focus();
-        }
-        syncHidden(customInput ? customInput.value || '' : '');
-      } else if (value === '') {
-        hideCustom();
-        syncHidden('');
-      } else {
-        hideCustom();
-        syncHidden(value);
-      }
-    });
-  }
-
-  if (customInput) {
-    customInput.addEventListener('input', () => {
-      if (selectEl && selectEl.value !== '__custom__') {
-        selectEl.value = '__custom__';
-      }
-      syncHidden(customInput.value || '');
-    });
-  }
-
-  setValue(initialValue);
-
-  root.numberPicker = {
-    setValue: (value) => setValue(value),
-  };
-}
-
-function initNumberPickers() {
-  document.querySelectorAll('[data-number-picker]').forEach((element) => {
-    initNumberPicker(element);
-  });
-}
-
-function initRangePicker(root) {
-  const selectEl = root.querySelector('.range-picker-select');
-  const customInput = root.querySelector('.range-picker-custom');
-  const hiddenInput = root.querySelector('.range-picker-value');
-  const initialValue = root.dataset.selected || '';
-
-  const normalizeForOption = (raw) => {
-    if (raw === undefined || raw === null) {
-      return '';
-    }
-    const text = String(raw).trim();
-    if (!text) {
-      return '';
-    }
-    const lowered = text.toLowerCase();
-    if (lowered === 'none' || lowered === 'null' || lowered === 'undefined') {
-      return '';
-    }
-    if (['wrÄ™cz', 'wrecz', 'melee', 'm'].includes(lowered)) {
-      return '0';
-    }
-    const numericMatch = lowered.match(/^(\d+)(?:["â€ť])?$/);
-    if (numericMatch) {
-      return numericMatch[1];
-    }
-    return text;
-  };
-
-  const showCustom = () => {
-    if (customInput) {
-      customInput.classList.remove('d-none');
-    }
-  };
-
-  const hideCustom = () => {
-    if (customInput) {
-      customInput.classList.add('d-none');
-      customInput.value = '';
-    }
-  };
-
-  const syncHidden = (value) => {
-    const text = value !== undefined && value !== null ? String(value) : '';
-    if (hiddenInput) {
-      hiddenInput.value = text;
-    }
-    root.dataset.selected = text;
-  };
-
-  const setValue = (rawValue) => {
-    const textValue = rawValue !== undefined && rawValue !== null ? String(rawValue).trim() : '';
-    if (!textValue) {
-      if (selectEl) {
-        selectEl.value = '';
-      }
-      hideCustom();
-      syncHidden('');
-      return;
-    }
-    if (textValue.toLowerCase() === '__custom__') {
-      if (selectEl) {
-        selectEl.value = '__custom__';
-      }
-      showCustom();
-      if (customInput && !customInput.value) {
-        customInput.focus();
-      }
-      syncHidden(customInput ? customInput.value || '' : '');
-      return;
-    }
-    const normalized = normalizeForOption(textValue);
-    if (!normalized) {
-      if (selectEl) {
-        selectEl.value = '';
-      }
-      hideCustom();
-      syncHidden('');
-      return;
-    }
-    if (selectEl && normalized !== '__custom__') {
-      const option = Array.from(selectEl.options || []).find((opt) => opt.value === normalized);
-      if (option && normalized !== '__custom__') {
-        selectEl.value = normalized;
-        hideCustom();
-        syncHidden(normalized);
-        return;
-      }
-    }
-    if (selectEl) {
-      selectEl.value = '__custom__';
-    }
-    showCustom();
-    if (customInput) {
-      customInput.value = textValue;
-    }
-    syncHidden(textValue);
-  };
-
-  if (selectEl) {
-    selectEl.addEventListener('change', () => {
-      const value = selectEl.value;
-      if (value === '__custom__') {
-        showCustom();
-        if (customInput && !customInput.value) {
-          customInput.focus();
-        }
-        syncHidden(customInput ? customInput.value : '');
-      } else {
-        hideCustom();
-        syncHidden(value);
-      }
-    });
-  }
-
-  if (customInput) {
-    customInput.addEventListener('input', () => {
-      syncHidden(customInput.value || '');
-    });
-  }
-
-  setValue(initialValue);
-  root.rangePicker = {
-    setValue,
-  };
-}
-
-function initRangePickers() {
-  document.querySelectorAll('[data-range-picker]').forEach((element) => {
-    initRangePicker(element);
-  });
-}
-
-function initWeaponDefaults() {
-  document.querySelectorAll('form[data-defaults]').forEach((form) => {
-    const defaultsData = form.dataset.defaults;
-    if (!defaultsData) {
-      return;
-    }
-    let defaults = null;
-    try {
-      defaults = JSON.parse(defaultsData);
-    } catch (err) {
-      defaults = null;
-    }
-    if (!defaults) {
-      return;
-    }
-    const resetButton = form.querySelector('[data-weapon-reset]');
-    if (!resetButton) {
-      return;
-    }
-    resetButton.addEventListener('click', () => {
-      const nameInput = form.querySelector('#name');
-      if (nameInput) {
-        nameInput.value = defaults.name || '';
-      }
-      const rangePicker = form.querySelector('[data-range-picker]');
-      if (rangePicker && rangePicker.rangePicker && typeof rangePicker.rangePicker.setValue === 'function') {
-        rangePicker.rangePicker.setValue(defaults.range || '');
-      }
-      const attacksPicker = form.querySelector('[data-number-picker][data-target-input="attacks"]');
-      if (attacksPicker && attacksPicker.numberPicker && typeof attacksPicker.numberPicker.setValue === 'function') {
-        attacksPicker.numberPicker.setValue(defaults.attacks || '');
-      } else {
-        const attacksInput = form.querySelector('#attacks');
-        if (attacksInput) {
-          attacksInput.value = defaults.attacks || '';
-        }
-      }
-      const apPicker = form.querySelector('[data-number-picker][data-target-input="ap"]');
-      if (apPicker && apPicker.numberPicker && typeof apPicker.numberPicker.setValue === 'function') {
-        apPicker.numberPicker.setValue(defaults.ap || '');
-      } else {
-        const apInput = form.querySelector('#ap');
-        if (apInput) {
-          apInput.value = defaults.ap || '';
-        }
-      }
-      const notesInput = form.querySelector('#notes');
-      if (notesInput) {
-        notesInput.value = defaults.notes || '';
-      }
-      const abilityPickerRoot = form.querySelector('[data-ability-picker]');
-      if (abilityPickerRoot && abilityPickerRoot.abilityPicker && typeof abilityPickerRoot.abilityPicker.setItems === 'function') {
-        abilityPickerRoot.abilityPicker.setItems(defaults.abilities || []);
-      }
-    });
-  });
-}
+const {
+  initNumberPicker,
+  initNumberPickers,
+  initRangePicker,
+  initRangePickers,
+  initWeaponDefaults,
+} = window.SZOPUIPickers;
 
 // ============================================================
 // SECTION: WEAPON PICKER
@@ -2454,1305 +1891,51 @@ function initWeaponPickers() {
 
 // ============================================================
 // SECTION: ROSTER ITEM RENDERING
-// formatPoints, createRosterItemElement, renderPassiveEditor
-// Tworzą elementy listy rozpiski i edytor pasywek.
+// Extracted to app/static/js/modules/roster_rendering.js
 // ============================================================
-function formatPoints(value) {
-  const number = Number(value);
-  if (!Number.isFinite(number)) {
-    return value !== undefined && value !== null ? String(value) : '0';
-  }
-  const baseOptions = { minimumFractionDigits: 0, maximumFractionDigits: 2 };
-  if (!Number.isInteger(number)) {
-    baseOptions.minimumFractionDigits = 2;
-  }
-  return number.toLocaleString('pl-PL', baseOptions);
-}
-
-function createRosterItemElement(data, options = {}) {
-  if (!data || typeof data !== 'object') {
-    return null;
-  }
-  const { rosterId = '', isEditable = false } = options || {};
-  const itemId = data.id !== undefined && data.id !== null ? String(data.id) : '';
-  const count = Number.isFinite(Number(data.count)) ? Number(data.count) : 1;
-  const cachedCost = Number.isFinite(Number(data.cached_cost)) ? Number(data.cached_cost) : 0;
-  const unitName = data.unit_name || 'Jednostka';
-  const unitQuality = data.unit_quality !== undefined ? data.unit_quality : '-';
-  const unitDefense = data.unit_defense !== undefined ? data.unit_defense : '-';
-  const unitToughness = data.unit_toughness !== undefined ? data.unit_toughness : '-';
-  const unitCacheId =
-    data.unit_cache_id !== undefined && data.unit_cache_id !== null
-      ? String(data.unit_cache_id)
-      : data.unit_id !== undefined && data.unit_id !== null
-        ? String(data.unit_id)
-        : '';
-  const defaultSummary = data.default_summary || '';
-  const loadoutSummary = data.loadout_summary || defaultSummary;
-  const customName = typeof data.custom_name === 'string' ? data.custom_name : '';
-  const baseCostPerModel = Number.isFinite(Number(data.base_cost_per_model))
-    ? Number(data.base_cost_per_model)
-    : 0;
-  const toJsonString = (value, fallback) => {
-    const base = value === undefined ? fallback : value;
-    try {
-      return JSON.stringify(base);
-    } catch (err) {
-      try {
-        return JSON.stringify(fallback);
-      } catch (innerErr) {
-        if (Array.isArray(fallback)) {
-          return '[]';
-        }
-        if (fallback && typeof fallback === 'object') {
-          return '{}';
-        }
-        return 'null';
-      }
-    }
-  };
-
-  const outer = document.createElement('div');
-  outer.className = 'list-group-item border-0 px-0 py-2';
-  outer.setAttribute('data-roster-entry', '');
-
-  const entry = document.createElement('div');
-  entry.className = 'roster-unit-entry';
-  outer.appendChild(entry);
-
-  if (isEditable) {
-    const handle = document.createElement('div');
-    handle.className = 'roster-drag-handle drag-handle';
-    handle.setAttribute('aria-hidden', 'true');
-    handle.textContent = '⋮⋮';
-    entry.appendChild(handle);
-
-    const reorder = document.createElement('div');
-    reorder.className = 'roster-unit-reorder';
-    entry.appendChild(reorder);
-
-    ['up', 'down'].forEach((direction) => {
-      const form = document.createElement('form');
-      form.method = 'post';
-      if (rosterId) {
-        form.action = `/rosters/${rosterId}/units/${itemId || ''}/move`;
-      }
-      form.setAttribute('data-roster-move-form', '');
-
-      const hidden = document.createElement('input');
-      hidden.type = 'hidden';
-      hidden.name = 'direction';
-      hidden.value = direction;
-      form.appendChild(hidden);
-
-      const button = document.createElement('button');
-      button.type = 'submit';
-      button.className = 'btn btn-outline-secondary btn-sm';
-      button.setAttribute('data-roster-move', '');
-      button.setAttribute(
-        'aria-label',
-        direction === 'up' ? 'Przesuń jednostkę w górę' : 'Przesuń jednostkę w dół',
-      );
-      button.textContent = direction === 'up' ? '↑' : '↓';
-      form.appendChild(button);
-
-      reorder.appendChild(form);
-    });
-  }
-
-  const item = document.createElement('div');
-  item.className =
-    'roster-unit-item roster-card text-start position-relative flex-grow-1 border rounded p-3 bg-body';
-  item.setAttribute('data-roster-item', '');
-  if (itemId) {
-    item.setAttribute('data-roster-unit-id', itemId);
-  }
-  item.setAttribute('data-unit-name', unitName);
-  item.setAttribute('data-unit-count', String(count));
-  item.setAttribute('data-unit-cost', String(cachedCost));
-  item.setAttribute('data-base-cost-per-model', String(baseCostPerModel));
-  item.setAttribute('data-unit-quality', String(unitQuality));
-  item.setAttribute('data-unit-defense', String(unitDefense));
-  item.setAttribute('data-unit-toughness', String(unitToughness));
-  item.setAttribute('data-unit-custom-name', customName);
-  if (unitCacheId) {
-    item.setAttribute('data-unit-cache-id', unitCacheId);
-  }
-  if (data.unit_flags !== undefined && data.unit_flags !== null) {
-    item.setAttribute('data-unit-flags', String(data.unit_flags));
-  }
-  item.setAttribute('data-default-summary', defaultSummary || '');
-  item.setAttribute('data-weapon-options', toJsonString(data.weapon_options, []));
-  item.setAttribute('data-passives', toJsonString(data.passive_items, []));
-  item.setAttribute('data-actives', toJsonString(data.active_items, []));
-  item.setAttribute('data-auras', toJsonString(data.aura_items, []));
-  item.setAttribute('data-selected-passives', toJsonString(data.selected_passive_items, []));
-  item.setAttribute('data-selected-actives', toJsonString(data.selected_active_items, []));
-  item.setAttribute('data-selected-auras', toJsonString(data.selected_aura_items, []));
-  item.setAttribute('data-loadout', toJsonString(data.loadout, {}));
-  item.setAttribute('data-unit-classification', toJsonString(data.classification, null));
-  item.setAttribute('role', 'button');
-  item.setAttribute('tabindex', '0');
-
-  const costBadge = document.createElement('span');
-  costBadge.className = 'badge text-bg-primary roster-cost-badge';
-  costBadge.setAttribute('data-roster-unit-cost', '');
-  costBadge.textContent = `${formatPoints(cachedCost)} pkt`;
-  item.appendChild(costBadge);
-
-  const title = document.createElement('div');
-  title.className = 'fw-semibold';
-  title.setAttribute('data-roster-unit-title', '');
-  title.textContent = `${count}x ${unitName}`;
-  item.appendChild(title);
-
-  const custom = document.createElement('div');
-  custom.className = 'text-muted small';
-  custom.setAttribute('data-roster-unit-custom', '');
-  const trimmedCustom = customName.trim();
-  custom.textContent = trimmedCustom;
-  if (!trimmedCustom) {
-    custom.classList.add('d-none');
-  }
-  item.appendChild(custom);
-
-  const stats = document.createElement('div');
-  stats.className = 'text-muted small';
-  stats.textContent = `Jakość ${unitQuality} / Obrona ${unitDefense} / Wytrzymałość ${unitToughness}`;
-  item.appendChild(stats);
-
-  const abilities = document.createElement('div');
-  abilities.className = 'd-flex flex-wrap gap-1 mt-2';
-  abilities.setAttribute('data-roster-unit-abilities', '');
-  item.appendChild(abilities);
-
-  const loadoutEl = document.createElement('div');
-  loadoutEl.className = 'text-muted small mt-2';
-  loadoutEl.setAttribute('data-roster-unit-loadout', '');
-  loadoutEl.textContent = `Uzbrojenie: ${loadoutSummary || '-'}`;
-  item.appendChild(loadoutEl);
-
-  entry.appendChild(item);
-
-  return outer;
-}
-
-function renderPassiveEditor(
-  container,
-  items,
-  stateMap,
-  modelCount,
-  editable,
-  onChange,
-  getDelta,
-) {
-  if (!container) {
-    return false;
-  }
-  container.innerHTML = '';
-  const safeItems = (Array.isArray(items) ? items : []).filter(
-    (entry) => entry && !entry.is_army_rule,
-  );
-  if (!safeItems.length) {
-    return false;
-  }
-  const totalModels = Math.max(Number(modelCount) || 0, 0);
-  const wrapper = document.createElement('div');
-  wrapper.className = 'd-flex flex-column gap-2';
-  safeItems.forEach((entry) => {
-    if (!entry || !entry.slug) {
-      return;
-    }
-    const slug = String(entry.slug);
-    const normalizedSlug = slug.trim().toLowerCase();
-    const isLockedAbility = Boolean(entry.is_mandatory);
-    let currentValue = Number(stateMap.get(slug));
-    if (!Number.isFinite(currentValue)) {
-      currentValue = Number(entry.default_count ?? (entry.is_default ? 1 : 0));
-    }
-    if (!Number.isFinite(currentValue) || currentValue <= 0) {
-      currentValue = 0;
-    } else {
-      currentValue = 1;
-    }
-    if (isLockedAbility) {
-      currentValue = 1;
-    }
-    stateMap.set(slug, currentValue);
-
-    const row = document.createElement('div');
-    row.className = 'roster-ability-item';
-
-    const info = document.createElement('div');
-    info.className = 'roster-ability-details flex-grow-1';
-    const name = document.createElement('span');
-    name.className = 'roster-ability-label';
-    name.textContent = entry.label || entry.raw || slug;
-    if (entry.description) {
-      name.title = entry.description;
-    }
-    info.appendChild(name);
-    const cost = document.createElement('span');
-    cost.className = 'roster-ability-cost';
-    const costValue = Number(entry.cost);
-    const multiplier = Math.max(totalModels, 1);
-    let currentFlag = currentValue > 0 ? 1 : 0;
-    if (isLockedAbility) {
-      currentFlag = 1;
-    }
-    const computeDelta = () => {
-      if (typeof getDelta === 'function') {
-        try {
-          const context = {
-            slug,
-            entry,
-            currentFlag,
-            models: totalModels,
-          };
-          const deltaResult = getDelta(context);
-          if (deltaResult && typeof deltaResult === 'object' && Object.prototype.hasOwnProperty.call(deltaResult, 'diff')) {
-            const diffValue = Number(deltaResult.diff);
-            if (Number.isFinite(diffValue)) {
-              return diffValue;
-            }
-          }
-          const numericResult = Number(deltaResult);
-          if (Number.isFinite(numericResult)) {
-            return numericResult;
-          }
-        } catch (err) {
-          console.warn('Nie udało się obliczyć kosztu zdolności pasywnej', slug, err);
-        }
-      }
-      if (Number.isFinite(costValue)) {
-        return costValue * multiplier;
-      }
-      return Number.NaN;
-    };
-    let deltaValue = computeDelta();
-    const normalizeDeltaForDisplay = (value) => {
-      const numericValue = Number(value);
-      if (!Number.isFinite(numericValue)) {
-        return Number.NaN;
-      }
-      const roundedValue = Math.round(numericValue * 100) / 100;
-      const roundedInteger = Math.round(roundedValue);
-      if (Math.abs(roundedValue - roundedInteger) < 0.005) {
-        return roundedInteger;
-      }
-      return roundedValue;
-    };
-    const formatDeltaText = () => {
-      const normalizedDelta = normalizeDeltaForDisplay(deltaValue);
-      if (!Number.isFinite(normalizedDelta) || Math.abs(normalizedDelta) < 0.005) {
-        return 'Δ 0 pkt';
-      }
-      const prefix = normalizedDelta > 0 ? '+' : '-';
-      return `Δ ${prefix}${formatPoints(Math.abs(normalizedDelta))} pkt`;
-    };
-    cost.textContent = formatDeltaText();
-    info.appendChild(cost);
-    row.appendChild(info);
-
-    const controls = document.createElement('div');
-    controls.className = 'roster-ability-controls text-end';
-
-    if (editable) {
-      const wrapperCheck = document.createElement('div');
-      wrapperCheck.className = 'form-check form-switch mb-0';
-      const input = document.createElement('input');
-      input.type = 'checkbox';
-      input.className = 'form-check-input';
-      input.id = `passive-${slug}-${Math.random().toString(16).slice(2)}`;
-      input.checked = currentFlag > 0;
-      if (isLockedAbility) {
-        input.disabled = true;
-      }
-      const label = document.createElement('label');
-      label.className = 'form-check-label small';
-      label.setAttribute('for', input.id);
-      const updateLabel = () => {
-        if (isLockedAbility) {
-          label.textContent = 'Zawsze aktywna';
-          return;
-        }
-        label.textContent = input.checked ? 'Aktywna' : 'Wyłączona';
-      };
-      updateLabel();
-      if (!isLockedAbility) {
-        input.addEventListener('change', () => {
-          const flag = input.checked ? 1 : 0;
-          stateMap.set(slug, flag);
-          currentFlag = flag;
-          deltaValue = computeDelta();
-          cost.textContent = formatDeltaText();
-          updateLabel();
-          if (typeof onChange === 'function') {
-            onChange();
-          }
-        });
-      }
-      wrapperCheck.appendChild(input);
-      wrapperCheck.appendChild(label);
-      controls.appendChild(wrapperCheck);
-    } else {
-      const status = document.createElement('div');
-      status.className = 'text-muted small';
-      status.textContent = currentFlag > 0 ? 'Aktywna' : 'Wyłączona';
-      controls.appendChild(status);
-    }
-
-    row.appendChild(controls);
-    wrapper.appendChild(row);
-  });
-
-  if (!wrapper.childElementCount) {
-    return false;
-  }
-  container.appendChild(wrapper);
-  return true;
-}
+const {
+  formatPoints,
+  createRosterItemElement,
+  renderPassiveEditor,
+} = window.SZOPRosterRendering;
 
 // ============================================================
 // SECTION: LOADOUT STATE MANAGEMENT
-// createLoadoutState, cloneLoadoutState, serializeLoadoutState,
-// ensureStateEntries, ensurePassiveStateEntries, itp.
-// Zarządza stanem loadoutu oddziału (broń, zdolności, pasywki).
+// Extracted to app/static/js/modules/loadout_state.js
 // ============================================================
-function normalizeLoadoutKey(rawKey) {
-  if (rawKey === undefined || rawKey === null) {
-    return '';
-  }
-  if (typeof rawKey === 'string') {
-    const trimmed = rawKey.trim();
-    return trimmed ? trimmed : '';
-  }
-  if (typeof rawKey === 'number') {
-    return Number.isFinite(rawKey) ? String(rawKey) : '';
-  }
-  if (typeof rawKey === 'bigint') {
-    return rawKey.toString();
-  }
-  const numeric = Number(rawKey);
-  if (Number.isFinite(numeric)) {
-    return String(numeric);
-  }
-  const text = String(rawKey).trim();
-  return text ? text : '';
-}
-
-function resolveLoadoutEntryKey(entry, ...idKeys) {
-  if (!entry || typeof entry !== 'object') {
-    return '';
-  }
-  const candidates = [];
-  const loadoutKey = entry.loadout_key ?? entry.loadoutKey;
-  if (loadoutKey !== undefined && loadoutKey !== null) {
-    candidates.push(loadoutKey);
-  }
-  const flatIdKeys = [];
-  idKeys.forEach((key) => {
-    if (!key) {
-      return;
-    }
-    if (Array.isArray(key)) {
-      key.forEach((inner) => {
-        if (inner) {
-          flatIdKeys.push(inner);
-        }
-      });
-      return;
-    }
-    flatIdKeys.push(key);
-  });
-  flatIdKeys.push('id');
-  const seen = new Set();
-  flatIdKeys.forEach((key) => {
-    if (!key || seen.has(key)) {
-      return;
-    }
-    seen.add(key);
-    if (Object.prototype.hasOwnProperty.call(entry, key)) {
-      candidates.push(entry[key]);
-    }
-  });
-  for (let index = 0; index < candidates.length; index += 1) {
-    const normalized = normalizeLoadoutKey(candidates[index]);
-    if (normalized) {
-      return normalized;
-    }
-  }
-  return '';
-}
-
-function createLoadoutState(rawLoadout) {
-  const state = {
-    weapons: new Map(),
-    active: new Map(),
-    aura: new Map(),
-    baseActive: new Map(),
-    baseAura: new Map(),
-    passive: new Map(),
-    activeLabels: new Map(),
-    auraLabels: new Map(),
-    baseActiveLabels: new Map(),
-    baseAuraLabels: new Map(),
-    mode: 'per_model',
-  };
-  if (!rawLoadout || typeof rawLoadout !== 'object') {
-    return state;
-  }
-  if (typeof rawLoadout.mode === 'string') {
-    state.mode = rawLoadout.mode;
-  }
-  const sections = [
-    ['weapons', 'weapon_id'],
-    ['active', 'ability_id'],
-    ['aura', 'ability_id'],
-  ];
-  sections.forEach(([section, idKey]) => {
-    const values = rawLoadout[section];
-    if (!values) {
-      return;
-    }
-    let entries;
-    if (Array.isArray(values)) {
-      entries = values;
-    } else if (typeof values === 'object') {
-      entries = Object.entries(values).map(([id, count]) => ({ id, per_model: count }));
-    } else {
-      entries = [];
-    }
-    entries.forEach((entry) => {
-      if (!entry) {
-        return;
-      }
-      const key = resolveLoadoutEntryKey(entry, idKey, ['weapon_id', 'ability_id']);
-      if (!key) {
-        return;
-      }
-      const rawCount = entry.per_model ?? entry.count ?? 0;
-      let parsedCount = Number(rawCount);
-      if (!Number.isFinite(parsedCount) || parsedCount < 0) {
-        parsedCount = 0;
-      }
-      state[section].set(key, parsedCount);
-    });
-  });
-  const passiveSource = rawLoadout.passive;
-  if (passiveSource && typeof passiveSource === 'object') {
-    let entries;
-    if (Array.isArray(passiveSource)) {
-      entries = passiveSource;
-    } else {
-      entries = Object.entries(passiveSource).map(([slug, enabled]) => ({ slug, enabled }));
-    }
-    entries.forEach((entry) => {
-      if (!entry) {
-        return;
-      }
-      const slug = entry.slug ?? entry.id;
-      if (slug === undefined || slug === null) {
-        return;
-      }
-      const rawValue = entry.enabled ?? entry.count ?? entry.value;
-      const numeric = Number(rawValue);
-      let flag = 0;
-      if (typeof rawValue === 'boolean') {
-        flag = rawValue ? 1 : 0;
-      } else if (Number.isFinite(numeric)) {
-        flag = numeric > 0 ? 1 : 0;
-      } else if (rawValue) {
-        flag = 1;
-      }
-      state.passive.set(String(slug), flag);
-    });
-  }
-  const labelSections = [
-    ['activeLabels', rawLoadout.active_labels],
-    ['auraLabels', rawLoadout.aura_labels],
-    ['baseActiveLabels', rawLoadout.base_active_labels],
-    ['baseAuraLabels', rawLoadout.base_aura_labels],
-  ];
-  labelSections.forEach(([targetKey, source]) => {
-    const target = state[targetKey];
-    if (!(target instanceof Map) || !source) {
-      return;
-    }
-    let entries;
-    if (Array.isArray(source)) {
-      entries = source;
-    } else if (typeof source === 'object') {
-      entries = Object.entries(source).map(([id, name]) => ({
-        id,
-        name,
-      }));
-    } else {
-      entries = [];
-    }
-    entries.forEach((entry) => {
-      if (!entry) {
-        return;
-      }
-      const key = resolveLoadoutEntryKey(entry, 'ability_id');
-      if (!key) {
-        return;
-      }
-      const rawName = entry.name ?? entry.value ?? entry.label;
-      if (rawName === undefined || rawName === null) {
-        return;
-      }
-      const trimmed = String(rawName).trim().slice(0, ABILITY_NAME_MAX_LENGTH);
-      if (!trimmed) {
-        return;
-      }
-      target.set(key, trimmed);
-    });
-  });
-  return state;
-}
-
-function cloneLoadoutState(state) {
-  const cloneSection = (section) => {
-    if (section instanceof Map) {
-      return new Map(section);
-    }
-    return new Map();
-  };
-  if (!state || typeof state !== 'object') {
-    return {
-      weapons: new Map(),
-      active: new Map(),
-      aura: new Map(),
-      baseActive: new Map(),
-      baseAura: new Map(),
-      passive: new Map(),
-      activeLabels: new Map(),
-      auraLabels: new Map(),
-      baseActiveLabels: new Map(),
-      baseAuraLabels: new Map(),
-      mode: 'per_model',
-    };
-  }
-  return {
-    weapons: cloneSection(state.weapons),
-    active: cloneSection(state.active),
-    aura: cloneSection(state.aura),
-    baseActive: cloneSection(state.baseActive),
-    baseAura: cloneSection(state.baseAura),
-    passive: cloneSection(state.passive),
-    activeLabels: cloneSection(state.activeLabels),
-    auraLabels: cloneSection(state.auraLabels),
-    baseActiveLabels: cloneSection(state.baseActiveLabels),
-    baseAuraLabels: cloneSection(state.baseAuraLabels),
-    mode: state.mode === 'total' ? 'total' : 'per_model',
-  };
-}
-
-function serializeLoadoutState(state) {
-  const result = {
-    weapons: [],
-    active: [],
-    aura: [],
-    passive: [],
-    active_labels: [],
-    aura_labels: [],
-    mode: 'total',
-  };
-  if (!state) {
-    return JSON.stringify(result);
-  }
-  result.mode = state.mode === 'total' ? 'total' : 'per_model';
-  state.weapons.forEach((value, id) => {
-    result.weapons.push({ id, count: value });
-  });
-  state.active.forEach((value, id) => {
-    result.active.push({ id, count: value });
-  });
-  state.aura.forEach((value, id) => {
-    result.aura.push({ id, count: value });
-  });
-  state.passive.forEach((value, slug) => {
-    result.passive.push({ slug, enabled: Boolean(value) });
-  });
-  if (state.activeLabels instanceof Map) {
-    state.activeLabels.forEach((value, id) => {
-      const text = typeof value === 'string' ? value.trim() : String(value || '').trim();
-      if (!text) {
-        return;
-      }
-      result.active_labels.push({ id, name: text.slice(0, ABILITY_NAME_MAX_LENGTH) });
-    });
-  }
-  if (state.auraLabels instanceof Map) {
-    state.auraLabels.forEach((value, id) => {
-      const text = typeof value === 'string' ? value.trim() : String(value || '').trim();
-      if (!text) {
-        return;
-      }
-      result.aura_labels.push({ id, name: text.slice(0, ABILITY_NAME_MAX_LENGTH) });
-    });
-  }
-  return JSON.stringify(result);
-}
-
-function ensureStateEntries(map, entries, idKey, defaultKey, options = {}) {
-  const safeEntries = Array.isArray(entries) ? entries : [];
-  const fallbackIdKeys = Array.isArray(options.fallbackIdKeys) ? options.fallbackIdKeys : [];
-  safeEntries.forEach((entry) => {
-    if (!entry) {
-      return;
-    }
-    const key = resolveLoadoutEntryKey(entry, idKey, fallbackIdKeys);
-    if (!key) {
-      return;
-    }
-    let defaultCount = Number(entry[defaultKey] ?? 0);
-    if (!Number.isFinite(defaultCount) || defaultCount < 0) {
-      defaultCount = 0;
-    }
-    if (!map.has(key)) {
-      map.set(key, defaultCount);
-    }
-  });
-}
-
-function ensureBaseStateEntries(map, entries, idKey, defaultKey, options = {}) {
-  if (!(map instanceof Map)) {
-    return;
-  }
-  const safeEntries = Array.isArray(entries) ? entries : [];
-  const fallbackIdKeys = Array.isArray(options.fallbackIdKeys) ? options.fallbackIdKeys : [];
-  safeEntries.forEach((entry) => {
-    if (!entry) {
-      return;
-    }
-    const key = resolveLoadoutEntryKey(entry, idKey, fallbackIdKeys);
-    if (!key || map.has(key)) {
-      return;
-    }
-    const rawDefault = entry[defaultKey] ?? (entry.is_default ? 1 : 0);
-    let defaultCount = Number(rawDefault);
-    if (!Number.isFinite(defaultCount) || defaultCount < 0) {
-      defaultCount = 0;
-    }
-    map.set(key, defaultCount);
-  });
-}
-
-function ensureBaseLabelEntries(map, entries, idKey, options = {}) {
-  if (!(map instanceof Map)) {
-    return;
-  }
-  const safeEntries = Array.isArray(entries) ? entries : [];
-  const fallbackIdKeys = Array.isArray(options.fallbackIdKeys) ? options.fallbackIdKeys : [];
-  safeEntries.forEach((entry) => {
-    if (!entry) {
-      return;
-    }
-    const key = resolveLoadoutEntryKey(entry, idKey, fallbackIdKeys);
-    if (!key || map.has(key)) {
-      return;
-    }
-    const rawDefault = entry.default_count ?? (entry.is_default ? 1 : 0);
-    const defaultCount = Number(rawDefault);
-    if (!Number.isFinite(defaultCount) || defaultCount <= 0) {
-      return;
-    }
-    const label = String(entry.label ?? entry.name ?? entry.raw ?? '').trim();
-    if (!label) {
-      return;
-    }
-    map.set(key, label.slice(0, ABILITY_NAME_MAX_LENGTH));
-  });
-}
-
-function ensurePassiveStateEntries(map, entries) {
-  const safeEntries = Array.isArray(entries) ? entries : [];
-  safeEntries.forEach((entry) => {
-    if (!entry) {
-      return;
-    }
-    const slug = entry.slug || entry.value || entry.label;
-    if (!slug) {
-      return;
-    }
-    let defaultCount = Number(entry.default_count ?? (entry.is_default ? 1 : 0));
-    if (!Number.isFinite(defaultCount) || defaultCount <= 0) {
-      defaultCount = 0;
-    } else {
-      defaultCount = 1;
-    }
-    const key = String(slug);
-    if (!map.has(key)) {
-      map.set(key, defaultCount);
-    }
-  });
-}
-
-function formatAbilityDisplayLabel(baseLabel, customName) {
-  const base = typeof baseLabel === 'string' ? baseLabel.trim() : '';
-  const custom = typeof customName === 'string' ? customName.trim() : '';
-  if (custom && base) {
-    return `${custom} [${base}]`;
-  }
-  if (custom) {
-    return custom;
-  }
-  return base;
-}
-
-function normalizeLoadoutMode(mode) {
-  return mode === 'per_model' ? 'per_model' : 'total';
-}
-
-function formatLoadoutCostLabel(costValue, mode) {
-  if (costValue === undefined || costValue === null) {
-    return 'wliczone';
-  }
-  const normalizedMode = normalizeLoadoutMode(mode);
-  const suffix = normalizedMode === 'per_model' ? 'pkt/model' : 'pkt';
-  return `+${formatPoints(costValue)} ${suffix}`;
-}
-
-function createModeIndicator(mode) {
-  const normalizedMode = normalizeLoadoutMode(mode);
-  if (normalizedMode !== 'per_model') {
-    return null;
-  }
-  const indicator = document.createElement('span');
-  indicator.className = 'badge rounded-pill text-bg-light border roster-mode-indicator';
-  indicator.textContent = 'Tryb: pkt/model';
-  indicator.title = 'Wartość dotyczy pojedynczego modelu.';
-  return indicator;
-}
+const {
+  normalizeLoadoutKey,
+  resolveLoadoutEntryKey,
+  createLoadoutState,
+  cloneLoadoutState,
+  serializeLoadoutState,
+  ensureStateEntries,
+  ensureBaseStateEntries,
+  ensureBaseLabelEntries,
+  ensurePassiveStateEntries,
+  formatAbilityDisplayLabel,
+  normalizeLoadoutMode,
+  formatLoadoutCostLabel,
+  createModeIndicator,
+} = window.SZOPLoadoutState;
 
 // ============================================================
 // SECTION: EDITOR RENDERERS
-// renderAbilityEditor, renderWeaponEditor, toggleSectionVisibility
-// Renderują edytory zdolności i broni w prawym panelu rozpiski.
+// Extracted to app/static/js/modules/editor_renderers.js
 // ============================================================
-function renderAbilityEditor(
-  container,
-  items,
-  stateMap,
-  labelMap = null,
-  modelCount,
-  editable,
-  onChange,
-  stateMode = 'total',
-) {
-
-  if (!container) {
-    return false;
-  }
-  container.innerHTML = '';
-  const safeItems = Array.isArray(items) ? items : [];
-  if (!safeItems.length) {
-    return false;
-  }
-  const wrapper = document.createElement('div');
-  wrapper.className = 'd-flex flex-column gap-2';
-  const normalizedMode = normalizeLoadoutMode(stateMode);
-  const safeLabelMap = labelMap instanceof Map ? labelMap : null;
-  const maxCount = Math.max(Number(modelCount) || 0, 0);
-  safeItems.forEach((item) => {
-    if (!item) {
-      return;
-    }
-    const abilityKey = resolveLoadoutEntryKey(item, 'ability_id');
-    if (!abilityKey) {
-      return;
-    }
-    let totalCount = Number(stateMap.get(abilityKey));
-    if (!Number.isFinite(totalCount) || totalCount < 0) {
-      totalCount = Number(item.default_count ?? 0);
-      if (!Number.isFinite(totalCount) || totalCount < 0) {
-        totalCount = 0;
-      }
-    }
-    if (maxCount > 0 && totalCount > maxCount) {
-      totalCount = maxCount;
-    }
-    stateMap.set(abilityKey, totalCount);
-
-    const row = document.createElement('div');
-    row.className = 'roster-ability-item';
-
-    const info = document.createElement('div');
-    info.className = 'roster-ability-details flex-grow-1';
-    const name = document.createElement('span');
-    name.className = 'roster-ability-label';
-    const baseLabel = item.label || 'Zdolność';
-
-    let customName = '';
-    if (safeLabelMap && safeLabelMap.has(abilityKey)) {
-      const override = safeLabelMap.get(abilityKey);
-      if (typeof override === 'string') {
-        customName = override.trim();
-      } else if (override !== undefined && override !== null) {
-        customName = String(override).trim();
-      }
-    }
-    if (!customName && typeof item.custom_name === 'string') {
-      customName = item.custom_name;
-    }
-    if (item.description) {
-      name.title = item.description;
-    }
-    name.textContent = formatAbilityDisplayLabel(baseLabel, customName);
-
-    info.appendChild(name);
-    const cost = document.createElement('span');
-    cost.className = 'roster-ability-cost';
-    cost.textContent = formatLoadoutCostLabel(item.cost, normalizedMode);
-    info.appendChild(cost);
-
-    if (!editable && customName) {
-      const customInfo = document.createElement('div');
-      customInfo.className = 'text-muted small mt-1';
-      customInfo.textContent = `Nazwa własna: ${customName}`;
-
-      info.appendChild(customInfo);
-    }
-    row.appendChild(info);
-
-    const controls = document.createElement('div');
-    controls.className = 'roster-ability-controls text-end';
-    if (editable) {
-      if (normalizedMode === 'per_model') {
-        const modeIndicator = createModeIndicator(normalizedMode);
-        if (modeIndicator) {
-          controls.appendChild(modeIndicator);
-        }
-      }
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.className = 'form-control form-control-sm roster-count-input';
-      input.min = '0';
-      input.value = String(totalCount);
-      if (maxCount > 0) {
-        input.max = String(maxCount);
-      }
-      input.addEventListener('change', () => {
-        let nextValue = Number(input.value);
-        if (!Number.isFinite(nextValue) || nextValue < 0) {
-          nextValue = 0;
-        }
-        if (maxCount > 0 && nextValue > maxCount) {
-          nextValue = maxCount;
-        }
-        input.value = String(nextValue);
-        stateMap.set(abilityKey, nextValue);
-        const hasCustomInput = typeof customInput !== 'undefined' && customInput;
-        if (nextValue <= 0) {
-          if (typeof applyCustomName === 'function') {
-            applyCustomName('');
-          }
-          if (hasCustomInput) {
-            customInput.value = '';
-            customInput.disabled = true;
-          }
-        } else if (hasCustomInput) {
-          customInput.disabled = false;
-          if (typeof formatDisplayLabel === 'function' && currentCustomName) {
-            formatDisplayLabel(currentCustomName);
-          }
-        }
-        if (typeof onChange === 'function') {
-          onChange();
-        }
-      });
-      controls.appendChild(input);
-    } else {
-      const valueDisplay = document.createElement('div');
-      valueDisplay.className = 'text-muted small';
-      valueDisplay.textContent = `${formatPoints(totalCount)} szt.`;
-      controls.appendChild(valueDisplay);
-    }
-
-    row.appendChild(controls);
-    wrapper.appendChild(row);
-  });
-  if (!wrapper.childElementCount) {
-    return false;
-  }
-  container.appendChild(wrapper);
-  return true;
-}
-
-function toggleSectionVisibility(container, isVisible) {
-  if (!container) {
-    return;
-  }
-  const wrapper = container.closest('[data-roster-section]');
-  if (wrapper) {
-    wrapper.classList.toggle('d-none', !isVisible);
-  }
-}
-
-function renderWeaponEditor(
-  container,
-  options,
-  stateMap,
-  modelCount,
-  editable,
-  onChange,
-  stateMode = 'total',
-) {
-  if (!container) {
-    return false;
-  }
-  container.innerHTML = '';
-  const safeOptions = Array.isArray(options) ? options : [];
-  if (!safeOptions.length) {
-    return false;
-  }
-  const normalizedMode = normalizeLoadoutMode(stateMode);
-  const numericModelCount = Math.max(Number(modelCount) || 0, 0);
-  const weaponInfoMap = new Map();
-  const classInfoMap = new Map();
-  const inputRefs = new Map();
-  const wrapper = document.createElement('div');
-  wrapper.className = 'd-flex flex-column gap-2';
-  const parseSafeNumber = (value) => {
-    const numeric = Number(value);
-    if (!Number.isFinite(numeric) || numeric < 0) {
-      return 0;
-    }
-    return numeric;
-  };
-  const getStoredCount = (key, fallback = 0) => {
-    if (!(stateMap instanceof Map) || !key) {
-      return 0;
-    }
-    const stored = Number(stateMap.get(key));
-    if (Number.isFinite(stored) && stored >= 0) {
-      return stored;
-    }
-    const fallbackNumeric = Number(fallback);
-    if (Number.isFinite(fallbackNumeric) && fallbackNumeric >= 0) {
-      return fallbackNumeric;
-    }
-    return 0;
-  };
-  safeOptions.forEach((option) => {
-    if (!option || option.id === undefined || option.id === null) {
-      return;
-    }
-    const weaponId = Number(option.id);
-    if (!Number.isFinite(weaponId)) {
-      return;
-    }
-    const weaponKey = resolveLoadoutEntryKey(option, 'id', ['weapon_id']);
-    if (!weaponKey) {
-      return;
-    }
-    const normalizedRange = normalizeRangeValue(option.range);
-    const weaponClass = normalizedRange > 0 ? 'ranged' : 'melee';
-    const defaultPerModel = parseSafeNumber(option.default_count ?? (option.is_default ? 1 : 0));
-    const isDefaultWeapon = Boolean(option.is_default) || defaultPerModel > 0;
-    const isPrimaryWeapon = Boolean(option.is_primary) && defaultPerModel > 0;
-    const weaponMeta = {
-      option,
-      weaponKey,
-      weaponClass,
-      defaultPerModel,
-      isPrimaryWeapon,
-      isDefaultWeapon,
-      currentValue: 0,
-    };
-    weaponInfoMap.set(weaponKey, weaponMeta);
-    let classInfo = classInfoMap.get(weaponClass);
-    if (!classInfo) {
-      classInfo = {
-        classKey: weaponClass,
-        weapons: [],
-        defaultWeapon: null,
-        capacity: 0,
-        total: 0,
-      };
-      classInfoMap.set(weaponClass, classInfo);
-    }
-    let totalCount = Number(stateMap.get(weaponKey));
-    if (!Number.isFinite(totalCount) || totalCount < 0) {
-      totalCount = Number(option.default_count ?? 0);
-      if (!Number.isFinite(totalCount) || totalCount < 0) {
-        totalCount = 0;
-      }
-    }
-    stateMap.set(weaponKey, totalCount);
-    weaponMeta.currentValue = totalCount;
-    classInfo.weapons.push(weaponMeta);
-    classInfo.total += totalCount;
-    const assignDefaultWeapon = () => {
-      classInfo.defaultWeapon = weaponMeta;
-      let capacity = defaultPerModel;
-      if (normalizedMode === 'total') {
-        const multiplier = numericModelCount > 0 ? numericModelCount : 1;
-        capacity *= multiplier;
-      }
-      if (!Number.isFinite(capacity) || capacity <= 0) {
-        capacity = totalCount;
-      }
-      classInfo.capacity = capacity;
-    };
-    if (isPrimaryWeapon) {
-      assignDefaultWeapon();
-    } else if (!classInfo.defaultWeapon && isDefaultWeapon) {
-      assignDefaultWeapon();
-    }
-
-    const row = document.createElement('div');
-    row.className = 'roster-ability-item';
-
-    const info = document.createElement('div');
-    info.className = 'roster-ability-details flex-grow-1';
-    const name = document.createElement('span');
-    name.className = 'roster-ability-label';
-    name.textContent = option.name || 'Broń';
-    info.appendChild(name);
-    const cost = document.createElement('span');
-    cost.className = 'roster-ability-cost';
-    cost.textContent = formatLoadoutCostLabel(option.cost, normalizedMode);
-    info.appendChild(cost);
-    const statsLine = document.createElement('div');
-    statsLine.className = 'text-muted small mt-1';
-    const rangeText = option.range !== undefined && option.range !== null && option.range !== '' ? option.range : '-';
-    const attacksText = option.attacks !== undefined && option.attacks !== null && option.attacks !== ''
-      ? option.attacks
-      : '-';
-    const apText = option.ap !== undefined && option.ap !== null && option.ap !== '' ? option.ap : 0;
-    const traitsText = option.traits ? String(option.traits) : 'Brak cech';
-    statsLine.textContent = `Zasięg: ${rangeText} • Ataki: ${attacksText} • AP: ${apText} • Cechy: ${traitsText}`;
-    info.appendChild(statsLine);
-    row.appendChild(info);
-
-    const controls = document.createElement('div');
-    controls.className = 'roster-ability-controls text-end';
-    if (editable) {
-      if (normalizedMode === 'per_model') {
-        const modeIndicator = createModeIndicator(normalizedMode);
-        if (modeIndicator) {
-          controls.appendChild(modeIndicator);
-        }
-      }
-      const input = document.createElement('input');
-      input.type = 'number';
-      input.className = 'form-control form-control-sm roster-count-input';
-      input.min = '0';
-      input.value = String(totalCount);
-      inputRefs.set(weaponKey, input);
-      input.addEventListener('change', () => {
-        let nextValue = Number(input.value);
-        if (!Number.isFinite(nextValue) || nextValue < 0) {
-          nextValue = 0;
-        }
-        input.value = String(nextValue);
-        const weaponInfo = weaponInfoMap.get(weaponKey);
-        const classInfo = weaponInfo ? classInfoMap.get(weaponInfo.weaponClass) : null;
-        const previousValue = getStoredCount(weaponKey);
-        let delta = nextValue - previousValue;
-        let defaultPrevious = null;
-        let defaultNext = null;
-        if (
-          weaponInfo
-          && classInfo
-          && classInfo.defaultWeapon
-          && classInfo.defaultWeapon.weaponKey !== weaponKey
-          && delta !== 0
-        ) {
-          const defaultWeapon = classInfo.defaultWeapon;
-          const defaultKey = defaultWeapon.weaponKey;
-          defaultPrevious = getStoredCount(defaultKey);
-          const otherTotal = classInfo.weapons.reduce((sum, entry) => {
-            if (!entry || entry.weaponKey === weaponKey || entry.weaponKey === defaultKey) {
-              return sum;
-            }
-            return sum + getStoredCount(entry.weaponKey);
-          }, 0);
-          if (delta > 0) {
-            defaultNext = Math.max(defaultPrevious - delta, 0);
-          } else {
-            const baselineTotal = defaultPrevious + previousValue + otherTotal;
-            const effectiveCapacity = Math.max(classInfo.capacity, baselineTotal);
-            const desiredDefault = defaultPrevious - delta;
-            const maxDefault = Math.max(effectiveCapacity - (otherTotal + nextValue), 0);
-            if (desiredDefault > maxDefault) {
-              defaultNext = maxDefault;
-              const recalculatedOptional = Math.max(
-                effectiveCapacity - (otherTotal + defaultNext),
-                0,
-              );
-              if (recalculatedOptional !== nextValue) {
-                nextValue = recalculatedOptional;
-                delta = nextValue - previousValue;
-                input.value = String(nextValue);
-              }
-            } else {
-              defaultNext = desiredDefault;
-            }
-          }
-          if (defaultNext !== null && defaultNext !== defaultPrevious) {
-            stateMap.set(defaultKey, defaultNext);
-            defaultWeapon.currentValue = defaultNext;
-            const defaultInput = inputRefs.get(defaultKey);
-            if (defaultInput && defaultInput !== input) {
-              defaultInput.value = String(defaultNext);
-            }
-          }
-        }
-        stateMap.set(weaponKey, nextValue);
-        if (weaponInfo) {
-          weaponInfo.currentValue = nextValue;
-        }
-        if (classInfo) {
-          classInfo.total = classInfo.weapons.reduce((sum, entry) => {
-            if (!entry) {
-              return sum;
-            }
-            return sum + getStoredCount(entry.weaponKey);
-          }, 0);
-        }
-        if (
-          typeof onChange === 'function'
-          && (delta !== 0
-            || (defaultPrevious !== null && defaultNext !== null && defaultNext !== defaultPrevious))
-        ) {
-          onChange();
-        }
-      });
-      controls.appendChild(input);
-    } else {
-      const valueDisplay = document.createElement('div');
-      valueDisplay.className = 'text-muted small';
-      valueDisplay.textContent = `${formatPoints(totalCount)} szt.`;
-      controls.appendChild(valueDisplay);
-    }
-
-    row.appendChild(controls);
-    wrapper.appendChild(row);
-  });
-  classInfoMap.forEach((classInfo) => {
-    if (!classInfo) {
-      return;
-    }
-    if (!Number.isFinite(classInfo.capacity) || classInfo.capacity <= 0) {
-      classInfo.capacity = classInfo.total;
-    }
-  });
-  if (!wrapper.childElementCount) {
-    return false;
-  }
-  container.appendChild(wrapper);
-  return true;
-}
+const {
+  renderAbilityEditor,
+  toggleSectionVisibility,
+  renderWeaponEditor,
+} = window.SZOPEditorRenderers;
 
 // ============================================================
 // SECTION: ROSTER ADDERS
-// initRosterAdders — przyciski dodawania oddziałów do rozpiski
+// Extracted to app/static/js/modules/roster_adders.js
 // ============================================================
-function initRosterAdders(root) {
-  if (!root) {
-    return;
-  }
-  const registeredForms = new WeakSet();
-
-  function registerForm(form) {
-    if (!form || registeredForms.has(form)) {
-      return;
-    }
-    registeredForms.add(form);
-    let isSubmitting = false;
-
-    const handleSubmit = async (event) => {
-      event.preventDefault();
-      if (isSubmitting) {
-        return;
-      }
-      isSubmitting = true;
-      const cleanup = () => {
-        isSubmitting = false;
-      };
-      const fallback = () => {
-        form.removeEventListener('submit', handleSubmit);
-        cleanup();
-        form.submit();
-      };
-
-      const action = form.getAttribute('action');
-      if (!action) {
-        fallback();
-        return;
-      }
-
-      const payload = new FormData(form);
-
-      try {
-        const response = await fetch(action, {
-          method: 'POST',
-          body: payload,
-          headers: { Accept: 'application/json' },
-          credentials: 'same-origin',
-        });
-        const contentType = (response.headers.get('content-type') || '').toLowerCase();
-        if (!response.ok || !contentType.includes('application/json')) {
-          fallback();
-          return;
-        }
-        let data;
-        try {
-          data = await response.json();
-        } catch (err) {
-          fallback();
-          return;
-        }
-        if (!data || typeof data !== 'object' || !data.roster_item || !data.unit) {
-          fallback();
-          return;
-        }
-        cleanup();
-        root.dispatchEvent(
-          new CustomEvent('roster:add-unit-success', { detail: { payload: data, form } }),
-        );
-      } catch (error) {
-        console.error('Nie udało się dodać oddziału', error);
-        fallback();
-      } finally {
-        if (isSubmitting) {
-          cleanup();
-        }
-      }
-    };
-
-    form.addEventListener('submit', handleSubmit);
-  }
-
-  root.querySelectorAll('[data-roster-add-trigger]').forEach((trigger) => {
-    const form = trigger.closest('form');
-    if (!form) {
-      return;
-    }
-    registerForm(form);
-    const submitForm = () => {
-      if (typeof form.requestSubmit === 'function') {
-        form.requestSubmit();
-      } else {
-        form.submit();
-      }
-    };
-    trigger.addEventListener('click', (event) => {
-      event.preventDefault();
-      submitForm();
-    });
-    trigger.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        submitForm();
-      }
-    });
-  });
-}
+const {
+  initRosterAdders,
+} = window.SZOPRosterAdders;
 
 // ============================================================
 // SECTION: ROSTER EDITOR CLOSURE
@@ -4609,7 +2792,13 @@ function initRosterEditor() {
           if (!unitId || !value || typeof value !== 'object') {
             return;
           }
-          rosterUnitDatasetRepo.set(String(unitId), value);
+          const normalizedValue = {};
+          UNIT_DATASET_KEYS.forEach((key) => {
+            if (Object.prototype.hasOwnProperty.call(value, key)) {
+              normalizedValue[key] = adaptUnitDatasetValue(key, value[key], `initial_dataset.${key}`);
+            }
+          });
+          rosterUnitDatasetRepo.set(String(unitId), normalizedValue);
         });
       } else {
         console.warn('Nieprawidłowy format danych jednostek, używam wartości domyślnych.');
@@ -4711,6 +2900,22 @@ function initRosterEditor() {
     return Array.isArray(value) ? value : [];
   }
 
+  function adaptUnitDatasetValue(datasetKey, value, moduleName) {
+    if (datasetKey === 'weapon_options') {
+      return payloadAdapters.adaptWeaponOptions(value, moduleName);
+    }
+    if (datasetKey === 'passive_items') {
+      return payloadAdapters.adaptAbilityEntries(value, 'passive', moduleName);
+    }
+    if (datasetKey === 'active_items') {
+      return payloadAdapters.adaptAbilityEntries(value, 'active', moduleName);
+    }
+    if (datasetKey === 'aura_items') {
+      return payloadAdapters.adaptAbilityEntries(value, 'aura', moduleName);
+    }
+    return value;
+  }
+
   function updateUnitDataset(source, updates) {
     const cacheId = resolveUnitCacheId(source);
     if (!cacheId || !updates || typeof updates !== 'object') {
@@ -4721,7 +2926,7 @@ function initRosterEditor() {
       if (Object.prototype.hasOwnProperty.call(updates, key)) {
         const value = updates[key];
         if (value !== undefined) {
-          normalizedUpdates[key] = value;
+          normalizedUpdates[key] = adaptUnitDatasetValue(key, value, `unit_dataset.${key}`);
         }
       }
     });
@@ -5110,7 +3315,14 @@ function initRosterEditor() {
     if (!element) {
       return;
     }
-    const safeList = Array.isArray(list) ? list : [];
+    let safeList = Array.isArray(list) ? list : [];
+    if (attribute === 'data-selected-passives') {
+      safeList = payloadAdapters.adaptAbilityEntries(safeList, 'passive', 'selected.passive_items');
+    } else if (attribute === 'data-selected-actives') {
+      safeList = payloadAdapters.adaptAbilityEntries(safeList, 'active', 'selected.active_items');
+    } else if (attribute === 'data-selected-auras') {
+      safeList = payloadAdapters.adaptAbilityEntries(safeList, 'aura', 'selected.aura_items');
+    }
     try {
       element.setAttribute(attribute, JSON.stringify(safeList));
     } catch (error) {
@@ -5204,10 +3416,25 @@ function initRosterEditor() {
 
     lastQuoteItemCosts = unitItemCostsCache.get(item.getAttribute('data-roster-unit-id')) || null;
     lastSelectedRole = null;
-    currentPassives = getUnitDatasetList(item, 'passive_items');
-    currentActives = getUnitDatasetList(item, 'active_items');
-    currentAuras = getUnitDatasetList(item, 'aura_items');
-    currentWeapons = getUnitDatasetList(item, 'weapon_options');
+    currentPassives = payloadAdapters.adaptAbilityEntries(
+      getUnitDatasetList(item, 'passive_items'),
+      'passive',
+      'editor.passive_items',
+    );
+    currentActives = payloadAdapters.adaptAbilityEntries(
+      getUnitDatasetList(item, 'active_items'),
+      'active',
+      'editor.active_items',
+    );
+    currentAuras = payloadAdapters.adaptAbilityEntries(
+      getUnitDatasetList(item, 'aura_items'),
+      'aura',
+      'editor.aura_items',
+    );
+    currentWeapons = payloadAdapters.adaptWeaponOptions(
+      getUnitDatasetList(item, 'weapon_options'),
+      'editor.weapon_options',
+    );
     currentBaseFlags = parseFlagString(item.getAttribute('data-unit-flags'));
 
     const unitName = item.getAttribute('data-unit-name') || 'Jednostka';
@@ -5306,7 +3533,11 @@ function initRosterEditor() {
             hydratedDataset[datasetKey] = targetItem.getAttribute(attribute) || '';
             return;
           }
-          hydratedDataset[datasetKey] = getParsedList(targetItem, attribute);
+          hydratedDataset[datasetKey] = adaptUnitDatasetValue(
+            datasetKey,
+            getParsedList(targetItem, attribute),
+            `hydrated_dataset.${datasetKey}`,
+          );
         });
         rosterUnitDatasetRepo.set(unitCacheId, hydratedDataset);
         rosterUnitDatasetCache.delete(unitCacheId);
@@ -5393,9 +3624,9 @@ function initRosterEditor() {
         ? unitData.selected_aura_items
         : getParsedList(targetItem, 'data-selected-auras');
       updateItemAbilityBadges(targetItem, {
-        passives: Array.isArray(nextPassiveItems) ? nextPassiveItems : [],
-        actives: Array.isArray(nextActiveItems) ? nextActiveItems : [],
-        auras: Array.isArray(nextAuraItems) ? nextAuraItems : [],
+        passives: payloadAdapters.adaptAbilityEntries(nextPassiveItems, 'passive', 'badges.passive_items'),
+        actives: payloadAdapters.adaptAbilityEntries(nextActiveItems, 'active', 'badges.active_items'),
+        auras: payloadAdapters.adaptAbilityEntries(nextAuraItems, 'aura', 'badges.aura_items'),
       });
       if (isActiveMatch) {
         suppressNextBadgeRefresh = true;
@@ -5516,25 +3747,18 @@ function initRosterEditor() {
       throw new Error(`HTTP ${response.status}`);
     }
     const payload = await response.json();
-    const selectedTotal = Number(payload?.selected_total);
-    if (!Number.isFinite(selectedTotal)) {
+    const quote = payloadAdapters.adaptQuotePayload(payload, requestedRosterUnitId, 'roster_editor.quote');
+    if (!Number.isFinite(quote.total)) {
       throw new Error('Nieprawidłowa odpowiedź endpointu quote');
     }
-    const responseRosterUnitIdRaw = payload?.roster_unit_id ?? payload?.unit_id;
-    const responseRosterUnitId = normalizeRosterUnitId(responseRosterUnitIdRaw);
+    const responseRosterUnitId = normalizeRosterUnitId(quote.rosterUnitId);
     if (
       responseRosterUnitId
       && String(responseRosterUnitId) !== String(requestedRosterUnitId)
     ) {
       throw new Error('Nieprawidłowy identyfikator oddziału w odpowiedzi endpointu quote');
     }
-    return {
-      total: selectedTotal,
-      rosterUnitId: responseRosterUnitId || String(requestedRosterUnitId),
-      loadout: payload?.loadout && typeof payload.loadout === 'object' ? payload.loadout : null,
-      itemCosts: payload?.item_costs && typeof payload.item_costs === 'object' ? payload.item_costs : null,
-      selectedRole: typeof payload?.selected_role === 'string' ? payload.selected_role : null,
-    };
+    return quote;
   }
 
   function renderActiveCost(total) {
@@ -5893,7 +4117,7 @@ function renderEditors() {
       if (!slug || !lastQuoteItemCosts) {
         return Number.NaN;
       }
-      const passiveDeltas = lastQuoteItemCosts.passive_deltas || {};
+      const passiveDeltas = lastQuoteItemCosts.passiveDeltas || lastQuoteItemCosts.passive_deltas || {};
       const identifier = abilityIdentifier(String(slug)) || String(slug);
       const delta = passiveDeltas[identifier];
       return Number.isFinite(delta) ? delta : Number.NaN;
@@ -6196,197 +4420,11 @@ function renderEditors() {
 
 // ============================================================
 // SECTION: SPELL ABILITY FORMS
-// initSpellAbilityForms — formularze zdolności zaklęć
+// Extracted to app/static/js/modules/spell_ability_forms.js
 // ============================================================
-function initSpellAbilityForms() {
-  document.querySelectorAll('[data-spell-ability-form]').forEach((form) => {
-    const abilitySelect = form.querySelector('[data-ability-select]');
-    const valueContainer = form.querySelector('[data-ability-value-container]');
-    const valueLabelEl = form.querySelector('[data-ability-value-label]');
-    const valueSelect = form.querySelector('[data-ability-value-select]');
-    const valueInput = form.querySelector('[data-ability-value-input]');
-    const valueDescription = form.querySelector('[data-ability-value-description]');
-    const passiveListId = form.dataset.passiveAbilityListId || '';
-
-    function resetValueDescription() {
-      if (valueDescription) {
-        valueDescription.textContent = '';
-        valueDescription.classList.add('d-none');
-      }
-    }
-
-    function setValueInputList(kind) {
-      if (!valueInput) {
-        return;
-      }
-      if (kind === 'passive' && passiveListId) {
-        valueInput.setAttribute('list', passiveListId);
-      } else {
-        valueInput.removeAttribute('list');
-      }
-    }
-
-    function updateValueDescriptionFromSelect() {
-      if (!valueDescription || !valueSelect) {
-        return;
-      }
-      const option = valueSelect.selectedOptions && valueSelect.selectedOptions.length > 0 ? valueSelect.selectedOptions[0] : null;
-      const description = option && option.dataset ? option.dataset.description || '' : '';
-      if (description) {
-        valueDescription.textContent = description;
-        valueDescription.classList.remove('d-none');
-      } else {
-        resetValueDescription();
-      }
-    }
-
-    function hideValueInputs() {
-      if (valueContainer) {
-        valueContainer.classList.add('d-none');
-      }
-      if (valueSelect) {
-        valueSelect.classList.add('d-none');
-        valueSelect.innerHTML = '';
-        valueSelect.disabled = true;
-      }
-      if (valueInput) {
-        valueInput.classList.add('d-none');
-        valueInput.value = '';
-        valueInput.disabled = true;
-        valueInput.type = 'text';
-        valueInput.removeAttribute('list');
-      }
-      resetValueDescription();
-    }
-
-    function showValueSelect(labelText, choices) {
-      if (!valueContainer || !valueSelect) {
-        return;
-      }
-      valueContainer.classList.remove('d-none');
-      valueSelect.classList.remove('d-none');
-      valueSelect.disabled = false;
-      valueSelect.innerHTML = '';
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = labelText ? `Wybierz (${labelText})` : 'Wybierz wartość';
-      valueSelect.appendChild(placeholder);
-      (choices || []).forEach((choice) => {
-        if (choice && typeof choice === 'object') {
-          const option = document.createElement('option');
-          option.value = choice.value ?? '';
-          option.textContent = choice.label ?? choice.value ?? '';
-          if (choice.description) {
-            option.dataset.description = choice.description;
-            option.title = choice.description;
-          }
-          valueSelect.appendChild(option);
-        } else {
-          const option = document.createElement('option');
-          option.value = choice ?? '';
-          option.textContent = choice ?? '';
-          valueSelect.appendChild(option);
-        }
-      });
-      if (valueInput) {
-        valueInput.classList.add('d-none');
-        valueInput.disabled = true;
-        setValueInputList('');
-      }
-      resetValueDescription();
-      valueSelect.value = '';
-      updateValueDescriptionFromSelect();
-    }
-
-    function showValueInput(labelText, valueType, valueKind) {
-      if (!valueContainer || !valueInput) {
-        return;
-      }
-      valueContainer.classList.remove('d-none');
-      valueInput.classList.remove('d-none');
-      valueInput.disabled = false;
-      valueInput.placeholder = labelText ? `Wartość (${labelText})` : 'Wartość';
-      valueInput.type = valueType === 'number' ? 'number' : 'text';
-      setValueInputList(valueKind || '');
-      if (valueSelect) {
-        valueSelect.classList.add('d-none');
-        valueSelect.innerHTML = '';
-        valueSelect.disabled = true;
-      }
-      resetValueDescription();
-    }
-
-    const htmlDecoder = document.createElement('textarea');
-
-    function parseChoiceDataset(option) {
-      if (!option) {
-        return [];
-      }
-      const rawAttribute = option.getAttribute('data-value-choices') || '';
-      const rawDataset = option.dataset.valueChoices || '';
-      const raw = rawAttribute || rawDataset;
-      if (!raw) {
-        return [];
-      }
-      let decoded = raw;
-      if (raw.includes('&')) {
-        htmlDecoder.innerHTML = raw;
-        decoded = htmlDecoder.value || raw;
-      }
-      try {
-        const parsed = JSON.parse(decoded);
-        return Array.isArray(parsed) ? parsed : [];
-      } catch (err) {
-        if (rawAttribute && rawAttribute !== decoded) {
-          try {
-            const parsed = JSON.parse(rawAttribute);
-            return Array.isArray(parsed) ? parsed : [];
-          } catch (innerErr) {
-            return [];
-          }
-        }
-        return [];
-      }
-    }
-
-    function handleAbilityChange() {
-      if (!abilitySelect) {
-        return;
-      }
-      resetValueDescription();
-      const option = abilitySelect.selectedOptions[0];
-      if (!option) {
-        hideValueInputs();
-        return;
-      }
-      const requiresValue = option.dataset.requiresValue === 'true';
-      if (!requiresValue) {
-        hideValueInputs();
-        return;
-      }
-      const labelText = option.dataset.valueLabel || '';
-      if (valueLabelEl) {
-        valueLabelEl.textContent = labelText ? `Wartość (${labelText})` : 'Wartość';
-      }
-      const valueKind = option.dataset.valueKind || '';
-      const choices = parseChoiceDataset(option);
-      if (Array.isArray(choices) && choices.length > 0) {
-        showValueSelect(labelText, choices);
-      } else {
-        const valueType = option.dataset.valueType || 'text';
-        showValueInput(labelText, valueType, valueKind);
-      }
-    }
-
-    if (abilitySelect) {
-      abilitySelect.addEventListener('change', handleAbilityChange);
-      handleAbilityChange();
-    }
-    if (valueSelect) {
-      valueSelect.addEventListener('change', updateValueDescriptionFromSelect);
-    }
-  });
-}
+const {
+  initSpellAbilityForms,
+} = window.SZOPSpellAbilityForms;
 
 // ============================================================
 // SECTION: ARMORY WEAPON TREE

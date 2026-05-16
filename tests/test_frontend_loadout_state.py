@@ -14,6 +14,18 @@ from tests.node_runtime import resolve_node_binary
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 APP_JS_PATH = ROOT_DIR / "app/static/js/app.js"
+MODULE_PATHS = [
+    ROOT_DIR / "app/static/js/modules/refresh_priority.js",
+    ROOT_DIR / "app/static/js/modules/payload_adapters.js",
+    ROOT_DIR / "app/static/js/modules/text_parsing.js",
+    ROOT_DIR / "app/static/js/modules/ui_pickers.js",
+    ROOT_DIR / "app/static/js/modules/spell_weapon_cost_preview.js",
+    ROOT_DIR / "app/static/js/modules/spell_ability_forms.js",
+    ROOT_DIR / "app/static/js/modules/roster_rendering.js",
+    ROOT_DIR / "app/static/js/modules/loadout_state.js",
+    ROOT_DIR / "app/static/js/modules/editor_renderers.js",
+    ROOT_DIR / "app/static/js/modules/roster_adders.js",
+]
 LEGACY_PARITY_ENABLED = os.getenv("ENABLE_LEGACY_MATH_PARITY_TESTS", "").strip() in {
     "1",
     "true",
@@ -27,6 +39,7 @@ def _build_sandbox_script(body: str) -> str:
         const fs = require('fs');
         const vm = require('vm');
         const path = {json.dumps(str(APP_JS_PATH))};
+        const modulePaths = {json.dumps([str(path) for path in MODULE_PATHS])};
         const code = fs.readFileSync(path, 'utf8');
         const sandbox = {{
           console,
@@ -43,6 +56,9 @@ def _build_sandbox_script(body: str) -> str:
         }};
         sandbox.window.window = sandbox.window;
         vm.createContext(sandbox);
+        modulePaths.forEach((modulePath) => {{
+          vm.runInContext(fs.readFileSync(modulePath, 'utf8'), sandbox, {{ filename: modulePath }});
+        }});
         vm.runInContext(code, sandbox);
         {body}
         """
