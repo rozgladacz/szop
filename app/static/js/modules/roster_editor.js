@@ -136,6 +136,7 @@ function initRosterEditor() {
         if (Number.isFinite(data.total_cost)) {
           updateTotalSummary(data.total_cost);
         }
+        refreshRosterCountDisplay();
       } catch (err) {
         console.error('Błąd usuwania oddziału', err);
         window.location.href = action;
@@ -634,6 +635,7 @@ function initRosterEditor() {
       registerRosterItem(rosterItemElement);
     }
     applyServerUpdate(payload);
+    refreshRosterCountDisplay();
     if (rosterItemElement) {
       selectItem(rosterItemElement);
       if (typeof listItemElement.scrollIntoView === 'function') {
@@ -692,14 +694,11 @@ function initRosterEditor() {
   ]);
   const rosterUnitDatasetRepo = new Map();
   const rosterUnitDatasetCache = new Map();
-  const lockPairCache = new Map();
-  const LOCK_PAIR_DATASET_KEY = 'rosterLockPairs';
 
   function resetRosterCaches() {
     rosterDatasetCache = new WeakMap();
     rosterUnitDatasetCache.clear();
     rosterUnitDatasetRepo.clear();
-    lockPairCache.clear();
   }
 
   function safeParseJson(value, fallback, warningLabel = 'Nie udało się odczytać danych') {
@@ -714,202 +713,12 @@ function initRosterEditor() {
     }
   }
 
-  function parseLockPairs(rawValue) {
-    const parsed = safeParseJson(rawValue, [], 'Nie udało się odczytać par blokad ekwipunku');
-    return Array.isArray(parsed) ? parsed : [];
-  }
-
-  function readLockPairDataset() {
-    if (!root || !root.dataset) {
-      return '[]';
-    }
-    const raw = root.dataset[LOCK_PAIR_DATASET_KEY] || root.dataset.lockPairs || '';
-    return raw || '[]';
-  }
-
-  function writeLockPairDataset(serializedPairs) {
-    if (!root || !root.dataset || typeof serializedPairs !== 'string') {
-      return;
-    }
-    root.dataset[LOCK_PAIR_DATASET_KEY] = serializedPairs;
-    if (Object.prototype.hasOwnProperty.call(root.dataset, 'lockPairs')) {
-      delete root.dataset.lockPairs;
-    }
-  }
-
   function normalizeRosterUnitId(value) {
     if (value === null || value === undefined) {
       return null;
     }
     const text = String(value).trim();
     return text || null;
-  }
-
-  function cloneLockPairCache(source) {
-    const clone = new Map();
-    if (!(source instanceof Map)) {
-      return clone;
-    }
-    source.forEach((partners, unitId) => {
-      if (!(partners instanceof Set)) {
-        return;
-      }
-      clone.set(unitId, new Set(partners));
-    });
-    return clone;
-  }
-
-  function applyLockPairsFromServer(payload) {
-    if (payload === undefined || payload === null) {
-      return;
-    }
-    const payloadIsList = Array.isArray(payload) || typeof payload === 'string';
-    const hasLockPairListProp =
-      payload && typeof payload === 'object' && Object.prototype.hasOwnProperty.call(payload, 'lock_pairs');
-    const replaceCache = payloadIsList || hasLockPairListProp;
-
-    const nextCache = replaceCache ? new Map() : cloneLockPairCache(lockPairCache);
-    let hasPayload = false;
-
-    const ensureEntry = (unitId) => {
-      const normalized = normalizeRosterUnitId(unitId);
-      if (!normalized) {
-        return null;
-      }
-      if (!nextCache.has(normalized)) {
-        nextCache.set(normalized, new Set());
-      }
-      return nextCache.get(normalized);
-    };
-
-    const addPair = (first, second) => {
-      const firstId = normalizeRosterUnitId(first);
-      const secondId = normalizeRosterUnitId(second);
-      if (!firstId || !secondId || firstId === secondId) {
-        return;
-      }
-      hasPayload = true;
-      const firstSet = ensureEntry(firstId);
-      const secondSet = ensureEntry(secondId);
-      if (firstSet) {
-        firstSet.add(secondId);
-      }
-      if (secondSet) {
-        secondSet.add(firstId);
-      }
-    };
-
-    const addUnitPartners = (unit) => {
-      if (!unit || typeof unit !== 'object' || !Object.prototype.hasOwnProperty.call(unit, 'locked_pair_unit_ids')) {
-        return;
-      }
-      const unitId = normalizeRosterUnitId(unit.id ?? unit.roster_unit_id ?? unit.rosterUnitId);
-      if (!unitId) {
-        return;
-      }
-      hasPayload = true;
-      ensureEntry(unitId);
-      const partners = Array.isArray(unit.locked_pair_unit_ids) ? unit.locked_pair_unit_ids : [];
-      partners.forEach((partnerId) => addPair(unitId, partnerId));
-    };
-
-    const addPairList = (pairs) => {
-      if (!Array.isArray(pairs)) {
-        return;
-      }
-      hasPayload = true;
-      pairs.forEach((pair) => {
-        if (!pair || typeof pair !== 'object') {
-          return;
-        }
-        const first = pair.first_roster_unit_id ?? pair.first ?? pair.first_id;
-        const second = pair.second_roster_unit_id ?? pair.second ?? pair.second_id;
-        addPair(first, second);
-      });
-    };
-
-    if (Array.isArray(payload)) {
-      addPairList(payload);
-    } else if (typeof payload === 'string') {
-      addPairList(parseLockPairs(payload));
-    } else if (payload && typeof payload === 'object') {
-      if (Object.prototype.hasOwnProperty.call(payload, 'lock_pairs')) {
-        addPairList(payload.lock_pairs);
-      }
-      const unitList = [];
-      if (Array.isArray(payload.units)) {
-        unitList.push(...payload.units);
-      }
-      if (payload.unit && typeof payload.unit === 'object') {
-        unitList.push(payload.unit);
-      }
-      unitList.forEach((unit) => addUnitPartners(unit));
-    } else {
-      return;
-    }
-
-    if (!hasPayload) {
-      return;
-    }
-
-    lockPairCache.clear();
-    nextCache.forEach((partners, unitId) => {
-      lockPairCache.set(unitId, partners);
-    });
-  }
-
-  function getPartnerId(rosterUnitId) {
-    const targetId = normalizeRosterUnitId(rosterUnitId);
-    if (!targetId) {
-      return null;
-    }
-    const cachedPartners = lockPairCache.get(targetId);
-    if (cachedPartners instanceof Set) {
-      const candidate = Array.from(cachedPartners).find(
-        (partnerId) => partnerId && partnerId !== targetId,
-      );
-      if (candidate) {
-        return candidate;
-      }
-      if (cachedPartners.size === 0) {
-        return null;
-      }
-    }
-    const datasetPartners = getUnitDatasetValue(targetId, 'locked_pair_unit_ids', []);
-    if (Array.isArray(datasetPartners)) {
-      const partnerId = datasetPartners
-        .map((value) => normalizeRosterUnitId(value))
-        .find((value) => value && value !== targetId);
-      if (partnerId) {
-        return partnerId;
-      }
-    }
-    const parsedPairs = parseLockPairs(readLockPairDataset());
-    if (parsedPairs.length) {
-      const partnerFromPairs = parsedPairs.reduce((result, pair) => {
-        if (result || !pair || typeof pair !== 'object') {
-          return result;
-        }
-        const first = normalizeRosterUnitId(pair.first_roster_unit_id ?? pair.first ?? pair.first_id);
-        const second = normalizeRosterUnitId(
-          pair.second_roster_unit_id ?? pair.second ?? pair.second_id,
-        );
-        if (!first || !second || first === second) {
-          return result;
-        }
-        if (first === targetId) {
-          return second;
-        }
-        if (second === targetId) {
-          return first;
-        }
-        return result;
-      }, null);
-      if (partnerFromPairs) {
-        return partnerFromPairs;
-      }
-    }
-    return null;
   }
 
   function initializeUnitDatasetRepo() {
@@ -1352,6 +1161,35 @@ function initRosterEditor() {
     totalValueEl.textContent = formatPoints(total);
   }
 
+  function refreshRosterCountDisplay() {
+    const framesEl = listWrapper && listWrapper.querySelector('[data-roster-frames-count]');
+    const heroEl = listWrapper && listWrapper.querySelector('[data-roster-hero-count]');
+    if (!framesEl && !heroEl) {
+      return;
+    }
+    const listEl = rosterListEl || root.querySelector('[data-roster-list]');
+    const allItems = listEl ? listEl.querySelectorAll('[data-roster-item]') : [];
+    let framesCount = 0;
+    let heroModelsCount = 0;
+    allItems.forEach((item) => {
+      const isAttached = item.hasAttribute('data-roster-attached-hero');
+      const isHero = item.getAttribute('data-is-hero') === 'true';
+      const count = Math.max(parseInt(item.getAttribute('data-unit-count') || '1', 10) || 1, 1);
+      if (!isAttached) {
+        framesCount += 1;
+      }
+      if (isHero) {
+        heroModelsCount += count;
+      }
+    });
+    if (framesEl) {
+      framesEl.textContent = String(framesCount);
+    }
+    if (heroEl) {
+      heroEl.textContent = String(heroModelsCount);
+    }
+  }
+
   function scheduleSave(requestVersion) {
     if (!isEditable || !form || !autoSaveEnabled) {
       return;
@@ -1786,11 +1624,6 @@ function initRosterEditor() {
         applyUnitData(unitData);
       });
     }
-    if (Array.isArray(payload.lock_pairs)) {
-      const serializedPairs = JSON.stringify(payload.lock_pairs);
-      writeLockPairDataset(serializedPairs);
-    }
-    applyLockPairsFromServer(payload);
     let totalCostValue = null;
     const payloadTotalCost = Number(payload.total_cost);
     const payloadRosterTotalCost = Number(payload?.roster?.total_cost);
@@ -2264,6 +2097,23 @@ function renderEditors() {
           return { ...option, cost: override };
         })
       : [];
+    const activeIsHero = activeItem
+      ? activeItem.getAttribute('data-is-hero') === 'true'
+      : false;
+    const heroContext = (activeIsHero && isEditable) ? {
+      rosterId,
+      rosterUnitId: activeItem ? activeItem.getAttribute('data-roster-unit-id') || '' : '',
+      currentParentId: activeItem
+        ? activeItem.getAttribute('data-parent-roster-unit-id') || ''
+        : '',
+      attachable: (() => {
+        try {
+          return JSON.parse(root.getAttribute('data-roster-attachable-units') || '[]');
+        } catch (_e) {
+          return [];
+        }
+      })(),
+    } : null;
     const hasPassives = renderPassiveEditor(
       passiveContainer,
       currentPassives,
@@ -2277,6 +2127,7 @@ function renderEditors() {
         }
         return computePassiveDeltaForSlug(context.slug);
       },
+      heroContext,
     );
     toggleSectionVisibility(passiveContainer, hasPassives);
     const hasActives = renderAbilityEditor(
@@ -2319,16 +2170,6 @@ function renderEditors() {
       registerRosterItem(item);
     });
     return initialItems;
-  }
-
-  function hydrateInitialLockPairs() {
-    const rawLockPairs = readLockPairDataset();
-    const initialPairs = parseLockPairs(rawLockPairs);
-    writeLockPairDataset(JSON.stringify(initialPairs));
-    const initialUnitPayloads = Array.from(rosterUnitDatasetRepo.values()).filter(
-      (value) => value && typeof value === 'object',
-    );
-    applyLockPairsFromServer({ lock_pairs: initialPairs, units: initialUnitPayloads });
   }
 
   function syncInitialRosterList(initialItems) {
@@ -2410,7 +2251,6 @@ function renderEditors() {
         applyServerUpdate({
           unit: departingData,
           total_cost: data.total_cost,
-          lock_pairs: data.lock_pairs,
           roster: data.roster,
         });
         // applyServerUpdate updates badge content but not the loading class;
@@ -2494,7 +2334,6 @@ function renderEditors() {
       initializeUnitDatasetRepo();
       initializeMoveForms();
       const initialItems = collectInitialRosterItems();
-      hydrateInitialLockPairs();
       syncInitialRosterList(initialItems);
       selectInitialRosterItem();
       refreshRosterCostBadges();

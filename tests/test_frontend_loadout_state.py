@@ -25,6 +25,11 @@ MODULE_PATHS = [
     ROOT_DIR / "app/static/js/modules/loadout_state.js",
     ROOT_DIR / "app/static/js/modules/editor_renderers.js",
     ROOT_DIR / "app/static/js/modules/roster_adders.js",
+    ROOT_DIR / "app/static/js/modules/ability_picker.js",
+    ROOT_DIR / "app/static/js/modules/weapon_picker.js",
+    ROOT_DIR / "app/static/js/modules/roster_editor.js",
+    ROOT_DIR / "app/static/js/modules/armory_tree.js",
+    ROOT_DIR / "app/static/js/modules/weapon_inheritance_panel.js",
 ]
 LEGACY_PARITY_ENABLED = os.getenv("ENABLE_LEGACY_MATH_PARITY_TESTS", "").strip() in {
     "1",

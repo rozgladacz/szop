@@ -71,7 +71,7 @@
     opacity: 0.55;
     background: #f1f1f1;
   }
-  .battle-state .unit-card.is-defeated .card-body > *:not(.unit-header):not(.defeated-banner) {
+  .battle-state .unit-card.is-defeated .card-body > *:not(.group-status-bar):not(.defeated-banner) {
     display: none;
   }
   .battle-state .defeated-banner {
@@ -184,43 +184,111 @@
     <span{% if desc and toggleable %} class="ability-tip toggle-ability"{% elif desc %} class="ability-tip"{% elif toggleable %} class="toggle-ability"{% endif %}{% if desc %} data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{{ desc | e }}"{% endif %}{% if toggleable %} data-ability-toggle="{{ toggle_key | e }}"{% endif %}>{{ label }}</span>
   {%- endmacro %}
 
-  <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 g-3" data-battle-section>
-    {% for item in roster_items %}
-    {% set unit_count = item.count or 0 %}
-    <div class="col" data-battle-card-wrapper data-original-position="{{ loop.index0 }}">
-      <div class="card h-100 shadow-sm unit-card"
-           data-battle-unit
-           data-roster-unit-id="{{ item.instance.id }}"
-           data-initial-models="{{ unit_count }}"
-           data-toughness="{{ item.toughness or 1 }}"
-           data-weapons-json='{{ item.weapon_details | tojson | e }}'>
-        <div class="card-body">
-          <div class="unit-header d-flex justify-content-between align-items-start gap-2">
-            <div class="flex-grow-1">
-              <h5 class="card-title mb-1">{{ item.custom_name or item.unit_name }}</h5>
-              {% if item.custom_name %}
-              <div class="text-muted small">{{ item.unit_name }}</div>
+  {% macro member_subblock(member, group_id, group_modes) %}
+    {% set unit_count = member.count or 0 %}
+    {% set show_models = member.show_models %}
+    <div class="unit-member"
+         data-battle-unit
+         data-roster-unit-id="{{ member.instance.id }}"
+         data-group-id="{{ group_id }}"
+         data-initial-models="{{ unit_count }}"
+         data-toughness="{{ member.toughness or 1 }}"
+         data-is-hero="{{ 'true' if member.is_hero else 'false' }}"
+         data-weapons-json='{{ member.weapon_details | tojson | e }}'>
+      <div class="unit-header d-flex justify-content-between align-items-start gap-2">
+        <div class="flex-grow-1">
+          <h6 class="mb-1">{{ member.custom_name or member.unit_name }}</h6>
+          {% if member.custom_name %}
+          <div class="text-muted small">{{ member.unit_name }}</div>
+          {% endif %}
+          {% if show_models %}
+          <div class="mt-2 d-flex align-items-center gap-1 flex-wrap">
+            <span class="d-inline-flex align-items-center gap-1 flex-shrink-0">
+              <span class="small text-muted">Modele:</span>
+              <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-models-decrement>−</button>
+              <span class="counter-value" data-models-value>{{ unit_count }}</span>
+              <span class="text-muted small">/ {{ unit_count }}</span>
+              <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-models-increment>+</button>
+            </span>
+          </div>
+          {% endif %}
+        </div>
+      </div>
+      <div class="stat-grid mt-2">
+        <div class="stat-box">
+          <div class="stat-label">Jakość</div>
+          <div class="stat-value">{{ member.quality }}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Obrona</div>
+          <div class="stat-value">{{ member.defense }}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Wytrz.</div>
+          <div class="stat-value">{{ member.toughness }}</div>
+        </div>
+      </div>
+      {% if member.passive_labels or member.active_labels or member.aura_labels %}
+      <div class="mt-2">
+        <div class="section-title">Zdolności</div>
+        {% if member.passive_labels %}
+        <div class="ability-line"><strong>Pasywne:</strong> {% for lbl in member.passive_labels %}{{ ability_span(lbl) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+        {% endif %}
+        {% if member.active_labels %}
+        <div class="ability-line"><strong>Aktywne:</strong> {% for lbl in member.active_labels %}{{ ability_span(lbl, toggleable=true, idx=loop.index0) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+        {% endif %}
+        {% if member.aura_labels %}
+        <div class="ability-line"><strong>Aury:</strong> {% for lbl in member.aura_labels %}{{ ability_span(lbl, toggleable=true, idx=loop.index0) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+        {% endif %}
+      </div>
+      {% endif %}
+      <div class="mt-2">
+        <div class="d-flex justify-content-between align-items-center mb-1">
+          <div class="section-title mb-0">Uzbrojenie</div>
+          <div class="btn-group btn-group-sm mode-toolbar" role="group" data-mode-toolbar data-group-id="{{ group_id }}">
+            {% for mode in group_modes %}
+              {% if mode == 'equipment' %}
+                <button class="btn btn-outline-secondary{% if loop.first %} active{% endif %}" type="button" data-mode="equipment">Wyposażenie</button>
+              {% elif mode == 'melee' %}
+                <button class="btn btn-outline-secondary" type="button" data-mode="melee">Wręcz</button>
+              {% elif mode.startswith('ranged:') %}
+                {% set distance = mode.split(':', 1)[1] %}
+                <button class="btn btn-outline-secondary" type="button" data-mode="ranged:{{ distance }}">{{ distance }}"</button>
               {% endif %}
-              {% if unit_count > 1 or item.show_wounds %}
-              <div class="mt-2 d-flex align-items-center gap-1 flex-wrap">
-                {% if unit_count > 1 %}
+            {% endfor %}
+          </div>
+        </div>
+        <div class="weapon-list" data-weapon-list>
+          <!-- Filled by JS -->
+        </div>
+        <div class="attack-summary mt-2 d-none" data-attack-summary>
+          <!-- Filled by JS -->
+        </div>
+      </div>
+    </div>
+  {% endmacro %}
+
+  <div class="row row-cols-1 row-cols-md-2 row-cols-xl-3 row-cols-xxl-4 g-3" data-battle-section>
+    {% for group in battle_groups %}
+    {% set parent_count = group.parent.count or 0 %}
+    {% set is_grouped = group.heroes | length > 0 %}
+    {% set group_id = group.group_id %}
+    <div class="col" data-battle-card-wrapper data-original-position="{{ loop.index0 }}">
+      <div class="card h-100 shadow-sm unit-card{% if is_grouped %} unit-card-grouped{% endif %}"
+           data-battle-group
+           data-group-id="{{ group_id }}">
+        <div class="card-body">
+          <div class="group-status-bar d-flex justify-content-between align-items-start gap-2 mb-2">
+            <div class="flex-grow-1">
+              {% if group.show_wounds_any %}
+              <div class="d-flex align-items-center gap-1 flex-wrap">
                 <span class="d-inline-flex align-items-center gap-1 flex-shrink-0">
-                  <span class="small text-muted">Modele:</span>
-                  <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-models-decrement>−</button>
-                  <span class="counter-value" data-models-value>{{ unit_count }}</span>
-                  <span class="text-muted small">/ {{ unit_count }}</span>
-                  <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-models-increment>+</button>
-                </span>
-                {% endif %}
-                {% if item.show_wounds %}
-                <span class="d-inline-flex align-items-center gap-1 flex-shrink-0 {{ 'ms-2' if unit_count > 1 else '' }}">
                   <span class="small text-muted">Rany:</span>
-                  <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-wounds-decrement>−</button>
-                  <span class="counter-value text-danger" data-wounds-value>0</span>
-                  <span class="text-muted small">/ <span data-wounds-max>{{ unit_count * (item.toughness or 1) }}</span></span>
-                  <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-wounds-increment>+</button>
+                  <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-group-wounds-decrement>−</button>
+                  <span class="counter-value text-danger" data-group-wounds-value>0</span>
+                  <span class="text-muted small">/ <span data-group-wounds-max>0</span></span>
+                  <button class="btn btn-outline-secondary btn-sm counter-btn" type="button" data-group-wounds-increment>+</button>
                 </span>
-                {% endif %}
               </div>
               {% endif %}
             </div>
@@ -242,52 +310,11 @@
 
           <div class="defeated-banner">✕ Pokonany ✕</div>
 
-          <div class="stat-grid mt-3">
-            <div class="stat-box">
-              <div class="stat-label">Jakość</div>
-              <div class="stat-value">{{ item.quality }}</div>
-            </div>
-            <div class="stat-box">
-              <div class="stat-label">Obrona</div>
-              <div class="stat-value">{{ item.defense }}</div>
-            </div>
-            <div class="stat-box">
-              <div class="stat-label">Wytrz.</div>
-              <div class="stat-value">{{ item.toughness }}</div>
-            </div>
-          </div>
-
-          {% if item.passive_labels or item.active_labels or item.aura_labels %}
-          <div class="mt-2">
-            <div class="section-title">Zdolności</div>
-            {% if item.passive_labels %}
-            <div class="ability-line"><strong>Pasywne:</strong> {% for lbl in item.passive_labels %}{{ ability_span(lbl) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
-            {% endif %}
-            {% if item.active_labels %}
-            <div class="ability-line"><strong>Aktywne:</strong> {% for lbl in item.active_labels %}{{ ability_span(lbl, toggleable=true, idx=loop.index0) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
-            {% endif %}
-            {% if item.aura_labels %}
-            <div class="ability-line"><strong>Aury:</strong> {% for lbl in item.aura_labels %}{{ ability_span(lbl, toggleable=true, idx=loop.index0) }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
-            {% endif %}
-          </div>
-          {% endif %}
-
-          <div class="mt-2">
-            <div class="d-flex justify-content-between align-items-center mb-1">
-              <div class="section-title mb-0">Uzbrojenie</div>
-              <div class="btn-group btn-group-sm mode-toolbar" role="group" data-mode-toolbar>
-                <button class="btn btn-outline-secondary active" type="button" data-mode="equipment">Wyposażenie</button>
-                <button class="btn btn-outline-secondary" type="button" data-mode="melee">Wręcz</button>
-                <!-- Range buttons inserted by JS -->
-              </div>
-            </div>
-            <div class="weapon-list" data-weapon-list>
-              <!-- Filled by JS -->
-            </div>
-            <div class="attack-summary mt-2 d-none" data-attack-summary>
-              <!-- Filled by JS -->
-            </div>
-          </div>
+          {% for hero in group.heroes %}
+            {{ member_subblock(hero, group_id, group.modes) }}
+            <hr class="my-2" />
+          {% endfor %}
+          {{ member_subblock(group.parent, group_id, group.modes) }}
         </div>
       </div>
     </div>

@@ -73,7 +73,7 @@
   data-roster-id="{{ roster.id }}"
   data-selected-id="{{ selected_id or '' }}"
   data-roster-unit-datasets='{{ unit_payloads | tojson | e }}'
-  data-roster-lock-pairs='{{ lock_pairs | tojson | e }}'
+  data-roster-attachable-units='{{ attachable_units | tojson | e }}'
   data-local-cost-engine-enabled="{{ 'true' if local_cost_engine_enabled else 'false' }}"
 >
   {% if can_edit %}
@@ -182,7 +182,7 @@
     <div class="card h-100">
       <div class="card-body d-flex flex-column" data-roster-items-container>
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <h5 class="mb-0">Oddziały w rozpisce ({{ non_hero_unit_count }})</h5>
+          <h5 class="mb-0">Oddziały w rozpisce (<span data-roster-frames-count>{{ frames_count }}</span>, bohaterów <span data-roster-hero-count>{{ hero_models_count }}</span>)</h5>
           <div
             class="text-muted small"
             data-roster-total-container
@@ -192,54 +192,11 @@
             / <span data-roster-limit>{{ roster.points_limit }}</span>{% endif %}
           </div>
         </div>
-        {% if roster_items %}
-          <div class="list-group roster-unit-list" data-roster-list data-roster-id="{{ roster.id }}">
-          {% for item in roster_items %}
-            {% set ru = item.instance %}
-            {% set is_first = loop.first %}
-            {% set is_last = loop.last %}
-          <div class="list-group-item border-0 px-0 py-2" data-roster-entry>
-            <div class="roster-unit-entry">
-              {% if can_edit %}
-              <div class="roster-drag-handle drag-handle" aria-hidden="true">⋮⋮</div>
-              <div class="roster-unit-reorder">
-                <form
-                  method="post"
-                  action="/rosters/{{ roster.id }}/units/{{ ru.id }}/move"
-                  data-roster-move-form
-                >
-                  <input type="hidden" name="direction" value="up" />
-                  <button
-                    class="btn btn-outline-secondary btn-sm"
-                    type="submit"
-                    data-roster-move
-                    aria-label="Przesuń jednostkę w górę"
-                    {% if is_first %}disabled{% endif %}
-                  >
-                    ↑
-                  </button>
-                </form>
-                <form
-                  method="post"
-                  action="/rosters/{{ roster.id }}/units/{{ ru.id }}/move"
-                  data-roster-move-form
-                >
-                  <input type="hidden" name="direction" value="down" />
-                  <button
-                    class="btn btn-outline-secondary btn-sm"
-                    type="submit"
-                    data-roster-move
-                    aria-label="Przesuń jednostkę w dół"
-                    {% if is_last %}disabled{% endif %}
-                  >
-                    ↓
-                  </button>
-                </form>
-              </div>
-              {% endif %}
+        {% macro roster_unit_card(item, ru, is_attached=False) %}
               <div
-                class="roster-unit-item roster-card text-start position-relative flex-grow-1 border rounded p-3 bg-body"
+                class="roster-unit-item roster-card text-start position-relative flex-grow-1 border rounded p-3 bg-body{% if is_attached %} roster-attached-hero{% endif %}"
                 data-roster-item
+                {% if is_attached %}data-roster-attached-hero data-parent-roster-unit-id="{{ ru.parent_roster_unit_id }}"{% endif %}
                 data-roster-unit-id="{{ ru.id }}"
                 data-unit-cache-id="{{ ru.unit.id }}"
                 data-unit-name="{{ ru.unit.name }}"
@@ -251,6 +208,7 @@
                 data-unit-toughness="{{ ru.unit.toughness }}"
                 data-unit-custom-name="{{ ru.custom_name or '' }}"
                 data-unit-flags='{{ item.unit_flags | default('', true) | e }}'
+                data-is-hero="{{ 'true' if item.is_hero else 'false' }}"
                 data-selected-passives='{{ item.selected_passive_items | tojson | e }}'
                 data-selected-actives='{{ item.selected_active_items | tojson | e }}'
                 data-selected-auras='{{ item.selected_aura_items | tojson | e }}'
@@ -309,6 +267,60 @@
                   {{ item.default_summary }}
                   {% endif %}
                 </div>
+              </div>
+        {% endmacro %}
+        {% if roster_frames %}
+          <div class="list-group roster-unit-list" data-roster-list data-roster-id="{{ roster.id }}">
+          {% for item in roster_frames %}
+            {% set ru = item.instance %}
+            {% set is_first = loop.first %}
+            {% set is_last = loop.last %}
+            {% set attached = item.attached_heroes or [] %}
+          <div class="list-group-item border-0 px-0 py-2" data-roster-entry>
+            <div class="roster-unit-entry{% if attached %} roster-unit-entry-grouped{% endif %}">
+              {% if can_edit %}
+              <div class="roster-drag-handle drag-handle" aria-hidden="true">⋮⋮</div>
+              <div class="roster-unit-reorder">
+                <form
+                  method="post"
+                  action="/rosters/{{ roster.id }}/units/{{ ru.id }}/move"
+                  data-roster-move-form
+                >
+                  <input type="hidden" name="direction" value="up" />
+                  <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="submit"
+                    data-roster-move
+                    aria-label="Przesuń jednostkę w górę"
+                    {% if is_first %}disabled{% endif %}
+                  >
+                    ↑
+                  </button>
+                </form>
+                <form
+                  method="post"
+                  action="/rosters/{{ roster.id }}/units/{{ ru.id }}/move"
+                  data-roster-move-form
+                >
+                  <input type="hidden" name="direction" value="down" />
+                  <button
+                    class="btn btn-outline-secondary btn-sm"
+                    type="submit"
+                    data-roster-move
+                    aria-label="Przesuń jednostkę w dół"
+                    {% if is_last %}disabled{% endif %}
+                  >
+                    ↓
+                  </button>
+                </form>
+              </div>
+              {% endif %}
+              <div class="roster-unit-stack flex-grow-1 d-flex flex-column gap-2">
+                {% for hero_item in attached %}
+                  {% set hero_ru = hero_item.instance %}
+                  {{ roster_unit_card(hero_item, hero_ru, is_attached=True) }}
+                {% endfor %}
+                {{ roster_unit_card(item, ru, is_attached=False) }}
               </div>
             </div>
           </div>

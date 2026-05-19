@@ -264,6 +264,10 @@ function initAbilityPicker(root) {
       updateSelectOptionVisibility();
       return;
     }
+    // Roster context for hero attach picker — computed once, outside the loop,
+    // to avoid referencing a block-scoped variable before its declaration.
+    const _heroRosterRoot = root.closest('[data-roster-root]') || document.querySelector('[data-roster-root]');
+    const _heroRosterId = _heroRosterRoot ? (_heroRosterRoot.getAttribute('data-roster-id') || '') : '';
     const wrapper = document.createElement('div');
     wrapper.className = 'd-flex flex-column gap-2';
     items.forEach((item, index) => {
@@ -331,7 +335,110 @@ function initAbilityPicker(root) {
 
       row.appendChild(labelWrapper);
 
-      if (allowDefaultToggle || allowMandatoryToggle) {
+      // Hero attach picker is only meaningful in the roster editor (where
+      // data-roster-root provides _heroRosterId). In the army unit editor there
+      // is no roster context, so fall through to the normal is_default toggle.
+      const isHeroAbility = item.slug === 'bohater' && Boolean(_heroRosterId);
+
+      if (isHeroAbility) {
+        // Hero ability: replace the default toggle with a "Dołącz do:" picker
+        // wired to the backend attach/detach endpoints. The hero either rides
+        // along with a parent unit (sharing classification) or stands alone.
+        const heroWrapper = document.createElement('div');
+        heroWrapper.className = 'd-flex align-items-center gap-2 flex-wrap mb-0 hero-attach-picker';
+
+        let attachable = [];
+        try {
+          attachable = JSON.parse(_heroRosterRoot ? _heroRosterRoot.getAttribute('data-roster-attachable-units') || '[]' : '[]');
+        } catch (err) {
+          attachable = [];
+        }
+        const activeRosterItem = _heroRosterRoot
+          ? (_heroRosterRoot.querySelector('[data-roster-item].active')
+             || _heroRosterRoot.querySelector('.roster-unit-item.active'))
+          : null;
+        const heroRosterUnitId = activeRosterItem
+          ? activeRosterItem.getAttribute('data-roster-unit-id')
+          : '';
+        const currentParentId = activeRosterItem
+          ? (activeRosterItem.getAttribute('data-parent-roster-unit-id') || '')
+          : '';
+
+        const selectLabel = document.createElement('label');
+        selectLabel.className = 'form-label small mb-0';
+        selectLabel.textContent = 'Dołącz do:';
+        const selectId = `ability-hero-attach-${index}-${Math.random().toString(16).slice(2)}`;
+        selectLabel.setAttribute('for', selectId);
+        heroWrapper.appendChild(selectLabel);
+
+        const selectEl = document.createElement('select');
+        selectEl.className = 'form-select form-select-sm hero-attach-select';
+        selectEl.id = selectId;
+        const noneOpt = document.createElement('option');
+        noneOpt.value = '';
+        noneOpt.textContent = '— (samodzielny)';
+        selectEl.appendChild(noneOpt);
+        attachable
+          .filter((unit) => unit && unit.id && String(unit.id) !== String(heroRosterUnitId))
+          .forEach((unit) => {
+            const opt = document.createElement('option');
+            opt.value = String(unit.id);
+            opt.textContent = unit.label || `Oddział ${unit.id}`;
+            selectEl.appendChild(opt);
+          });
+        selectEl.value = currentParentId || '';
+        heroWrapper.appendChild(selectEl);
+
+        const errorBox = document.createElement('div');
+        errorBox.className = 'text-danger small d-none';
+        heroWrapper.appendChild(errorBox);
+
+        const submitAttachChange = (newParentId) => {
+          if (!_heroRosterId || !heroRosterUnitId) {
+            errorBox.textContent = 'Nie można ustalić oddziału do dołączenia.';
+            errorBox.classList.remove('d-none');
+            return;
+          }
+          errorBox.classList.add('d-none');
+          selectEl.disabled = true;
+          const isAttach = Boolean(newParentId);
+          const url = isAttach
+            ? `/rosters/${_heroRosterId}/units/${heroRosterUnitId}/attach`
+            : `/rosters/${_heroRosterId}/units/${heroRosterUnitId}/detach`;
+          const init = {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Accept': 'application/json' },
+          };
+          if (isAttach) {
+            init.headers['Content-Type'] = 'application/json';
+            init.body = JSON.stringify({ parent_roster_unit_id: Number(newParentId) });
+          }
+          fetch(url, init)
+            .then((response) => {
+              if (!response.ok) {
+                return response.text().then((text) => {
+                  throw new Error(text || `HTTP ${response.status}`);
+                });
+              }
+              return response.json();
+            })
+            .then(() => {
+              window.location.reload();
+            })
+            .catch((err) => {
+              selectEl.disabled = false;
+              errorBox.textContent = `Nie udało się zmienić dołączenia: ${err && err.message ? err.message : err}`;
+              errorBox.classList.remove('d-none');
+            });
+        };
+
+        selectEl.addEventListener('change', () => {
+          submitAttachChange(selectEl.value);
+        });
+
+        row.appendChild(heroWrapper);
+      } else if (allowDefaultToggle || allowMandatoryToggle) {
         const toggleWrapper = document.createElement('div');
         toggleWrapper.className = 'd-flex flex-column gap-1 mb-0';
 

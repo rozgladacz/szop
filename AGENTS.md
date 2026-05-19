@@ -1,5 +1,19 @@
 # AGENTS.md
 
+## KROK 0 — HANDOFF.md (obowiązkowy przed każdą zmianą kodu)
+
+**Zanim napiszesz jakikolwiek kod, otwórz `HANDOFF.md` i przeczytaj sekcję BIEŻĄCE ZADANIE.**
+
+| Sytuacja | Co zrobić |
+|---|---|
+| Nowe zadanie różni się od "Cel" w HANDOFF | Nadpisz całą sekcję BIEŻĄCE ZADANIE nowym "Cel". Dodaj wpis do LOG SESJI zamykający poprzednie zadanie. |
+| Nowe zadanie pasuje do aktualnego "Cel" | Aktualizuj "W toku" przed każdym podetapem — nie po jego zakończeniu. |
+| Aktywny plan file (plan mode → execute) | Nie duplikuj BIEŻĄCE ZADANIE. Zaktualizuj tylko LOG SESJI + WIEDZA PROJEKTU jeśli zmieniła się architektura. |
+
+Pominięcie tego kroku = utrata kontekstu przy następnym uruchomieniu agenta. Nie ma zadania zbyt małego żeby go pominąć.
+
+---
+
 ## Project Context
 - This is the SZOP wargame tooling project (autorski system inspirowany One Page Rules). Tests live alongside Python rule logic; weapon/ability costs and rule parameters are SSOT-driven. After rule changes, verify both backend payloads and JS rendering layers.
 
@@ -54,12 +68,18 @@ Zależności:
 - Nie przebudowuj architektury bez potrzeby.
 - Preferuj małe, odwracalne zmiany.
 - Before writing any code, list every layer this change touches (data model, backend payload, JS render, CSS, tests). Then implement each layer and run tests. After tests pass, walk me through how you verified each layer end-to-end.
-- As you work on a prolonged task, maintain a `HANDOFF.md` file. **Update HANDOFF.md BEFORE starting each major sub-task** (not only at end of session) — context windows can be exhausted mid-work, and an end-of-session update may never happen. Treat it as a pre-step checkpoint, not a post-step summary.
-- `HANDOFF.md` has two distinct zones — treat them differently:
-  - **BIEŻĄCE ZADANIE** (volatile): overwrite entirely at the start of each new unrelated task. Set "Cel" to the new task; clear "W toku", "Pliki dotknięte", "Hipotezy", "Jak zweryfikować".
-  - **WIEDZA PROJEKTU** (stable): never clear on task switch — only update when architecture genuinely changes (e.g. new module added, performance baseline revised).
-- **Task-switch protocol**: when the user gives a task that differs from the current "Cel" in HANDOFF.md — (1) add a log entry closing the previous task, (2) overwrite BIEŻĄCE ZADANIE with the new task before writing any code.
-- **Plan file as BIEŻĄCE ZADANIE**: when an active plan file exists (plan mode → execute flow), treat the plan file as the source of truth for current task state — do NOT duplicate "W toku" / steps / files into HANDOFF.md. Only update HANDOFF.md in WIEDZA PROJEKTU (if architecture changed) and LOG SESJI (brief closing entry after task is done). For direct tasks without a plan file (hotfix, quick bugfix), use BIEŻĄCE ZADANIE in HANDOFF.md as usual.
+- **HANDOFF.md jest obowiązkowy** — szczegółowy protokół na górze tego pliku. Skrót: przeczytaj BIEŻĄCE ZADANIE → zaktualizuj jeśli trzeba → wtedy piszesz kod. Żadnych wyjątków dla "małych" zmian.
+- HANDOFF.md aktualizuj **przed** każdym podetapem, nie po nim. Kontekst okna może skończyć się w trakcie pracy — zapis końcowy może nigdy nie nastąpić.
+- **WIEDZA PROJEKTU** w HANDOFF.md: nie czyść przy zmianie zadania. Aktualizuj tylko gdy architektura realnie się zmienia (nowy moduł, zmiana baseline wydajności).
+
+## Wydajność — analiza na etapie planu
+
+Dla każdej zmiany dotykającej hot path (endpointy `/quote`, `/rosters/{id}`, pętle renderujące strony z listą oddziałów) odpowiedz na te pytania **w planie, zanim zaczniesz implementację**:
+
+1. **Ile extra DB queries** generuje ta zmiana na typowej rozpisce (10–20 oddziałów)? Policz pesymistyczny przypadek: N oddziałów × M queries per oddział.
+2. **Nowe FK/kolumny:** Czy dominujący pattern to `WHERE nowa_kolumna = ?`? Jeśli tak — indeks (partial jeśli kolumna często NULL) musi być częścią migracji Alembic, nie post-hoc poprawką.
+3. **Fast-path:** Czy istnieje przypadek trywialny który można obsłużyć bez DB query? (Przykład: standalone hero z `parent_id IS NULL AND is_hero` → brak query do `_hero_group_partner_ids`.)
+4. **SSOT-check przed implementacją:** Przed dodaniem logiki klasyfikacji, kosztów lub walidacji — `grep` dla istniejących funkcji SSOT (`_classification_map`, `roster_unit_role_totals`, itp.) i wywołaj istniejącą funkcję. Nigdy nie replikuj tej logiki inline.
 
 ## Przenoszenie dużych bloków kodu między plikami
 Gdy przenosisz blok kodu > 100 linii do nowego pliku (np. ekstrakcja submodułu):
@@ -94,6 +114,53 @@ src.write_text(text[:start] + stub + text[end:], encoding='utf-8')
 - Nie uznawaj zadania za zakończone bez krótkiej weryfikacji diffu.
 - Before declaring task done, search the codebase for every other call site or case that touches the code you just modified. List each one and explain why your change does or doesn't affect it. Then run the full test suite.
 - Na początku analizy wymagań oceń, czy zlecone zadanie dezaktualizuje istniejące testy. Jeśli tak — popraw lub usuń je jako pierwszy krok, zanim zmienisz kod produkcyjny. Nieaktualne testy blokują pracę i generują fałszywe błędy.
+- **Diagnoza bugów UI:** Przed analizą backendu ustal pełną ścieżkę wywołania (JS event → fetch → endpoint → render). Sprawdź czy wynik nie jest nadpisywany przez inny fetch po załadowaniu strony (np. batch `/quote` po renderowaniu SSR).
+
+## Efektywne uruchamianie testów
+
+**Środowisko Windows** — `make` może być poza PATH. Używaj bezpośrednio:
+```bash
+python -m pytest -x --tb=short -q          # szybki, stop na pierwszym błędzie
+python -m pytest -x --tb=short -q <plik>   # fokusowany na jeden plik
+```
+
+### Kolejność — zawsze ta sama
+
+1. **Natychmiast po zmianie** — tylko dotknięty plik lub moduł:
+   ```bash
+   python -m pytest tests/test_roster_classification.py -x --tb=short -q
+   ```
+   Szybki feedback zanim pójdziesz dalej. Jeśli tu nie przejdzie, nie ma sensu uruchamiać reszty.
+
+2. **Przed deklaracją "gotowe"** — filtruj po obszarze:
+   ```bash
+   python -m pytest -k "roster or cost or classification" -x --tb=short
+   ```
+
+3. **Przed commitem** — pełna suita, obowiązkowo:
+   ```bash
+   python -m pytest --tb=short -q
+   ```
+
+### Przydatne flagi
+
+| Flaga | Kiedy użyć |
+|---|---|
+| `-x` | Zawsze — stop na pierwszym błędzie, nie czekaj na resztę |
+| `--tb=short` | Domyślnie — czytelny traceback bez szumu |
+| `-q` | Szybki przebieg — jedna linia per test, podsumowanie na końcu |
+| `-v` | Debugging — pełna nazwa każdego testu + status |
+| `-k "słowo"` | Filtruj testy po nazwie funkcji lub pliku (np. `-k "classification"`) |
+| `--lf` | Uruchom ponownie tylko ostatnio nieudane — przydatne przy poprawianiu |
+| `-s` | Pokaż `print()` w testach — tylko do debugowania, nie zostawiaj |
+
+### Kiedy testy dezaktualizują się
+
+Jeśli zmieniasz zachowanie funkcji — najpierw sprawdź czy istniejące testy testują stare zachowanie. Jeśli tak: **popraw testy jako pierwszy krok**, zanim zmienisz kod produkcyjny. Stare testy blokują dalszą pracę i generują fałszywe błędy.
+
+### Testy frontendu
+
+Pliki `tests/test_frontend_*.py` weryfikują payload parity (JS↔backend). Uruchom je po każdej zmianie w `rosters.py`, `export.py` lub `payload_adapters.js`. Backend unit tests **nie pokrywają inicjalizacji JS** — smoke test manualny wymagany po zmianie `app.js` (patrz sekcja "Smoke test po zmianie app.js").
 
 ## String Handling
 

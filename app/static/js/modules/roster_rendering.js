@@ -137,6 +137,7 @@ function createRosterItemElement(data, options = {}) {
   if (data.unit_flags !== undefined && data.unit_flags !== null) {
     item.setAttribute('data-unit-flags', String(data.unit_flags));
   }
+  item.setAttribute('data-is-hero', data.is_hero ? 'true' : 'false');
   item.setAttribute('data-default-summary', defaultSummary || '');
   item.setAttribute('data-weapon-options', toJsonString(weaponOptions, []));
   item.setAttribute('data-passives', toJsonString(passiveItems, []));
@@ -201,6 +202,7 @@ function renderPassiveEditor(
   editable,
   onChange,
   getDelta,
+  heroContext,
 ) {
   if (!container) {
     return false;
@@ -313,7 +315,83 @@ function renderPassiveEditor(
     const controls = document.createElement('div');
     controls.className = 'roster-ability-controls text-end';
 
-    if (editable) {
+    const isHeroBohater = normalizedSlug === 'bohater';
+    if (editable && isHeroBohater && heroContext && heroContext.rosterId) {
+      // Replace the on/off toggle with a "Dołącz do:" selector that calls the
+      // attach/detach endpoints. Page reloads to reflect the new grouping.
+      const heroWrap = document.createElement('div');
+      heroWrap.className = 'd-flex align-items-center gap-2 flex-wrap';
+      heroWrap.style.minWidth = '190px';
+
+      const selectLabel = document.createElement('label');
+      selectLabel.className = 'form-label small mb-0';
+      selectLabel.textContent = 'Dołącz do:';
+      const selectId = `hero-attach-${slug}-${Math.random().toString(16).slice(2)}`;
+      selectLabel.setAttribute('for', selectId);
+      heroWrap.appendChild(selectLabel);
+
+      const heroSelect = document.createElement('select');
+      heroSelect.className = 'form-select form-select-sm';
+      heroSelect.id = selectId;
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = '— (samodzielny)';
+      heroSelect.appendChild(noneOpt);
+      (heroContext.attachable || [])
+        .filter((u) => u && u.id && String(u.id) !== String(heroContext.rosterUnitId))
+        .forEach((u) => {
+          const opt = document.createElement('option');
+          opt.value = String(u.id);
+          opt.textContent = u.label || `Oddział ${u.id}`;
+          heroSelect.appendChild(opt);
+        });
+      heroSelect.value = heroContext.currentParentId || '';
+      heroWrap.appendChild(heroSelect);
+
+      const errorBox = document.createElement('div');
+      errorBox.className = 'text-danger small d-none';
+      heroWrap.appendChild(errorBox);
+
+      heroSelect.addEventListener('change', () => {
+        const newParentId = heroSelect.value;
+        const { rosterId: rId, rosterUnitId: ruId } = heroContext;
+        if (!rId || !ruId) {
+          errorBox.textContent = 'Nie można ustalić kontekstu dołączenia.';
+          errorBox.classList.remove('d-none');
+          return;
+        }
+        errorBox.classList.add('d-none');
+        heroSelect.disabled = true;
+        const isAttach = Boolean(newParentId);
+        const url = isAttach
+          ? `/rosters/${rId}/units/${ruId}/attach`
+          : `/rosters/${rId}/units/${ruId}/detach`;
+        const init = {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { Accept: 'application/json' },
+        };
+        if (isAttach) {
+          init.headers['Content-Type'] = 'application/json';
+          init.body = JSON.stringify({ parent_roster_unit_id: Number(newParentId) });
+        }
+        fetch(url, init)
+          .then((r) => {
+            if (!r.ok) {
+              return r.text().then((t) => { throw new Error(t || `HTTP ${r.status}`); });
+            }
+            return r.json();
+          })
+          .then(() => { window.location.reload(); })
+          .catch((err) => {
+            heroSelect.disabled = false;
+            errorBox.textContent = `Błąd: ${err && err.message ? err.message : String(err)}`;
+            errorBox.classList.remove('d-none');
+          });
+      });
+
+      controls.appendChild(heroWrap);
+    } else if (editable) {
       const wrapperCheck = document.createElement('div');
       wrapperCheck.className = 'form-check form-switch mb-0';
       const input = document.createElement('input');

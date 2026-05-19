@@ -85,7 +85,7 @@ def test_update_api_contract_returns_frontend_render_fields() -> None:
         )
         payload = _payload(response)
 
-        assert set(payload) == {"unit", "units", "warnings", "total_cost", "lock_pairs"}
+        assert set(payload) == {"unit", "units", "warnings", "total_cost"}
         unit_payload = payload["unit"]
         assert unit_payload["id"] == roster_unit.id
         assert unit_payload["custom_name"] == "Line Prime"
