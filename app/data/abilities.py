@@ -71,7 +71,9 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         type="passive",
         description=(
             "Rozstawia się po rozstawieniu wszystkich pozostałych jednostek, w odległości do 12” od normalnie dozwolonej pozycji. "
-            "Gracze na zmianę rozmieszczają jednostki zwiadowcy, zaczynając od gracza, który dokonuje aktywacji jako następny."
+            "Gracze na zmianę rozmieszczają jednostki zwiadowcy, zaczynając od gracza, który dokonuje aktywacji jako następny. "
+            "Jeżeli nie rozstawiłeś oddziałów bez tej zdolności, możesz później zamiast rozstawiać oddział raz aktywować "
+            "ten oddział w rundzie rozstawienia (nie może w niej atakować)."
         ),
     ),
     AbilityDefinition(
@@ -172,12 +174,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         type="passive",
         description="Może wykonywać tę samą akcję wielokrotnie w rundzie.",
     ),
-    AbilityDefinition(
-        slug="niestrudzony",
-        name="Niestrudzony",
-        type="passive",
-        description="Może wykonywać tę samą akcję wielokrotnie w rundzie.",
-    ),
+
     AbilityDefinition(
         slug="ucieczka",
         name="Ucieczka",
@@ -294,12 +291,20 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Transport",
         type="passive",
         description=(
-            "Odziały o maksymalnej sumarycznej wytrzymałości X mogą być do niego przypisane. Mogą być w nich modele o wytrzymałości do 3."
-            "Gdy aktywujesz taki odział, możesz zamiast ruchu rozstawić go tak, aby każdy jego model był do 3” od transportera."
-            "Przestaje być przypisany i może wykonać akcję. Jeżeli nie zostanie rozstawiony, może oddziaływać tylko na transporter (zawsze ma zasięg). "
-            "Jeżeli transporter zostanie zniszczony, przed jego zdjęciem każdy odział do niego przypisany zostaje rozstawiony jak wyżej, "
-            "zostaje przyszpilony i wykonuje test jakości. W przypadku porażki zostaje wyczerpany i wykonuje test trudnego terenu. "
-            "Odział który spełnia warunki rozstawienia z transportera, jako akcję możesz zostać zdjęty z planszy i do niego przypisany."
+            "Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. "
+            "Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. "
+            "Transportowany oddział nie znajduje się na planszy, zawsze pozostaje w zasięgu transportującego oddziału, "
+            "może oddziaływać wyłącznie na siebie i transportujący oddział. "
+            "Jako swoją akcję ruchu może zostać rozstawiony. Wszystkie jego modele muszą zostać ustawione w odległości do 3” "
+            "od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany. "
+            "Oddział, którego wszystkie modele znajdują się do 3” od transportującego oddziału, "
+            "może jako swoją akcję ruchu zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. "
+            "Jeżeli część modeli transportującego oddziału zostanie zniszczona, transportowane oddziały mogą tymczasowo "
+            "przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie zniszczony, "
+            "wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się przyszpilone. "
+            "Jeżeli transportujący oddział wykona podwójny ruch lub początkowy ruch zdolności Samolot, "
+            "wszystkie transportowane oddziały zostają wyczerpane. "
+            "Transportowane oddziały są rozstawiane razem z transporterem."
         ),
         value_label="X",
         value_type="number",
@@ -330,6 +335,12 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Strażnik",
         type="passive",
         description="Gdy wrogi odział zakończy ruch, możesz przerwać aby zaatakować. Następnie ten odział zostaje wyczerpany.",
+    ),
+    AbilityDefinition(
+        slug="bastion",
+        name="Bastion",
+        type="passive",
+        description="Nie zostajesz wyczerpany po kontrataku.",
     ),
     AbilityDefinition(
         slug="zemsta",

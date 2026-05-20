@@ -101,7 +101,10 @@
       "Bash(python -m pytest tests/test_hero_attach_detach.py tests/test_roster_classification.py -x --tb=short)",
       "Bash(python -m pytest -x --tb=short)",
       "Bash(mkdir -p \"docs/handoffs\" \".claude/skills/handoff-start\" \".claude/skills/handoff-archive\" \".claude/skills/handoff-status\" \".claude/skills/load-context\" \".claude/skills/handoff-sync\")",
-      "Bash(python -m pytest -x --tb=short -q)"
+      "Bash(python -m pytest -x --tb=short -q)",
+      "Bash(dir \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\services\\\\\" 2>&1 | head -20)",
+      "Bash(.venv/Scripts/python scripts/update_descriptions.py)",
+      "Bash(.venv/Scripts/python -c \"from app.data import abilities; print\\('import OK'\\)\")"
     ]
   }
 }
