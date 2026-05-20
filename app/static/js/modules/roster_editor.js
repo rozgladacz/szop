@@ -2160,6 +2160,13 @@ function renderEditors() {
       isEditable,
       handleStateChange,
       loadoutState ? loadoutState.mode : 'total',
+      loadoutState ? (loadoutState.primaryWeapon || {}) : {},
+      (newPrimaryWeapon) => {
+        if (loadoutState) {
+          loadoutState.primaryWeapon = newPrimaryWeapon;
+        }
+        handleStateChange();
+      },
     );
     toggleSectionVisibility(loadoutContainer, hasWeapons);
   }

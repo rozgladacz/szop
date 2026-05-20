@@ -90,6 +90,7 @@ function createLoadoutState(rawLoadout) {
     baseActiveLabels: new Map(),
     baseAuraLabels: new Map(),
     mode: 'per_model',
+    primaryWeapon: {},
   };
   if (!rawLoadout || typeof rawLoadout !== 'object') {
     return state;
@@ -201,6 +202,17 @@ function createLoadoutState(rawLoadout) {
       target.set(key, trimmed);
     });
   });
+  const rawPrimary = rawLoadout.primary_weapon;
+  if (rawPrimary && typeof rawPrimary === 'object' && !Array.isArray(rawPrimary)) {
+    const safe = {};
+    if (Object.prototype.hasOwnProperty.call(rawPrimary, 'melee')) {
+      safe.melee = rawPrimary.melee !== null ? String(rawPrimary.melee) : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(rawPrimary, 'ranged')) {
+      safe.ranged = rawPrimary.ranged !== null ? String(rawPrimary.ranged) : null;
+    }
+    state.primaryWeapon = safe;
+  }
   return state;
 }
 
@@ -224,6 +236,7 @@ function cloneLoadoutState(state) {
       baseActiveLabels: new Map(),
       baseAuraLabels: new Map(),
       mode: 'per_model',
+      primaryWeapon: {},
     };
   }
   return {
@@ -238,6 +251,9 @@ function cloneLoadoutState(state) {
     baseActiveLabels: cloneSection(state.baseActiveLabels),
     baseAuraLabels: cloneSection(state.baseAuraLabels),
     mode: state.mode === 'total' ? 'total' : 'per_model',
+    primaryWeapon: (state.primaryWeapon && typeof state.primaryWeapon === 'object')
+      ? { ...state.primaryWeapon }
+      : {},
   };
 }
 
@@ -284,6 +300,10 @@ function serializeLoadoutState(state) {
       }
       result.aura_labels.push({ id, name: text.slice(0, ABILITY_NAME_MAX_LENGTH) });
     });
+  }
+  if (state.primaryWeapon && typeof state.primaryWeapon === 'object'
+      && Object.keys(state.primaryWeapon).length > 0) {
+    result.primary_weapon = { ...state.primaryWeapon };
   }
   return JSON.stringify(result);
 }

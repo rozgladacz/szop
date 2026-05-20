@@ -11,13 +11,16 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| *(brak aktywnych wątków)* | | | |
+| [HANDOFF_primary-weapon-flag](docs/handoffs/HANDOFF_primary-weapon-flag.md) | Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski + zapis w loadout_json | `loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `rosters.py` | In progress |
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| *(brak zablokowanych zasobów)* | | |
+| `app/static/js/modules/loadout_state.js` | primary-weapon-flag | nowe pole primaryWeapon |
+| `app/static/js/modules/editor_renderers.js` | primary-weapon-flag | UI klikalnej nazwy |
+| `app/static/js/modules/roster_editor.js` | primary-weapon-flag | przekazanie primaryWeapon |
+| `app/routers/rosters.py` | primary-weapon-flag | _parse_loadout_json + _loadout_weapon_details |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 

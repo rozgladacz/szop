@@ -2564,6 +2564,7 @@ def _parse_loadout_json(text: str | None) -> dict[str, Any]:
         "passive": {},
         "active_labels": {},
         "aura_labels": {},
+        "primary_weapon": {},
     }
     mode: str | None = None
     if not text:
@@ -2584,6 +2585,14 @@ def _parse_loadout_json(text: str | None) -> dict[str, Any]:
             continue
         if section in {"active_labels", "aura_labels"}:
             base[section] = _extract_label_map(values)
+            continue
+        if section == "primary_weapon":
+            if isinstance(values, dict):
+                safe: dict[str, str | None] = {}
+                for k, v in values.items():
+                    if k in ("melee", "ranged"):
+                        safe[k] = str(v) if v is not None else None
+                base["primary_weapon"] = safe
             continue
         if section not in {"weapons", "active", "aura", "passive"}:
             continue
@@ -2864,6 +2873,15 @@ def _sanitize_loadout(
 
     if mode_value:
         defaults["mode"] = mode_value
+    if isinstance(payload, dict):
+        raw_primary = payload.get("primary_weapon")
+        if isinstance(raw_primary, dict) and raw_primary:
+            safe_primary: dict[str, str | None] = {}
+            for k, v in raw_primary.items():
+                if k in ("melee", "ranged"):
+                    safe_primary[k] = str(v) if v is not None else None
+            if safe_primary:
+                defaults["primary_weapon"] = safe_primary
     return defaults
 
 
@@ -3027,6 +3045,14 @@ def _loadout_weapon_details(
 ) -> list[dict[str, Any]]:
     details: list[dict[str, Any]] = []
     mode = loadout.get("mode") if isinstance(loadout, dict) else None
+    primary_override: dict[str, str] = {}
+    raw_override = loadout.get("primary_weapon") if isinstance(loadout, dict) else None
+    if isinstance(raw_override, dict):
+        primary_override = {
+            k: (str(v) if v is not None else None)
+            for k, v in raw_override.items()
+            if k in ("melee", "ranged")
+        }
     option_by_id = {
         str(option.get("id")): option
         for option in weapon_options
@@ -3053,6 +3079,17 @@ def _loadout_weapon_details(
             total_count = parsed_count * max(int(roster_unit.count), 0)
         if total_count <= 0:
             continue
+        range_val = option.get("range", 0)
+        try:
+            is_melee = (int(range_val) == 0)
+        except (TypeError, ValueError):
+            is_melee = True
+        weapon_type = "melee" if is_melee else "ranged"
+        if weapon_type in primary_override:
+            override_val = primary_override.get(weapon_type)
+            is_primary = override_val is not None and str(option.get("id")) == override_val
+        else:
+            is_primary = bool(option.get("is_primary", False))
         details.append(
             {
                 "weapon_id": option.get("id"),
@@ -3062,7 +3099,7 @@ def _loadout_weapon_details(
                 "attacks": option.get("attacks"),
                 "ap": option.get("ap"),
                 "traits": option.get("traits"),
-                "is_primary": bool(option.get("is_primary", False)),
+                "is_primary": is_primary,
             }
         )
     return details

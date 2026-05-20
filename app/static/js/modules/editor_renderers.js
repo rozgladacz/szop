@@ -184,6 +184,8 @@ function renderWeaponEditor(
   editable,
   onChange,
   stateMode = 'total',
+  primaryWeapon = {},
+  onPrimaryChange = null,
 ) {
   if (!container) {
     return false;
@@ -269,6 +271,11 @@ function renderWeaponEditor(
     stateMap.set(weaponKey, totalCount);
     weaponMeta.currentValue = totalCount;
     classInfo.weapons.push(weaponMeta);
+    const safeWeapon = (primaryWeapon && typeof primaryWeapon === 'object') ? primaryWeapon : {};
+    const hasOverride = Object.prototype.hasOwnProperty.call(safeWeapon, weaponClass);
+    const isCurrentPrimary = hasOverride
+      ? (safeWeapon[weaponClass] !== null && safeWeapon[weaponClass] === weaponKey)
+      : isPrimaryWeapon;
     classInfo.total += totalCount;
     const assignDefaultWeapon = () => {
       classInfo.defaultWeapon = weaponMeta;
@@ -295,7 +302,22 @@ function renderWeaponEditor(
     info.className = 'roster-ability-details flex-grow-1';
     const name = document.createElement('span');
     name.className = 'roster-ability-label';
-    name.textContent = option.name || 'Broń';
+    name.textContent = (isCurrentPrimary ? '⚑ ' : '') + (option.name || 'Broń');
+    if (editable && typeof onPrimaryChange === 'function') {
+      name.style.cursor = 'pointer';
+      name.title = isCurrentPrimary
+        ? 'Broń podstawowa — kliknij aby przenieść flagę'
+        : 'Kliknij aby ustawić jako broń podstawową';
+      name.addEventListener('click', () => {
+        const next = Object.assign({}, safeWeapon);
+        if (isCurrentPrimary) {
+          next[weaponClass] = null;
+        } else {
+          next[weaponClass] = weaponKey;
+        }
+        onPrimaryChange(next);
+      });
+    }
     info.appendChild(name);
     const cost = document.createElement('span');
     cost.className = 'roster-ability-cost';
