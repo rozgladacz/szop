@@ -90,7 +90,16 @@
       "Bash(Select-Object -First 5)",
       "Bash(python -m pytest tests/test_roster_classification.py -q)",
       "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\mlis\\\\.claude\\\\projects\\\\\" -Recurse -Filter \"*.jsonl\" | Sort-Object LastWriteTime -Descending | Select-Object -First 50 | Select-Object FullName, LastWriteTime | Format-Table -AutoSize)",
-      "Bash(awk '{print $2}')"
+      "Bash(awk '{print $2}')",
+      "Bash(python -m pytest tests/test_hero_attach_detach.py -x --tb=short -q)",
+      "Bash(python /tmp/test_attached_hero_quote.py)",
+      "Bash(cp /tmp/test_attached_hero_quote.py \"./test_attached_hero_temp.py\")",
+      "Bash(python test_attached_hero_temp.py)",
+      "Bash(python -m pytest test_attached_hero_temp.py)",
+      "Bash(python -m pytest test_attached_hero_temp.py -s)",
+      "Bash(python -m pytest tests/test_hero_attach_detach.py tests/test_roster_classification.py -x --tb=short -q)",
+      "Bash(python -m pytest tests/test_hero_attach_detach.py tests/test_roster_classification.py -x --tb=short)",
+      "Bash(python -m pytest -x --tb=short)"
     ]
   }
 }

@@ -26,7 +26,7 @@ from typing import Any, Sequence
 
 from ... import models
 from ..utils import ARMY_RULE_OFF_PREFIX
-from ._engine import ORDER_LIKE_ACTIVE_SLUGS
+from ._engine import ORDER_LIKE_ACTIVE_SLUGS, ROLE_SLUGS
 from .abilities import ability_cost_from_name, base_model_cost
 from .passive_state import (
     _parse_passive_counts,
@@ -303,6 +303,15 @@ def normalize_roster_unit_loadout(
         for candidate in (slug, slug.casefold(), normalize_name(slug), identifier):
             if candidate:
                 allowed_passive_lookup.setdefault(candidate, identifier)
+    # Role slugs (wojownik/strzelec) are classification markers persisted into
+    # loadout.passive by _apply_classification_to_loadout. They must always be
+    # accepted — even when the unit's army flags declare only one of them — so
+    # that an attached hero whose group classifies as Strzelec keeps its
+    # passive.strzelec=1 flag through sanitization. Without this, the role
+    # marker is dropped and role_totals falls back to the unit's default flag,
+    # producing the regressed "stale 49.14" cost.
+    for role in ROLE_SLUGS:
+        allowed_passive_lookup.setdefault(role, role)
 
     passive_counts = _parse_passive_counts(raw_loadout)
     sanitized_passive: dict[str, int] = {}

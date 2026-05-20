@@ -10,7 +10,7 @@
 | Nowe zadanie pasuje do aktualnego "Cel" | Aktualizuj "W toku" przed każdym podetapem — nie po jego zakończeniu. |
 | Aktywny plan file (plan mode → execute) | Nie duplikuj BIEŻĄCE ZADANIE. Zaktualizuj tylko LOG SESJI + WIEDZA PROJEKTU jeśli zmieniła się architektura. |
 
-Pominięcie tego kroku = utrata kontekstu przy następnym uruchomieniu agenta. Nie ma zadania zbyt małego żeby go pominąć.
+Pominięcie tego kroku = utrata kontekstu przy następnym uruchomieniu agenta.
 
 ---
 
@@ -76,7 +76,7 @@ Zależności:
 
 Dla każdej zmiany dotykającej hot path (endpointy `/quote`, `/rosters/{id}`, pętle renderujące strony z listą oddziałów) odpowiedz na te pytania **w planie, zanim zaczniesz implementację**:
 
-1. **Ile extra DB queries** generuje ta zmiana na typowej rozpisce (10–20 oddziałów)? Policz pesymistyczny przypadek: N oddziałów × M queries per oddział.
+1. **Ile extra DB queries** generuje ta zmiana na typowej rozpisce (5–12 oddziałów)? Policz pesymistyczny przypadek: N oddziałów × M queries per oddział.
 2. **Nowe FK/kolumny:** Czy dominujący pattern to `WHERE nowa_kolumna = ?`? Jeśli tak — indeks (partial jeśli kolumna często NULL) musi być częścią migracji Alembic, nie post-hoc poprawką.
 3. **Fast-path:** Czy istnieje przypadek trywialny który można obsłużyć bez DB query? (Przykład: standalone hero z `parent_id IS NULL AND is_hero` → brak query do `_hero_group_partner_ids`.)
 4. **SSOT-check przed implementacją:** Przed dodaniem logiki klasyfikacji, kosztów lub walidacji — `grep` dla istniejących funkcji SSOT (`_classification_map`, `roster_unit_role_totals`, itp.) i wywołaj istniejącą funkcję. Nigdy nie replikuj tej logiki inline.

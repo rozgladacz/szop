@@ -382,7 +382,11 @@ function renderPassiveEditor(
             }
             return r.json();
           })
-          .then(() => { window.location.reload(); })
+          .then(() => {
+            const targetUrl = new URL(window.location.href);
+            targetUrl.searchParams.set('selected', String(ruId));
+            window.location.href = targetUrl.toString();
+          })
           .catch((err) => {
             heroSelect.disabled = false;
             errorBox.textContent = `Błąd: ${err && err.message ? err.message : String(err)}`;

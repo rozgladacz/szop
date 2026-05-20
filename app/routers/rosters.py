@@ -1441,6 +1441,38 @@ def quote_roster_unit(
         selected_role = group_role
         selected_total = round(shooter_total if group_role == "strzelec" else warrior_total, 2)
 
+        # When group classification overrides the solo role, item_costs.weapons must be
+        # recomputed with the correct role's traits so the right panel shows accurate
+        # per-weapon costs (e.g. Miecz energetyczny halved when hero classified strzelec
+        # by the group but evaluated solo as wojownik).
+        solo_role = quote.get("selected_role") or "wojownik"
+        if include_item_costs and group_role != solo_role:
+            unit_obj = roster_unit.unit
+            normalized_for_traits = costs.normalize_roster_unit_loadout(
+                unit_obj, request_payload.get("loadout")
+            )
+            passive_for_traits = costs.compute_passive_state(unit_obj, normalized_for_traits)
+            base_traits = list(costs._strip_role_traits(passive_for_traits.traits))
+            group_traits = costs._with_role_trait(base_traits, group_role)
+            weapon_by_id_for_group: dict[int, Any] = {}
+            for link in getattr(unit_obj, "weapon_links", []) or []:
+                wid = getattr(link, "weapon_id", None)
+                weapon = getattr(link, "weapon", None)
+                if wid is None or weapon is None:
+                    continue
+                weapon_by_id_for_group[int(wid)] = weapon
+            dw_id = getattr(unit_obj, "default_weapon_id", None)
+            dw = getattr(unit_obj, "default_weapon", None)
+            if dw_id is not None and dw is not None:
+                weapon_by_id_for_group.setdefault(int(dw_id), dw)
+            corrected_weapons = {
+                str(wid): round(costs.weapon_cost(w, unit_obj.quality, group_traits), 2)
+                for wid, w in weapon_by_id_for_group.items()
+            }
+            existing_item_costs = dict(quote.get("item_costs") or {})
+            existing_item_costs["weapons"] = corrected_weapons
+            quote = {**quote, "item_costs": existing_item_costs}
+
     return JSONResponse(
         _json_safe(
             {
@@ -2741,7 +2773,20 @@ def _sanitize_loadout(
                         )
                 else:
                     entry_id = entry.get("id") or entry.get("weapon_id") or entry.get("ability_id")
-                    raw_value = entry.get("per_model") or entry.get("count") or entry.get("value")
+                    # Use explicit None check rather than `or` chain: count=0 is
+                    # a legitimate value (weapon explicitly deselected) that
+                    # must not fall back to the next key or to the default. Old
+                    # `entry.get("per_model") or entry.get("count")` collapsed
+                    # 0 to None, causing _sanitize_loadout to substitute the
+                    # weapon's default_count and silently re-enable it. This
+                    # was the source of attached-hero cost regression (49.14
+                    # vs correct 37.80 — weapon 203 reactivated by the
+                    # fallback).
+                    raw_value = entry.get("per_model")
+                    if raw_value is None:
+                        raw_value = entry.get("count")
+                    if raw_value is None:
+                        raw_value = entry.get("value")
                 if entry_id is None:
                     continue
                 normalized[str(entry_id)] = raw_value

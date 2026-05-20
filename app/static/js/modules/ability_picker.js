@@ -424,7 +424,12 @@ function initAbilityPicker(root) {
               return response.json();
             })
             .then(() => {
-              window.location.reload();
+              // Zachowaj zaznaczenie bohatera po reload — bez ?selected=
+              // server-side rendering nie wie, że user właśnie operował na tym
+              // RosterUnit i prawy panel zostałby pusty.
+              const targetUrl = new URL(window.location.href);
+              targetUrl.searchParams.set('selected', String(heroRosterUnitId));
+              window.location.href = targetUrl.toString();
             })
             .catch((err) => {
               selectEl.disabled = false;
