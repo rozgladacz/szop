@@ -1,94 +1,62 @@
-# HANDOFF
+# HANDOFF — Meta
 
-> **Protokół przy ZMIANIE ZADANIA:** Na początku nowego zadania (jeśli
-> sekcja BIEŻĄCE ZADANIE opisuje inny cel) — nadpisz całą sekcję
-> BIEŻĄCE ZADANIE. Sekcji WIEDZA PROJEKTU nie czyść — to trwała
-> referencja. Dopisz wpis do Logu.
->
-> **Protokół przy KONTYNUACJI:** Aktualizuj PRZED każdym podetapem,
-> nie po sesji — kontekst może się skończyć w trakcie pracy.
+> **Co tu jest:** spis aktywnych wątków + zablokowane zasoby + szybkozmienne notatki cross-wątkowe + LOG SESJI.
+> **Czego tu NIE ma:** wiedzy stabilnej (mapa submodułów, architektura) — to jest w `docs/architecture.md`.
+> **Per-wątek:** szczegóły w `docs/handoffs/HANDOFF_<slug>.md`.
+> **Workflow:** uruchom `/load-context` na początku sesji. Detale konwencji: [docs/handoffs/README.md](docs/handoffs/README.md).
 
 ---
 
-# BIEŻĄCE ZADANIE
-*(Nadpisz tę sekcję przy każdej zmianie zadania)*
+## Aktywne wątki
 
-## Cel
-Faza III refaktoryzacji `app/static/js/app.js`: wydzielenie 8 sekcji pomocniczych do modułów IIFE bez ruszania `ROSTER EDITOR CLOSURE`.
+| Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
+|---|---|---|---|
+| *(brak aktywnych wątków)* | | | |
 
-## W toku
-- Ekstrakcja modułów wykonana.
-- Call-site check, `node --check` i sandbox load-test JS przeszły.
-- Pytest/smoke dev zablokowane lokalnym runtime: `make`/`pytest` poza PATH, `.venv\Scripts\python` wskazuje na WindowsApps Python z odmową dostępu; eskalacja została odrzucona przez limit aplikacji.
-- Warstwy: JS moduły, `app.js`, `base.html`, testy Node/frontend, mapa zależności/call sites.
+## Zasoby zablokowane (reverse lookup)
 
-## Pliki dotknięte
-- `app/static/js/app.js`
-- `app/static/js/modules/*`
-- `app/templates/base.html`
-- `tests/test_frontend_*.py`
-- `docs/frontend_js_modules.md`
-- `HANDOFF.md`
+| Plik / katalog | Wątek blokujący | Powód |
+|---|---|---|
+| *(brak zablokowanych zasobów)* | | |
 
-## Hipotezy / pytania otwarte
-- Moduły pozostają jako IIFE publikujące API na `window`.
-- `initRosterEditor`, `WEAPON PICKER`, `ABILITY PICKER`, `ARMORY WEAPON TREE`, `WEAPON INHERITANCE PANEL` zostają w `app.js`.
-
-## Jak zweryfikować
-```bash
-make test
-python -m pytest tests/test_frontend_loadout_state.py tests/test_frontend_payload_adapters.py tests/test_frontend_roster_refresh_priority_regression.py -q
-pytest -q
-# manual smoke: make dev -> Zbrojownia / Edytor Armii / Rozpiski
-```
+> **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
 ---
 
-# WIEDZA PROJEKTU
-*(Nie czyść przy zmianie zadania — aktualizuj tylko gdy architektura się zmienia)*
+## Szybkozmienne notatki cross-wątkowe
 
-## Pakiet `app/services/costs/` — mapa submodułów
+*(Krótkie alerty istotne dla wielu wątków. Coś, co nie pasuje jeszcze do `docs/`, ale dotyczy więcej niż jednego wątku. Sprzątaj regularnie — przenoś do `docs/*` jeśli reguła stała się trwała.)*
 
-| Plik | Linie | Zawartość |
-|------|-------|-----------|
-| `_engine.py` | ~300 | Stałe, tabele, dataclassy (`PassiveState`, `AbilityCostComponents`), `_roster_unit_classification`, stubs importów |
-| `primitives.py` | ~310 | Sekcja 4: `ability_identifier`, `normalize_name`, `_strip_role_traits` |
-| `weapons.py` | ~317 | Sekcja 6: `_weapon_cost`, `weapon_cost_components`, `weapon_cost` |
-| `abilities.py` | ~372 | Sekcja 5: `passive_cost`, `base_model_cost`, `ability_cost_from_name` |
-| `passive_state.py` | ~347 | Sekcja 3: `compute_passive_state`, helpery army/passive |
-| `unit_helpers.py` | ~351 | Sekcja 7: `ability_cost`, `unit_default_weapons`, `normalize_roster_unit_loadout` |
-| `role_totals.py` | ~471 | Sekcja 9: `roster_unit_role_totals` |
-| `quote.py` | ~314 | Sekcja 8: `calculate_roster_unit_quote` (SSOT core) |
-| `roster.py` | ~127 | Sekcja 10: `roster_unit_cost`, `recalculate_roster_costs` |
-
-## Frontend JS — mapa modułów
-
-- Aktualna mapa zależności i lista call sites po podziale `app/static/js/app.js`: `docs/frontend_js_modules.md`.
-- `ROSTER EDITOR CLOSURE`, `WEAPON PICKER`, `ABILITY PICKER`, `ARMORY WEAPON TREE`, `WEAPON INHERITANCE PANEL` nadal mieszkają w `app.js`.
+- **2026-05-20:** Lokalny runtime na Windows — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
+- **2026-05-12:** Merge conflicts gałęzi Klasyfikacja nadal nierozwiązane — blokują SSOT Phase 5. Patrz [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
-# LOG SESJI
+## LOG SESJI
 
-### 2026-05-12 — Start zadania: modularizacja app.js
-- Zamknięto poprzedni stan "BRAK AKTYWNEGO ZADANIA".
-- Nowy cel: sekcyjna ekstrakcja `app.js` z zachowaniem 1:1 i pełną weryfikacją parity/smoke.
+*(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
-### 2026-05-13 — Przejście do Fazy II payload adapters
-- Zamknięto etap startowej modularizacji jako kontekst bazowy.
-- Nowy cel: adaptery i walidatory payloadów przed dalszym podziałem `app.js`.
+### 2026-05-20 — refactor-agents-md (archived)
+- Podział AGENTS.md (267 → 73 linii) na manifest `[CRITICAL]/[REQUIRED]/[RECOMMENDED]` + szczegóły w `docs/`. HANDOFF.md przebudowany na meta-spis (95 → 61 linii). System per-wątek `docs/handoffs/HANDOFF_<slug>.md` + 5 skilli (`/handoff-start`, `/handoff-archive`, `/handoff-status`, `/load-context`, `/handoff-sync`) + obowiązkowy SessionStart hook w `.claude/settings.json`.
+- Pliki: AGENTS.md, HANDOFF.md, `docs/{README,overview,architecture,roadmap,planning,developing,testing,git-workflow,app-js-guide}.md`, `docs/handoffs/README.md`, `.claude/settings.json`, `.claude/skills/handoff-{start,archive,status,sync}/SKILL.md`, `.claude/skills/load-context/SKILL.md`.
+- Weryfikacja: pytest 172/172 passed, 0 zbitych linków w 13 plikach, JSON `.claude/settings.json` poprawny, SessionStart hook output zweryfikowany ręcznie.
 
-### 2026-05-14 — Faza II payload adapters zakończona
-- Dodano `payload_adapters.js`, flagę `window.SZOP_DEV_MODE`, podpięcia w `app.js` i testy regresyjne.
-- Weryfikacja automatyczna: `tests/test_frontend_payload_adapters.py`, istniejące testy frontendowe oraz pełne `pytest -q` przeszły.
-- Smoke przeglądarkowy wymaga ręcznej akceptacji w UI, bo automatyczna przeglądarka została zablokowana przez uprawnienia środowiska.
-
-### 2026-05-14 — Start Fazy III modułów pomocniczych app.js
-- Zamknięto poprzedni cel Fazy II jako bazę roboczą.
-- Nowy cel: 8 małych ekstrakcji sekcji bez zmian zachowania kosztów, loadoutu i bootstrap order.
-
-### 2026-05-14 — Faza III modułów pomocniczych app.js zaimplementowana
-- Wydzielono sekcje: text parsing, UI pickers, spell weapon preview, spell ability forms, roster rendering, loadout state, editor renderers, roster adders.
+### 2026-05-14 — Faza III modułów pomocniczych app.js (zaimplementowana)
+- Wydzielono 8 sekcji do modułów IIFE: text parsing, UI pickers, spell weapon preview, spell ability forms, roster rendering, loadout state, editor renderers, roster adders.
 - Dodano `docs/frontend_js_modules.md` jako mapę zależności i call-site checklist.
-- Weryfikacja wykonana: `node --check` dla nowych modułów i `app.js`, sandbox load-test modułów + `app.js`, call-site grep.
-- Weryfikacja zablokowana: pytest/full smoke przez niedostępny Python/make w lokalnym środowisku.
+- Weryfikacja: `node --check` dla nowych modułów i `app.js`, sandbox load-test, call-site grep — przeszły.
+- Pytest/full smoke zablokowany niedostępnym Python/make w lokalnym środowisku Windows (dalej notatka cross-wątkowa wyżej).
+- Commity: `b1ccd78` (faza I-III), `ef4bbf7` (faza IV), `65f8b6f` (merge).
+
+### 2026-05-14 — Faza II payload adapters (zakończona)
+- Dodano `payload_adapters.js`, flagę `window.SZOP_DEV_MODE`, podpięcia w `app.js` i testy regresyjne (`tests/test_frontend_payload_adapters.py`).
+- Weryfikacja automatyczna: pełne `pytest -q` przeszło.
+- Smoke przeglądarkowy wymagał ręcznej akceptacji w UI.
+
+### 2026-05-13 — Start Fazy II payload adapters
+- Zamknięto etap startowej modularizacji jako kontekst bazowy.
+- Cel: adaptery i walidatory payloadów przed dalszym podziałem `app.js`.
+
+### 2026-05-12 — Start modularizacji app.js
+- Zamknięto stan "BRAK AKTYWNEGO ZADANIA".
+- Nowy cel: sekcyjna ekstrakcja `app.js` z zachowaniem 1:1 i pełną weryfikacją parity/smoke.

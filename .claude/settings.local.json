@@ -99,7 +99,9 @@
       "Bash(python -m pytest test_attached_hero_temp.py -s)",
       "Bash(python -m pytest tests/test_hero_attach_detach.py tests/test_roster_classification.py -x --tb=short -q)",
       "Bash(python -m pytest tests/test_hero_attach_detach.py tests/test_roster_classification.py -x --tb=short)",
-      "Bash(python -m pytest -x --tb=short)"
+      "Bash(python -m pytest -x --tb=short)",
+      "Bash(mkdir -p \"docs/handoffs\" \".claude/skills/handoff-start\" \".claude/skills/handoff-archive\" \".claude/skills/handoff-status\" \".claude/skills/load-context\" \".claude/skills/handoff-sync\")",
+      "Bash(python -m pytest -x --tb=short -q)"
     ]
   }
 }
