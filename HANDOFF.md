@@ -1,126 +1,70 @@
-# HANDOFF
+# HANDOFF — Meta
 
-> **Protokół przy ZMIANIE ZADANIA:** Na początku nowego zadania (jeśli
-> sekcja BIEŻĄCE ZADANIE opisuje inny cel) — nadpisz całą sekcję
-> BIEŻĄCE ZADANIE. Sekcji WIEDZA PROJEKTU nie czyść — to trwała
-> referencja. Dopisz wpis do Logu.
->
-> **Protokół przy KONTYNUACJI:** Aktualizuj PRZED każdym podetapem,
-> nie po sesji — kontekst może się skończyć w trakcie pracy.
+> **Co tu jest:** spis aktywnych wątków + zablokowane zasoby + szybkozmienne notatki cross-wątkowe + LOG SESJI.
+> **Czego tu NIE ma:** wiedzy stabilnej (mapa submodułów, architektura) — to jest w `docs/architecture.md`.
+> **Per-wątek:** szczegóły w `docs/handoffs/HANDOFF_<slug>.md`.
+> **Workflow:** uruchom `/load-context` na początku sesji. Detale konwencji: [docs/handoffs/README.md](docs/handoffs/README.md).
 
 ---
 
-# BIEŻĄCE ZADANIE
-*(Nadpisz tę sekcję przy każdej zmianie zadania)*
+## Aktywne wątki
 
-## Cel
-**BRAK AKTYWNEGO ZADANIA** — restrukturyzacja `costs/` zakończona 2026-05-02.
-Czekam na nowe polecenie użytkownika.
+| Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
+|---|---|---|---|
+| [HANDOFF_primary-weapon-flag](docs/handoffs/HANDOFF_primary-weapon-flag.md) | Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski + zapis w loadout_json | `loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `rosters.py` | In progress |
+| [HANDOFF_widok-rozpiski-ostrzezenia](docs/handoffs/HANDOFF_widok-rozpiski-ostrzezenia.md) | Wskaźnik ⚠+tooltip ostrzeżeń po liczniku oddziałów/bohaterów + cleanup martwego `warnings:[]` w backendzie | `roster_edit.html`, `roster_warnings.js` (NEW), `roster_editor.js`*, `rosters.py`*, `rules.py` | In progress |
 
-## W toku
-—
+## Zasoby zablokowane (reverse lookup)
 
-## Pliki dotknięte
-—
+| Plik / katalog | Wątek blokujący | Powód |
+|---|---|---|
+| `app/static/js/modules/loadout_state.js` | primary-weapon-flag | nowe pole primaryWeapon |
+| `app/static/js/modules/editor_renderers.js` | primary-weapon-flag | UI klikalnej nazwy |
+| `app/static/js/modules/roster_editor.js` | primary-weapon-flag | przekazanie primaryWeapon |
+| `app/routers/rosters.py` | primary-weapon-flag | _parse_loadout_json + _loadout_weapon_details |
+| `app/routers/rosters.py` | widok-rozpiski-ostrzezenia | dodanie `weapon_cost` w `roster_items.append` + cleanup `warnings:[]` (sekcje ortogonalne do primary-weapon-flag) |
+| `app/static/js/modules/roster_editor.js` | widok-rozpiski-ostrzezenia | 2 linie hook po updateTotalSummary / refreshRosterCountDisplay (ortogonalne do primary-weapon-flag) |
+| `app/templates/roster_edit.html` | widok-rozpiski-ostrzezenia | nowy znacznik `<span data-roster-warnings>` + atrybut `data-unit-weapon-cost` |
+| `app/services/rules.py` | widok-rozpiski-ostrzezenia | usunięcie martwej `collect_roster_warnings()` |
 
-## Hipotezy / pytania otwarte
-—
-
-## Jak zweryfikować
-```bash
-python -m pytest tests/ -q   # 143/143 — baseline po zakończeniu restrukturyzacji
-```
-
----
-
-# WIEDZA PROJEKTU
-*(Nie czyść przy zmianie zadania — aktualizuj tylko gdy architektura się zmienia)*
-
-## Pakiet `app/services/costs/` — mapa submodułów
-
-| Plik | Linie | Zawartość |
-|------|-------|-----------|
-| `_engine.py` | ~300 | Stałe, tabele, dataclassy (`PassiveState`, `AbilityCostComponents`), `_roster_unit_classification`, stubs importów |
-| `primitives.py` | ~310 | Sekcja 4: `ability_identifier`, `normalize_name`, `_strip_role_traits` |
-| `weapons.py` | ~317 | Sekcja 6: `_weapon_cost`, `weapon_cost_components`, `weapon_cost` |
-| `abilities.py` | ~372 | Sekcja 5: `passive_cost`, `base_model_cost`, `ability_cost_from_name` |
-| `passive_state.py` | ~347 | Sekcja 3: `compute_passive_state`, helpery army/passive |
-| `unit_helpers.py` | ~351 | Sekcja 7: `ability_cost`, `unit_default_weapons`, `normalize_roster_unit_loadout` |
-| `role_totals.py` | ~471 | Sekcja 9: `roster_unit_role_totals` |
-| `quote.py` | ~314 | Sekcja 8: `calculate_roster_unit_quote` (SSOT core) |
-| `roster.py` | ~127 | Sekcja 10: `roster_unit_cost`, `recalculate_roster_costs` |
-
-## Monkeypatching guide
-
-- `costs.weapons._weapon_cost` — formuła kosztu broni
-- `costs.role_totals.compute_passive_state` — passive state wewnątrz role totals
-- `costs.quote.compute_passive_state` — passive state wewnątrz quote
-- `costs.quote.roster_unit_role_totals` — role totals wewnątrz quote
-
-## Performance baseline (rosters/10)
-
-- Total: ~334 ms, Chmiera: ~70 ms (po optymalizacjach 2026-04-30)
-- Badge-only refresh (`include_item_costs=False`): ~3 ms/oddział
+> **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
 ---
 
-# LOG SESJI
-*(Dopisuj na górze. Zachowaj max ~5 ostatnich wpisów — starsze usuń lub skróć do jednej linii.)*
+## Szybkozmienne notatki cross-wątkowe
 
+*(Krótkie alerty istotne dla wielu wątków. Coś, co nie pasuje jeszcze do `docs/`, ale dotyczy więcej niż jednego wątku. Sprzątaj regularnie — przenoś do `docs/*` jeśli reguła stała się trwała.)*
 
-
-### 2026-05-02 — Ekstrakcja role_totals.py + quote.py; naprawa błędów poprzedniej sesji
-
-**Cel:** Dokończyć restrukturyzację — sekcje 8 i 9 ostatnie żywe bloki w `_engine.py`.
-
-**Diagoza zmarnowanego kontekstu (poprzednia sesja):**
-1. `Write` tool z 400-liniowym ciałem `roster_unit_role_totals` — weszło do kontekstu.
-2. `Edit` zastąpił tylko 6 pierwszych linii sekcji → ciało zostało jako `_roster_unit_role_totals_DELETED`.
-3. Sesja skończyła się przed aktualizacją HANDOFF.md.
-
-**Wykonane:**
-- `role_totals.py` — już istniał z poprzedniej sesji (310 linii, poprawny).
-- `_engine.py` — Python text-surgery usunął martwą `_roster_unit_role_totals_DELETED` (~409 linii).
-- `quote.py` — Python text-surgery skopiował sekcję 8 z `_engine.py`; ciało nigdy nie weszło do kontekstu.
-- `_engine.py` sekcja 8 → stub `from .quote import calculate_roster_unit_quote`.
-- `__init__.py` — dodano `role_totals`, `quote`; zaktualizowany docstring.
-- `tests/test_passive_costs.py:572` — patch zmieniony na `costs.role_totals.compute_passive_state`; zbędna łatka `ability_cost_from_name` (nigdy nie działała — `ability_cost_components_from_name` rozwiązuje `ability_cost_from_name` przez własne globals `abilities.py`, nie przez `role_totals`) usunięta z wyjaśnieniem.
-- `AGENTS.md` — nowa sekcja "Przenoszenie dużych bloków kodu", poprawka HANDOFF zasady, stała referencja `costs.py` → `costs/_engine.py`.
-
-**Weryfikacja:**
-- `python -m pytest tests/ -q` → **143/143 passed**.
+- **2026-05-20:** Lokalny runtime na Windows — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
+- **2026-05-12:** Merge conflicts gałęzi Klasyfikacja nadal nierozwiązane — blokują SSOT Phase 5. Patrz [docs/roadmap.md](docs/roadmap.md).
 
 ---
 
-### 2026-05-01 — Ekstrakcja passive_state.py + unit_helpers.py + roster.py
+## LOG SESJI
 
-> *Wpis dopisany retrospektywnie — sesja wybiła limit kontekstu przed aktualizacją HANDOFF.md.*
+*(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
-**Cel:** Wyciągnąć sekcje 3, 7, 10.
+### 2026-05-20 — refactor-agents-md (archived)
+- Podział AGENTS.md (267 → 73 linii) na manifest `[CRITICAL]/[REQUIRED]/[RECOMMENDED]` + szczegóły w `docs/`. HANDOFF.md przebudowany na meta-spis (95 → 61 linii). System per-wątek `docs/handoffs/HANDOFF_<slug>.md` + 5 skilli (`/handoff-start`, `/handoff-archive`, `/handoff-status`, `/load-context`, `/handoff-sync`) + obowiązkowy SessionStart hook w `.claude/settings.json`.
+- Pliki: AGENTS.md, HANDOFF.md, `docs/{README,overview,architecture,roadmap,planning,developing,testing,git-workflow,app-js-guide}.md`, `docs/handoffs/README.md`, `.claude/settings.json`, `.claude/skills/handoff-{start,archive,status,sync}/SKILL.md`, `.claude/skills/load-context/SKILL.md`.
+- Weryfikacja: pytest 172/172 passed, 0 zbitych linków w 13 plikach, JSON `.claude/settings.json` poprawny, SessionStart hook output zweryfikowany ręcznie.
 
-**Wykonane:**
-- `passive_state.py` — `compute_passive_state`, `army_rules`, `normalize_roster_unit_count`, helpery payload/counts.
-- `unit_helpers.py` — `unit_default_weapons`, `ability_cost`, `ability_uses_order_like_cost`, `normalize_roster_unit_loadout`, `unit_total_cost`.
-- `roster.py` — `roster_unit_cost`, `recalculate_roster_costs`, `roster_total`, `ensure_cached_costs`, `update_cached_costs`.
-- `_engine.py` sekcje 3, 7, 10 → stuby importów.
-- `__init__.py` — dodano `passive_state`, `unit_helpers`, `roster`.
+### 2026-05-14 — Faza III modułów pomocniczych app.js (zaimplementowana)
+- Wydzielono 8 sekcji do modułów IIFE: text parsing, UI pickers, spell weapon preview, spell ability forms, roster rendering, loadout state, editor renderers, roster adders.
+- Dodano `docs/frontend_js_modules.md` jako mapę zależności i call-site checklist.
+- Weryfikacja: `node --check` dla nowych modułów i `app.js`, sandbox load-test, call-site grep — przeszły.
+- Pytest/full smoke zablokowany niedostępnym Python/make w lokalnym środowisku Windows (dalej notatka cross-wątkowa wyżej).
+- Commity: `b1ccd78` (faza I-III), `ef4bbf7` (faza IV), `65f8b6f` (merge).
 
-**Weryfikacja:**
-- `pytest tests/ -q` → 143/143. Profile: Chmiera ~70 ms, total ~352 ms.
+### 2026-05-14 — Faza II payload adapters (zakończona)
+- Dodano `payload_adapters.js`, flagę `window.SZOP_DEV_MODE`, podpięcia w `app.js` i testy regresyjne (`tests/test_frontend_payload_adapters.py`).
+- Weryfikacja automatyczna: pełne `pytest -q` przeszło.
+- Smoke przeglądarkowy wymagał ręcznej akceptacji w UI.
 
----
+### 2026-05-13 — Start Fazy II payload adapters
+- Zamknięto etap startowej modularizacji jako kontekst bazowy.
+- Cel: adaptery i walidatory payloadów przed dalszym podziałem `app.js`.
 
-### 2026-05-01 — Ekstrakcja weapons.py + abilities.py
-`weapons.py` (sekcja 6), `abilities.py` (sekcja 5+6 shims). Kluczowe: mutual dependency rozwiązana kolejnością (weapons first, abilities importuje weapon_cost). Patch `costs.weapons._weapon_cost` zamiast `costs._engine._weapon_cost`. 143/143.
-
-### 2026-04-30 — Rozbicie costs.py → pakiet costs/
-`costs.py` → `costs/_engine.py` (git mv) + `__init__.py` (re-eksport API) + `primitives.py` (sekcja 4). Wzorzec ekstrakcji z re-importem przez globals `_engine` potwierdzony. 143/143.
-
-### 2026-04-30 — Optymalizacja cost engine
-`lru_cache` na `normalize_name` + `ability_identifier`. Hoisting + memoizacja w `roster_unit_role_totals`. Wynik: Leman Russ 4480 ms → 41 ms, Chmiera kilkanaście s → 55 ms. Badge-only: 3 ms. 143/143.
-
-**Pominięte i odłożone:**
-- A2 — `selectinload(Weapon.parent).selectinload(Weapon.parent)` w `_unit_eager_options`
-  okazał się intencjonalnym dziadkiem (`utils.py:207-209`), nie duplikatem.
-- B3 — skip render gdy zmienia się tylko `count`. Niepotrzebne po B1.
-- C1 — lazy unit_payloads + AJAX endpoint. Osobne zadanie, niższy priorytet.
+### 2026-05-12 — Start modularizacji app.js
+- Zamknięto stan "BRAK AKTYWNEGO ZADANIA".
+- Nowy cel: sekcyjna ekstrakcja `app.js` z zachowaniem 1:1 i pełną weryfikacją parity/smoke.

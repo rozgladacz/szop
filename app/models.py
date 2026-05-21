@@ -481,10 +481,6 @@ class Roster(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="RosterUnit.position",
     )
-    roster_unit_pairs: Mapped[List["RosterUnitPair"]] = relationship(
-        back_populates="roster",
-        cascade="all, delete-orphan",
-    )
 
 
 class RosterUnit(TimestampMixin, Base):
@@ -498,29 +494,22 @@ class RosterUnit(TimestampMixin, Base):
     cached_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     custom_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    parent_roster_unit_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("roster_units.id", ondelete="SET NULL"), nullable=True
+    )
 
     roster: Mapped[Roster] = relationship(back_populates="roster_units")
     unit: Mapped[Unit] = relationship(back_populates="roster_units")
-
-
-class RosterUnitPair(TimestampMixin, Base):
-    __tablename__ = "roster_unit_pairs"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    roster_id: Mapped[int] = mapped_column(ForeignKey("rosters.id"), nullable=False)
-    first_roster_unit_id: Mapped[int] = mapped_column(
-        ForeignKey("roster_units.id"), nullable=False
+    parent: Mapped[Optional["RosterUnit"]] = relationship(
+        "RosterUnit",
+        remote_side=[id],
+        back_populates="attached_heroes",
+        foreign_keys=[parent_roster_unit_id],
     )
-    second_roster_unit_id: Mapped[int] = mapped_column(
-        ForeignKey("roster_units.id"), nullable=False
-    )
-
-    roster: Mapped[Roster] = relationship(back_populates="roster_unit_pairs")
-    first_roster_unit: Mapped[RosterUnit] = relationship(
-        foreign_keys=[first_roster_unit_id]
-    )
-    second_roster_unit: Mapped[RosterUnit] = relationship(
-        foreign_keys=[second_roster_unit_id]
+    attached_heroes: Mapped[List["RosterUnit"]] = relationship(
+        "RosterUnit",
+        back_populates="parent",
+        foreign_keys=[parent_roster_unit_id],
     )
 
 
@@ -536,7 +525,6 @@ for cls in [
     UnitAbility,
     Roster,
     RosterUnit,
-    RosterUnitPair,
     ArmySpell,
 ]:
     event.listen(cls, "before_insert", touch_timestamps)

@@ -85,7 +85,9 @@ def _weapon_cost(
     if "niestrudzony" in unit_set and "samolot" not in unit_set:
         mult *= 1.5
     if "straznik" in unit_set and not melee:
-        mult *= 1.5
+        mult *= 1.7
+    if "bastion" in unit_set and melee:
+        mult *= 1.2
     if "szpica" in unit_set:
         chance += 0.5
     if "ostrozny" in unit_set:

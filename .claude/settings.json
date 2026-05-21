@@ -7,6 +7,14 @@
           {"type": "command", "command": "python -m pytest -x --tb=short 2>&1 | tail -20"}
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {"type": "command", "command": "python -c \"import os, glob; threads = sorted(os.path.basename(p)[len('HANDOFF_'):-len('.md')] for p in glob.glob('docs/handoffs/HANDOFF_*.md') if os.path.basename(p) != 'README.md'); print('[OPR SESSION START]'); print('Protokol: 1) AGENTS.md  2) HANDOFF.md  3) docs/handoffs/HANDOFF_<twoj-watek>.md'); print('Skrot: uruchom /load-context'); print(''); print('Aktywne watki ({0}): {1}'.format(len(threads), ', '.join(threads) if threads else 'brak')); print('Zasada: jesli kontynuujesz istniejacy watek - odczytaj jego HANDOFF_X.md. Jesli nowy - /handoff-start <slug>.')\""}
+        ]
+      }
     ]
   },
   "permissions": {
@@ -29,7 +37,9 @@
       "mcp__Claude_Preview__preview_screenshot",
       "mcp__Claude_Preview__preview_console_logs",
       "mcp__Claude_Preview__preview_snapshot",
-      "mcp__Claude_Preview__preview_list"
+      "mcp__Claude_Preview__preview_list",
+      "mcp__ccd_session_mgmt__search_session_transcripts",
+      "mcp__Claude_in_Chrome__tabs_context_mcp"
     ]
   }
 }

@@ -441,18 +441,7 @@ def roster_unit_role_totals(
             passive_entry_diff = selected_cost - default_cost
             if passive_entry_diff == 0:
                 continue
-            is_unit_wide_binary_passive = ident not in {
-                "transport",
-                "otwarty_transport",
-                "platforma_strzelecka",
-                "otwarty transport",
-                "platforma strzelecka",
-            }
-            passive_multiplier = (
-                model_count
-                if is_unit_wide_binary_passive
-                else (1 if total_mode else ability_multiplier)
-            )
+            passive_multiplier = model_count
             passive_diff += passive_entry_diff * passive_multiplier
         if passive_diff:
             total += passive_diff

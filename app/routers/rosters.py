@@ -8,7 +8,6 @@ from __future__ import annotations
 import json
 import logging
 import math
-from collections import defaultdict
 from collections.abc import Mapping, Sequence, Set as AbstractSet
 from decimal import Decimal
 from types import SimpleNamespace
@@ -258,6 +257,7 @@ def _classification_map(
     totals_by_id: dict[int, dict[str, float]] = {}
     classifications: dict[int, dict[str, Any] | None] = {}
 
+    # Phase 1: independent per-unit role totals (no cross-unit influence yet).
     for unit_id, roster_unit in units_by_id.items():
         loadout_payload = loadouts.get(unit_id)
         quote = _internal_roster_unit_quote(roster_unit, loadout_payload)
@@ -265,11 +265,86 @@ def _classification_map(
             "wojownik": float(quote.get("warrior_total") or 0.0),
             "strzelec": float(quote.get("shooter_total") or 0.0),
         }
-        classifications[unit_id] = _roster_unit_classification(
-            roster_unit, loadout_payload, totals=totals_by_id.get(unit_id)
+
+    # Phase 2: join heroes with their parent unit and decide the Wojownik /
+    # Strzelec classification once per group from the *summed* role totals.
+    # This is the sole documented exception to the rule that the cost of one
+    # roster unit must not depend on another (joined hero + unit share the
+    # role decision, even though individual role totals stay independent).
+    group_members: dict[int, list[int]] = {}
+    for unit_id, roster_unit in units_by_id.items():
+        parent_id = getattr(roster_unit, "parent_roster_unit_id", None)
+        anchor = unit_id
+        if parent_id is not None and parent_id in units_by_id:
+            anchor = parent_id
+        group_members.setdefault(anchor, []).append(unit_id)
+
+    for anchor_id, member_ids in group_members.items():
+        warrior_sum = sum(
+            float(totals_by_id.get(mid, {}).get("wojownik") or 0.0)
+            for mid in member_ids
         )
+        shooter_sum = sum(
+            float(totals_by_id.get(mid, {}).get("strzelec") or 0.0)
+            for mid in member_ids
+        )
+        anchor_unit = units_by_id.get(anchor_id)
+        anchor_loadout = loadouts.get(anchor_id) if anchor_unit is not None else None
+        fallback_slug = _classification_fallback_slug(
+            anchor_loadout if isinstance(anchor_loadout, dict) else None
+        )
+        group_classification = _classification_from_totals(
+            warrior_sum,
+            shooter_sum,
+            fallback=fallback_slug,
+        )
+        for mid in member_ids:
+            if group_classification is None:
+                # Fall back to per-unit classification when the group has no
+                # role-bearing cost at all (rare; preserves prior behaviour).
+                loadout_payload = loadouts.get(mid)
+                classifications[mid] = _roster_unit_classification(
+                    units_by_id[mid], loadout_payload, totals=totals_by_id.get(mid)
+                )
+            else:
+                classifications[mid] = dict(group_classification)
 
     return classifications, totals_by_id
+
+
+def _hero_group_partner_ids(
+    db: Session,
+    roster_unit: models.RosterUnit,
+) -> set[int]:
+    """Return the set of partner roster_unit IDs that share a classification
+    with the given unit. For a parent unit: its attached heroes. For an
+    attached hero: its parent and that parent's other attached heroes.
+    Lone units (no attachments either way) return an empty set."""
+    partners: set[int] = set()
+    if roster_unit is None or roster_unit.id is None:
+        return partners
+
+    parent_id = getattr(roster_unit, "parent_roster_unit_id", None)
+    if parent_id is not None:
+        anchor_id = parent_id
+    else:
+        anchor_id = roster_unit.id
+
+    sibling_ids = (
+        db.execute(
+            select(models.RosterUnit.id).where(
+                models.RosterUnit.parent_roster_unit_id == anchor_id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for sid in sibling_ids:
+        if sid != roster_unit.id:
+            partners.add(int(sid))
+    if anchor_id != roster_unit.id:
+        partners.add(int(anchor_id))
+    return partners
 
 
 def _internal_roster_unit_quote(
@@ -410,7 +485,6 @@ def edit_roster(
         select(models.Roster)
         .options(
             selectinload(models.Roster.army).selectinload(models.Army.unit_groups),
-            selectinload(models.Roster.roster_unit_pairs),
             selectinload(models.Roster.roster_units).options(
                 selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
             )
@@ -479,14 +553,6 @@ def edit_roster(
     roster_items: list[dict[str, Any]] = []
     sanitized_loadouts: dict[int, dict[str, Any]] = {}
     payload_cache: dict[int | None, dict[str, Any]] = {}
-    lock_pairs = [
-        {
-            "id": pair.id,
-            "first_roster_unit_id": pair.first_roster_unit_id,
-            "second_roster_unit_id": pair.second_roster_unit_id,
-        }
-        for pair in roster.roster_unit_pairs
-    ]
 
     for roster_unit in roster.roster_units:
         unit = roster_unit.unit
@@ -577,18 +643,60 @@ def edit_roster(
                 "classification": classification,
                 "is_hero": is_hero,
                 "unit_flags": _unit_flag_string_with_army(unit),
+                "weapon_cost": _roster_unit_classification_weapon_cost(
+                    roster_unit, applied_loadout
+                ),
             }
         )
-    non_hero_unit_count = sum(
-        1
+    # Build hero-attachment frames: heroes attached to a parent are absorbed
+    # into that parent's frame and excluded from the standalone list so the
+    # template renders them above the parent inside one drag-frame.
+    heroes_by_parent: dict[int, list[dict[str, Any]]] = {}
+    frame_items: list[dict[str, Any]] = []
+    for item in roster_items:
+        ru = item.get("instance")
+        parent_id = getattr(ru, "parent_roster_unit_id", None) if ru is not None else None
+        if parent_id is not None:
+            heroes_by_parent.setdefault(int(parent_id), []).append(item)
+            item["is_attached_hero"] = True
+        else:
+            item["is_attached_hero"] = False
+
+    for item in roster_items:
+        if item.get("is_attached_hero"):
+            continue
+        ru = item.get("instance")
+        ru_id = getattr(ru, "id", None) if ru is not None else None
+        attached = heroes_by_parent.get(int(ru_id), []) if ru_id is not None else []
+        attached.sort(key=lambda h: getattr(h.get("instance"), "position", 0) or 0)
+        item["attached_heroes"] = attached
+        frame_items.append(item)
+
+    frames_count = len(frame_items)
+    hero_models_count = sum(
+        int(getattr(item.get("instance"), "count", 0) or 0)
         for item in roster_items
-        if getattr(item.get("instance"), "unit", None) is not None
-        and not item.get("is_hero", False)
+        if item.get("is_hero", False)
     )
+
+    # JSON list shown in the "Dołącz do:" picker — non-hero roster units only.
+    attachable_units = [
+        {
+            "id": getattr(item.get("instance"), "id", None),
+            "label": (
+                getattr(item.get("instance"), "custom_name", None)
+                or getattr(getattr(item.get("instance"), "unit", None), "name", "Oddział")
+            ),
+        }
+        for item in roster_items
+        if not item.get("is_hero", False)
+        and getattr(item.get("instance"), "id", None) is not None
+    ]
+
     can_edit = current_user.is_admin or roster.owner_id == current_user.id
     can_delete = can_edit
 
-    roster_groups = group_roster_items(roster_items, roster.army)
+    roster_groups = group_roster_items(frame_items, roster.army)
     available_groups = group_available_units(available_unit_options, roster.army)
 
     return templates.TemplateResponse(
@@ -600,8 +708,11 @@ def edit_roster(
             "available_units": available_unit_options,
             "available_groups": available_groups,
             "roster_items": roster_items,
+            "roster_frames": frame_items,
             "roster_groups": roster_groups,
-            "non_hero_unit_count": non_hero_unit_count,
+            "frames_count": frames_count,
+            "hero_models_count": hero_models_count,
+            "attachable_units": attachable_units,
             "total_cost": total_cost,
             "error": None,
             "can_edit": can_edit,
@@ -609,7 +720,6 @@ def edit_roster(
             "warnings": [],
             "selected_id": selected_id,
             "unit_payloads": unit_payloads,
-            "lock_pairs": lock_pairs,
             "local_cost_engine_enabled": config.LOCAL_COST_ENGINE_ENABLED,
         },
     )
@@ -643,7 +753,6 @@ def duplicate_roster(
         select(models.Roster)
         .options(
             selectinload(models.Roster.roster_units),
-            selectinload(models.Roster.roster_unit_pairs),
         )
         .where(models.Roster.id == roster_id)
     )
@@ -663,6 +772,7 @@ def duplicate_roster(
     db.flush()
 
     unit_id_map: dict[int, int] = {}
+    clone_by_old_id: dict[int, models.RosterUnit] = {}
     for roster_unit in roster.roster_units:
         clone = models.RosterUnit(
             roster_id=roster_copy.id,
@@ -677,19 +787,18 @@ def duplicate_roster(
         db.flush()
         if roster_unit.id is not None and clone.id is not None:
             unit_id_map[roster_unit.id] = clone.id
+            clone_by_old_id[roster_unit.id] = clone
 
-    for pair in roster.roster_unit_pairs:
-        first_id = unit_id_map.get(pair.first_roster_unit_id)
-        second_id = unit_id_map.get(pair.second_roster_unit_id)
-        if first_id is None or second_id is None:
+    for roster_unit in roster.roster_units:
+        if roster_unit.parent_roster_unit_id is None:
             continue
-        db.add(
-            models.RosterUnitPair(
-                roster_id=roster_copy.id,
-                first_roster_unit_id=first_id,
-                second_roster_unit_id=second_id,
-            )
-        )
+        if roster_unit.id is None:
+            continue
+        new_parent_id = unit_id_map.get(roster_unit.parent_roster_unit_id)
+        clone = clone_by_old_id.get(roster_unit.id)
+        if new_parent_id is None or clone is None:
+            continue
+        clone.parent_roster_unit_id = new_parent_id
 
     db.commit()
     return RedirectResponse(url=f"/rosters/{roster_copy.id}", status_code=303)
@@ -818,6 +927,9 @@ def add_roster_unit(
             weapon_options,
         )
         base_cost_per_model = _base_cost_per_model(unit, classification)
+        weapon_cost_classification = _roster_unit_classification_weapon_cost(
+            roster_unit, loadout_payload
+        )
         roster_item = {
             "id": roster_unit.id,
             "count": roster_unit.count,
@@ -828,6 +940,7 @@ def add_roster_unit(
             "unit_quality": unit.quality,
             "unit_defense": unit.defense,
             "unit_toughness": unit.toughness,
+            "is_hero": unit_is_hero(unit, roster_unit),
             "unit_flags": _unit_flag_string_with_army(unit),
             "default_summary": default_summary,
             "loadout_summary": loadout_summary,
@@ -841,6 +954,7 @@ def add_roster_unit(
             "loadout": loadout_payload,
             "classification": classification,
             "base_cost_per_model": base_cost_per_model,
+            "weapon_cost": weapon_cost_classification,
         }
         payload = {
             "unit": {
@@ -1064,33 +1178,13 @@ def update_roster_unit(
     def _unit_payload(unit: models.Unit) -> dict[str, Any]:
         return _unit_payload_cached(unit, unit_data_cache, unit_payloads)
 
-    lock_pairs = (
-        db.execute(
-            select(models.RosterUnitPair).where(
-                models.RosterUnitPair.roster_id == roster.id,
-            )
-        )
-        .scalars()
-        .all()
-    )
-    pair_partner_map: dict[int, list[int]] = defaultdict(list)
-    target_pair_ids: set[int] = set()
-    for pair in lock_pairs:
-        first_id = pair.first_roster_unit_id
-        second_id = pair.second_roster_unit_id
-        if first_id is None or second_id is None:
-            continue
-        pair_partner_map[first_id].append(second_id)
-        pair_partner_map[second_id].append(first_id)
-        if first_id == roster_unit.id:
-            target_pair_ids.add(second_id)
-        elif second_id == roster_unit.id:
-            target_pair_ids.add(first_id)
-
-    paired_unit_ids = target_pair_ids
-
+    # Hero-attachment group: when a member of a hero-parent group is updated,
+    # the classification of the whole group must be re-evaluated because joined
+    # units share a Wojownik/Strzelec classification (the sole documented
+    # exception to "koszt jednego oddziału nigdy nie wpływa na inny").
+    group_unit_ids = _hero_group_partner_ids(db, roster_unit)
     paired_units: list[models.RosterUnit] = []
-    if paired_unit_ids:
+    if group_unit_ids:
         paired_units = (
             db.execute(
                 select(models.RosterUnit)
@@ -1099,7 +1193,7 @@ def update_roster_unit(
                         *_unit_eager_options()
                     )
                 )
-                .where(models.RosterUnit.id.in_(paired_unit_ids))
+                .where(models.RosterUnit.id.in_(group_unit_ids))
             )
             .scalars()
             .all()
@@ -1210,27 +1304,21 @@ def update_roster_unit(
                 "selected_passive_items": selected_passives,
                 "selected_active_items": selected_actives,
                 "selected_aura_items": selected_auras,
-                "locked_pair_unit_ids": pair_partner_map.get(target.id, []),
+                "parent_roster_unit_id": target.parent_roster_unit_id,
+                "weapon_cost": _roster_unit_classification_weapon_cost(
+                    target, loadout_payload
+                ),
             }
 
         unit_payloads = {
             ru.id: _unit_payload_for_response(ru) for ru in affected_units if ru.id
         }
-        lock_pair_payloads = [
-            {
-                "id": pair.id,
-                "first_roster_unit_id": pair.first_roster_unit_id,
-                "second_roster_unit_id": pair.second_roster_unit_id,
-            }
-            for pair in lock_pairs
-        ]
         unit_payload = unit_payloads.get(roster_unit.id)
         payload = {
             "unit": unit_payload,
             "units": list(unit_payloads.values()),
             "warnings": [],
             "total_cost": total_cost,
-            "lock_pairs": lock_pair_payloads,
         }
         return JSONResponse(_json_safe(payload))
     return RedirectResponse(
@@ -1284,6 +1372,118 @@ def quote_roster_unit(
         count,
         include_item_costs=include_item_costs,
     )
+
+    # When this unit belongs to a hero group (attached hero or parent with heroes),
+    # the Wojownik/Strzelec classification is shared across the group.  Use
+    # _classification_map (the SSOT for group classification) so that the returned
+    # selected_total is always consistent with the roster-list badge.
+    warrior_total = float(quote.get("warrior_total") or 0.0)
+    shooter_total = float(quote.get("shooter_total") or 0.0)
+    selected_role = quote.get("selected_role")
+    selected_total = float(quote.get("selected_total") or 0.0)
+
+    # Fast-path: standalone heroes (parent_roster_unit_id=None + is_hero) are never
+    # in a group — skip the DB round-trip that _hero_group_partner_ids would issue.
+    parent_id = getattr(roster_unit, "parent_roster_unit_id", None)
+    if parent_id is None and unit_is_hero(roster_unit.unit, roster_unit):
+        group_unit_ids: set[int] = set()
+    else:
+        group_unit_ids = _hero_group_partner_ids(db, roster_unit)
+
+    if group_unit_ids:
+        partner_units: list[models.RosterUnit] = (
+            db.execute(
+                select(models.RosterUnit)
+                .options(
+                    selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
+                )
+                .where(models.RosterUnit.id.in_(group_unit_ids))
+            )
+            .scalars()
+            .all()
+        )
+        unit_data_cache: dict[int, dict[str, Any]] = {}
+        unit_payloads_cache: dict[int, dict[str, Any]] = {}
+        loadout_map: dict[int, dict[str, Any]] = {}
+
+        for partner in partner_units:
+            p_payload = _unit_payload_cached(partner.unit, unit_data_cache, unit_payloads_cache)
+            loadout_map[partner.id] = _roster_unit_loadout(
+                partner,
+                weapon_options=p_payload["weapon_options"],
+                active_items=p_payload["active_items"],
+                aura_items=p_payload["aura_items"],
+                passive_items=p_payload["passive_items"],
+            )
+
+        # For the current unit use the transient loadout from the request (the same
+        # payload passed to calculate_roster_unit_quote above), or the stored loadout
+        # when no transient loadout was provided.
+        c_payload = _unit_payload_cached(roster_unit.unit, unit_data_cache, unit_payloads_cache)
+        raw_loadout_dict = request_payload.get("loadout")
+        loadout_map[roster_unit.id] = (
+            _sanitize_loadout(
+                roster_unit.unit,
+                count,
+                raw_loadout_dict if isinstance(raw_loadout_dict, dict) else None,
+                weapon_options=c_payload["weapon_options"],
+                active_items=c_payload["active_items"],
+                aura_items=c_payload["aura_items"],
+                passive_items=c_payload["passive_items"],
+            )
+            if isinstance(raw_loadout_dict, dict)
+            else _roster_unit_loadout(
+                roster_unit,
+                weapon_options=c_payload["weapon_options"],
+                active_items=c_payload["active_items"],
+                aura_items=c_payload["aura_items"],
+                passive_items=c_payload["passive_items"],
+            )
+        )
+
+        classifications, totals_by_id = _classification_map(
+            [roster_unit, *partner_units], loadout_map
+        )
+        group_class = classifications.get(roster_unit.id)
+        group_role = (group_class or {}).get("slug") or "wojownik"
+        unit_totals = totals_by_id.get(roster_unit.id, {})
+        warrior_total = float(unit_totals.get("wojownik") or warrior_total)
+        shooter_total = float(unit_totals.get("strzelec") or shooter_total)
+        selected_role = group_role
+        selected_total = round(shooter_total if group_role == "strzelec" else warrior_total, 2)
+
+        # When group classification overrides the solo role, item_costs.weapons must be
+        # recomputed with the correct role's traits so the right panel shows accurate
+        # per-weapon costs (e.g. Miecz energetyczny halved when hero classified strzelec
+        # by the group but evaluated solo as wojownik).
+        solo_role = quote.get("selected_role") or "wojownik"
+        if include_item_costs and group_role != solo_role:
+            unit_obj = roster_unit.unit
+            normalized_for_traits = costs.normalize_roster_unit_loadout(
+                unit_obj, request_payload.get("loadout")
+            )
+            passive_for_traits = costs.compute_passive_state(unit_obj, normalized_for_traits)
+            base_traits = list(costs._strip_role_traits(passive_for_traits.traits))
+            group_traits = costs._with_role_trait(base_traits, group_role)
+            weapon_by_id_for_group: dict[int, Any] = {}
+            for link in getattr(unit_obj, "weapon_links", []) or []:
+                wid = getattr(link, "weapon_id", None)
+                weapon = getattr(link, "weapon", None)
+                if wid is None or weapon is None:
+                    continue
+                weapon_by_id_for_group[int(wid)] = weapon
+            dw_id = getattr(unit_obj, "default_weapon_id", None)
+            dw = getattr(unit_obj, "default_weapon", None)
+            if dw_id is not None and dw is not None:
+                weapon_by_id_for_group.setdefault(int(dw_id), dw)
+            corrected_weapons = {
+                str(wid): round(costs.weapon_cost(w, unit_obj.quality, group_traits), 2)
+                for wid, w in weapon_by_id_for_group.items()
+            }
+            existing_item_costs = dict(quote.get("item_costs") or {})
+            existing_item_costs["weapons"] = corrected_weapons
+            quote = {**quote, "item_costs": existing_item_costs}
+
     return JSONResponse(
         _json_safe(
             {
@@ -1292,10 +1492,10 @@ def quote_roster_unit(
                 "unit_id": roster_unit.id,
                 "count": count,
                 "cost_engine_version": quote.get("cost_engine_version"),
-                "selected_role": quote.get("selected_role"),
-                "warrior_total": quote.get("warrior_total"),
-                "shooter_total": quote.get("shooter_total"),
-                "selected_total": quote.get("selected_total"),
+                "selected_role": selected_role,
+                "warrior_total": warrior_total,
+                "shooter_total": shooter_total,
+                "selected_total": selected_total,
                 "components": quote.get("components") or {},
                 "item_costs": quote.get("item_costs") or {},
                 "loadout": quote.get("loadout") or {},
@@ -1346,6 +1546,191 @@ def duplicate_roster_unit(
     )
 
 
+def _recompute_all_classifications(
+    db: Session,
+    roster: models.Roster,
+) -> tuple[float, dict[int, float]]:
+    """Apply the hero-group classification policy to every roster unit and
+    refresh ``extra_weapons_json`` + ``cached_cost``. Returns (total_cost, per-unit map).
+    Used by attach/detach because changing group membership can flip the
+    classification (Wojownik/Strzelec) for several units at once."""
+    unit_data_cache: dict[int, dict[str, Any]] = {}
+    unit_payloads: dict[int, dict[str, Any]] = {}
+
+    loadout_map: dict[int, dict[str, Any]] = {}
+    role_slug_maps: dict[int, dict[str, str]] = {}
+    for ru in roster.roster_units:
+        payload = _unit_payload_cached(ru.unit, unit_data_cache, unit_payloads)
+        loadout_map[ru.id] = _roster_unit_loadout(
+            ru,
+            weapon_options=payload["weapon_options"],
+            active_items=payload["active_items"],
+            aura_items=payload["aura_items"],
+            passive_items=payload["passive_items"],
+        )
+        role_slug_maps[ru.id] = _role_slug_map(ru.unit)
+
+    classifications, totals_by_id = _classification_map(
+        list(roster.roster_units), loadout_map
+    )
+
+    applied_loadouts: dict[int, dict[str, Any]] = {}
+    precomputed_costs: dict[int, float] = {}
+    for ru in roster.roster_units:
+        loadout = loadout_map.get(ru.id) or {}
+        classification = classifications.get(ru.id)
+        applied = _apply_classification_to_loadout(
+            loadout, classification, role_slug_map=role_slug_maps.get(ru.id) or {}
+        ) or loadout
+        applied_loadouts[ru.id] = applied
+        ru.extra_weapons_json = json.dumps(applied, ensure_ascii=False)
+        role_slug = (classification or {}).get("slug", "wojownik")
+        precomputed_costs[ru.id] = round(
+            float(totals_by_id.get(ru.id, {}).get(role_slug, 0.0)), 2
+        )
+
+    affected_ids = {ru.id for ru in roster.roster_units if ru.id is not None}
+    total_cost, unit_costs = costs.recalculate_roster_costs(
+        roster,
+        loadout_overrides=applied_loadouts,
+        changed_unit_ids=affected_ids,
+        precomputed_costs=precomputed_costs,
+    )
+    return total_cost, unit_costs
+
+
+@router.post("/{roster_id}/units/{roster_unit_id}/attach")
+def attach_roster_unit(
+    roster_id: int,
+    roster_unit_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    """Attach a hero roster unit to a non-hero parent roster unit in the same
+    roster. Both units' classifications will be jointly determined."""
+    raw_parent_id = payload.get("parent_roster_unit_id")
+    try:
+        parent_id = int(raw_parent_id) if raw_parent_id is not None else None
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="parent_roster_unit_id invalid")
+    if parent_id is None:
+        raise HTTPException(status_code=400, detail="parent_roster_unit_id required")
+    if parent_id == roster_unit_id:
+        raise HTTPException(status_code=400, detail="Cannot attach unit to itself")
+
+    roster_stmt = (
+        select(models.Roster)
+        .options(
+            selectinload(models.Roster.roster_units).options(
+                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
+            )
+        )
+        .where(models.Roster.id == roster_id)
+    )
+    roster = db.execute(roster_stmt).scalars().unique().one_or_none()
+    if roster is None:
+        raise HTTPException(status_code=404)
+    _ensure_roster_edit_access(roster, current_user)
+
+    roster_unit = next(
+        (ru for ru in roster.roster_units if ru.id == roster_unit_id), None
+    )
+    parent_unit = next(
+        (ru for ru in roster.roster_units if ru.id == parent_id), None
+    )
+    if roster_unit is None or parent_unit is None:
+        raise HTTPException(status_code=404)
+    from ..services.rules import unit_is_hero
+
+    if not unit_is_hero(roster_unit.unit, roster_unit):
+        raise HTTPException(
+            status_code=400, detail="Only hero units can be attached"
+        )
+    if unit_is_hero(parent_unit.unit, parent_unit):
+        raise HTTPException(
+            status_code=400, detail="Cannot attach to another hero unit"
+        )
+    if parent_unit.parent_roster_unit_id is not None:
+        raise HTTPException(
+            status_code=400, detail="Parent unit is itself attached"
+        )
+
+    roster_unit.parent_roster_unit_id = parent_unit.id
+    total_cost, unit_costs = _recompute_all_classifications(db, roster)
+    db.commit()
+    return JSONResponse(
+        _json_safe(
+            {
+                "roster_unit_id": roster_unit_id,
+                "parent_roster_unit_id": parent_unit.id,
+                "total_cost": total_cost,
+                "unit_costs": unit_costs,
+            }
+        )
+    )
+
+
+@router.post("/{roster_id}/units/{roster_unit_id}/detach")
+def detach_roster_unit(
+    roster_id: int,
+    roster_unit_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    """Detach a hero roster unit from its parent. After detach the hero is a
+    standalone roster entry and reverts to its own solo classification."""
+    roster_stmt = (
+        select(models.Roster)
+        .options(
+            selectinload(models.Roster.roster_units).options(
+                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
+            )
+        )
+        .where(models.Roster.id == roster_id)
+    )
+    roster = db.execute(roster_stmt).scalars().unique().one_or_none()
+    if roster is None:
+        raise HTTPException(status_code=404)
+    _ensure_roster_edit_access(roster, current_user)
+    roster_unit = next(
+        (ru for ru in roster.roster_units if ru.id == roster_unit_id), None
+    )
+    if roster_unit is None:
+        raise HTTPException(status_code=404)
+    if roster_unit.parent_roster_unit_id is None:
+        return JSONResponse(
+            _json_safe(
+                {
+                    "roster_unit_id": roster_unit_id,
+                    "parent_roster_unit_id": None,
+                    "total_cost": round(
+                        sum(float(ru.cached_cost or 0.0) for ru in roster.roster_units),
+                        2,
+                    ),
+                    "unit_costs": {
+                        ru.id: float(ru.cached_cost or 0.0)
+                        for ru in roster.roster_units
+                        if ru.id is not None
+                    },
+                }
+            )
+        )
+    roster_unit.parent_roster_unit_id = None
+    total_cost, unit_costs = _recompute_all_classifications(db, roster)
+    db.commit()
+    return JSONResponse(
+        _json_safe(
+            {
+                "roster_unit_id": roster_unit_id,
+                "parent_roster_unit_id": None,
+                "total_cost": total_cost,
+                "unit_costs": unit_costs,
+            }
+        )
+    )
+
+
 @router.post("/{roster_id}/units/{roster_unit_id}/delete")
 def delete_roster_unit(
     roster_id: int,
@@ -1368,13 +1753,13 @@ def delete_roster_unit(
         if wants_json else 0.0
     )
     removed_position = roster_unit.position or 0
-    db.query(models.RosterUnitPair).filter(
-        models.RosterUnitPair.roster_id == roster.id,
-        or_(
-            models.RosterUnitPair.first_roster_unit_id == roster_unit.id,
-            models.RosterUnitPair.second_roster_unit_id == roster_unit.id,
-        ),
-    ).delete(synchronize_session=False)
+    # Detach any heroes attached to the unit being deleted (don't rely on
+    # ON DELETE SET NULL because SQLite FK enforcement may not be active).
+    db.execute(
+        update(models.RosterUnit)
+        .where(models.RosterUnit.parent_roster_unit_id == roster_unit.id)
+        .values(parent_roster_unit_id=None)
+    )
     db.delete(roster_unit)
     db.flush()
     db.execute(
@@ -1697,6 +2082,16 @@ def _selected_passive_entries(
         selected_flag = flags.get(slug, default_flag)
         if is_mandatory:
             selected_flag = 1
+        # When a group classification is active, suppress role abilities that
+        # don't match it — the group slug is injected at the end of this
+        # function instead, so only the shared classification is shown.
+        if (
+            identifier in costs.ROLE_SLUGS
+            and isinstance(classification, dict)
+            and classification.get("slug")
+            and costs.ability_identifier(str(classification.get("slug") or "")) != identifier
+        ):
+            selected_flag = 0
         if selected_flag <= 0:
             seen_slugs.add(slug)
             if identifier:
@@ -1816,7 +2211,10 @@ def _apply_classification_to_loadout(
         if identifier not in existing_map:
             existing_map[identifier] = str(key)
         if not target_identifier or identifier != target_identifier:
-            passive_section.pop(key, None)
+            # Set to 0 rather than removing the key so that _sanitize_loadout
+            # does not re-introduce the default value on the next page load,
+            # and _selected_passive_entries sees an explicit disabled flag.
+            passive_section[key] = 0
 
     if target_identifier:
         preferred_map = dict(existing_map)
@@ -2003,6 +2401,83 @@ def _ability_entries(unit: models.Unit, ability_type: str) -> list[dict]:
     return entries
 
 
+def _roster_unit_weapon_components_sum(
+    roster_unit: models.RosterUnit,
+    applied_loadout: dict[str, Any] | None,
+) -> tuple[float, float]:
+    unit = getattr(roster_unit, "unit", None)
+    if unit is None:
+        return (0.0, 0.0)
+    flags = _unit_army_flags(unit)
+    unit_traits = costs.flags_to_ability_list(flags)
+
+    if not isinstance(applied_loadout, dict):
+        applied_loadout = {}
+    weapons_section = applied_loadout.get("weapons") or {}
+    total_mode = applied_loadout.get("mode") == "total"
+    model_count = max(int(getattr(roster_unit, "count", 1) or 1), 1)
+
+    weapons_by_id: dict[int, models.Weapon] = {}
+    for link in getattr(unit, "weapon_links", None) or []:
+        if link.weapon_id is not None and link.weapon is not None:
+            weapons_by_id.setdefault(int(link.weapon_id), link.weapon)
+    default_id = getattr(unit, "default_weapon_id", None)
+    default_w = getattr(unit, "default_weapon", None)
+    if default_id is not None and default_w is not None:
+        weapons_by_id.setdefault(int(default_id), default_w)
+
+    counts_iter: list[tuple[Any, Any]] = []
+    if isinstance(weapons_section, dict):
+        counts_iter = list(weapons_section.items())
+    elif isinstance(weapons_section, list):
+        for entry in weapons_section:
+            if not isinstance(entry, dict):
+                continue
+            wid = (
+                entry.get("weapon_id")
+                or entry.get("id")
+                or entry.get("loadout_key")
+                or entry.get("key")
+            )
+            cnt = entry.get("per_model") if "per_model" in entry else entry.get("count")
+            if wid is not None:
+                counts_iter.append((wid, cnt))
+
+    melee_sum = 0.0
+    ranged_sum = 0.0
+    for raw_id, raw_count in counts_iter:
+        try:
+            weapon_id = int(str(raw_id).split(":", 1)[0])
+        except (TypeError, ValueError):
+            continue
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            try:
+                count = int(float(raw_count))
+            except (TypeError, ValueError):
+                continue
+        if count <= 0:
+            continue
+        weapon = weapons_by_id.get(weapon_id)
+        if weapon is None:
+            continue
+        components = costs.weapon_cost_components(weapon, unit.quality, unit_traits)
+        total_count = count if total_mode else count * model_count
+        melee_sum += float(components.get("melee") or 0.0) * total_count
+        ranged_sum += float(components.get("ranged") or 0.0) * total_count
+
+    return (melee_sum, ranged_sum)
+
+
+def _roster_unit_classification_weapon_cost(
+    roster_unit: models.RosterUnit,
+    applied_loadout: dict[str, Any] | None,
+) -> float:
+    melee, ranged = _roster_unit_weapon_components_sum(roster_unit, applied_loadout)
+    return round((melee + ranged + max(melee, ranged)) / 2.0, 2)
+
+
 def _base_cost_per_model(
     unit: models.Unit, classification: dict[str, Any] | None = None
 ) -> float:
@@ -2177,6 +2652,7 @@ def _parse_loadout_json(text: str | None) -> dict[str, Any]:
         "passive": {},
         "active_labels": {},
         "aura_labels": {},
+        "primary_weapon": {},
     }
     mode: str | None = None
     if not text:
@@ -2197,6 +2673,14 @@ def _parse_loadout_json(text: str | None) -> dict[str, Any]:
             continue
         if section in {"active_labels", "aura_labels"}:
             base[section] = _extract_label_map(values)
+            continue
+        if section == "primary_weapon":
+            if isinstance(values, dict):
+                safe: dict[str, str | None] = {}
+                for k, v in values.items():
+                    if k in ("melee", "ranged"):
+                        safe[k] = str(v) if v is not None else None
+                base["primary_weapon"] = safe
             continue
         if section not in {"weapons", "active", "aura", "passive"}:
             continue
@@ -2386,7 +2870,20 @@ def _sanitize_loadout(
                         )
                 else:
                     entry_id = entry.get("id") or entry.get("weapon_id") or entry.get("ability_id")
-                    raw_value = entry.get("per_model") or entry.get("count") or entry.get("value")
+                    # Use explicit None check rather than `or` chain: count=0 is
+                    # a legitimate value (weapon explicitly deselected) that
+                    # must not fall back to the next key or to the default. Old
+                    # `entry.get("per_model") or entry.get("count")` collapsed
+                    # 0 to None, causing _sanitize_loadout to substitute the
+                    # weapon's default_count and silently re-enable it. This
+                    # was the source of attached-hero cost regression (49.14
+                    # vs correct 37.80 — weapon 203 reactivated by the
+                    # fallback).
+                    raw_value = entry.get("per_model")
+                    if raw_value is None:
+                        raw_value = entry.get("count")
+                    if raw_value is None:
+                        raw_value = entry.get("value")
                 if entry_id is None:
                     continue
                 normalized[str(entry_id)] = raw_value
@@ -2464,6 +2961,15 @@ def _sanitize_loadout(
 
     if mode_value:
         defaults["mode"] = mode_value
+    if isinstance(payload, dict):
+        raw_primary = payload.get("primary_weapon")
+        if isinstance(raw_primary, dict) and raw_primary:
+            safe_primary: dict[str, str | None] = {}
+            for k, v in raw_primary.items():
+                if k in ("melee", "ranged"):
+                    safe_primary[k] = str(v) if v is not None else None
+            if safe_primary:
+                defaults["primary_weapon"] = safe_primary
     return defaults
 
 
@@ -2627,6 +3133,14 @@ def _loadout_weapon_details(
 ) -> list[dict[str, Any]]:
     details: list[dict[str, Any]] = []
     mode = loadout.get("mode") if isinstance(loadout, dict) else None
+    primary_override: dict[str, str] = {}
+    raw_override = loadout.get("primary_weapon") if isinstance(loadout, dict) else None
+    if isinstance(raw_override, dict):
+        primary_override = {
+            k: (str(v) if v is not None else None)
+            for k, v in raw_override.items()
+            if k in ("melee", "ranged")
+        }
     option_by_id = {
         str(option.get("id")): option
         for option in weapon_options
@@ -2653,6 +3167,17 @@ def _loadout_weapon_details(
             total_count = parsed_count * max(int(roster_unit.count), 0)
         if total_count <= 0:
             continue
+        range_val = option.get("range", 0)
+        try:
+            is_melee = (int(range_val) == 0)
+        except (TypeError, ValueError):
+            is_melee = True
+        weapon_type = "melee" if is_melee else "ranged"
+        if weapon_type in primary_override:
+            override_val = primary_override.get(weapon_type)
+            is_primary = override_val is not None and str(option.get("id")) == override_val
+        else:
+            is_primary = bool(option.get("is_primary", False))
         details.append(
             {
                 "weapon_id": option.get("id"),
@@ -2662,7 +3187,7 @@ def _loadout_weapon_details(
                 "attacks": option.get("attacks"),
                 "ap": option.get("ap"),
                 "traits": option.get("traits"),
-                "is_primary": bool(option.get("is_primary", False)),
+                "is_primary": is_primary,
             }
         )
     return details
@@ -2818,6 +3343,7 @@ def _roster_unit_export_data(
                     result[base_lbl] = desc
         return result
 
+    is_hero_flag = unit_is_hero(unit, roster_unit, loadout)
     return {
         "instance": roster_unit,
         "unit": unit,
@@ -2839,6 +3365,8 @@ def _roster_unit_export_data(
         "rounded_total_cost": rounded_total,
         "classification": classification_data,
         "active_slugs": active_slugs,
+        "is_hero": is_hero_flag,
+        "parent_roster_unit_id": getattr(roster_unit, "parent_roster_unit_id", None),
     }
 
 

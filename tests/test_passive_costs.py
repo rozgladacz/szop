@@ -421,6 +421,37 @@ def test_niestrudzony_ignored_for_samolot() -> None:
     assert cost_samolot == pytest.approx(cost_base, abs=0.02)
 
 
+def test_straznik_ranged_multiplier() -> None:
+    ranged = models.Weapon(range='24"', attacks=1.0, ap=0, armory_id=1)
+    melee = models.Weapon(range="Melee", attacks=1.0, ap=0, armory_id=1)
+    base_ranged = costs.weapon_cost(ranged, unit_quality=4, unit_flags=[])
+    with_straznik_ranged = costs.weapon_cost(ranged, unit_quality=4, unit_flags=["Straznik"])
+    with_straznik_melee = costs.weapon_cost(melee, unit_quality=4, unit_flags=["Straznik"])
+    base_melee = costs.weapon_cost(melee, unit_quality=4, unit_flags=[])
+    assert with_straznik_ranged == pytest.approx(base_ranged * 1.7, abs=0.02)
+    assert with_straznik_melee == pytest.approx(base_melee, abs=0.02)
+
+
+def test_straznik_passive_cost() -> None:
+    assert costs.passive_cost("straznik", 1.0) == pytest.approx(9.0)
+    assert costs.passive_cost("straznik", 2.0) == pytest.approx(18.0)
+
+
+def test_bastion_melee_multiplier() -> None:
+    melee = models.Weapon(range="Melee", attacks=1.0, ap=0, armory_id=1)
+    ranged = models.Weapon(range='24"', attacks=1.0, ap=0, armory_id=1)
+    base_melee = costs.weapon_cost(melee, unit_quality=4, unit_flags=[])
+    with_bastion_melee = costs.weapon_cost(melee, unit_quality=4, unit_flags=["Bastion"])
+    with_bastion_ranged = costs.weapon_cost(ranged, unit_quality=4, unit_flags=["Bastion"])
+    base_ranged = costs.weapon_cost(ranged, unit_quality=4, unit_flags=[])
+    assert with_bastion_melee == pytest.approx(base_melee * 1.2, abs=0.02)
+    assert with_bastion_ranged == pytest.approx(base_ranged, abs=0.02)
+
+
+def test_bastion_aura_cost() -> None:
+    assert costs.passive_cost("bastion", 8.0, aura=True) == pytest.approx(3.0)
+
+
 
 def test_dywersant_aura_cost() -> None:
     assert costs.passive_cost("dywersant", 8, True) == pytest.approx(10)

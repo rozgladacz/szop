@@ -281,7 +281,87 @@ def roster_battle_state(
         ability_descriptions.update(entry.get("aura_descs") or {})
         passive_labels: list[str] = entry.get("passive_labels") or []
         has_zemsta = army_has_zemsta or any("Zemsta" in lbl for lbl in passive_labels)
-        entry["show_wounds"] = ((entry.get("toughness") or 1) > 1) or has_zemsta
+        entry["show_wounds"] = (
+            ((entry.get("toughness") or 1) > 1)
+            or has_zemsta
+            or bool(entry.get("is_hero"))
+        )
+        entry["show_models"] = (entry.get("count") or 0) > 1 or bool(entry.get("is_hero"))
+        # Max wounds = unit toughness (not models × toughness). Frontend may
+        # display values exceeding max (e.g. 9/6) without clamping.
+        entry["max_wounds"] = int(entry.get("toughness") or 1)
+
+    # Build battle groups: a non-hero parent + its attached heroes share one
+    # frame in Stan bitewny. Lone units form single-member groups.
+    by_id: dict[int, dict[str, Any]] = {}
+    for entry in roster_items:
+        ru = entry.get("instance")
+        ru_id = getattr(ru, "id", None) if ru is not None else None
+        if ru_id is None:
+            continue
+        by_id[int(ru_id)] = entry
+
+    heroes_by_parent: dict[int, list[dict[str, Any]]] = {}
+    standalone_anchor_ids: list[int] = []
+    for entry in roster_items:
+        ru = entry.get("instance")
+        ru_id = getattr(ru, "id", None) if ru is not None else None
+        if ru_id is None:
+            continue
+        parent_id = entry.get("parent_roster_unit_id")
+        if parent_id is not None and int(parent_id) in by_id:
+            heroes_by_parent.setdefault(int(parent_id), []).append(entry)
+            entry["group_id"] = int(parent_id)
+        else:
+            entry["group_id"] = int(ru_id)
+            standalone_anchor_ids.append(int(ru_id))
+
+    def _mode_keys(entry: dict[str, Any]) -> list[str]:
+        keys: set[str] = {"equipment", "melee"}
+        for weapon in entry.get("weapon_details", []) or []:
+            range_val = weapon.get("range_int") or 0
+            if range_val and int(range_val) > 0:
+                keys.add(f"ranged:{int(range_val)}")
+        return sorted(
+            keys,
+            key=lambda k: (
+                0 if k == "equipment" else (1 if k == "melee" else 2),
+                int(k.split(":", 1)[1]) if k.startswith("ranged:") else 0,
+            ),
+        )
+
+    battle_groups: list[dict[str, Any]] = []
+    for entry in roster_items:
+        ru = entry.get("instance")
+        ru_id = getattr(ru, "id", None) if ru is not None else None
+        if ru_id is None or int(ru_id) not in standalone_anchor_ids:
+            continue
+        attached = sorted(
+            heroes_by_parent.get(int(ru_id), []),
+            key=lambda h: getattr(h.get("instance"), "position", 0) or 0,
+        )
+        group_members = attached + [entry]
+        mode_set: set[str] = set()
+        for member in group_members:
+            for key in _mode_keys(member):
+                mode_set.add(key)
+        modes_ordered = sorted(
+            mode_set,
+            key=lambda k: (
+                0 if k == "equipment" else (1 if k == "melee" else 2),
+                int(k.split(":", 1)[1]) if k.startswith("ranged:") else 0,
+            ),
+        )
+        battle_groups.append(
+            {
+                "group_id": int(ru_id),
+                "parent": entry,
+                "heroes": attached,
+                "members": group_members,
+                "modes": modes_ordered,
+                "show_wounds_any": any(m.get("show_wounds") for m in group_members),
+            }
+        )
     return templates.TemplateResponse(
         "roster_battle_state.html",
         {
@@ -290,6 +370,7 @@ def roster_battle_state(
             "roster": roster,
             "roster_items": roster_items,
             "roster_groups": roster_groups,
+            "battle_groups": battle_groups,
             "total_cost_rounded": utils.round_points(total_cost),
             "army_rules_detail": army_rules_detail,
             "ability_descriptions": ability_descriptions,

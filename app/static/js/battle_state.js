@@ -5,7 +5,8 @@
   const MELEE_ASSAULT_TRAITS = new Set(["szturmowy", "szturmowa", "assault"]);
   const UNWIELDY_TRAITS = new Set(["nieporeczna", "unwieldy"]);
 
-  // Status buttons config: key → {selector, btn color} — order matches template
+  // Status buttons config: key → {selector, btn color} — buttons live on the
+  // group card, not on individual unit cards. A hero + parent share statuses.
   const STATUS_CONFIGS = [
     { key: "activated", selector: '[data-status-toggle="activated"]', color: "primary"   },
     { key: "entrenched",selector: '[data-status-toggle="entrenched"]',color: "success"   },
@@ -121,17 +122,22 @@
       weaponCounts[key] = Number.isFinite(c) && c >= 0 ? c : 0;
     });
     return {
+      activeModels: initialModels,
+      weapons: weaponCounts,
+      primaryOverrides: {},
+      struckAbilities: [],
+    };
+  }
+
+  function groupInitialState() {
+    return {
       defeated: false,
       pinned: false,
       fatigued: false,
       entrenched: false,
       activated: false,
-      activeModels: initialModels,
       woundsRemaining: 0,
-      weapons: weaponCounts,
-      primaryOverrides: {},
       mode: "equipment",
-      struckAbilities: [],
     };
   }
 
@@ -139,23 +145,8 @@
     return Array.prototype.slice.call(document.querySelectorAll("[data-battle-unit]"));
   }
 
-  function buildModeToolbar(card, weapons) {
-    const toolbar = card.querySelector("[data-mode-toolbar]");
-    if (!toolbar) return;
-    toolbar.querySelectorAll("[data-mode^='ranged:']").forEach((b) => b.remove());
-    const ranges = new Set();
-    weapons.forEach((w) => {
-      const r = parseRangeInt(w);
-      if (r > 0) ranges.add(r);
-    });
-    Array.from(ranges).sort((a, b) => a - b).forEach((r) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "btn btn-outline-secondary";
-      btn.dataset.mode = "ranged:" + r;
-      btn.textContent = r + '"';
-      toolbar.appendChild(btn);
-    });
+  function getGroupCards() {
+    return Array.prototype.slice.call(document.querySelectorAll("[data-battle-group]"));
   }
 
   function filterWeaponsForMode(weapons, mode, unitState) {
@@ -220,41 +211,30 @@
     });
   }
 
-  function renderUnit(card, unitState) {
-    const weapons = parseWeaponsCached(card);
-    const toughness = parseInt(card.dataset.toughness || "1", 10) || 1;
+  function computeGroupWoundMax(state, groupCard) {
+    let max = 0;
+    groupCard.querySelectorAll("[data-battle-unit]").forEach((card) => {
+      const us = state.units[card.dataset.rosterUnitId];
+      if (!us) return;
+      if ((us.activeModels || 0) <= 0) return;
+      const t = parseInt(card.dataset.toughness || "1", 10) || 1;
+      if (t > max) max = t;
+    });
+    return max;
+  }
 
-    // Model counter
+  function renderUnit(card, unitState, groupState) {
+    const weapons = parseWeaponsCached(card);
+
+    // Model counter (per-unit). Heroes always show counter even at count=1.
     const modelsValue = card.querySelector("[data-models-value]");
     if (modelsValue) modelsValue.textContent = unitState.activeModels;
 
-    // Wounds counter
-    const woundsValue = card.querySelector("[data-wounds-value]");
-    const woundsMax = card.querySelector("[data-wounds-max]");
-    if (woundsValue) woundsValue.textContent = unitState.woundsRemaining;
-    if (woundsMax) woundsMax.textContent = unitState.activeModels * toughness;
-
-    // Status buttons
-    STATUS_CONFIGS.forEach(({ key, selector, color }) => {
-      const btn = card.querySelector(selector);
-      if (!btn) return;
-      const isActive = key === "defeated" ? !!unitState.defeated : !!unitState[key];
-      if (isActive) {
-        btn.classList.remove("btn-outline-" + color);
-        btn.classList.add("btn-" + color, "active");
-      } else {
-        btn.classList.remove("btn-" + color, "active");
-        btn.classList.add("btn-outline-" + color);
-      }
-    });
-
-    card.classList.toggle("is-defeated", !!unitState.defeated);
-
-    // Mode toolbar active state
+    // Mode toolbar active state (shared mode across the group)
     const toolbar = card.querySelector("[data-mode-toolbar]");
     if (toolbar) {
       toolbar.querySelectorAll("[data-mode]").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.mode === unitState.mode);
+        btn.classList.toggle("active", btn.dataset.mode === groupState.mode);
       });
     }
 
@@ -275,7 +255,7 @@
       activeCount: unitState.weapons[weaponKey(w, idx)] || 0,
     }));
 
-    if (unitState.mode === "equipment") {
+    if (groupState.mode === "equipment") {
       summary.classList.add("d-none");
       initialWeapons.forEach((entry) => {
         const w = entry.weapon;
@@ -346,7 +326,7 @@
     }
 
     // Attack mode — grouped summary
-    const filtered = filterWeaponsForMode(weapons, unitState.mode, unitState);
+    const filtered = filterWeaponsForMode(weapons, groupState.mode, unitState);
     filtered.forEach((entry) => { entry.activeCount = unitState.weapons[entry.key] || 0; });
 
     summary.classList.remove("d-none");
@@ -380,6 +360,35 @@
     });
   }
 
+  function renderGroup(state, groupCard) {
+    const gid = groupCard.dataset.groupId;
+    const gs = state.groups[gid];
+    if (!gs) return;
+
+    // Wound counter (shared per group)
+    const woundsValue = groupCard.querySelector("[data-group-wounds-value]");
+    const woundsMax = groupCard.querySelector("[data-group-wounds-max]");
+    const max = computeGroupWoundMax(state, groupCard);
+    if (woundsValue) woundsValue.textContent = gs.woundsRemaining;
+    if (woundsMax) woundsMax.textContent = max;
+
+    // Status buttons (on the group card)
+    STATUS_CONFIGS.forEach(({ key, selector, color }) => {
+      const btn = groupCard.querySelector(selector);
+      if (!btn) return;
+      const isActive = key === "defeated" ? !!gs.defeated : !!gs[key];
+      if (isActive) {
+        btn.classList.remove("btn-outline-" + color);
+        btn.classList.add("btn-" + color, "active");
+      } else {
+        btn.classList.remove("btn-" + color, "active");
+        btn.classList.add("btn-outline-" + color);
+      }
+    });
+
+    groupCard.classList.toggle("is-defeated", !!gs.defeated);
+  }
+
   const _weaponsCache = new WeakMap();
   function parseWeaponsCached(card) {
     if (_weaponsCache.has(card)) return _weaponsCache.get(card);
@@ -394,10 +403,12 @@
     sections.forEach((section) => {
       const wrappers = Array.prototype.slice.call(section.querySelectorAll("[data-battle-card-wrapper]"));
       wrappers.sort((a, b) => {
-        const ida = a.querySelector("[data-battle-unit]")?.dataset.rosterUnitId;
-        const idb = b.querySelector("[data-battle-unit]")?.dataset.rosterUnitId;
-        const da = state.units?.[ida]?.defeated ? 1 : 0;
-        const db = state.units?.[idb]?.defeated ? 1 : 0;
+        const groupCard = a.querySelector("[data-battle-group]");
+        const groupCardB = b.querySelector("[data-battle-group]");
+        const gidA = groupCard?.dataset.groupId;
+        const gidB = groupCardB?.dataset.groupId;
+        const da = state.groups?.[gidA]?.defeated ? 1 : 0;
+        const db = state.groups?.[gidB]?.defeated ? 1 : 0;
         if (da !== db) return da - db;
         return parseInt(a.dataset.originalPosition || 0) - parseInt(b.dataset.originalPosition || 0);
       });
@@ -405,15 +416,15 @@
     });
   }
 
-  function updateSummaryBadge(state, cards) {
+  function updateSummaryBadge(state, groupCards) {
     let active = 0;
-    cards.forEach((card) => {
-      if (!state.units?.[card.dataset.rosterUnitId]?.defeated) active += 1;
+    groupCards.forEach((card) => {
+      if (!state.groups?.[card.dataset.groupId]?.defeated) active += 1;
     });
     const a = document.querySelector("[data-active-units]");
     const t = document.querySelector("[data-total-units]");
     if (a) a.textContent = active;
-    if (t) t.textContent = cards.length;
+    if (t) t.textContent = groupCards.length;
   }
 
   function updateRoundDisplay(state) {
@@ -437,43 +448,81 @@
     });
   }
 
+  function migrateLegacyState(legacy, cards) {
+    // Old format had every per-unit dict carrying defeated/pinned/...,
+    // woundsRemaining, mode. The new format splits those into state.groups.
+    // For each card we know its (unit_id, group_id); copy legacy unit flags
+    // to the group bucket (OR-merging when multiple members had flags set).
+    const migrated = { units: {}, groups: {}, round: legacy.round || 1 };
+    const legacyUnits = legacy.units || {};
+    cards.forEach((card) => {
+      const uid = card.dataset.rosterUnitId;
+      const gid = card.dataset.groupId || uid;
+      const stored = legacyUnits[uid] || null;
+      const init = unitInitialState(card);
+      if (stored) {
+        migrated.units[uid] = {
+          activeModels: typeof stored.activeModels === "number" ? stored.activeModels : init.activeModels,
+          weapons: {},
+          primaryOverrides: (stored.primaryOverrides && typeof stored.primaryOverrides === "object") ? stored.primaryOverrides : {},
+          struckAbilities: Array.isArray(stored.struckAbilities) ? stored.struckAbilities : [],
+        };
+        Object.keys(init.weapons).forEach((k) => {
+          migrated.units[uid].weapons[k] = typeof stored.weapons?.[k] === "number" ? stored.weapons[k] : init.weapons[k];
+        });
+      } else {
+        migrated.units[uid] = init;
+      }
+      if (!migrated.groups[gid]) migrated.groups[gid] = groupInitialState();
+      const gs = migrated.groups[gid];
+      if (stored) {
+        if (stored.defeated) gs.defeated = true;
+        if (stored.pinned) gs.pinned = true;
+        if (stored.fatigued) gs.fatigued = true;
+        if (stored.entrenched) gs.entrenched = true;
+        if (stored.activated) gs.activated = true;
+        if (typeof stored.woundsRemaining === "number" && stored.woundsRemaining > gs.woundsRemaining) {
+          gs.woundsRemaining = stored.woundsRemaining;
+        }
+        if (typeof stored.mode === "string" && stored.mode && gs.mode === "equipment") {
+          gs.mode = stored.mode;
+        }
+      }
+    });
+    return migrated;
+  }
+
   function init() {
     const root = document.querySelector("[data-battle-root]");
     if (!root) return;
     const rosterId = root.dataset.rosterId;
     const cards = getCards();
+    const groupCards = getGroupCards();
 
-    let state = loadState(rosterId) || { units: {}, round: 1 };
-    if (!state.units) state.units = {};
-    if (!state.round) state.round = 1;
+    let state = loadState(rosterId);
+    if (!state || !state.groups) {
+      // Legacy (per-unit) or no stored state — build/migrate.
+      state = migrateLegacyState(state || {}, cards);
+    } else {
+      // Ensure every current unit / group has an entry.
+      if (!state.units) state.units = {};
+      if (!state.groups) state.groups = {};
+      if (!state.round) state.round = 1;
+      cards.forEach((card) => {
+        const uid = card.dataset.rosterUnitId;
+        const gid = card.dataset.groupId || uid;
+        if (!state.units[uid]) state.units[uid] = unitInitialState(card);
+        if (!state.groups[gid]) state.groups[gid] = groupInitialState();
+      });
+    }
 
-    cards.forEach((card) => {
-      const id = card.dataset.rosterUnitId;
-      const initial = unitInitialState(card);
-      const stored = state.units[id];
-      if (!stored) {
-        state.units[id] = initial;
-      } else {
-        // Merge: keep stored values, fill missing fields from initial
-        const merged = {
-          defeated: !!stored.defeated,
-          pinned: !!stored.pinned,
-          fatigued: !!stored.fatigued,
-          entrenched: !!stored.entrenched,
-          activated: !!stored.activated,
-          activeModels: typeof stored.activeModels === "number" ? stored.activeModels : initial.activeModels,
-          woundsRemaining: typeof stored.woundsRemaining === "number" ? stored.woundsRemaining : initial.woundsRemaining,
-          weapons: {},
-          primaryOverrides: (stored.primaryOverrides && typeof stored.primaryOverrides === "object") ? stored.primaryOverrides : {},
-          mode: stored.mode || "equipment",
-          struckAbilities: Array.isArray(stored.struckAbilities) ? stored.struckAbilities : [],
-        };
-        Object.keys(initial.weapons).forEach((k) => {
-          merged.weapons[k] = typeof stored.weapons?.[k] === "number" ? stored.weapons[k] : initial.weapons[k];
-        });
-        state.units[id] = merged;
+    // Guard: ensure every group card has a valid state entry regardless of
+    // migration path (handles stale localStorage with mismatched group IDs).
+    groupCards.forEach((g) => {
+      const gid = g.dataset.groupId;
+      if (gid && (!state.groups[gid] || typeof state.groups[gid] !== "object")) {
+        state.groups[gid] = groupInitialState();
       }
-      buildModeToolbar(card, parseWeaponsCached(card));
     });
 
     saveState(rosterId, state);
@@ -481,11 +530,15 @@
     function rerenderAll() {
       cards.forEach((card) => {
         const us = state.units[card.dataset.rosterUnitId];
-        renderUnit(card, us);
+        const gid = card.dataset.groupId || card.dataset.rosterUnitId;
+        const gs = state.groups[gid];
+        if (!us || !gs) return;
+        renderUnit(card, us, gs);
         applyAbilityStates(card, us);
       });
+      groupCards.forEach((g) => renderGroup(state, g));
       reorderDefeated(state);
-      updateSummaryBadge(state, cards);
+      updateSummaryBadge(state, groupCards);
       updateRoundDisplay(state);
     }
 
@@ -501,10 +554,12 @@
       return value;
     }
 
+    // Per-unit event handlers (model counter, weapon counters, ability toggles,
+    // mode toolbar — note: mode click affects the entire group).
     cards.forEach((card) => {
-      const id = card.dataset.rosterUnitId;
+      const uid = card.dataset.rosterUnitId;
+      const gid = card.dataset.groupId || uid;
       const initialModels = parseInt(card.dataset.initialModels || "0", 10) || 0;
-      const toughness = parseInt(card.dataset.toughness || "1", 10) || 1;
       const weapons = parseWeaponsCached(card);
       const initialWeaponCounts = {};
       weapons.forEach((w, idx) => {
@@ -514,19 +569,18 @@
       });
 
       card.addEventListener("click", function (ev) {
+        const us = state.units[uid];
+        const gs = state.groups[gid];
+        if (!us || !gs) return;
+
         // Ability toggle (span click)
         const abilitySpan = ev.target.closest("[data-ability-toggle]");
         if (abilitySpan) {
-          const us = state.units[id];
-          if (!us) return;
           const label = abilitySpan.dataset.abilityToggle;
           if (!Array.isArray(us.struckAbilities)) us.struckAbilities = [];
           const idx = us.struckAbilities.indexOf(label);
-          if (idx >= 0) {
-            us.struckAbilities.splice(idx, 1);
-          } else {
-            us.struckAbilities.push(label);
-          }
+          if (idx >= 0) us.struckAbilities.splice(idx, 1);
+          else us.struckAbilities.push(label);
           commit();
           return;
         }
@@ -534,8 +588,6 @@
         // Primary weapon toggle (weapon name click)
         const primaryToggleEl = ev.target.closest("[data-weapon-primary-toggle]");
         if (primaryToggleEl) {
-          const us = state.units[id];
-          if (!us) return;
           const key = primaryToggleEl.dataset.weaponPrimaryToggle;
           const wIdx = weapons.findIndex((w, i) => weaponKey(w, i) === key);
           if (wIdx < 0) return;
@@ -559,8 +611,6 @@
 
         const target = ev.target.closest("button");
         if (!target) return;
-        const us = state.units[id];
-        if (!us) return;
 
         if (target.matches("[data-models-decrement]")) {
           const newCount = clamp(us.activeModels - 1, 0, initialModels);
@@ -569,7 +619,6 @@
               us.weapons[k] = Math.round(initialWeaponCounts[k] * newCount / initialModels);
             });
           }
-          us.woundsRemaining = clamp(us.woundsRemaining, 0, newCount * toughness);
           us.activeModels = newCount;
           commit();
           return;
@@ -583,36 +632,6 @@
             });
           }
           us.activeModels = newCount;
-          commit();
-          return;
-        }
-
-        if (target.matches("[data-wounds-decrement]")) {
-          us.woundsRemaining = clamp(us.woundsRemaining - 1, 0, us.activeModels * toughness);
-          commit();
-          return;
-        }
-
-        if (target.matches("[data-wounds-increment]")) {
-          us.woundsRemaining = clamp(us.woundsRemaining + 1, 0, us.activeModels * toughness);
-          commit();
-          return;
-        }
-
-        if (target.matches("[data-defeated-toggle]")) {
-          us.defeated = !us.defeated;
-          commit();
-          return;
-        }
-
-        const statusKey = target.dataset.statusToggle;
-        if (statusKey) {
-          const newVal = !us[statusKey];
-          us[statusKey] = newVal;
-          if (newVal) {
-            if (statusKey === "activated") us.entrenched = false;
-            else if (statusKey === "entrenched") us.pinned = false;
-          }
           commit();
           return;
         }
@@ -661,9 +680,52 @@
           return;
         }
 
+        // Mode toolbar click: shared with the entire group. Update group state
+        // so all member tables filter to the same mode (Wręcz on hero ⇒ Wręcz
+        // on the parent and vice versa).
         const mode = target.dataset.mode;
         if (mode) {
-          us.mode = mode;
+          gs.mode = mode;
+          commit();
+          return;
+        }
+      });
+    });
+
+    // Per-group event handlers (status buttons, defeated toggle, shared wound counter)
+    groupCards.forEach((groupCard) => {
+      const gid = groupCard.dataset.groupId;
+      groupCard.addEventListener("click", function (ev) {
+        const gs = state.groups[gid];
+        if (!gs) return;
+        const target = ev.target.closest("button");
+        if (!target) return;
+
+        if (target.matches("[data-group-wounds-decrement]")) {
+          // Allow values below zero? Clamp at 0. Max is informational only —
+          // we let users exceed it (e.g. 9/6 from Zemsta).
+          gs.woundsRemaining = Math.max(0, (gs.woundsRemaining || 0) - 1);
+          commit();
+          return;
+        }
+        if (target.matches("[data-group-wounds-increment]")) {
+          gs.woundsRemaining = (gs.woundsRemaining || 0) + 1;
+          commit();
+          return;
+        }
+        if (target.matches("[data-defeated-toggle]")) {
+          gs.defeated = !gs.defeated;
+          commit();
+          return;
+        }
+        const statusKey = target.dataset.statusToggle;
+        if (statusKey) {
+          const newVal = !gs[statusKey];
+          gs[statusKey] = newVal;
+          if (newVal) {
+            if (statusKey === "activated") gs.entrenched = false;
+            else if (statusKey === "entrenched") gs.pinned = false;
+          }
           commit();
           return;
         }
@@ -675,7 +737,7 @@
     if (endRoundBtn) {
       endRoundBtn.addEventListener("click", function () {
         state.round = (state.round || 1) + 1;
-        Object.values(state.units).forEach((us) => { us.activated = false; });
+        Object.values(state.groups).forEach((gs) => { gs.activated = false; });
         commit();
       });
     }
@@ -686,8 +748,13 @@
       resetBtn.addEventListener("click", function () {
         if (!window.confirm("Zakończyć starcie? Stan bitewny zostanie usunięty i przywrócony do wartości początkowych.")) return;
         clearState(rosterId);
-        state = { units: {}, round: 1 };
-        cards.forEach((card) => { state.units[card.dataset.rosterUnitId] = unitInitialState(card); });
+        state = { units: {}, groups: {}, round: 1 };
+        cards.forEach((card) => {
+          state.units[card.dataset.rosterUnitId] = unitInitialState(card);
+        });
+        groupCards.forEach((g) => {
+          state.groups[g.dataset.groupId] = groupInitialState();
+        });
         saveState(rosterId, state);
         rerenderAll();
       });

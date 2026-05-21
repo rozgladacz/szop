@@ -388,6 +388,25 @@ def _migrate_schema() -> None:
                     )
                 )
                 _initialize_roster_unit_positions(connection)
+            if "parent_roster_unit_id" not in column_names:
+                logger.info("Adding parent_roster_unit_id column to roster_units table")
+                connection.execute(
+                    text(
+                        "ALTER TABLE roster_units ADD COLUMN parent_roster_unit_id INTEGER "
+                        "REFERENCES roster_units(id) ON DELETE SET NULL"
+                    )
+                )
+            connection.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_roster_units_parent_id "
+                    "ON roster_units(parent_roster_unit_id) "
+                    "WHERE parent_roster_unit_id IS NOT NULL"
+                )
+            )
+
+        if "roster_unit_pairs" in table_names:
+            logger.info("Dropping obsolete roster_unit_pairs table")
+            connection.execute(text("DROP TABLE roster_unit_pairs"))
 
         if "unit_abilities" in table_names:
             columns = inspector.get_columns("unit_abilities")

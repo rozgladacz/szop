@@ -5,8 +5,8 @@ from app.services import costs
 def _role_keys(passive_section: dict[str, int]) -> list[str]:
     return [
         key
-        for key in passive_section.keys()
-        if costs.ability_identifier(key) in costs.ROLE_SLUGS
+        for key, value in passive_section.items()
+        if costs.ability_identifier(key) in costs.ROLE_SLUGS and value > 0
     ]
 
 
@@ -24,8 +24,9 @@ def test_apply_classification_replaces_existing_role_flag() -> None:
         costs.ability_identifier(key) for key in passive_section
     }
     assert all(
-        costs.ability_identifier(key) != "wojownik"
+        passive_section[key] == 0
         for key in passive_section
+        if costs.ability_identifier(key) == "wojownik"
     )
 
 
