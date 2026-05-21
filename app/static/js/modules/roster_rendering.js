@@ -130,6 +130,7 @@ function createRosterItemElement(data, options = {}) {
   item.setAttribute('data-unit-quality', String(unitQuality));
   item.setAttribute('data-unit-defense', String(unitDefense));
   item.setAttribute('data-unit-toughness', String(unitToughness));
+  item.setAttribute('data-unit-weapon-cost', String(Number.isFinite(Number(data.weapon_cost)) ? Number(data.weapon_cost) : 0));
   item.setAttribute('data-unit-custom-name', customName);
   if (unitCacheId) {
     item.setAttribute('data-unit-cache-id', unitCacheId);

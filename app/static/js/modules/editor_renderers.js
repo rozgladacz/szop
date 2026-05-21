@@ -289,9 +289,9 @@ function renderWeaponEditor(
       }
       classInfo.capacity = capacity;
     };
-    if (isPrimaryWeapon) {
+    if (isCurrentPrimary) {
       assignDefaultWeapon();
-    } else if (!classInfo.defaultWeapon && isDefaultWeapon) {
+    } else if (!classInfo.defaultWeapon && isDefaultWeapon && !hasOverride) {
       assignDefaultWeapon();
     }
 

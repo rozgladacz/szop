@@ -643,6 +643,9 @@ def edit_roster(
                 "classification": classification,
                 "is_hero": is_hero,
                 "unit_flags": _unit_flag_string_with_army(unit),
+                "weapon_cost": _roster_unit_classification_weapon_cost(
+                    roster_unit, applied_loadout
+                ),
             }
         )
     # Build hero-attachment frames: heroes attached to a parent are absorbed
@@ -924,6 +927,9 @@ def add_roster_unit(
             weapon_options,
         )
         base_cost_per_model = _base_cost_per_model(unit, classification)
+        weapon_cost_classification = _roster_unit_classification_weapon_cost(
+            roster_unit, loadout_payload
+        )
         roster_item = {
             "id": roster_unit.id,
             "count": roster_unit.count,
@@ -934,6 +940,7 @@ def add_roster_unit(
             "unit_quality": unit.quality,
             "unit_defense": unit.defense,
             "unit_toughness": unit.toughness,
+            "is_hero": unit_is_hero(unit, roster_unit),
             "unit_flags": _unit_flag_string_with_army(unit),
             "default_summary": default_summary,
             "loadout_summary": loadout_summary,
@@ -947,6 +954,7 @@ def add_roster_unit(
             "loadout": loadout_payload,
             "classification": classification,
             "base_cost_per_model": base_cost_per_model,
+            "weapon_cost": weapon_cost_classification,
         }
         payload = {
             "unit": {
@@ -1297,6 +1305,9 @@ def update_roster_unit(
                 "selected_active_items": selected_actives,
                 "selected_aura_items": selected_auras,
                 "parent_roster_unit_id": target.parent_roster_unit_id,
+                "weapon_cost": _roster_unit_classification_weapon_cost(
+                    target, loadout_payload
+                ),
             }
 
         unit_payloads = {
@@ -2388,6 +2399,83 @@ def _ability_entries(unit: models.Unit, ability_type: str) -> list[dict]:
         )
     entries.sort(key=lambda entry: (not entry.get("is_default", False), entry.get("label", "").casefold()))
     return entries
+
+
+def _roster_unit_weapon_components_sum(
+    roster_unit: models.RosterUnit,
+    applied_loadout: dict[str, Any] | None,
+) -> tuple[float, float]:
+    unit = getattr(roster_unit, "unit", None)
+    if unit is None:
+        return (0.0, 0.0)
+    flags = _unit_army_flags(unit)
+    unit_traits = costs.flags_to_ability_list(flags)
+
+    if not isinstance(applied_loadout, dict):
+        applied_loadout = {}
+    weapons_section = applied_loadout.get("weapons") or {}
+    total_mode = applied_loadout.get("mode") == "total"
+    model_count = max(int(getattr(roster_unit, "count", 1) or 1), 1)
+
+    weapons_by_id: dict[int, models.Weapon] = {}
+    for link in getattr(unit, "weapon_links", None) or []:
+        if link.weapon_id is not None and link.weapon is not None:
+            weapons_by_id.setdefault(int(link.weapon_id), link.weapon)
+    default_id = getattr(unit, "default_weapon_id", None)
+    default_w = getattr(unit, "default_weapon", None)
+    if default_id is not None and default_w is not None:
+        weapons_by_id.setdefault(int(default_id), default_w)
+
+    counts_iter: list[tuple[Any, Any]] = []
+    if isinstance(weapons_section, dict):
+        counts_iter = list(weapons_section.items())
+    elif isinstance(weapons_section, list):
+        for entry in weapons_section:
+            if not isinstance(entry, dict):
+                continue
+            wid = (
+                entry.get("weapon_id")
+                or entry.get("id")
+                or entry.get("loadout_key")
+                or entry.get("key")
+            )
+            cnt = entry.get("per_model") if "per_model" in entry else entry.get("count")
+            if wid is not None:
+                counts_iter.append((wid, cnt))
+
+    melee_sum = 0.0
+    ranged_sum = 0.0
+    for raw_id, raw_count in counts_iter:
+        try:
+            weapon_id = int(str(raw_id).split(":", 1)[0])
+        except (TypeError, ValueError):
+            continue
+        try:
+            count = int(raw_count)
+        except (TypeError, ValueError):
+            try:
+                count = int(float(raw_count))
+            except (TypeError, ValueError):
+                continue
+        if count <= 0:
+            continue
+        weapon = weapons_by_id.get(weapon_id)
+        if weapon is None:
+            continue
+        components = costs.weapon_cost_components(weapon, unit.quality, unit_traits)
+        total_count = count if total_mode else count * model_count
+        melee_sum += float(components.get("melee") or 0.0) * total_count
+        ranged_sum += float(components.get("ranged") or 0.0) * total_count
+
+    return (melee_sum, ranged_sum)
+
+
+def _roster_unit_classification_weapon_cost(
+    roster_unit: models.RosterUnit,
+    applied_loadout: dict[str, Any] | None,
+) -> float:
+    melee, ranged = _roster_unit_weapon_components_sum(roster_unit, applied_loadout)
+    return round((melee + ranged + max(melee, ranged)) / 2.0, 2)
 
 
 def _base_cost_per_model(

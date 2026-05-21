@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_primary-weapon-flag](docs/handoffs/HANDOFF_primary-weapon-flag.md) | Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski + zapis w loadout_json | `loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `rosters.py` | In progress |
+| [HANDOFF_widok-rozpiski-ostrzezenia](docs/handoffs/HANDOFF_widok-rozpiski-ostrzezenia.md) | Wskaźnik ⚠+tooltip ostrzeżeń po liczniku oddziałów/bohaterów + cleanup martwego `warnings:[]` w backendzie | `roster_edit.html`, `roster_warnings.js` (NEW), `roster_editor.js`*, `rosters.py`*, `rules.py` | In progress |
 
 ## Zasoby zablokowane (reverse lookup)
 
@@ -21,6 +22,10 @@
 | `app/static/js/modules/editor_renderers.js` | primary-weapon-flag | UI klikalnej nazwy |
 | `app/static/js/modules/roster_editor.js` | primary-weapon-flag | przekazanie primaryWeapon |
 | `app/routers/rosters.py` | primary-weapon-flag | _parse_loadout_json + _loadout_weapon_details |
+| `app/routers/rosters.py` | widok-rozpiski-ostrzezenia | dodanie `weapon_cost` w `roster_items.append` + cleanup `warnings:[]` (sekcje ortogonalne do primary-weapon-flag) |
+| `app/static/js/modules/roster_editor.js` | widok-rozpiski-ostrzezenia | 2 linie hook po updateTotalSummary / refreshRosterCountDisplay (ortogonalne do primary-weapon-flag) |
+| `app/templates/roster_edit.html` | widok-rozpiski-ostrzezenia | nowy znacznik `<span data-roster-warnings>` + atrybut `data-unit-weapon-cost` |
+| `app/services/rules.py` | widok-rozpiski-ostrzezenia | usunięcie martwej `collect_roster_warnings()` |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 

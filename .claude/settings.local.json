@@ -104,7 +104,14 @@
       "Bash(python -m pytest -x --tb=short -q)",
       "Bash(dir \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\services\\\\\" 2>&1 | head -20)",
       "Bash(.venv/Scripts/python scripts/update_descriptions.py)",
-      "Bash(.venv/Scripts/python -c \"from app.data import abilities; print\\('import OK'\\)\")"
+      "Bash(.venv/Scripts/python -c \"from app.data import abilities; print\\('import OK'\\)\")",
+      "Bash(node --check \"D:/OneDrive - KBJ S.A/Dokumenty/GitHub/OPR/app/static/js/modules/roster_warnings.js\")",
+      "PowerShell(node --check \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\static\\\\js\\\\modules\\\\roster_warnings.js\")",
+      "PowerShell(node --check \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\static\\\\js\\\\modules\\\\roster_editor.js\")",
+      "PowerShell(node --check \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\static\\\\js\\\\modules\\\\roster_rendering.js\")",
+      "PowerShell(if \\($?\\) { \"OK warnings.js\" })",
+      "PowerShell(if \\($?\\) { \"OK editor.js\" })",
+      "PowerShell(if \\($?\\) { \"OK rendering.js\" })"
     ]
   }
 }

@@ -710,16 +710,30 @@ def _apply_inheritance_selection(
         )
     if weapon.parent_id != resolved.id:
         weapon.parent_id = resolved.id
-        disabled_entry = db.execute(
-            select(models.ArmoryDisabledWeapon).where(
-                models.ArmoryDisabledWeapon.armory_id == armory.id,
-                models.ArmoryDisabledWeapon.weapon_id == resolved.id,
-            )
-        ).scalar_one_or_none()
-        if disabled_entry is not None:
-            db.delete(disabled_entry)
+        _clear_disabled_parent_entry(db, armory.id, resolved.id)
         return True
     return False
+
+
+def _clear_disabled_parent_entry(
+    db: Session, armory_id: int, parent_weapon_id: int
+) -> None:
+    """Remove any ArmoryDisabledWeapon record blocking an explicitly chosen parent.
+
+    When a user deletes an inherited weapon, ``_disable_inherited_weapon`` records
+    the parent so ``ensure_armory_variant_sync`` will not auto-recreate the clone.
+    When the user later explicitly chooses that parent (via inheritance, variant,
+    or import), the disabled state is no longer meaningful and would otherwise
+    cause the newly-created weapon to be deleted on the next page load.
+    """
+    disabled_entry = db.execute(
+        select(models.ArmoryDisabledWeapon).where(
+            models.ArmoryDisabledWeapon.armory_id == armory_id,
+            models.ArmoryDisabledWeapon.weapon_id == parent_weapon_id,
+        )
+    ).scalar_one_or_none()
+    if disabled_entry is not None:
+        db.delete(disabled_entry)
 
 
 def _weapon_chain_ids(db: Session, weapon: models.Weapon) -> list[int]:
@@ -1543,6 +1557,7 @@ def import_weapon(
             )
             if local_parent is not None:
                 source.parent_id = local_parent.id
+                _clear_disabled_parent_entry(db, source.armory_id, local_parent.id)
         db.flush()
     db.commit()
     return RedirectResponse(
@@ -1704,6 +1719,7 @@ def update_weapon(
     if action == "create_variant":
         parent = _resolve_local_parent_for_variant(db, armory, weapon)
         protected_parent_id = parent.id
+        _clear_disabled_parent_entry(db, armory.id, protected_parent_id)
         variant_name = None if cleaned_name == parent.effective_name else cleaned_name
         variant_range = None if cleaned_range == parent.effective_range else cleaned_range
         variant_attacks_input = (

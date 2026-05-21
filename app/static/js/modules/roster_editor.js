@@ -118,8 +118,30 @@ function initRosterEditor() {
           if (listElement) {
             const item = listElement.querySelector(`[data-roster-unit-id="${deletedId}"]`);
             if (item) {
-              const entry = item.closest('[data-roster-entry]');
-              (entry || item).remove();
+              // Attached heroes are nested inside the parent's [data-roster-entry].
+              // Removing the entry would also remove the parent — remove just the
+              // hero card itself instead.
+              if (item.hasAttribute('data-roster-attached-hero')) {
+                // Find parent entry before removing the node so we can
+                // clean up grouped styling if no heroes remain.
+                const parentEntry = item.closest('[data-roster-entry]');
+                item.remove();
+                // Remove the grouped CSS class when the last attached hero
+                // is gone so the parent entry reverts to a standalone frame.
+                if (parentEntry) {
+                  const remaining = parentEntry.querySelectorAll('[data-roster-attached-hero]');
+                  if (!remaining.length) {
+                    parentEntry.querySelector('.roster-unit-entry')
+                      ?.classList.remove('roster-unit-entry-grouped');
+                  }
+                }
+              } else {
+                const entry = item.closest('[data-roster-entry]');
+                (entry || item).remove();
+              }
+              // Keep items[] in sync so the "Dołącz do:" dropdown stays accurate.
+              const idx = items.indexOf(item);
+              if (idx !== -1) items.splice(idx, 1);
             }
           }
         }
@@ -1159,6 +1181,7 @@ function initRosterEditor() {
       return;
     }
     totalValueEl.textContent = formatPoints(total);
+    window.SZOPRosterWarnings?.recompute();
   }
 
   function refreshRosterCountDisplay() {
@@ -1188,6 +1211,7 @@ function initRosterEditor() {
     if (heroEl) {
       heroEl.textContent = String(heroModelsCount);
     }
+    window.SZOPRosterWarnings?.recompute();
   }
 
   function scheduleSave(requestVersion) {
@@ -1533,6 +1557,9 @@ function initRosterEditor() {
         && Number.isFinite(unitData.base_cost_per_model)
       ) {
         targetItem.setAttribute('data-base-cost-per-model', String(unitData.base_cost_per_model));
+      }
+      if (typeof unitData.weapon_cost === 'number' && Number.isFinite(unitData.weapon_cost)) {
+        targetItem.setAttribute('data-unit-weapon-cost', String(unitData.weapon_cost));
       }
       if (unitData.custom_name !== undefined) {
         const serverName = typeof unitData.custom_name === 'string' ? unitData.custom_name : '';
@@ -1935,8 +1962,12 @@ function initRosterEditor() {
   function handleStateChange() {
     const editVersion = latestEditVersion + 1;
     latestEditVersion = editVersion;
-    const activeEntry = activeItem ? getEntryElementFromItem(activeItem) : null;
-    const activeId = getUnitIdFromEntry(activeEntry);
+    // Read the active unit's own ID directly — do NOT go through
+    // getUnitIdFromEntry, which returns the first [data-roster-item] within
+    // the .roster-unit-entry.  For grouped (hero-attached) entries that first
+    // item is the hero, so using the entry-based helper would wrongly mark the
+    // hero's badge as loading whenever the parent unit is selected.
+    const activeId = activeItem ? activeItem.getAttribute('data-roster-unit-id') || '' : '';
     if (loadoutState) {
       loadoutState.mode = 'total';
     }
@@ -2107,11 +2138,23 @@ function renderEditors() {
         ? activeItem.getAttribute('data-parent-roster-unit-id') || ''
         : '',
       attachable: (() => {
-        try {
-          return JSON.parse(root.getAttribute('data-roster-attachable-units') || '[]');
-        } catch (_e) {
-          return [];
-        }
+        // Build dynamically from items so newly added units appear immediately
+        // without requiring a page reload (static data-roster-attachable-units
+        // is only set at server render time).
+        const heroId = activeItem ? activeItem.getAttribute('data-roster-unit-id') || '' : '';
+        return items
+          .filter((it) =>
+            it.getAttribute('data-is-hero') !== 'true' &&
+            it.getAttribute('data-roster-unit-id') !== heroId,
+          )
+          .map((it) => {
+            const id = it.getAttribute('data-roster-unit-id') || '';
+            const label =
+              it.getAttribute('data-unit-custom-name') ||
+              it.getAttribute('data-unit-name') ||
+              `Oddział ${id}`;
+            return { id, label };
+          });
       })(),
     } : null;
     const hasPassives = renderPassiveEditor(

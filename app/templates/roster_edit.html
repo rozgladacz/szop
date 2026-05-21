@@ -182,7 +182,20 @@
     <div class="card h-100">
       <div class="card-body d-flex flex-column" data-roster-items-container>
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <h5 class="mb-0">Oddziały w rozpisce (<span data-roster-frames-count>{{ frames_count }}</span>, bohaterów <span data-roster-hero-count>{{ hero_models_count }}</span>)</h5>
+          <h5 class="mb-0 d-flex align-items-center gap-2 flex-wrap">
+            <span>Oddziały w rozpisce (<span data-roster-frames-count>{{ frames_count }}</span>, bohaterów <span data-roster-hero-count>{{ hero_models_count }}</span>)</span>
+            <span class="roster-warnings-indicator d-none"
+                  data-roster-warnings
+                  data-bs-toggle="tooltip"
+                  data-bs-placement="bottom"
+                  data-bs-html="true"
+                  data-bs-title=""
+                  role="button"
+                  tabindex="0"
+                  aria-label="Ostrzeżenia rozpiski">
+              <span class="badge text-bg-warning"><span aria-hidden="true">⚠</span> <span data-roster-warnings-count>0</span></span>
+            </span>
+          </h5>
           <div
             class="text-muted small"
             data-roster-total-container
@@ -206,6 +219,7 @@
                 data-unit-quality="{{ ru.unit.quality }}"
                 data-unit-defense="{{ ru.unit.defense }}"
                 data-unit-toughness="{{ ru.unit.toughness }}"
+                data-unit-weapon-cost="{{ item.weapon_cost }}"
                 data-unit-custom-name="{{ ru.custom_name or '' }}"
                 data-unit-flags='{{ item.unit_flags | default('', true) | e }}'
                 data-is-hero="{{ 'true' if item.is_hero else 'false' }}"
