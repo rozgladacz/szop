@@ -1,42 +1,323 @@
 # Roadmap
 
 > Kierunki długofalowe. Bieżące zadania per wątek: `docs/handoffs/HANDOFF_*.md`. Stan zarchiwizowany: LOG SESJI w `HANDOFF.md`.
+>
+> Pełny plan architektoniczny 12–24 mies.: [docs/plans/architektura-dlugofala.md](plans/architektura-dlugofala.md)
 
-## Aktywne inicjatywy
+---
 
-### SSOT initiative — konsolidacja kalkulacji kosztów
+## Plan długofalowy — 5 strumieni (12–24 mies.)
 
-**Cel:** Wszystkie kalkulacje kosztów (oddziałów, broni, abilities) liczy backend w `app/services/costs/`. JS renderuje wyniki, nie liczy.
+```
+        ┌──────────────────────────────────────┐
+        │  A. Deklaratywne reguły (YAML SSOT) │  hard prereq dla B
+        └────┬─────────────────────┬───────────┘  soft prereq dla C
+             ▼                     ▼
+   ┌──────────────────┐   ┌───────────────────────┐
+   │  B. Game engine  │   │  C. MCP agent (RAG)   │
+   │  MVP (event-src) │   │  klient API + tokeny  │
+   └────────┬─────────┘   └──────┬────────────────┘
+            └───────────┬─────────┘
+                        ▼
+             ┌──────────┴─────────┐
+             │  D. Agenci (boty)  │  E. Wzbogacanie modelu
+             │  exploit-hunting   │  (po stabilizacji B)
+             └────────────────────┘
+```
 
-**Status:** 5-fazowy plan. Detale per faza w odpowiednich `HANDOFF_*.md` lub LOG SESJI.
+Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine **nie jest usuwany** — koexistuje z YAML pod feature toggle do ≥3 mies. stabilności w prod.
 
-**Faza końcowa:** usunięcie ostatnich inline cost calc w JS (`app/static/js/app.js`).
+---
 
-### Refaktoryzacja `app/static/js/app.js`
+## Strumień A — Deklaratywne reguły (YAML + SSOT)
 
-**Cel:** Podział monolitycznego `app.js` (~6500 linii) na moduły IIFE.
+> Zamiana hardcoded tabel i `if/elif` na YAML + Pydantic. Feature toggle `OPR_RULES_BACKEND ∈ {procedural, yaml, both_assert}`.
 
-**Status:**
-- **Faza I-III** — zakończone (merge `b1ccd78`, `ef4bbf7`, `65f8b6f`). Wydzielono: text parsing, UI pickers, spell weapon preview, spell ability forms, roster rendering, loadout state, editor renderers, roster adders, refresh priority.
-- **Faza IV** — w toku (commit `ef4bbf7`).
-- **Pozostałe sekcje monolitu:** `ROSTER EDITOR CLOSURE` (~2000 linii), `WEAPON PICKER`, `ABILITY PICKER`, `ARMORY WEAPON TREE`, `WEAPON INHERITANCE PANEL`.
+### A0. Feature toggle (prereq)
+- [ ] ENV `OPR_RULES_BACKEND` z defaultem `procedural`
+- [ ] Dispatcher w `app/services/costs/quote.py` (procedural | yaml | both_assert)
+- [ ] Tryb `both_assert`: wywołuje oba, loguje `RulesetParityError` jeśli delta > 1e-3, zwraca wynik procedurala
+- [ ] CI uruchamia `OPR_RULES_BACKEND=both_assert pytest` na każdym PR
+- [ ] ADR-0005: Feature toggle — procedural i YAML koexistują do dojrzałości
 
-**Detale techniczne:** `docs/app-js-guide.md`, `docs/frontend_js_modules.md`.
+### A1. Schema + słowniki (3 tyg)
+- [ ] `app/rulesets/v1/` — katalog plików YAML
+- [ ] `app/services/rulesets/models.py` — Pydantic v2 schema (TableDefinition, AbilityDefinition, AbilityCost, RulesetManifest)
+- [ ] `make generate-schema` → `docs/schemas/ruleset_v1.schema.json` (dla VS Code YAML extension)
+- [ ] `app/rulesets/v1/tables.yaml` — migracja tabel z `app/services/costs/_engine.py` (DEFENSE_BASE_VALUES, RANGE_TABLE, AP_BASE, BLAST_MULTIPLIER, …)
+- [ ] `app/rulesets/v1/abilities.yaml` — migracja 98 ability defs z `app/data/abilities.py`
+- [ ] `app/services/rulesets/loader.py` — LRU cache keyed na `(version, sha256(content))`, file mtime check w dev, zero alokacji w hot path
+- [ ] Testy: `tests/test_tables_migration.py`, `tests/test_abilities_migration.py` — exact match vs oryginał
+- [ ] ADR-0003: YAML + Pydantic v2 jako format reguł
 
-### System handoff i dokumentacja (ta refaktoryzacja)
+### A2. Cost DSL (4–5 tyg)
+- [ ] `app/services/rulesets/cost_functions.py` — ~12–15 czystych funkcji (`scale_by_tou`, `scale_by_quality`, `apply_ap_modifier`, `blast_cost`, …)
+- [ ] `app/rulesets/v1/ability_costs.yaml` — DSL: `{fn: "scale_by_tou", args: {factor: 1.25}}`
+- [ ] `_yaml_quote()` w `app/services/costs/quote.py` — loader → lookup → dispatch → QuoteResult
+- [ ] Testy: `tests/test_cost_functions.py`, `tests/test_quote_yaml_backend.py`
+- [ ] ADR-0004: Cost DSL — function dispatcher zamiast eval
 
-**Cel:** AGENTS.md → manifest invariantów + linki. Szczegóły w `docs/`. Per-wątek `docs/handoffs/HANDOFF_*.md` + 5 skilli automatyzujących workflow.
+### A3. Testy (cross-cutting)
+- [ ] Golden tests procedurala (istniejące) — **nie ruszać semantyki**; stają się wzorcem
+- [ ] `tests/yaml/test_*_yaml.py` — te same scenariusze pod `OPR_RULES_BACKEND=yaml`
+- [ ] `tests/test_ruleset_parity.py` — 100 cartesian + 50 ręcznych przypadków; `proc == yaml ± 1e-3`
+- [ ] CI: wszystkie 3 warstwy na każdym PR
 
-**Status:** in progress — szczegóły w `docs/handoffs/HANDOFF_refactor-agents-md.md`.
+### A4. Pipeline DOCX → PDF → YAML (3–4 tyg)
+- [ ] `scripts/rules_extract.py` — DOCX → `build/rules_extracted.yaml` (slug, name, type, description; cost_fn ręcznie)
+- [ ] `scripts/rules_drift.py` — diff extracted vs `abilities.yaml`; 4 rodzaje raportów; exit code 0/1/2; `build/drift_report.md`
+- [ ] `scripts/rules_classify_geometry.py` — klasyfikacja zdolności wg keywords (flanka, tył, obrót, …); `build/geometry_classification.md` → lista exclusions z B MVP
+- [ ] `scripts/rules_pdf_check.py` — DOCX vs PDF integrality; SHA256 w `app/static/docs/SZOP.pdf.sha256`
+- [ ] `make rules-check` — uruchamia cały pipeline
+- [ ] `.github/workflows/rules_drift.yml` — trigger: PR touching `app/static/docs/`, `app/rulesets/`, `app/data/abilities.py`
+- [ ] ADR-0006: Pipeline drift — nie auto-gen, only drift detection
 
-## Otwarte sprawy (do zaplanowania)
+### A5. Wydajność
+- [ ] `tests/test_quote_performance_regression.py` — YAML ≤ +20% baseline procedural (fail jeśli > 30%)
+- [ ] Profiling hot path `ability_identifier` (~18 700 callów/quote)
+- [ ] ADR-0007: Cache rulesetów — frozen dataclass + hash LRU
 
-- **Merge conflicts gałęzi Klasyfikacja** — nierozwiązane, blokują finalizację SSOT Phase 5.
-- **Lokalny runtime na Windows** — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
+---
+
+## Strumień B — Game Engine MVP (event-sourced, Pareto)
+
+> Symulator pełnej bitwy 1v1. Uproszczony model: oddział = koło, tereny = koła/linie, brak orientacji/per-model loadout. Pełne zasady przebiegu rundy.
+
+### B0. Pareto MVP — założenia (prereq)
+- [ ] Zdefiniuj w `tables.yaml`: wzór na radius_inches = f(models_count, toughness, base_size_mm)
+- [ ] Globalna stała ruchu: 6" w `tables.yaml` (nie per-unit)
+- [ ] Lista exclusions z `build/geometry_classification.md` (A4) — engine raise `UnsupportedAbilityError` dla tych zdolności
+- [ ] ADR-0008: Pareto MVP specification
+- [ ] ADR-0010a: Decision freeze — "rules text dojrzały do implementacji B3 actions" (GATE)
+
+### B2. Modele danych (4 tyg)
+
+**ORM — persistence layer (`app/models.py`):**
+- [ ] `User` — rozszerz: `role` (dodaj `agent`), `owner_user_id?`, `agent_kind?`
+- [ ] `Battle` — `(p1_user_id, p2_user_id, p1_roster_id, p2_roster_id, winner_user_id?, current_round, rng_seed, status, …)`
+- [ ] `BattleInvite` — `(from_user_id, to_user_id?, roster_id, scenario, status ∈ {pending/accepted/declined/expired}, expires_at)`
+- [ ] `BattleEvent` — append-only: `(battle_id, sequence, event_type, payload_json, timestamp)` + UniqueConstraint
+- [ ] `BattleSnapshot` — opcjonalny: `(battle_id, sequence_at, state_json)` (MVP: nie używany)
+- [ ] `Unit` — dodaj: `base_size_mm: int = 25`, `base_shape: str = "round"`
+- [ ] `AgentToken` — `(agent_user_id, owner_user_id, scope_json, expires_at, revoked_at?, last_used_at)`
+- [ ] `AgentAuditLog` — `(user_id?, agent_user_id?, route, params_json, timestamp)`
+- [ ] Migracja Alembic: `XXX_add_battle_models.py`
+
+**Runtime dataclass'y — czysty Python (`app/services/engine/state.py`):**
+- [ ] `UnitBlob(frozen=True)` — `(id, owner_player, position, radius_inches, models_alive, wounds_remaining, passives, status_flags)` — semantyka wounds jak istniejący „Stan bitewny"
+- [ ] `BattleState(frozen=True)` — `(round, active_player, activations_remaining, blobs, terrain, pending_effects, pending_interrupts, score)`
+- [ ] `TerrainCircle(frozen=True)`, `TerrainLine(frozen=True)`
+
+**Event definitions (`app/services/engine/events.py`):**
+- [ ] Frozen dataclass per event type: `MoveExecuted`, `ShotResolved`, `MeleeResolved`, `ModelKilled`, `MoraleTestPassed`, `EffectApplied`, `InterruptTriggered`, `RoundEnded`
+- [ ] `event_to_json()` + `json_to_event()` serializer
+
+**Persistence (`app/services/engine/persistence.py`):**
+- [ ] `save_events(session, battle_id, events)` — append do BattleEvent
+- [ ] `load_events(session, battle_id, since=0)` — odczyt z db
+- [ ] `create_snapshot()` — optionally save snapshot (MVP: nie wywoływane)
+
+- [ ] ADR-0010: Event-sourced battle log
+- [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence
+- [ ] ADR-0014: Obrażenia per-oddział (zgodne z „Stan bitewny")
+
+### B3. Rule Executor + dice (5–7 tyg, gate: ADR-0010a)
+
+**Dice (`app/services/engine/dice.py`, ~80 linii):**
+- [ ] `DeterministicDice(seed)` — `roll_d6(count, modifiers)`, `roll_with_threshold(pool, threshold)`
+- [ ] Testy: reproducibility, distribution, threshold
+- [ ] ADR-0012: Własna biblioteka dice, deterministic seed
+
+**LoS (`app/services/engine/los.py`):**
+- [ ] 3-state: `WIDZI` / `NIE_WIDZI` / `OSŁONA` — via N=16 deterministycznych punktów na okręgu celu
+- [ ] `check_los(attacker, target, terrain, N=16) → LoSState`
+- [ ] Testy: `tests/test_los_geometry.py` — 30 hand-crafted scenarios
+- [ ] ADR-0043: LoS 3-stanowy — sampling N=16, plan B: N=32 lub analytic tangent
+
+**Prediction (`app/services/engine/prediction.py`):**
+- [ ] `expected_damage(attacker, defender, weapon_slug, terrain, ruleset) → DamageDistribution` — analitycznie, binomial CDF, bez RNG
+- [ ] `DamageDistribution(mean, pmf, p_at_least(), p_kill())`
+- [ ] `would_see(pos, target, terrain) → LoSState`
+- [ ] Testy: `tests/test_prediction_vs_simulation.py` — 100 scenariuszy × 1000 Monte Carlo; mean ±3σ; Chi-square dla pmf
+- [ ] ADR-0044: Prediction module dla agentów (bez symulacji)
+
+**Combat (`app/services/engine/combat.py`):**
+- [ ] `resolve_ranged_attack(attacker, defender, weapon, dice, terrain, ruleset) → CombatResult`
+- [ ] Faza 1: Declare + attacker modifiers; REACTIVE WINDOW dla broniącego (jednorazowe, atomowe); Faza 2: Dice resolution; Faza 3: Wound allocation
+- [ ] `resolve_melee_attack(…)` — analogicznie
+- [ ] ADR-0015a: Reactive window — jednorazowa, atomowa, nie generuje nowych okien
+
+**Effects + Interrupts (`app/services/engine/effects.py`, `interrupts.py`):**
+- [ ] `EFFECT_REGISTRY` — `{slug: apply_fn}`; każda funkcja czysta: `(unit, context) → unit`
+- [ ] `InterruptManager` — 4 zamknięte punkty: `activation_start`, `after_action`, `before_regroup`, `after_regroup`; constraint: interrupt nie generuje nowego punktu
+- [ ] ADR-0015: 4 zamknięte interrupt points
+
+**Phases (`app/services/engine/phases.py`):**
+- [ ] `setup_phase(roster_p0, roster_p1, scenario, ruleset) → BattleState`
+- [ ] `deployment_round(state, actions) → (BattleState, events)`
+- [ ] `activation_phase(state, action) → (BattleState, events)`
+- [ ] `round_end_phase(state) → (BattleState, events)`
+
+**Resolver (`app/services/engine/resolver.py`):**
+- [ ] `apply(state, action, dice, ruleset, terrain) → (BattleState, list[BattleEvent])` — czysta funkcja, zero DB access
+- [ ] ADR-0011: Rule executor — hardcoded klasy na MVP
+
+### B4. API (3 tyg)
+- [ ] `app/routers/battles.py` — endpointy: `POST /battles/invite`, `POST /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `GET /battles/{id}/events`, `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST /battles/{id}/replay`
+- [ ] Auth: tylko gracze bitwy (nie trzecia osoba); agent wymaga scope
+- [ ] Pydantic schemas w `app/schemas.py` — BattleState, BattleEvent, Action (polimorficzne)
+- [ ] Optimistic locking na `BattleEvent.sequence` — zapobiega race condition
+
+### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg)
+- [ ] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `subscribe_events`, `simulate`
+- [ ] `szop_client/http.py` — `HttpClient(base_url, token)` — wywołuje FastAPI przez httpx
+- [ ] `szop_client/local.py` — `LocalClient(db_session, user_id)` — in-process BattleEngine; szybki batch (1000 bitew/min)
+- [ ] `szop_client/setup.py` — `pip install -e szop_client/`
+- [ ] `tests/test_clients_parity.py` — `HttpClient.simulate(...) == LocalClient.simulate(...)` dla tych samych args + seed
+- [ ] ADR-0016: szop_client jako wydzielony moduł
+
+### B6. Prezentacja (opcjonalne, 3–4 tyg)
+- [ ] `scripts/battle_replay.py <id>` — CLI terminal output
+- [ ] SSE stream `GET /battles/{id}/events`
+- [ ] `app/static/js/modules/battle_canvas.js` — minimalny 2D canvas (Konva.js lub goły Canvas)
+- [ ] ADR-0013: Engine headless-first, UI opcjonalne
+
+### B7. Test bed (2 tyg)
+- [ ] `tests/fixtures/battles/*.yaml` — golden scenariusze z predefined seed i oczekiwanym wynikiem
+- [ ] `tests/test_engine_regression.py` — golden battles deterministyczne (zmiana golden = świadoma zmiana rulesetu → ADR)
+
+---
+
+## Strumień C — Lokalny agent MCP (RAG + klient API)
+
+> MCP server jako klient publicznego API (przez szop_client HTTP). Nie łączy się bezpośrednio z DB.
+
+### C1. Infrastruktura (3 tyg)
+- [ ] `mcp_server/{server.py, config.py}` — MCP Python SDK, rejestracja narzędzi
+- [ ] Endpointy tokenów: `POST /agent_tokens`, `DELETE /agent_tokens/{id}`, `GET /agent_tokens`
+- [ ] Middleware `require_agent_scope(scope_name)` — weryfikacja + `AgentAuditLog`
+- [ ] `AgentProposal` model + `POST /agent_proposals`, `POST /agent_proposals/{id}/approve`
+- [ ] Frontend: approval UI "[Agent chce X] [Zezwól] [Odrzuć]"
+- [ ] ADR-0021: MCP jako klient publicznego API; ADR-0024: Consent-gated writes; ADR-0025: Rola agent + scoped tokens
+
+### C2. RAG (3 tyg)
+- [ ] `mcp_server/indexer.py` — chunki ~300 słów / 50 overlap z DOCX; embed via `paraphrase-multilingual-MiniLM-L12-v2`; store w `sqlite-vec`
+- [ ] `mcp_server/search.py` — hybrid: dense + BM25 (`rank_bm25`)
+- [ ] `make reindex-rules` — rebuild vector store
+- [ ] Ewaluacja: ≥70% recall@5 na 30 ręcznych Q&A
+- [ ] ADR-0022: sqlite-vec; ADR-0023: sentence-transformers offline
+
+### C3. Narzędzia MCP (3 tyg)
+- [ ] `lookup_rule(query)` — RAG nad SZOP.docx + YAML
+- [ ] `explain_ability(slug)` — strukturalny lookup z `abilities.yaml`
+- [ ] `validate_loadout(payload)` — `POST /rosters/.../quote`
+- [ ] `find_exploit_candidates(army_id)` — heurystyka cost/effectiveness
+- [ ] `score_list(roster_id)` — quick heuristic
+- [ ] `simulate_engagement(roster_a, roster_b, n)` — LocalClient batch
+
+---
+
+## Strumień D — Agenci konkurujący (testowanie)
+
+> Bot players do exploit-hunting i balansu. Wszystko na MVP modelu z B.
+
+### D1. Heuristic players (4 tyg)
+- [ ] `app/services/agents/base.py` — `class Player(ABC)`: `choose_action(state) → Action`
+- [ ] `random_player.py` — losowy wybór spośród valid actions
+- [ ] `greedy_player.py` — maks `damage_dealt - damage_taken` w 1 turze; używa `prediction.py`
+- [ ] `policy_eval.py` — `evaluate_state(state, perspective) → float` (HP balance + board control)
+
+### D2. Balance simulation (2 tyg)
+- [ ] `scripts/balance_simulate.py --ruleset v1 -n 1000` → CSV: win rates per rozpiska/zdolność/broń
+- [ ] `scripts/balance_report.py` → `reports/balance/YYYY-MM-DD.md` z wykresami
+
+### D3. Exploit hunting (2 tyg)
+- [ ] `scripts/exploit_hunt.py` — generuje losowe rozpiski na koncie `agent_kind=exploit_hunter`, gra vs siebie, raportuje top 10 (win_rate/points)
+- [ ] Każdy exploit → ADR z propozycją zmiany DOCX
+
+### D4. Adversarial play (4 tyg, opcjonalne)
+- [ ] Frontend UI "Play vs AI" — wybór agenta z listy
+- [ ] `minimax_player.py` — depth-2 (dla testów, ~100 ms/action)
+- [ ] Leaderboard `reports/leaderboard.md`
+- [ ] ADR-0030: Wielu agentów konkurujących — osobne konta + leaderboard
+
+---
+
+## Strumień E — Wzbogacanie modelu (po B stabilne, tydzień 20+)
+
+### E1. Per-model granularity (4–5 tyg)
+- [ ] `BattleModel` frozen dataclass w `app/services/engine/per_model.py`
+- [ ] `expand_blob_to_models(blob)` — na potrzeby heterogenicznych loadoutów
+- [ ] Adapter eventów: `BlobModified` → `ModelModified`
+- [ ] ADR-0040: Migration blob → per-model
+
+### E2. Geometria terenu (3 tyg)
+- [ ] `TerrainPolygon` w `app/services/engine/terrain_complex.py`
+- [ ] Ray-casting w `los.py` dla poligonów
+- [ ] ADR-0041: Terrain shapes beyond circle/line
+
+### E3. Złożone zdolności (iteracyjnie)
+- [ ] Lista priorytetowa z `build/geometry_classification.md`
+- [ ] Zdolność `Zwrot` wprowadza `UnitBlob.facing_deg: float = 0.0`
+- [ ] Każda zdolność = osobny PR + test + ADR
+
+---
+
+## Cross-cutting: telemetria od dnia 1 (ADR-0017)
+
+- [ ] `structlog` w `app/services/engine/{resolver, persistence}.py` — każdy event: `battle_id, action_id, actor_user_id`
+- [ ] `data/battle_metrics/{battle_id}.jsonl` — `action_count, dice_rolls_total, dice_distribution, time_per_action_ms`
+- [ ] `data/agent_metrics/{agent_user_id}.jsonl` — `decision_time_ms, decision_quality_score`
+- [ ] `scripts/analyze_battle.py <id>` — raport markdown z wykresami
+- [ ] `.gitignore`: `data/{battle,agent}_metrics/`
+
+---
+
+## ADR index
+
+| # | Tytuł | Status |
+|---|-------|--------|
+| 0001 | Refaktor app.js — IIFE bez bundlera | ✓ |
+| 0002 | SSOT kosztów: calculate_roster_unit_quote | ✓ |
+| 0003 | Format reguł: YAML + Pydantic v2 | — |
+| 0004 | Cost DSL: function dispatcher | — |
+| 0005 | Feature toggle: procedural + YAML | — |
+| 0006 | Pipeline docx↔yaml: drift-only | — |
+| 0007 | Cache rulesetów: frozen dataclass + LRU | — |
+| 0008 | Pareto MVP: oddział = koło, pełne zasady | — |
+| 0010 | Event-sourced battle log | — |
+| 0010a | Decision freeze (GATE dla B3 actions) | — |
+| 0010b | Eventy + immutable state; ORM tylko persistence | — |
+| 0011 | Rule executor: hardcoded → YAML handlers | — |
+| 0012 | Dice: własna biblioteka, deterministyczny seed | — |
+| 0013 | Engine headless-first | — |
+| 0014 | Obrażenia per-oddział (= Stan bitewny) | — |
+| 0015 | 4 zamknięte interrupt points | — |
+| 0015a | Reactive window w akcji ataku (atomowe) | — |
+| 0016 | szop_client jako wydzielony moduł | — |
+| 0017 | Telemetria od dnia 1 | — |
+| 0020 | MCP runtime: Python SDK | — |
+| 0021 | MCP jako klient publicznego API | — |
+| 0022 | Vector store: sqlite-vec | — |
+| 0023 | Embeddings: sentence-transformers offline | — |
+| 0024 | Consent-gated agent writes | — |
+| 0025 | Rola agent + scoped tokens | — |
+| 0030 | Wielu agentów: osobne konta + leaderboard | — |
+| 0040 | Migration blob → per-model | — |
+| 0041 | Terrain shapes beyond circle/line | — |
+| 0042 | Facing: wprowadzane z Zwrot | — |
+| 0043 | LoS 3-stanowy (sampling N=16) | — |
+| 0044 | Prediction module (damage PMF + visibility) | — |
+
+---
 
 ## Decyzje strategiczne
 
-- **Backend = SSOT dla kosztów.** Frontend renderuje, nie liczy.
-- **Hierarchia oddziałów = dziedziczenie z różnicami.** Wariant trzyma tylko delta, nie pełen stan.
-- **Monolityczne pliki dzielimy stopniowo, sekcjami.** Komentarze `// === SECTION: ... ===` są mapą — patrz `docs/developing.md`.
-- **Reguły gry (`app/static/docs/`) są źródłem prawdy.** Niedopuszczalna dywergencja kod ↔ dokumentacja reguł.
+- **Backend = SSOT dla kosztów.** Frontend renderuje, nie liczy. ✅
+- **Procedural engine nie jest usuwany** — feature toggle, usunięcie po ≥3 mies. prod stabilności + perf audit.
+- **Hierarchia oddziałów = dziedziczenie z różnicami.** Wariant trzyma tylko delta.
+- **Monolityczne pliki dzielimy stopniowo.** Komentarze sekcji w `app.js`, `_engine.py` — patrz `docs/developing.md`.
+- **Reguły gry (`app/static/docs/`) = source of truth.** Niedopuszczalna dywergencja kod ↔ DOCX.
+- **Procedural ↔ YAML parity = CI gate.** `both_assert` wykrywa każdą rozbieżność > 1e-3.
+- **Game engine = czyste funkcje + event sourcing.** ORM tylko do persistence, brak logiki gry w ORM.
+- **MCP agent = klient HTTP, nie direct DB.** Jeden mechanizm uprawnień, jeden audit trail.
