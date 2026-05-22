@@ -725,6 +725,7 @@
           if (newVal) {
             if (statusKey === "activated") gs.entrenched = false;
             else if (statusKey === "entrenched") gs.pinned = false;
+            else if (statusKey === "pinned") gs.entrenched = false;
           }
           commit();
           return;

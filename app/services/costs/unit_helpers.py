@@ -319,6 +319,19 @@ def normalize_roster_unit_loadout(
         slug_text = str(slug).strip()
         if not slug_text:
             continue
+        # Army-rule off-toggles (e.g. "__army_off__odwody") must be preserved
+        # as-is and must NOT be canonicalized via ability_identifier — that
+        # would strip the prefix and map them to the base slug (e.g. "odwody"),
+        # inverting the semantics: a stored value of 0 (meaning "do not
+        # disable this rule") would become passive["odwody"]=0 (meaning "rule
+        # is off"), silently disabling the army rule and distorting the cost.
+        # Pass them through unchanged; _apply_army_rule_overrides inside
+        # compute_passive_state interprets them correctly.
+        if slug_text.startswith(ARMY_RULE_OFF_PREFIX):
+            if value > 0:
+                sanitized_passive[slug_text] = 1
+            # value == 0: off-toggle inactive; leave the rule at its default.
+            continue
         canonical = None
         for candidate in (
             slug_text,
@@ -331,7 +344,7 @@ def normalize_roster_unit_loadout(
                 break
         if canonical is None:
             continue
-        sanitized_passive[canonical] = 1 if int(value) > 0 else 0
+        sanitized_passive[canonical] = 1 if value > 0 else 0
 
     return {
         "mode": normalized_mode,

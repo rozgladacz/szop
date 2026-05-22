@@ -272,7 +272,15 @@ function initRosterEditor() {
   }
 
   function getItemElementFromEntry(entry) {
-    return entry ? entry.querySelector('[data-roster-item]') : null;
+    if (!entry) return null;
+    // In a grouped entry the attached hero card comes first in the DOM, but
+    // the entry's canonical unit is the parent (no data-roster-attached-hero).
+    // Fall back to any [data-roster-item] only for standalone entries
+    // (including standalone heroes that have no parent).
+    return (
+      entry.querySelector('[data-roster-item]:not([data-roster-attached-hero])') ||
+      entry.querySelector('[data-roster-item]')
+    );
   }
 
   function getUnitIdFromEntry(entry) {
@@ -416,7 +424,7 @@ function initRosterEditor() {
       preserveSelection && activeItem
         ? activeItem
         : preserveSelection && entry
-          ? entry.querySelector('[data-roster-item]')
+          ? getItemElementFromEntry(entry)
           : null;
     const fallback = (reason = null) => {
       console.warn('Nie udało się przesunąć oddziału, wysyłam formularz ponownie.', reason);

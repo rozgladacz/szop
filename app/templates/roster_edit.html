@@ -467,7 +467,13 @@
       const entries = Array.from(list.querySelectorAll('[data-roster-entry]'));
       const order = entries
         .map((el) => {
-          const item = el.querySelector('[data-roster-unit-id]');
+          // Prefer the non-attached unit (parent in a grouped entry). Attached
+          // hero cards have data-roster-attached-hero and come first in DOM
+          // order, so a plain querySelector would return the hero's ID instead
+          // of the parent's.
+          const item =
+            el.querySelector('[data-roster-unit-id]:not([data-roster-attached-hero])') ||
+            el.querySelector('[data-roster-unit-id]');
           return item ? parseInt(item.dataset.rosterUnitId, 10) : null;
         })
         .filter((id) => id);

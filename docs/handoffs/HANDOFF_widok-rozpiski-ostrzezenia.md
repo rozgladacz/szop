@@ -1,9 +1,9 @@
 # HANDOFF — widok-rozpiski-ostrzezenia
 
 > **Wątek:** Wskaźnik ostrzeżeń (⚠ + tooltip) po liczniku oddziałów/bohaterów w edytorze rozpiski + cleanup martwej infrastruktury banner-warnings w backendzie.
-> **Status:** In progress
+> **Status:** Completed
 > **Utworzony:** 2026-05-20
-> **Ostatnia aktualizacja:** 2026-05-20
+> **Ostatnia aktualizacja:** 2026-05-22
 
 ## Cel
 
@@ -68,6 +68,7 @@ Plan szczegółowy: `C:\Users\mlis\.claude\plans\w-widoku-rozpiski-dodaj-mighty-
 - [x] Smoke: roster/3 (3 oddziały, 0 bohaterów, przekroczony limit) → badge ⚠3, tooltip poprawny.
 - [x] Smoke: roster/13 (5 oddziałów, 2 bohaterów, poniżej limitu) → badge ukryty (0 ostrzeżeń).
 - [x] Zero błędów/ostrzeżeń w konsoli przeglądarki.
+- [x] BUG FIX weapon_cost: `pytest -q` 176/176 po poprawce `_roster_unit_weapon_components_sum`.
 
 ## Pliki dotknięte
 
@@ -95,3 +96,4 @@ node --check app/static/js/modules/roster_warnings.js
 ## Notatki / odkrycia w trakcie
 
 - 2026-05-20: HANDOFF utworzony po zatwierdzeniu planu przez usera.
+- 2026-05-22: BUG FIX — `_roster_unit_weapon_components_sum` używał `_unit_army_flags(unit)` który zawierał slug roli (`strzelec`) z `unit.flags`, skutkiem czego `_weapon_cost` premat­uralnie dzielił koszt broni białej o 0.5. Naprawiono: zastąpiono `_unit_army_flags` + `flags_to_ability_list` wywołaniem `costs.compute_passive_state(unit, loadout)` + `costs._strip_role_traits(ps.traits)` — dokładnie jak robi to `roster_unit_role_totals`. Efekt: dla Widmy (3 modele, 2 bronie ×3) wynik zmienił się z 51.94 → 98.17 (zgodne z oczekiwaniem użytkownika ≈98.16).

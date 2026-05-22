@@ -2408,11 +2408,15 @@ def _roster_unit_weapon_components_sum(
     unit = getattr(roster_unit, "unit", None)
     if unit is None:
         return (0.0, 0.0)
-    flags = _unit_army_flags(unit)
-    unit_traits = costs.flags_to_ability_list(flags)
-
     if not isinstance(applied_loadout, dict):
         applied_loadout = {}
+    # Use compute_passive_state (like roster_unit_role_totals) to get base
+    # traits without role-classification slugs (wojownik/strzelec).  Using
+    # _unit_army_flags directly would include the unit's own role slug and
+    # halve the wrong weapon type (e.g. strzelec halves melee, but the
+    # classification formula (melee+ranged+max)/2 must receive raw values).
+    passive_state = costs.compute_passive_state(unit, applied_loadout)
+    unit_traits = costs._strip_role_traits(passive_state.traits)
     weapons_section = applied_loadout.get("weapons") or {}
     total_mode = applied_loadout.get("mode") == "total"
     model_count = max(int(getattr(roster_unit, "count", 1) or 1), 1)
@@ -2482,11 +2486,7 @@ def _base_cost_per_model(
     unit: models.Unit, classification: dict[str, Any] | None = None
 ) -> float:
     passive_state = costs.compute_passive_state(unit)
-    base_traits = [
-        trait
-        for trait in passive_state.traits
-        if costs.ability_identifier(trait) not in costs.ROLE_SLUGS
-    ]
+    base_traits = costs._strip_role_traits(passive_state.traits)
     slug: str | None = None
     if isinstance(classification, dict):
         raw_slug = classification.get("slug")
