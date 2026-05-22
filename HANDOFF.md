@@ -11,21 +11,19 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_primary-weapon-flag](docs/handoffs/HANDOFF_primary-weapon-flag.md) | Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski + zapis w loadout_json | `loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `rosters.py` | In progress |
-| [HANDOFF_widok-rozpiski-ostrzezenia](docs/handoffs/HANDOFF_widok-rozpiski-ostrzezenia.md) | Wskaźnik ⚠+tooltip ostrzeżeń po liczniku oddziałów/bohaterów + cleanup martwego `warnings:[]` w backendzie | `roster_edit.html`, `roster_warnings.js` (NEW), `roster_editor.js`*, `rosters.py`*, `rules.py` | In progress |
+| [HANDOFF_faza-a](docs/handoffs/HANDOFF_faza-a.md) | Migracja proceduralnej logiki kosztów do YAML+Pydantic v2 pod feature toggle `OPR_RULES_BACKEND` (A0+A1+A2+A3+A5) | `quote.py`, `config.py`, `requirements.txt`, `app/rulesets/v1/*`, `app/services/rulesets/*`, `Makefile` | In progress |
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `app/static/js/modules/loadout_state.js` | primary-weapon-flag | nowe pole primaryWeapon |
-| `app/static/js/modules/editor_renderers.js` | primary-weapon-flag | UI klikalnej nazwy |
-| `app/static/js/modules/roster_editor.js` | primary-weapon-flag | przekazanie primaryWeapon |
-| `app/routers/rosters.py` | primary-weapon-flag | _parse_loadout_json + _loadout_weapon_details |
-| `app/routers/rosters.py` | widok-rozpiski-ostrzezenia | dodanie `weapon_cost` w `roster_items.append` + cleanup `warnings:[]` (sekcje ortogonalne do primary-weapon-flag) |
-| `app/static/js/modules/roster_editor.js` | widok-rozpiski-ostrzezenia | 2 linie hook po updateTotalSummary / refreshRosterCountDisplay (ortogonalne do primary-weapon-flag) |
-| `app/templates/roster_edit.html` | widok-rozpiski-ostrzezenia | nowy znacznik `<span data-roster-warnings>` + atrybut `data-unit-weapon-cost` |
-| `app/services/rules.py` | widok-rozpiski-ostrzezenia | usunięcie martwej `collect_roster_warnings()` |
+| `app/services/costs/quote.py` | faza-a | dispatcher (A0) + `_yaml_quote()` (A2) |
+| `app/config.py` | faza-a | `OPR_RULES_BACKEND` ENV var (A0) |
+| `requirements.txt` | faza-a | pydantic v2 + pyyaml (A0) |
+| `app/rulesets/v1/` (NEW) | faza-a | tables.yaml + abilities.yaml + ability_costs.yaml (A1, A2) |
+| `app/services/rulesets/` (NEW) | faza-a | models, loader, cost_functions, dispatcher (A1, A2) |
+| `app/services/costs/errors.py` (NEW) | faza-a | `RulesetParityError` (A0) |
+| `Makefile` | faza-a | cel `test-parity` (A3) |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
@@ -43,6 +41,16 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-05-21 — widok-rozpiski-ostrzezenia (archived)
+- Dodany moduł `roster_warnings.js` + znacznik `⚠ N` z tooltipem po liczniku oddziałów/bohaterów (8 reguł: liczność oddziałów/bohaterów, limit punktów, nierównowaga cenowa 4×, broń vs wytrzymałość). Backend dorzuca `weapon_cost` do `roster_items`. Klucz `warnings:[]` i `collect_roster_warnings()` zostawione jako publiczny kontrakt AJAX.
+- Pliki: `app/static/js/modules/roster_warnings.js` (NEW), `app/templates/roster_edit.html`, `app/static/js/modules/roster_editor.js`, `app/static/js/modules/roster_rendering.js`, `app/routers/rosters.py`.
+- Weryfikacja: pytest 176/176, smoke roster/3 i roster/13 OK. Commit `588d27c`.
+
+### 2026-05-21 — primary-weapon-flag (archived)
+- Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski z zapisem override w `loadout_json.primary_weapon` (per typ: melee/ranged). Backend `_loadout_weapon_details` honoruje override przy budowaniu `weapon_details` dla Stanu Bitewnego.
+- Pliki: `app/static/js/modules/loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `app/routers/rosters.py`.
+- Weryfikacja: pytest 176/176, smoke OK po bugfixach (zachowanie w `_sanitize_loadout`, warunek `totalCount>0`, null sentinel dla zdejmowania default-primary). Commit `c8d6d52`.
 
 ### 2026-05-20 — refactor-agents-md (archived)
 - Podział AGENTS.md (267 → 73 linii) na manifest `[CRITICAL]/[REQUIRED]/[RECOMMENDED]` + szczegóły w `docs/`. HANDOFF.md przebudowany na meta-spis (95 → 61 linii). System per-wątek `docs/handoffs/HANDOFF_<slug>.md` + 5 skilli (`/handoff-start`, `/handoff-archive`, `/handoff-status`, `/load-context`, `/handoff-sync`) + obowiązkowy SessionStart hook w `.claude/settings.json`.

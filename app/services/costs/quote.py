@@ -22,10 +22,11 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any
 
-from ... import models
+from ... import config, models
 from ..utils import ARMY_RULE_OFF_PREFIX
 from ._engine import COST_ENGINE_VERSION, ROLE_SLUGS, _roster_unit_classification
 from .abilities import base_model_cost
+from .errors import RulesetParityError
 from .passive_state import compute_passive_state, normalize_roster_unit_count
 from .primitives import _strip_role_traits, _with_role_trait, ability_identifier
 from .role_totals import roster_unit_role_totals
@@ -34,19 +35,132 @@ from .weapons import weapon_cost, weapon_cost_components
 
 
 __all__ = ["calculate_roster_unit_quote"]
+
+
 # ============================================================
 # SECTION: QUOTE API — SSOT CORE
 # calculate_roster_unit_quote — jedyne źródło prawdy dla kosztów.
-# Zwraca total, components, item_costs (opcjonalnie), selected_role.
+# Strumień A (A0): top-level dispatcher czyta `config.OPR_RULES_BACKEND`
+# i wybiera _procedural_quote (default) / _yaml_quote (A2) /
+# _both_assert_quote (CI parity gate). Procedural pozostaje SSOT.
 # include_item_costs=False pomija pętlę passive_deltas (wydajność).
 # ============================================================
+_PARITY_TOLERANCE = 1e-3
+
+
 def calculate_roster_unit_quote(
     unit: models.Unit | None,
     loadout: dict[str, Any] | None = None,
     count: int = 1,
     include_item_costs: bool = True,
 ) -> dict[str, Any]:
-    """Public quote interface for a single roster unit.
+    """Public quote interface — dispatcher na backend z `config.OPR_RULES_BACKEND`."""
+    backend = config.OPR_RULES_BACKEND
+    if backend == config.RULES_BACKEND_YAML:
+        return _yaml_quote(unit, loadout, count, include_item_costs)
+    if backend == config.RULES_BACKEND_BOTH_ASSERT:
+        return _both_assert_quote(unit, loadout, count, include_item_costs)
+    return _procedural_quote(unit, loadout, count, include_item_costs)
+
+
+def _yaml_quote(
+    unit: models.Unit | None,
+    loadout: dict[str, Any] | None,
+    count: int,
+    include_item_costs: bool,
+) -> dict[str, Any]:
+    """YAML/Pydantic backend — implementacja w Fazie A2.
+
+    Sygnatura zgodna z `_procedural_quote`; aktualnie placeholder.
+    """
+    raise NotImplementedError(
+        "OPR_RULES_BACKEND='yaml' wymaga ukończenia Fazy A2 (cost DSL + _yaml_quote). "
+        "Patrz docs/handoffs/HANDOFF_faza-a.md."
+    )
+
+
+def _both_assert_quote(
+    unit: models.Unit | None,
+    loadout: dict[str, Any] | None,
+    count: int,
+    include_item_costs: bool,
+) -> dict[str, Any]:
+    """Parity gate — uruchamia oba backendy, porównuje, zwraca procedural.
+
+    Raise `RulesetParityError` gdy delta którejkolwiek liczby > _PARITY_TOLERANCE
+    albo gdy struktura wyniku różni się non-numerically.
+    """
+    proc_result = _procedural_quote(unit, loadout, count, include_item_costs)
+    yaml_result = _yaml_quote(unit, loadout, count, include_item_costs)
+    _assert_quote_parity(proc_result, yaml_result, tolerance=_PARITY_TOLERANCE)
+    return proc_result
+
+
+def _assert_quote_parity(
+    proc_result: Any,
+    yaml_result: Any,
+    *,
+    tolerance: float,
+    path: str = "<root>",
+) -> None:
+    """Recursive structural compare; numeric values within `tolerance`."""
+    # Numeric leaf (treat int and float jointly; bool is int subclass — handle first).
+    if isinstance(proc_result, bool) or isinstance(yaml_result, bool):
+        if proc_result != yaml_result:
+            raise RulesetParityError(
+                path=path, proc_value=proc_result, yaml_value=yaml_result, delta=None
+            )
+        return
+    if isinstance(proc_result, (int, float)) or isinstance(yaml_result, (int, float)):
+        try:
+            delta = abs(float(proc_result) - float(yaml_result))
+        except (TypeError, ValueError):
+            raise RulesetParityError(
+                path=path, proc_value=proc_result, yaml_value=yaml_result, delta=None
+            )
+        if delta > tolerance:
+            raise RulesetParityError(
+                path=path,
+                proc_value=proc_result,
+                yaml_value=yaml_result,
+                delta=delta,
+                tolerance=tolerance,
+            )
+        return
+    if isinstance(proc_result, dict):
+        if not isinstance(yaml_result, dict):
+            raise RulesetParityError(
+                path=path, proc_value=proc_result, yaml_value=yaml_result, delta=None
+            )
+        for key in set(proc_result) | set(yaml_result):
+            _assert_quote_parity(
+                proc_result.get(key),
+                yaml_result.get(key),
+                tolerance=tolerance,
+                path=f"{path}.{key}",
+            )
+        return
+    if isinstance(proc_result, (list, tuple)):
+        if not isinstance(yaml_result, type(proc_result)) or len(proc_result) != len(yaml_result):
+            raise RulesetParityError(
+                path=path, proc_value=proc_result, yaml_value=yaml_result, delta=None
+            )
+        for idx, (p_item, y_item) in enumerate(zip(proc_result, yaml_result)):
+            _assert_quote_parity(p_item, y_item, tolerance=tolerance, path=f"{path}[{idx}]")
+        return
+    if proc_result != yaml_result:
+        raise RulesetParityError(
+            path=path, proc_value=proc_result, yaml_value=yaml_result, delta=None
+        )
+
+
+def _procedural_quote(
+    unit: models.Unit | None,
+    loadout: dict[str, Any] | None = None,
+    count: int = 1,
+    include_item_costs: bool = True,
+) -> dict[str, Any]:
+    """Aktualny silnik proceduralny — SSOT przed A2.
 
     ``count`` is normalized through :func:`normalize_roster_unit_count`.
     ``count <= 0`` or unparsable values produce zero totals and normalized
