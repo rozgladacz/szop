@@ -126,7 +126,14 @@
       "Bash(python -m pytest tests/test_rules_drift.py tests/test_rules_extract.py -q)",
       "Bash(python scripts/rules_drift.py --extracted build/rules_md.yaml --yaml app/rulesets/v1/abilities.yaml --report build/drift_md_vs_yaml.md)",
       "Bash(python scripts/rules_drift.py --extracted build/rules_extracted.yaml --yaml build/rules_md.yaml --whitelist /dev/null --report build/drift_docx_vs_md.md)",
-      "Bash(python -m pytest tests/test_rules_extract_md.py -v)"
+      "Bash(python -m pytest tests/test_rules_extract_md.py -v)",
+      "Bash(python -m pytest -s -x -q)",
+      "Bash(python -m pytest --co -q tests/)",
+      "Bash(python -m pytest tests/test_quote_endpoint_flow.py -s -x -q --no-header -p no:warnings)",
+      "Bash(ls *.db)",
+      "Bash(ls data *)",
+      "Bash(python -m pytest tests/test_rosters_from_fixtures.py -k \"test_roster\" --collect-only)",
+      "PowerShell(cd \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\"; git show HEAD~1:app/routers/rosters.py | Select-String -Pattern \"def _base_cost_per_model\" -Context 0 | ForEach-Object { $_.LineNumber })"
     ]
   }
 }
