@@ -1,0 +1,387 @@
+# Ruleset v1 — definicje zdolnosci (mirror app/data/abilities.py).
+#
+# Procedural engine pozostaje SSOT przez caly Strumien A (ADR-0005). Ten plik jest
+# zrodlem dla YAML backend uruchamianego pod OPR_RULES_BACKEND=yaml.
+# Test tests/test_abilities_migration.py wymusza exact match (slug, name, type,
+# description, value_label, value_type, value_choices) wzgledem ABILITY_DEFINITIONS.
+
+version: 1
+abilities:
+- slug: bohater
+  name: Bohater
+  type: passive
+  description: Może być dołączony do dowolnego oddziału z którym dzieli pozostałe zdolności pasywne.Może wykonywać testy przegrupowania za cały oddział, ale musi korzystać z jego obrony, dopóki są w nim inne modele.Jego rozmiar jest traktowany  jakby miał 2 razy mniejszą wytrzymałość.
+- slug: ochroniarz
+  name: Ochroniarz
+  type: passive
+  description: Bohater. Oddział może korzystać z twojej obrony. Kontrolujący nie może pokonywać innych modeli w oddziale.
+- slug: zasadzka
+  name: Zasadzka
+  type: passive
+  description: Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej aktywacji rozstaw w dowolnym dozwolonym miejscu.Nie kontroluje celów w pierwszej rundzie.
+- slug: zwiadowca
+  name: Zwiadowca
+  type: passive
+  description: Rozstawia się po rozstawieniu wszystkich pozostałych jednostek, w odległości do 12” od normalnie dozwolonej pozycji. Gracze na zmianę rozmieszczają jednostki zwiadowcy, zaczynając od gracza, który dokonuje aktywacji jako następny. Jeżeli nie rozstawiłeś oddziałów bez tej zdolności, możesz później zamiast rozstawiać oddział raz aktywować ten oddział w rundzie rozstawienia (nie może w niej atakować).
+- slug: odwody
+  name: Odwody
+  type: passive
+  description: Przed rozstawieniem podziel oddziały z tą zdolnością bez zdolności Zwiadowca, Zasadzka lub Rezerwa na dwie grupy.Przeciwnik wybiera jedną z nich, a oddziały w niej zyskują zdolność Rezerwa.
+- slug: szybki
+  name: Szybki
+  type: passive
+  description: Porusza się o +2”.
+- slug: wolny
+  name: Wolny
+  type: passive
+  description: Porusza się o -2”.
+- slug: harcownik
+  name: Harcownik
+  type: passive
+  description: Przed przegrupowaniem możesz się ruszyć o 2”.
+- slug: instynkt
+  name: Instynkt
+  type: passive
+  description: Rusza się zawsze w stronę najbliższego wroga i zawsze atakuje najbliższego wroga.
+- slug: nieruchomy
+  name: Nieruchomy
+  type: passive
+  description: Po rozstawieniu nie może się przemieszczać i nie może zostać przyszpilony. Podczas szarży może atakować odziały w zasięgu 3”.
+- slug: zwinny
+  name: Zwinny
+  type: passive
+  description: Ignoruje trudny i niebezpieczny teren.
+- slug: niezgrabny
+  name: Niezgrabny
+  type: passive
+  description: Na trudnym i niebezpiecznym terenie wykonuje dodatkowy test trudnego terenu.
+- slug: latajacy
+  name: Latający
+  type: passive
+  description: Ignoruje teren i jednostki podczas ruchu. Wciąż jest uznawany za przechodzący przez punkt końcowy.
+- slug: samolot
+  name: Samolot
+  type: passive
+  description: Wysoki. Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. Nie może być przyszpilony, kontrolować punktów, szarżować, ani być celem szarży. Nie blokuje ruchu ani widzenia innych jednostek, a podczas ruchu ignoruje teren. Ma osłonę a jednostki strzelające do niego mają -12” zasięgu. Nie może być atakowany bronią Niebezpośrednią.
+- slug: wysoki
+  name: Wysoki
+  type: passive
+  description: Sprawdza linię wzroku jakby był na podwyższeniu.
+- slug: masywny
+  name: Sekcje
+  type: passive
+  description: Cały oddział reprezentowany jest przez jeden model z wydzielonymi elementami, który może przyjmować rany ponad maksimum.
+- slug: nieustraszony
+  name: Nieustraszony
+  type: passive
+  description: Wykonuje jeden test przegrupowania mniej.
+- slug: niestrudzony
+  name: Niestrudzony
+  type: passive
+  description: Może wykonywać tę samą akcję wielokrotnie w rundzie.
+- slug: ucieczka
+  name: Ucieczka
+  type: passive
+  description: Zanim zaczniesz być przyszpilony lub wyczerpany, możesz wykonać ruch.
+- slug: stracency
+  name: Straceńcy
+  type: passive
+  description: Po nieudanym teście przegrupowania wykonaj test trudnego terenu zamiast normalnych konsekwencji.
+- slug: furia
+  name: Furia
+  type: passive
+  description: Podczas szarży naturalne 6 dają dodatkowe zwykłe trafienie.
+- slug: przygotowanie
+  name: Przygotowanie
+  type: passive
+  description: Jeżeli jest Ufortyfikowany, +1 do rzutów na trafienie.
+- slug: kontra
+  name: Kontra
+  type: passive
+  description: Może wykonać kontratak przed szarżującym odziałem, a ten ignoruje swoją zdolność Impet.
+- slug: regeneracja
+  name: Regeneracja
+  type: passive
+  description: Przed przegrupowaniem odzyskujesz K3 rany, ale nie więcej, niż liczba straconych w tej aktywacji.
+- slug: dywersant
+  name: Dywersant
+  type: passive
+  description: Jeżeli oddział któremu w wyniku ataku zadałeś rany w tej aktywacji wykonuje test przegrupowania podczas gdy znajduje się bliżej twojej strefy rozstawienia niż ten oddział lub ten odział znajduje się bliżej jego strefy rozstawienia niż on, wykonuje on dodatkowy test przegrupowania.
+- slug: szpica
+  name: Szpica
+  type: passive
+  description: Podczas ataku przeciwko oddziałom które nie rozpoczęły swojej aktywacji w tej turze, naturalne 6 dają dodatkowe zwykłe trafienie.
+- slug: delikatny
+  name: Delikatny
+  type: passive
+  description: Podczas testów obrony naturalna 6 nie oznacza automatycznego sukcesu.
+- slug: niewrazliwy
+  name: Niewrażliwy
+  type: passive
+  description: Podczas testów obrony naturalna 5 daje automatyczny sukces.
+- slug: maskowanie
+  name: Maskowanie
+  type: passive
+  description: Ma osłonę, gdy jest dalej niż 3" od wrogów.
+- slug: waagh
+  name: Waagh!
+  type: passive
+  description: Jeżeli twój oddział ma poniżej połowy początkowej wytrzymałości i nie ma innego przyjaznego oddziału z tą zdolnością w zasięgu 12”, twoje ataki mają -1AP, a ataki w ciebie +1AP.
+- slug: ostrozny
+  name: Ostrożny
+  type: passive
+  description: Jeżeli nie ma wrogów w zasięgu 12” od oddziału modelu, +1 do rzutów na trafienie.
+- slug: tarcza
+  name: Tarcza
+  type: passive
+  description: +1 do testów obrony, gdy nie jest przyszpilony.
+- slug: okopany
+  name: Okopany
+  type: passive
+  description: +1 do testów obrony, gdy ma osłonę z terenu.
+- slug: zdobywca
+  name: Zdobywca
+  type: passive
+  description: Możesz ignorować wrogie oddziały bez tej zdolności podczas sprawdzania celów misji.
+- slug: transport
+  name: Transport
+  type: passive
+  description: Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. Transportowany oddział nie znajduje się na planszy, zawsze pozostaje w zasięgu transportującego oddziału, może oddziaływać wyłącznie na siebie i transportujący oddział. Jako swoją akcję ruchu może zostać rozstawiony. Wszystkie jego modele muszą zostać ustawione w odległości do 3” od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany. Oddział, którego wszystkie modele znajdują się do 3” od transportującego oddziału, może jako swoją akcję ruchu zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. Jeżeli część modeli transportującego oddziału zostanie zniszczona, transportowane oddziały mogą tymczasowo przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie zniszczony, wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się przyszpilone. Jeżeli transportujący oddział wykona podwójny ruch lub początkowy ruch zdolności Samolot, wszystkie transportowane oddziały zostają wyczerpane. Transportowane oddziały są rozstawiane razem z transporterem.
+  value_label: X
+  value_type: number
+- slug: platforma_strzelecka
+  name: Platforma strzelecka
+  type: passive
+  description: Jak Transport(X)t, ale odziały mogą strzelać tak jakby znajdowały się w miejscu transportera.
+  value_label: X
+  value_type: number
+- slug: otwarty_transport
+  name: Otwarty transport
+  type: passive
+  description: Jak Platforma strzelecka(X), ale odziały mogą zostać Wyczerpana, aby zaatakować wręcz razem z Transporterem. Mogą również być atakowane jakby były w miejscu transportera i w osłonie.
+  value_label: X
+  value_type: number
+- slug: straznik
+  name: Strażnik
+  type: passive
+  description: Gdy wrogi odział zakończy ruch, możesz przerwać aby zaatakować. Następnie ten odział zostaje wyczerpany.
+- slug: bastion
+  name: Bastion
+  type: passive
+  description: Nie zostajesz wyczerpany po kontrataku.
+- slug: zemsta
+  name: Zemsta
+  type: passive
+  description: Gdy przydzielasz rany, nie musisz od razu pokonywać modeli.Zamiast tego na końcu aktywacji oddziału, przed przegrupowaniem, pokonaj tyle modeli, aby liczba ran była niższa od wytrzymałości oddziału. Przeciwnik przydzielający rany, nie może używać wcześniej przydzielonych ran do pokonania modelu.
+- slug: dobrze_strzela
+  name: Dobrze strzela
+  type: passive
+  description: Atakuje na dystans z jakością 4.
+- slug: zle_strzela
+  name: Źle strzela
+  type: passive
+  description: Atakuje na dystans z jakością 5.
+- slug: cierpliwy
+  name: Cierpliwy
+  type: passive
+  description: Masz +1 do rzutów obrony, jeżeli nie rozpocząłeś swojej aktywacji w tej rundzie.
+- slug: odrodzenie
+  name: Odrodzenie
+  type: passive
+  description: Na koniec swojej aktywacji odzyskujesz połowę, zaokrąglając w górę, utraconych punktów wytrzymałości oddziału.Możesz je wykorzystać, aby przywrócić do gry pokonane model z tego oddziału, jeżeli możesz jej poprawnie rozstawić.
+- slug: rezerwa
+  name: Rezerwa
+  type: passive
+  description: Jak zasadzka, ale 12” od Twojej krawędzi stołu (jeżeli nie określają jej zasady rozstawienia wybiera przeciwnik na początku pierwszej rundy)
+- slug: wrak
+  name: Wrak
+  type: passive
+  description: Gdy zostaniesz pokonany teren który zajmujesz do końca bitwy uznawany jest niebezpieczny i trudny oraz osłonę.
+- slug: roj
+  name: Rój
+  type: passive
+  description: Gdy ten odział jest celem, ignoruj zdolność Zabójczy na broni,ale bronie z Rozprysk(X), działają zawsze z pełną efektywnością.
+- slug: zwrot
+  name: Zwrot
+  type: passive
+  description: 'Na końcu ruchu w swojej aktywacji wybiera w która stronę jest zwrócony (nie może tego zmienić poza swoją aktywacją). Jego usytuowanie wyznacza 4 nakładające się strefy, każda o kącie 180’: przód, tył, lewo, prawo.Jeżeli oddział który go atakuje jest cały w tylnej strefie, otrzymuje -1 do obrony.Co najmniej połowa jego broni musi być przypisana do strefy i może atakować tylko cele które w pełni się w niej znajdują. Pozostałe muszą atakować jeden oddział.'
+- slug: mistrzostwo
+  name: Mistrzostwo
+  type: passive
+  description: Każda twoja broń ma zdolność X.
+  value_label: X
+  value_type: text
+- slug: mag
+  name: Mag
+  type: active
+  description: 'Otrzymuje X żetonów mocy na początku każdej rundy, do maksymalnie 2X. Magowie w oddziale współdzielą żetony. Wydaj tyle żetonów, ile wynosi koszt czaru i rzuć kością. Przy wyniku 4+ rozstrzygnij jego efekt. Jedna próba na czar na aktywację. '
+  value_label: X
+  value_type: number
+- slug: przekaznik
+  name: Przekaźnik
+  type: active
+  description: Raz na rundę, gdy Mag w zasięgu 12” rzuca czar, może go rzucić z twojej pozycji z +1 do rzutu.
+- slug: koordynacja
+  name: Koordynacja
+  type: active
+  description: Przeciwnik pomija swoją następną aktywację.
+- slug: latanie
+  name: Łatanie
+  type: active
+  description: Na końcu towjej aktywacji oddział w zasięgu 3” odzyskuje k3 rany.
+- slug: mobilizacja
+  name: Mobilizacja
+  type: active
+  description: Oddział w zasięgu 12” przestaje być przyszpilony.
+- slug: przepowiednia
+  name: Przepowiednia
+  type: active
+  description: Wybierz oddział przeciwnika, który zostanie aktywowany jako następny, jeżeli to możliwe.
+- slug: presja
+  name: Presja
+  type: active
+  description: Odział w zasięgu 12” przestaje być wyczerpany.
+- slug: usprawnienie
+  name: Usprawnienie
+  type: active
+  description: Przerwij, aby oddział w zasięgu 12” do końca aktywacji zwiększył AP wszystkich swoich broni o 1.
+- slug: rozkaz
+  name: Rozkaz
+  type: active
+  description: Raz na rundę możesz przerwać, aby odział w zasięgu 12” od teraz do końca aktywacji (nie)miał zdolność X.
+  value_label: Zdolność
+  value_type: text
+- slug: klatwa
+  name: Klątwa
+  type: active
+  description: Raz na rundę możesz przerwać, aby wrogi oddział w zasięgu 12” od teraz do końca aktywacji (nie)miał zdolność X.
+  value_label: Zdolność
+  value_type: text
+- slug: oznaczenie
+  name: Oznaczenie
+  type: active
+  description: Raz na rundę możesz przerwać, aby sojuszniczy oddział który atakuje oddział w zasięgu 12” od teraz do końca aktywacji (nie)miał zdolność X.
+  value_label: Zdolność
+  value_type: text
+- slug: aura
+  name: Aura
+  type: aura
+  description: Przydziel oddziałom w zasięgu wybraną zdolność. Wariant o zasięgu 12” jest dwukrotnie silniejszy.
+  value_label: Zdolność
+  value_type: text
+- slug: radio
+  name: Radio
+  type: aura
+  description: Jeżeli model w twoim oddziale wydaje rozkaz, może wybrać oddział odległy o 24” który też ma radio.
+- slug: ociezalosc
+  name: Ociężałość
+  type: aura
+  description: Teren w zasięgu 12” jest uznawany za trudny dla wrogich oddziałów.
+- slug: spaczenie
+  name: Spaczenie
+  type: aura
+  description: Teren w zasięgu 12” jest uznawany za niebezpieczny dla wrogich oddziałów.
+- slug: meczennik
+  name: Męczennik
+  type: aura
+  description: Jeżeli wróg może cię pokonać, musi to zrobić.
+- slug: rozprysk
+  name: Rozprysk
+  type: weapon
+  description: Przed wykonaniem testów obrony liczba trafień jest mnożona przez X, ale nie więcej, niż jest modeli w atakowanym oddziale.
+  value_label: X
+  value_type: number
+  value_choices:
+  - '2'
+  - '3'
+  - '6'
+- slug: zabojczy
+  name: Zabójczy
+  type: weapon
+  description: Zamiast jednej przydziel X ran, ale nie więcej niż wytrzymałość wybranego modelu, który, jeżeli to możliwe, zostaje pokonany.Jeżeli w wyniku tego, zmieniała się maksymalna wytrzymałość oddziału, odrzuć tyle ran, aby nie było ich mniej niż ona.
+  value_label: X
+  value_type: number
+  value_choices:
+  - '2'
+  - '3'
+  - '6'
+- slug: niebezposredni
+  name: Niebezpośredni
+  type: weapon
+  description: Nie wymaga linii wzroku.
+- slug: artyleria
+  name: Artyleria
+  type: weapon
+  description: Każdy oddział w zasięgu 12” od sojuszniczego oddziału jest w zasięgu tej broni.
+- slug: impet
+  name: Impet
+  type: weapon
+  description: +1 do trafienia i +1 do AP podczas szarży.
+- slug: namierzanie
+  name: Namierzanie
+  type: weapon
+  description: Ignoruje osłonę i negatywne modyfikatory do rzutów na trafienie i do zasięgu.
+- slug: zuzywalny
+  name: Zużywalny
+  type: weapon
+  description: Można użyć tylko raz na grę. Limit jeden rodzaj broni z tą zdolnością na oddział.
+- slug: niezawodny
+  name: Niezawodny
+  type: weapon
+  description: Atakuje z jakością 2+.
+- slug: nieporeczny
+  name: Nieporęczny
+  type: weapon
+  description: Nie może atakować oddziałów w zasięgu 12”.
+- slug: rozrywajacy
+  name: Podwójny
+  type: weapon
+  description: Naturalne 6 na trafienie dają dodatkowe normalne trafienie.
+- slug: precyzyjny
+  name: Precyzyjny
+  type: weapon
+  description: Atakujący rozdziela rany.
+- slug: przebijajaca
+  name: Przebijająca
+  type: weapon
+  description: Każde trafienie zadaje liczbę ran równą wynikowi kostki obrony.
+- slug: szturmowa
+  name: Szturmowa
+  type: weapon
+  description: Można nią wykonywać ataki wręcz.
+- slug: finezja
+  name: Finezja
+  type: weapon
+  description: Wynik udanego rzutu na trafienie możesz traktować jak wynik rzutu na obronę.
+- slug: brutalny
+  name: Brutalny
+  type: weapon
+  description: W teście obrony nie ma automatycznych sukcesów.
+- slug: podkrecenie
+  name: Podkręcenie
+  type: weapon
+  description: W ostatniej rundzie wykonuje podwójną liczbę ataków.
+- slug: burzaca
+  name: Przełamanie
+  type: weapon
+  description: Jeżeli cel jest w zasięgu celu misji, wykonuje podwójną liczbę ataków.
+- slug: unik
+  name: Przewidywalny
+  type: weapon
+  description: Jeżeli cel jest Przyszpilony, wykonuje podwójną liczbę ataków.
+- slug: sterowany
+  name: Sterowany
+  type: weapon
+  description: Zanim wykonasz atak tą bronią, dla każdego powiązanego znacznika ustaw go w zasięgu broni od jego obecnej pozycji albo wykonaj atak z jego pozycji i go odrzuć. Następnie wykonaj zwykły atak albo ustaw nowy znacznik w zasięgu. Możesz mieć dwa znaczniki na planszy, są wspólne dla całego oddziału. Po wystawianiu rozstaw jeden znacznik.
+- slug: porazenie
+  name: Porażenie
+  type: weapon
+  description: Podczas sprawdzania kto wygrał walkę wręcz, rany zadane tą bronią liczą się podwójnie.
+- slug: zguba
+  name: Zguba
+  type: weapon
+  description: Zmniejsz liczbę odzyskanych ran w tej aktywacji o liczbę ran otrzymanych tą bronią. Modele pokonane tą bronią nie mogą wrócić do gry.
+- slug: dezintegracja
+  name: Dezintegracja
+  type: weapon
+  description: Naturalne 6 na trafienie ranią bez rzutu na obronę.

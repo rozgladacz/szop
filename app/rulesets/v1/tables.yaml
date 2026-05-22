@@ -1,0 +1,176 @@
+# Ruleset v1 — tabele kosztów (mirror app/services/costs/_engine.py:23-79).
+#
+# Procedural engine pozostaje SSOT przez cały Strumień A (patrz
+# docs/adr/0005-feature-toggle.md). Ten plik jest źródłem dla YAML backend
+# uruchamianego pod `OPR_RULES_BACKEND=yaml`. Test `tests/test_tables_migration.py`
+# wymusza exact match z oryginalnymi stałymi Pythonowymi.
+
+version: 1
+
+# Mnożniki kosztu testów przegrupowania (passive: nieustraszony, ucieczka, stracency).
+morale_ability_multipliers:
+  nieustraszony: 0.5
+  ucieczka: 0.5
+  stracency: 0.5
+
+# Bazowe wartości kosztu obrony per stat 2..6.
+defense_base_values:
+  2: 2.3
+  3: 1.65
+  4: 1.25
+  5: 1.0
+  6: 0.9
+
+# Delty kosztu obrony per ability per stat 2..6.
+defense_ability_modifiers:
+  delikatny:
+    2: -0.05
+    3: -0.05
+    4: -0.05
+    5: -0.05
+    6: -0.1
+  niewrazliwy:
+    2: 0.05
+    3: 0.1
+    4: 0.2
+    5: 0.3
+    6: 0.25
+  szpica:
+    2: 0.15
+    3: 0.12
+    4: 0.1
+    5: 0.08
+    6: 0.06
+  waagh:
+    2: -0.03
+    3: -0.03
+    4: -0.03
+    5: -0.02
+    6: -0.01
+  odrodzenie:
+    2: 0.9
+    3: 0.65
+    4: 0.5
+    5: 0.4
+    6: 0.35
+
+# Specjalne mnożniki wytrzymałości (TOUGHNESS_SPECIAL).
+toughness_special:
+  1: 1.0
+  2: 2.15
+  3: 3.5
+  4: 5
+
+# Mnożnik zasięgu broni (RANGE_TABLE). 0 = melee.
+range_table:
+  0: 0.6
+  12: 0.65
+  18: 1.0
+  24: 1.25
+  30: 1.45
+  36: 1.55
+
+# Bonus zasięgu artylerii (ARTILLERY_RANGE_BONUS).
+artillery_range_bonus:
+  0: 0.0
+  12: 0.85
+  18: 0.55
+  24: 0.35
+  30: 0.2
+  36: 0.15
+
+# Kara zasięgu nieporęcznych (UNWIELDY_RANGE_PENALTY).
+unwieldy_range_penalty:
+  0: 0.0
+  12: 0.6
+  18: 0.4
+  24: 0.4
+  30: 0.3
+  36: 0.15
+
+# Bonus trafienia ostrożnego (CAUTIOUS_HIT_BONUS).
+cautious_hit_bonus:
+  0: 0.0
+  12: 0.0
+  18: 0.6
+  24: 0.7
+  30: 0.8
+  36: 0.9
+
+# Bazowy mnożnik AP -1..5 (AP_BASE).
+ap_base:
+  -1: 0.75
+  0: 1.0
+  1: 1.4
+  2: 1.8
+  3: 2.1
+  4: 2.3
+  5: 2.4
+
+# Modyfikator AP dla lance (AP_LANCE).
+ap_lance:
+  -1: 0.15
+  0: 0.35
+  1: 0.3
+  2: 0.25
+  3: 0.15
+  4: 0.1
+  5: 0.05
+
+# Mnożnik penetracji per AP (PENETRATING_MULTIPLIER).
+penetrating_multiplier:
+  -1: 1.5
+  0: 2.0
+  1: 2.5
+  2: 2.7
+  3: 2.8
+  4: 2.9
+  5: 3.0
+
+# Modyfikator AP dla waagh (WAAGH_AP_MODIFIER).
+waagh_ap_modifier:
+  -1: 0.01
+  0: 0.02
+  1: 0.05
+  2: 0.04
+  3: 0.04
+  4: 0.03
+  5: 0.02
+
+# Mnożnik blastu per defense (BLAST_MULTIPLIER).
+blast_multiplier:
+  2: 1.9
+  3: 2.7
+  6: 4.3
+
+# Mnożnik deadly per defense (DEADLY_MULTIPLIER).
+deadly_multiplier:
+  2: 1.8
+  3: 2.5
+  6: 3.8
+
+# Koszt brutalnego per AP (BRUTALNY_AP_COST).
+brutalny_ap_cost:
+  -1: 0.0
+  0: 0.01
+  1: 0.02
+  2: 0.1
+  3: 0.2
+  4: 0.3
+  5: 0.4
+
+# Lista par (trait-set, mnożnik) dla TRANSPORT_MULTIPLIERS.
+# Kolejność istotna: pierwsze dopasowanie wygrywa (jak w procedural).
+transport_multipliers:
+  - traits: [samolot]
+    multiplier: 3.5
+  - traits: [zasadzka, zwiadowca]
+    multiplier: 2.5
+  - traits: [latajacy]
+    multiplier: 1.5
+  - traits: [szybki, zwinny]
+    multiplier: 1.25
+
+# Skalary globalne.
+overcharge_multiplier: 1.05
+base_cost_factor: 5.0
