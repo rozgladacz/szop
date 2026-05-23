@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-a](docs/handoffs/HANDOFF_faza-a.md) | Migracja proceduralnej logiki kosztów do YAML+Pydantic v2 pod feature toggle `OPR_RULES_BACKEND` (A0+A1+A2+A3+A5) | `quote.py`, `config.py`, `requirements.txt`, `app/rulesets/v1/*`, `app/services/rulesets/*`, `Makefile` | In progress |
+| [HANDOFF_faza-a-2-dsl-quote](docs/handoffs/HANDOFF_faza-a-2-dsl-quote.md) | Sub-wątek A2.4c: NEW `quote_yaml.py` (replika `roster_unit_role_totals`) + body `_yaml_quote()` + fix `transport_multiplier` priority-first | `app/services/rulesets/quote_yaml.py` (NEW), `cost_functions.py`, `quote.py`, `handlers.py` | In progress |
 
 ## Zasoby zablokowane (reverse lookup)
 

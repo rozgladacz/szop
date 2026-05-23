@@ -147,6 +147,7 @@ def transport_multiplier(
     for rule in tables.transport_multipliers:
         if ident_set & rule.traits_set:
             multiplier = float(rule.multiplier)
+            break
     return multiplier
 
 
