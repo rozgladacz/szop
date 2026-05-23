@@ -3,7 +3,7 @@
 > **Wątek:** Sub-wątek `faza-a` — implementacja A2.4c: YAML replika `roster_unit_role_totals` (NEW `quote_yaml.py`) + body `_yaml_quote()` + fix parity-bug `transport_multiplier` (priority-first), zamknięcie luki blokującej `OPR_RULES_BACKEND=both_assert` w fazie A3.
 > **Status:** In progress
 > **Utworzony:** 2026-05-23
-> **Ostatnia aktualizacja:** 2026-05-23 (po c.0+c.1)
+> **Ostatnia aktualizacja:** 2026-05-23 (po c.0+c.1+c.2)
 
 ## Cel
 
@@ -45,16 +45,16 @@ Po A2.4b (commit `a70601d`) mamy `ability_cost_components_yaml` z parity 37/37, 
 - [x] Krok 1.9: `pytest -q` → 296/296 green
 - [ ] Commit: `A2.4c.1: quote_yaml.roster_unit_role_totals_yaml + fix transport_multiplier priority`
 
-### Faza A2.4c.2 — `_yaml_quote()` body
+### Faza A2.4c.2 — `_yaml_quote()` body ✅
 
-- [ ] Krok 2.1: `quote.py` — importy `load_ruleset`, `roster_unit_role_totals_yaml`, `base_components_yaml` (lub inline)
-- [ ] Krok 2.2: Body `_yaml_quote` — mirror `_procedural_quote` z YAML substytucjami (tabela w planie)
-- [ ] Krok 2.3: `_passive_fn` closure (zbudowane raz per quote) injectowane do `cost_functions.base_model_cost`
-- [ ] Krok 2.4: Section totals (weapons/active/aura) inline z `weapon_cost_yaml` + `_yaml_ability_cost`
-- [ ] Krok 2.5: `item_costs.passive_deltas` (2× call `roster_unit_role_totals_yaml`) jeśli `include_item_costs=True`
-- [ ] Krok 2.6: Smoke `OPR_RULES_BACKEND=both_assert` × 20 roster_units × `{include_item_costs: True, False}` — 0 `RulesetParityError`
-- [ ] Krok 2.7: `pytest -q` → default procedural nadal green
-- [ ] Krok 2.8: Smoke UI `make dev` pod `both_assert` — otwórz rozpiskę, sprawdź render
+- [x] Krok 2.1: `quote.py` — importy `load_ruleset`, `weapon_cost_components_yaml`, `weapon_cost_yaml`, `base_model_cost_yaml`, `passive_cost_dsl`, `_build_passive_recipes`, `roster_unit_role_totals_yaml`, `_yaml_ability_cost`, `slug_for_name`
+- [x] Krok 2.2: Body `_yaml_quote` — mirror `_procedural_quote` 1:1 z YAML substytucjami
+- [x] Krok 2.3: `_passive_fn` closure zbudowany raz per quote, injectowany do `base_model_cost_yaml`
+- [x] Krok 2.4: `_section_total` inline z `weapon_cost_yaml` + `_yaml_ability_cost`
+- [x] Krok 2.5: `item_costs.passive_deltas` (2× `roster_unit_role_totals_yaml` per passive)
+- [x] Krok 2.6: Smoke `OPR_RULES_BACKEND=both_assert` × 10 cases × `{include_item_costs: True/False}` — 0 `RulesetParityError`. Pokrycie: None-unit, count=0, infantry, passive nieustraszony, passive zwiadowca, transport capacity, masywny, aura parse+dispatch, weapon, no-item-costs branch.
+- [x] Krok 2.7: `pytest -q` → 296/296 green (po update test_feature_toggle.py — stub→YAML active)
+- [ ] Krok 2.8: Smoke UI `make dev` pod `both_assert` — DEFERRED (DB pusta w lokalnym env; ten gate trafia do A3 z prawdziwą DB)
 - [ ] Commit: `A2.4c.2: _yaml_quote() body — YAML quote bit-identyczny z procedural`
 
 ### Faza Weryfikacja end-to-end
@@ -67,7 +67,12 @@ Po A2.4b (commit `a70601d`) mamy `ability_cost_components_yaml` z parity 37/37, 
 
 ## Pliki dotknięte
 
-**A2.4c.0 + c.1 (ta sesja):**
+**A2.4c.0 + c.1 + c.2 (ta sesja):**
+
+- `app/services/costs/quote.py` — implementacja body `_yaml_quote()` (~190 LOC). Mirror `_procedural_quote` z YAML substytucjami: `weapon_cost_components_yaml`/`weapon_cost_yaml`/`base_model_cost_yaml`/`_yaml_ability_cost`/`roster_unit_role_totals_yaml`. `_passive_fn` closure zbudowany raz per quote.
+- `tests/test_feature_toggle.py` — update 2 testów (`test_yaml_backend_raises_not_implemented` → `test_yaml_backend_returns_legacy_zero_shape_for_none_unit`; `test_both_assert_backend_propagates_yaml_stub` → `test_both_assert_backend_passes_on_none_unit`). YAML stub zastąpiony pełną implementacją.
+
+**A2.4c.0 + c.1:**
 - `app/services/rulesets/cost_functions.py:147-151` — `break` w `transport_multiplier` (priority-first match, fix last-match-wins parity bug)
 - `app/services/rulesets/quote_yaml.py` (NEW, ~440 LOC) — `roster_unit_role_totals_yaml` + `_yaml_ability_cost` helper. Importy whitelisted (`primitives`, `passive_state`, `unit_helpers` jako pure parsing; `cost_functions`, `dispatcher`, `handlers` jako cost math). Brak importu z `_engine`/`abilities`/`weapons`/`app/data/abilities`.
 

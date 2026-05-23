@@ -4,8 +4,8 @@ Verifies that `OPR_RULES_BACKEND` dispatches `calculate_roster_unit_quote`
 to the correct backend implementation:
 
 - `procedural` (default) — current SSOT engine, bit-identical to pre-A0 output.
-- `yaml`        — raises NotImplementedError until Faza A2 lands.
-- `both_assert` — raises NotImplementedError because it calls YAML internally.
+- `yaml`        — YAML backend (Faza A2.4c+): returns same shape as procedural.
+- `both_assert` — runs both backends, asserts parity, returns procedural.
 
 Also covers the config-level validation of unknown backend values.
 """
@@ -60,18 +60,39 @@ def test_procedural_backend_empty_quote_unchanged(monkeypatch: pytest.MonkeyPatc
     }
 
 
-def test_yaml_backend_raises_not_implemented(monkeypatch: pytest.MonkeyPatch) -> None:
-    """YAML backend stub raises until Faza A2."""
+def test_yaml_backend_returns_legacy_zero_shape_for_none_unit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """YAML backend (post A2.4c) returns same zero-unit shape as procedural."""
     monkeypatch.setattr(config, "OPR_RULES_BACKEND", config.RULES_BACKEND_YAML)
-    with pytest.raises(NotImplementedError, match="A2"):
-        quote_module.calculate_roster_unit_quote(None)
+    result = quote_module.calculate_roster_unit_quote(None)
+    assert result["selected_role"] is None
+    assert result["warrior_total"] == 0.0
+    assert result["shooter_total"] == 0.0
+    assert result["selected_total"] == 0.0
+    assert result["components"] == {
+        "base": 0.0,
+        "weapon": 0.0,
+        "active": 0.0,
+        "aura": 0.0,
+        "passive": 0.0,
+    }
+    assert result["item_costs"] == {
+        "weapons": {},
+        "active": {},
+        "aura": {},
+        "passive_deltas": {},
+    }
 
 
-def test_both_assert_backend_propagates_yaml_stub(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`both_assert` invokes YAML internally — stub propagates the error."""
+def test_both_assert_backend_passes_on_none_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`both_assert` runs both backends; for None-unit they produce identical zeros."""
     monkeypatch.setattr(config, "OPR_RULES_BACKEND", config.RULES_BACKEND_BOTH_ASSERT)
-    with pytest.raises(NotImplementedError):
-        quote_module.calculate_roster_unit_quote(None)
+    result = quote_module.calculate_roster_unit_quote(None)
+    # `_both_assert_quote` returns procedural after parity check passes.
+    assert result["selected_role"] is None
+    assert result["warrior_total"] == 0.0
+    assert result["selected_total"] == 0.0
 
 
 def test_invalid_backend_value_rejected_at_import(monkeypatch: pytest.MonkeyPatch) -> None:
