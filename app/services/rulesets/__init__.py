@@ -8,6 +8,10 @@ funkcje DSL kosztów (Faza A2+). Wpinany pod feature toggle
 
 from .loader import RULESET_VERSIONS, load_ruleset
 from .models import (
+    AbilityCosts,
+    CostRecipeSpec,
+    HandlerMatch,
+    HandlerSpec,
     RulesetAbility,
     RulesetManifest,
     RulesetTables,
@@ -16,6 +20,10 @@ from .models import (
 
 __all__ = [
     "RULESET_VERSIONS",
+    "AbilityCosts",
+    "CostRecipeSpec",
+    "HandlerMatch",
+    "HandlerSpec",
     "RulesetAbility",
     "RulesetManifest",
     "RulesetTables",

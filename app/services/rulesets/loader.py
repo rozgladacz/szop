@@ -18,7 +18,16 @@ from typing import Any
 
 import yaml
 
-from .models import RulesetAbility, RulesetManifest, RulesetTables, TransportMultiplier
+from .models import (
+    AbilityCosts,
+    CostRecipeSpec,
+    HandlerMatch,
+    HandlerSpec,
+    RulesetAbility,
+    RulesetManifest,
+    RulesetTables,
+    TransportMultiplier,
+)
 
 # Korzeń katalogu rulesetów: `app/rulesets/`. Plik żyje w
 # `app/services/rulesets/loader.py`, więc parent.parent.parent = `app/`.
@@ -74,24 +83,102 @@ def _build_abilities(raw: list[Any]) -> tuple[RulesetAbility, ...]:
     return tuple(out)
 
 
+def _build_cost_recipe(raw: Any, *, ctx: str) -> CostRecipeSpec:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{ctx}: expected mapping {{fn, args}}, got {raw!r}")
+    fn_name = raw.get("fn")
+    if not isinstance(fn_name, str) or not fn_name:
+        raise ValueError(f"{ctx}: missing/empty 'fn'")
+    args = raw.get("args") or {}
+    if not isinstance(args, dict):
+        raise ValueError(f"{ctx}: 'args' must be a mapping, got {args!r}")
+    return CostRecipeSpec(fn=fn_name, args=dict(args))
+
+
+def _build_handler(raw: Any, *, ctx: str) -> HandlerSpec:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{ctx}: expected mapping, got {raw!r}")
+    match_raw = raw.get("match")
+    if not isinstance(match_raw, dict):
+        raise ValueError(f"{ctx}: missing/invalid 'match'")
+    match_payload: dict[str, Any] = {}
+    if "prefix" in match_raw:
+        match_payload["prefix"] = str(match_raw["prefix"])
+    if "prefix_any" in match_raw:
+        prefixes = match_raw["prefix_any"]
+        if not isinstance(prefixes, list):
+            raise ValueError(f"{ctx}.match.prefix_any: must be a list")
+        match_payload["prefix_any"] = tuple(str(p) for p in prefixes)
+    if "slug" in match_raw:
+        match_payload["slug"] = str(match_raw["slug"])
+    if not match_payload:
+        raise ValueError(f"{ctx}.match: requires at least one of prefix/prefix_any/slug")
+    payload = {k: v for k, v in raw.items() if k != "match"}
+    payload["match"] = HandlerMatch(**match_payload)
+    return HandlerSpec(**payload)
+
+
+def _build_ability_costs(raw: dict[str, Any], *, ctx: str) -> AbilityCosts:
+    if not isinstance(raw, dict):
+        raise ValueError(f"{ctx}: top-level must be a mapping")
+    version = int(raw.get("version", 0))
+    if version <= 0:
+        raise ValueError(f"{ctx}: invalid version {version}")
+    passive_raw = raw.get("passive_abilities", {}) or {}
+    if not isinstance(passive_raw, dict):
+        raise ValueError(f"{ctx}.passive_abilities: must be a mapping")
+    passive: dict[str, CostRecipeSpec] = {
+        str(slug): _build_cost_recipe(spec, ctx=f"{ctx}.passive_abilities.{slug}")
+        for slug, spec in passive_raw.items()
+    }
+    fixed_by_slug = {
+        str(k): float(v) for k, v in (raw.get("fixed_by_slug") or {}).items()
+    }
+    fixed_by_desc = {
+        str(k): float(v) for k, v in (raw.get("fixed_by_desc") or {}).items()
+    }
+    handlers_raw = raw.get("handlers") or []
+    if not isinstance(handlers_raw, list):
+        raise ValueError(f"{ctx}.handlers: must be a list")
+    handlers = tuple(
+        _build_handler(h, ctx=f"{ctx}.handlers[{i}]") for i, h in enumerate(handlers_raw)
+    )
+    skip_in_default = tuple(str(s) for s in (raw.get("skip_in_default") or ()))
+    return AbilityCosts(
+        version=version,
+        passive_abilities=passive,
+        fixed_by_slug=fixed_by_slug,
+        fixed_by_desc=fixed_by_desc,
+        handlers=handlers,
+        skip_in_default=skip_in_default,
+    )
+
+
 @lru_cache(maxsize=8)
-def _load_ruleset_cached(version: str, tables_sha: str, abilities_sha: str) -> RulesetManifest:
-    """Inner cached builder — keyed on (version, sha256(tables), sha256(abilities))."""
-    del tables_sha, abilities_sha  # used only as cache discriminator
+def _load_ruleset_cached(
+    version: str, tables_sha: str, abilities_sha: str, ability_costs_sha: str
+) -> RulesetManifest:
+    """Inner cached builder — keyed on (version, sha256(*) per YAML file)."""
+    del tables_sha, abilities_sha, ability_costs_sha  # cache discriminators
     base = _RULESETS_ROOT / version
     tables_doc = _parse_yaml(_read_bytes(base / "tables.yaml"))
     abilities_doc = _parse_yaml(_read_bytes(base / "abilities.yaml"))
+    ability_costs_doc = _parse_yaml(_read_bytes(base / "ability_costs.yaml"))
 
     if not isinstance(tables_doc, dict):
         raise ValueError(f"{base / 'tables.yaml'}: top-level must be a mapping")
     if not isinstance(abilities_doc, dict):
         raise ValueError(f"{base / 'abilities.yaml'}: top-level must be a mapping")
+    if not isinstance(ability_costs_doc, dict):
+        raise ValueError(f"{base / 'ability_costs.yaml'}: top-level must be a mapping")
 
     tables_version = int(tables_doc.get("version", 0))
     abilities_version = int(abilities_doc.get("version", 0))
-    if tables_version != abilities_version:
+    ability_costs_version = int(ability_costs_doc.get("version", 0))
+    if not (tables_version == abilities_version == ability_costs_version):
         raise ValueError(
-            f"Ruleset version mismatch: tables={tables_version}, abilities={abilities_version}"
+            f"Ruleset version mismatch: tables={tables_version}, "
+            f"abilities={abilities_version}, ability_costs={ability_costs_version}"
         )
     if tables_version <= 0:
         raise ValueError(f"Ruleset {version}: invalid version {tables_version}")
@@ -101,14 +188,22 @@ def _load_ruleset_cached(version: str, tables_sha: str, abilities_sha: str) -> R
     if not isinstance(abilities_payload, list):
         raise ValueError(f"{base / 'abilities.yaml'}: 'abilities' must be a list")
     abilities = _build_abilities(abilities_payload)
+    ability_costs = _build_ability_costs(
+        ability_costs_doc, ctx=str(base / "ability_costs.yaml")
+    )
 
-    return RulesetManifest(version=tables_version, tables=tables, abilities=abilities)
+    return RulesetManifest(
+        version=tables_version,
+        tables=tables,
+        abilities=abilities,
+        ability_costs=ability_costs,
+    )
 
 
 def load_ruleset(version: str = "v1") -> RulesetManifest:
     """Public entrypoint — zwraca cache'owany manifest dla podanej wersji.
 
-    Re-czytamy SHA256 obu plików, żeby zmiana w dev triggerowała rewalidację
+    Re-czytamy SHA256 wszystkich plików, żeby zmiana w dev triggerowała rewalidację
     bez ręcznego invalidate'u cache. W prod (pliki zamrożone) SHA jest stabilne
     → cache hit od drugiego wywołania.
     """
@@ -117,4 +212,5 @@ def load_ruleset(version: str = "v1") -> RulesetManifest:
     base = _RULESETS_ROOT / version
     tables_sha = _sha256(_read_bytes(base / "tables.yaml"))
     abilities_sha = _sha256(_read_bytes(base / "abilities.yaml"))
-    return _load_ruleset_cached(version, tables_sha, abilities_sha)
+    ability_costs_sha = _sha256(_read_bytes(base / "ability_costs.yaml"))
+    return _load_ruleset_cached(version, tables_sha, abilities_sha, ability_costs_sha)
