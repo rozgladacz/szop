@@ -1,9 +1,9 @@
 # HANDOFF — faza-a
 
 > **Wątek:** Strumień A planu długofalowego — migracja proceduralnej logiki kosztów do deklaratywnej (YAML + Pydantic v2) pod feature toggle `OPR_RULES_BACKEND`, fazy A0+A1+A2+A3+A5 (A4 świadomie poza scope).
-> **Status:** In progress (A0+A1 done, A2.1+A2.2+A2.3+A2.4a+A2.4b done, A2.4c next)
+> **Status:** In progress (A0+A1 done, A2.1+A2.2+A2.3+A2.4a+A2.4b+A2.4c done, A2.5 next)
 > **Utworzony:** 2026-05-21
-> **Ostatnia aktualizacja:** 2026-05-22
+> **Ostatnia aktualizacja:** 2026-05-23 (po A2.4c w sub-wątku `faza-a-2-dsl-quote`)
 
 ## Cel
 
@@ -71,10 +71,10 @@ Plan szczegółowy: `C:\Users\mlis\.claude\plans\twoje-zadanie-skoordynowa-prac-
 - [x] Krok A2.1: `app/services/rulesets/cost_functions.py` (NOWY) — 13 czystych funkcji + 1 prywatny helper `_weapon_cost_yaml` (mirror `weapons._weapon_cost`). Funkcje są pure, czytają `RulesetTables` z YAML, brak importów z `costs/_engine`. Smoke parity ok (8/8 delta=0): bolter, weapon-z-traitami, assault, mistrzostwo_aura, base_model_cost, defense/morale/toughness
 - [x] Krok A2.2: `app/services/rulesets/dispatcher.py` (NOWY) — `CostRecipe` pydantic model + `_REGISTRY` (9 funkcji) + `call_recipe()` + `passive_cost_dsl()` jako YAML-replika oracle passive_cost. Smoke parity 22/22 na 11 abilities × {aura=False, aura=True}, 0 mismatch (włącznie z instynkt aura_alt_base i bastion/niestrudzony/ostrozny aura_required)
 - [x] Krok A2.3: `app/rulesets/v1/ability_costs.yaml` (NOWY) — DSL per slug. 4 sekcje: `passive_abilities` (33 recipes), `fixed_by_slug` (7), `fixed_by_desc` (4), `handlers` (6 dla transport/open_transport/aura/mag/order_like/mistrzostwo). Plus `skip_in_default: [przygotowanie]`. Parity test 330/330 (33 slugów × 5 tou × {aura,non-aura}). Wymagało rozszerzenia `scale_by_tou` o flagę `aura_scale` (dla "dywersant": 1.25 stałe gdy aura=False, 1.25*tou gdy aura=True)
-- [~] Krok A2.4: `app/services/costs/quote.py` — implementacja `_yaml_quote()` end-to-end (reprodukuje shape outputu procedural). **Podzielone na 3 podetapy:**
+- [x] Krok A2.4: `app/services/costs/quote.py` — implementacja `_yaml_quote()` end-to-end (reprodukuje shape outputu procedural). **Podzielone na 3 podetapy:**
   - [x] A2.4a: `models.py` + `loader.py` — `AbilityCosts`/`CostRecipeSpec`/`HandlerSpec`/`HandlerMatch` pydantic schema + loader walidacja spójności wersji 3 plików YAML. Cache LRU wzbogacony o sha256 trzeciego pliku.
-  - [x] A2.4b: `handlers.py` (NOWY) — 6 handlerów (open_transport/aura/mag/order_like/mistrzostwo + ablacja "transport") + `ability_cost_components_yaml()` jako wierna replika oracle dispatcher. Helper `weapon_cost_components_yaml`/`weapon_cost_yaml` dodane do cost_functions.py. **Smoke parity 37/37** vs oracle `ability_cost_components_from_name` (wszystkie 6 handlerów + fixed_by_desc + fixed_by_slug + row_delta morale/defense + weapon_delta + skip_in_default + unknown slug).
-  - [ ] A2.4c: `quote_yaml.py` (NOWY) — `roster_unit_role_totals_yaml()` (replika role_totals.py) + integracja w `_yaml_quote()`. **Pozostała praca** (~300+ LOC).
+  - [x] A2.4b: `handlers.py` (NOWY) — 6 handlerów (open_transport/aura/mag/order_like/mistrzostwo + ablacja "transport") + `ability_cost_components_yaml()` jako wierna replika oracle dispatcher. Helper `weapon_cost_components_yaml`/`weapon_cost_yaml` dodane do cost_functions.py. **Smoke parity 37/37** vs oracle `ability_cost_components_from_name`.
+  - [x] A2.4c (sub-wątek `faza-a-2-dsl-quote`, commity `5d02dd5`+`c4e01cd`): NEW `app/services/rulesets/quote_yaml.py` (~440 LOC) — `roster_unit_role_totals_yaml` (1:1 port `role_totals.py` z YAML substytucjami: `weapon_cost_components_yaml`, `ability_cost_components_yaml`, `_yaml_ability_cost` z `cost_hint` short-circuit). Body `_yaml_quote()` w `quote.py` (~190 LOC) mirror `_procedural_quote`. Fix parity-bug `transport_multiplier` (priority-first via `break`). Smoke `OPR_RULES_BACKEND=both_assert` × 10 cases (None-unit, count=0, infantry, passive nieustraszony/zwiadowca, transport-6, masywny, aura, weapon, no-item-costs) — 0 `RulesetParityError`. pytest 296/296.
 - [ ] Krok A2.5: `tests/test_cost_functions.py`, `test_quote_yaml_backend.py` (NOWE)
 - [ ] Krok A2.6: `docs/adr/0004-cost-dsl.md` (NOWY)
 - [ ] `pytest -q` → wszystko zielone; `OPR_RULES_BACKEND=yaml pytest tests/test_quote_yaml_backend.py -v` zielone
@@ -200,6 +200,12 @@ $env:OPR_RULES_BACKEND="both_assert"; python -m pytest tests/test_ruleset_parity
 - 2026-05-21: Pydantic v2 + PyYAML w `requirements.txt` (runtime, nie dev-only) — koszt importu akceptowalny.
 - 2026-05-21: Cost DSL = hardcoded function dispatcher (nie eval/exec). Ok 13 czystych funkcji.
 - 2026-05-21: A4 (DOCX→YAML drift pipeline) świadomie poza scope — osobny wątek po stabilizacji A3.
+- 2026-05-23 (A2.4c, sub-wątek `faza-a-2-dsl-quote`):
+  - D1: split A2.4c na 2 sub-fazy (c.1 role_totals replika izolowane, c.2 `_yaml_quote` integracja) — łatwiejsza bisekcja drift.
+  - D2: fix `transport_multiplier` priority-first (`break`) w scope A2.4c — real parity bug (last-match-wins) blokujący `both_assert`.
+  - D3: reuse `normalize_roster_unit_loadout` i `compute_passive_state` w `_yaml_quote` — potwierdzone pure parsing (zero imports cost_engine).
+  - D4: capacity parsing inline w `_effective_passive_cost_yaml` (mirror oracle), nie ekstrahowane do `cost_functions`.
+  - D5: `_ROLE_SLUGS = frozenset({"wojownik","strzelec"})` lokalnie w `quote_yaml.py` — ścisłe no-engine-import w `rulesets/*`.
 
 ## Notatki / odkrycia w trakcie
 
