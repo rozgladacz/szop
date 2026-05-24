@@ -42,6 +42,11 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
+### 2026-05-24 — faza-a A2.5 (test suite)
+- A2.5 done w jednej sesji. 2 nowe pliki testowe: `tests/test_cost_functions.py` (232 testy) i `tests/test_quote_yaml_backend.py` (35 testów). Pełna suita 563/563 passed. Pokrycie: per-fn parytet 13 DSL prymitywów vs oracle (range/ap/blast/deadly/morale/defense/toughness/transport priority-first), 5-flag scale_by_tou edge cases, cartesian passive_cost_dsl × 35 abilities × aura, base_model_cost 10 scenariuszy, weapon wrappers, mistrzostwo. End-to-end: 3 backendy × 10 scenariuszy (basic/passive/aura/transport/weapon-traits/loadout/masywny) z `both_assert` no-raise + edge cases (count=0, include_item_costs=False, loadout normalization).
+- Pliki: `tests/test_cost_functions.py` (NEW), `tests/test_quote_yaml_backend.py` (NEW), `docs/handoffs/HANDOFF_faza-a.md` (A2.5 odznaczony).
+- Następny krok: A2.6 (`docs/adr/0004-cost-dsl.md`).
+
 ### 2026-05-23 — faza-a-2-dsl-quote (archived)
 - Sub-wątek `faza-a` zamykający A2.4c. NEW `app/services/rulesets/quote_yaml.py` (~440 LOC) — `roster_unit_role_totals_yaml` jako 1:1 port `costs/role_totals.py` z YAML substytucjami (`weapon_cost_components_yaml`, `ability_cost_components_yaml`, `_yaml_ability_cost` z `cost_hint` short-circuit). Body `_yaml_quote()` (~190 LOC) w `quote.py` — mirror `_procedural_quote` end-to-end. Fix parity-bug `transport_multiplier` (priority-first via `break` — był last-match-wins).
 - Pliki: `app/services/rulesets/quote_yaml.py` (NEW), `app/services/costs/quote.py`, `app/services/rulesets/cost_functions.py`, `tests/test_feature_toggle.py`. Commity: `5d02dd5` (c.0+c.1), `c4e01cd` (c.2), `0ed400c` (parent update).
