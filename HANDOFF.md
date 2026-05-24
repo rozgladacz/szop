@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-a](docs/handoffs/HANDOFF_faza-a.md) | Migracja proceduralnej logiki kosztów do YAML+Pydantic v2 pod feature toggle `OPR_RULES_BACKEND` (A0+A1+A2+A3+A5) | `quote.py`, `config.py`, `requirements.txt`, `app/rulesets/v1/*`, `app/services/rulesets/*`, `Makefile` | In progress |
-| [HANDOFF_faza-a-2-dsl-quote](docs/handoffs/HANDOFF_faza-a-2-dsl-quote.md) | Sub-wątek A2.4c: NEW `quote_yaml.py` (replika `roster_unit_role_totals`) + body `_yaml_quote()` + fix `transport_multiplier` priority-first | `app/services/rulesets/quote_yaml.py` (NEW), `cost_functions.py`, `quote.py`, `handlers.py` | In progress |
 
 ## Zasoby zablokowane (reverse lookup)
 
@@ -42,6 +41,11 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-05-23 — faza-a-2-dsl-quote (archived)
+- Sub-wątek `faza-a` zamykający A2.4c. NEW `app/services/rulesets/quote_yaml.py` (~440 LOC) — `roster_unit_role_totals_yaml` jako 1:1 port `costs/role_totals.py` z YAML substytucjami (`weapon_cost_components_yaml`, `ability_cost_components_yaml`, `_yaml_ability_cost` z `cost_hint` short-circuit). Body `_yaml_quote()` (~190 LOC) w `quote.py` — mirror `_procedural_quote` end-to-end. Fix parity-bug `transport_multiplier` (priority-first via `break` — był last-match-wins).
+- Pliki: `app/services/rulesets/quote_yaml.py` (NEW), `app/services/costs/quote.py`, `app/services/rulesets/cost_functions.py`, `tests/test_feature_toggle.py`. Commity: `5d02dd5` (c.0+c.1), `c4e01cd` (c.2), `0ed400c` (parent update).
+- Weryfikacja: pytest 296/296, smoke `OPR_RULES_BACKEND=both_assert` × 10 cases (None-unit, count=0, infantry, passive nieustraszony/zwiadowca, transport-6, masywny, aura, weapon, no-item-costs) — 0 RulesetParityError. UI-smoke deferred do A3 (lokalna DB pusta).
 
 ### 2026-05-21 — widok-rozpiski-ostrzezenia (archived)
 - Dodany moduł `roster_warnings.js` + znacznik `⚠ N` z tooltipem po liczniku oddziałów/bohaterów (8 reguł: liczność oddziałów/bohaterów, limit punktów, nierównowaga cenowa 4×, broń vs wytrzymałość). Backend dorzuca `weapon_cost` do `roster_items`. Klucz `warnings:[]` i `collect_roster_warnings()` zostawione jako publiczny kontrakt AJAX.
