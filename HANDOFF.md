@@ -42,6 +42,11 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
+### 2026-05-24 — faza-a A2.6 (ADR-0004 + faza A2 zamknięta)
+- A2.6 done. `docs/adr/0004-cost-dsl.md` (NEW) podsumowuje decyzje strukturalne fazy A2: hardcoded fn-dispatcher (nie eval), callable injection (`passive_cost_fn`, `slug_for_name`), inwariant czystości "no-oracle-import" w `rulesets/*`, świadome odchylenie `transport_multiplier` priority-first vs oracle last-match-wins (parity-bug fix). Plus 5 alternatyw odrzuconych. Faza A2 (DSL + YAML backend) zamknięta — następna jest **A3** (parity tests + CI gate).
+- Pliki: `docs/adr/0004-cost-dsl.md` (NEW), `HANDOFF.md`, `docs/handoffs/HANDOFF_faza-a.md`.
+- Następny krok: A3.1 (`tests/test_ruleset_parity.py` — 100 cartesian + 50 manual cases, delta ≤ 1e-3).
+
 ### 2026-05-24 — faza-a A2.5 (test suite)
 - A2.5 done w jednej sesji. 2 nowe pliki testowe: `tests/test_cost_functions.py` (232 testy) i `tests/test_quote_yaml_backend.py` (35 testów). Pełna suita 563/563 passed. Pokrycie: per-fn parytet 13 DSL prymitywów vs oracle (range/ap/blast/deadly/morale/defense/toughness/transport priority-first), 5-flag scale_by_tou edge cases, cartesian passive_cost_dsl × 35 abilities × aura, base_model_cost 10 scenariuszy, weapon wrappers, mistrzostwo. End-to-end: 3 backendy × 10 scenariuszy (basic/passive/aura/transport/weapon-traits/loadout/masywny) z `both_assert` no-raise + edge cases (count=0, include_item_costs=False, loadout normalization).
 - Pliki: `tests/test_cost_functions.py` (NEW), `tests/test_quote_yaml_backend.py` (NEW), `docs/handoffs/HANDOFF_faza-a.md` (A2.5 odznaczony).
