@@ -42,6 +42,12 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
+### 2026-05-24 — faza-a A5 (perf gate + LRU cache) — wątek zamknięty (Faza A done)
+- A5 done w jednej sesji. Test `test_quote_performance_regression.py` (NEW, 3 testy) wykrył regresję yaml 3.57× → optymalizacje wymuszone: `@lru_cache(maxsize=4)` na `load_ruleset()` + manual id-keyed cache na `_build_passive_recipes` (frozen Pydantic z dict-pól nie hashable). Po fix ratio **1.158×** (budżet 1.20× ✅). Plus `scripts/profile_quote.py --backend ...` + `Makefile:profile BACKEND=...`, `docs/PERFORMANCE.md` z A5 baseline, ADR-0007 (cache strategy). Pytest 815/815 passed (812 + 3 perf).
+- **Faza A zamknięta — wszystkie zaplanowane podfazy ✅** (A0 toggle, A1 schema, A2 DSL, A3 parity gate, A5 perf gate). A4 (DOCX→YAML drift) świadomie poza scope — osobny wątek gdy wymagane.
+- Pliki: `tests/test_quote_performance_regression.py` (NEW), `app/services/rulesets/loader.py` (lru_cache load_ruleset), `app/services/rulesets/handlers.py` (id-cache _build_passive_recipes), `scripts/profile_quote.py` (--backend), `Makefile` (BACKEND var), `docs/PERFORMANCE.md` (A5 baseline), `docs/adr/0007-ruleset-cache.md` (NEW), HANDOFF.md, HANDOFF_faza-a.md.
+- Wątek `faza-a` gotowy do `/handoff-archive faza-a`. Strumień A odblokowuje strumienie B/C/D.
+
 ### 2026-05-24 — faza-a A3 (parity gate)
 - A3 done w jednej sesji (A3.1 + A3.2 + A3.3). 3 nowe pliki testowe + 1 zmodyfikowany Makefile + 249 nowych testów. Pełna suita **812/812 passed** (563 baseline + 156 parity + 93 yaml mirror). `tests/test_ruleset_parity.py` (156 testów: 100 cartesian + 55 manual + None-unit) pod `both_assert` — wewnętrzny `_assert_quote_parity` raise gdy delta > 1e-3. `tests/yaml_backend/` (93 testów w 4 plikach: passive/active/weapon/mistrzostwo) wymusza `OPR_RULES_BACKEND=yaml` przez conftest. `Makefile`: nowy cel `test-parity` (both_assert + yaml).
 - Odkrycie: nazwa katalogu `tests/yaml/` shadowed PyYAML (`yaml.safe_load` AttributeError) — pytest add testdir do sys.path. Rename na `tests/yaml_backend/`.

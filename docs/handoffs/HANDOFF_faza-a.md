@@ -1,9 +1,9 @@
 # HANDOFF — faza-a
 
 > **Wątek:** Strumień A planu długofalowego — migracja proceduralnej logiki kosztów do deklaratywnej (YAML + Pydantic v2) pod feature toggle `OPR_RULES_BACKEND`, fazy A0+A1+A2+A3+A5 (A4 świadomie poza scope).
-> **Status:** In progress (A0+A1+A2+A3 done, A5 next)
+> **Status:** Done (A0+A1+A2+A3+A5 wszystkie zamknięte; A4 świadomie poza scope)
 > **Utworzony:** 2026-05-21
-> **Ostatnia aktualizacja:** 2026-05-24 (po A3)
+> **Ostatnia aktualizacja:** 2026-05-24 (po A5 — wątek gotowy do archiwizacji)
 
 ## Cel
 
@@ -91,13 +91,17 @@ Plan szczegółowy: `C:\Users\mlis\.claude\plans\twoje-zadanie-skoordynowa-prac-
 - [ ] Smoke: `make dev` pod both_assert — deferred (lokalna DB pusta, patrz cross-wątkowa notatka 2026-05-20).
 - [ ] Commit: `A3: parity tests (156) + yaml mirror (93) + Makefile test-parity gate`
 
-### Faza A5 — Perf regression gate (~0.5 sesji)
+### Faza A5 — Perf regression gate (~0.5 sesji) ✅
 
-- [ ] Krok A5.1: `tests/test_quote_performance_regression.py` (NOWY) — `yaml_time/proc_time <= 1.20`
-- [ ] Krok A5.2: `scripts/profile_quote.py` — flaga `--backend`
-- [ ] Krok A5.3: `docs/PERFORMANCE.md` — baseline obu backendów
-- [ ] Krok A5.4: `docs/adr/0007-ruleset-cache.md` (NOWY)
-- [ ] Commit: `A5: perf regression gate + ADR-0007`
+- [x] Krok A5.1: `tests/test_quote_performance_regression.py` (NOWY, 3 testy) — `yaml_time/proc_time ≤ 1.20` na synthetic mix 7 jednostek × 30 iteracji, plus `load_ruleset()` LRU hit check, plus warm-call <50ms sanity. **Pierwszy run wykrył regresję 3.57×** → wymusił implementację A5 cache (poniżej).
+- [x] **A5 optymalizacje** (in scope, odkryte przez A5.1):
+  - `app/services/rulesets/loader.py:load_ruleset()` — `@lru_cache(maxsize=4)` na publicznym entrypoincie. Pomija SHA recheck (3× file read + sha256) na hot path. Dev reload przez `load_ruleset.cache_clear()`.
+  - `app/services/rulesets/handlers.py:_build_passive_recipes(ac)` — manual cache `dict[int, Mapping]` keyed na `id(ac)` (frozen AbilityCosts ma `dict[str, ...]` pola, nie hashable → lru_cache nie pasuje). Plus helper `_clear_passive_recipes_cache()` razem z `load_ruleset.cache_clear()`.
+- [x] Krok A5.2: `scripts/profile_quote.py` — `--backend procedural|yaml|both_assert` flag (argparse). `Makefile:profile` rozszerzony o `BACKEND=...` (default `procedural`).
+- [x] Krok A5.3: `docs/PERFORMANCE.md` — sekcja "Baseline YAML backend (Faza A5)" z tabelą perf 7 unit mix (procedural 355.8 ms vs yaml 412.2 ms, ratio 1.158× ≤ budget 1.20×) + historia A5 entry.
+- [x] Krok A5.4: `docs/adr/0007-ruleset-cache.md` (NOWY) — uzasadnienie dwupoziomowego cache, 4 alternatywy odrzucone (frozenset key, pre-build w manifest init, cache w quote.py, mtime zamiast SHA).
+- [x] Pytest: 815/815 passed (812 + 3 perf).
+- [ ] Commit: `A5: perf regression gate + LRU cache + ADR-0007`
 
 ### Weryfikacja end-to-end (po A3, finalny przed A5)
 
@@ -231,5 +235,6 @@ $env:OPR_RULES_BACKEND="both_assert"; python -m pytest tests/test_ruleset_parity
 - 2026-05-22: A2.4b — **kluczowe odkrycie: dead code w oracle**. `ability_cost_components_from_name` ma `if desc.startswith("transport"):` (abilities.py:325) który ustawia `base_result = capacity * multiplier`, ale ten wynik jest **natychmiast nadpisywany** przez fallback `else` branch (linia 394+), bo: (a) `transport` ma `type=passive` w katalogu, (b) `passive_cost("transport", tou, aura=False)` zwraca 0 (brak match w switch), (c) `base_result = 0` finalnie. Faktyczny dynamic transport cost jest liczony **w `role_totals.py:_effective_passive_cost`** na podstawie active_set jednostki. YAML usunęło handler `transport` z `ability_costs.yaml` zachowując tylko `open_transport`/`platforma_strzelecka` (te DZIAŁAJĄ bo desc nie zaczyna się od "transport" w if-chain B → trafiają na poprawną gałąź `if`). Note do A2.4c: dynamic transport handling przeniesie do `quote_yaml.py:_effective_passive_cost`.
 - 2026-05-22: A2.4b — pełna parytetność dispatch 37/37 vs oracle: 6 handlerów (open_transport×3, aura×4 z mistrzostwo, mag×2, order_like×4 z mistrzostwo, mistrzostwo×2), fixed_by_desc×4, fixed_by_slug×5, row_delta morale (nieustraszony) + defense (delikatny), weapon_delta (niestrudzony), skip_in_default (przygotowanie), unknown slug. Pytest baseline 296/296.
 - 2026-05-24: A2.5 done. **2 nowe pliki testowe, 267 testów dodanych** (563/563 passed). `test_cost_functions.py` (232) pokrywa per-fn parytet vs oracle (range/ap/blast/deadly/morale/defense/toughness/transport — z asercją YAML priority-first), 5-flag scale_by_tou edge cases (aura_required/aura_alt_base/no_scale/aura_scale), passive_cost_dsl cartesian 35 abilities × aura ON/OFF, base_model_cost 10 scenariuszy, parse_aura_value 7 form, _weapon_cost_yaml 16 traits combinations, mistrzostwo_aura×6, mistrzostwo_weapon×3 (empty/single/skip-existing-trait), weapon_cost_components_yaml×7 + weapon_cost_yaml (ignoruje cache attr). `test_quote_yaml_backend.py` (35) odpala calculate_roster_unit_quote pod 3 backendami × 10 scenariuszy (infantry basic/wojownik/strzelec, count=1, passive Nieustraszony+Zwiadowca, aura Bastion, Transport(6)+Latajacy, Otwarty Transport(8)+Szybki, weapon z Rozprysk+Przebijajaca, loadout per_model, masywny) z asercją shape + numeric parity (1e-2) + `both_assert` no-RulesetParityError + edge cases (count=0, include_item_costs=False, loadout normalization). Cache attr (`effective_cached_cost=999`) świadomie ignorowany — komentarz w `cost_functions.py:619`.
+- 2026-05-24: A5 done w jednej sesji. Pierwszy run `test_yaml_backend_within_perf_budget` wykrył regresję 3.57× (yaml 717 ms vs proc 201 ms na 7 unit × 30 iter). cProfile zlokalizował dwa hot spoty: (1) `_build_passive_recipes` woła 2600× per 100 quotes — każdy call alokuje 33 nowych `CostRecipe` Pydantic (cumtime 270 ms); (2) `load_ruleset()` re-reads 3 YAML files i liczy SHA256 per quote (cumtime 93 ms na 100 quotes). Fix: `@lru_cache(maxsize=4)` na `load_ruleset` + manual `id(ac)`-keyed cache na `_build_passive_recipes` (frozen Pydantic z polami dict nie jest hashable → lru_cache nie pasuje). Po fix ratio **1.158× ≤ budżet 1.20×**. Plus: `scripts/profile_quote.py --backend ...` + `Makefile:profile BACKEND=...`, `docs/PERFORMANCE.md` z baseline obu backendów, ADR-0007 (4 alternatywy odrzucone). Faza A zamknięta (A0+A1+A2+A3+A5). A4 (DOCX→YAML drift pipeline) świadomie poza scope. **Wątek gotowy do `/handoff-archive faza-a`.**
 - 2026-05-24: A3 done w jednej sesji (A3.1 + A3.2 + A3.3). **3 nowe pliki + 249 testów** (812/812 passed). `tests/test_ruleset_parity.py` (156): 100 cartesian (quality×defense×toughness×flags×weapon-config, sample 100 z 512) + 55 manualnych edge'ów (passive scaling 12, morale 3, defense 3, aura 6, transport 6, open_transport 3, weapon stack 10, unit-trait interakcje 8, masywny 2, loadout per_model/total 2, count 0/1/large 3) + None-unit. Wszystko pod `OPR_RULES_BACKEND=both_assert` przez autouse fixture — `_assert_quote_parity` raise gdy delta > 1e-3 na dowolnym polu (selected_total/component/item_cost). `tests/yaml_backend/` (93): conftest z `_yaml_backend` autouse + `make_quote/assert_quote_parity` fixtures, 4 testowe pliki (passive 26, active 18, weapon 36, mistrzostwo 13). `Makefile`: cel `test-parity` (both_assert na parity + yaml na mirror). **Odkrycie**: nazwa katalogu `tests/yaml/` shadowed PyYAML (`yaml.safe_load` AttributeError) — pytest add testdir do sys.path. Rename na `tests/yaml_backend/` rozwiązuje. Smoke UI pod `both_assert` deferred (lokalna DB pusta).
 - 2026-05-24: A2.6 done. `docs/adr/0004-cost-dsl.md` (NEW) zapisuje 4 decyzje strukturalne fazy A2: (D1) podział `cost_functions.py` (13 pure fn) + `dispatcher.py` (registry 9 fn) + `handlers.py` (6 high-level) + `quote_yaml.py` (orchestracja); (D2) callable injection zamiast cyklicznych importów (`passive_cost_fn`, `slug_for_name`); (D3) inwariant czystości "no-oracle-import" w `rulesets/*` — wolno tylko universal-string utils z `costs/primitives` i pure parsers z `costs/passive_state`+`costs/unit_helpers`; (D4) świadome odchylenie `transport_multiplier` priority-first vs oracle last-match-wins jako fix parity-bug (A2.4c). Plus 5 alternatyw odrzuconych (eval/exec, parser wyrażeń, monolit, recipe-podzbiór, reuse oracle przez import). Faza A2 zamknięta — gotowe do Fazy A3 (parity tests + CI gate).

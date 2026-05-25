@@ -44,7 +44,50 @@ Cały zapis rostera (`/update`) z odświeżeniem badge'y mieści się w **<400 m
 
 ---
 
+## Baseline YAML backend (Faza A5)
+
+**Data:** 2026-05-24
+**Commit:** *(uzupełnij po commit'cie A5)*
+**Pomiar:** synthetic mix 7 jednostek (`tests/test_quote_performance_regression.py`),
+50 iteracji per (backend, unit), `time.perf_counter()`.
+
+| Backend | Total (ms) | Ratio yaml/proc |
+|---|---:|---:|
+| procedural | 355.8 | 1.000× |
+| yaml       | 412.2 | **1.158×** |
+
+**Budżet:** ≤ 1.20× (asercja w `tests/test_quote_performance_regression.py`).
+
+Po optymalizacjach A5 (LRU na `load_ruleset()` + cache `_build_passive_recipes`)
+yaml backend mieści się w budżecie. Bez tych optymalizacji ratio wynosiło
+**3.57×** (cProfile pokazywał 270 ms cumulative na `_build_passive_recipes` →
+33 alokacji `CostRecipe` per `ability_cost_components_yaml` call).
+
+**Reprodukcja:**
+
+```bash
+# Per-backend profile (po imporcie prod DB):
+make profile ROSTER=10 BACKEND=procedural
+make profile ROSTER=10 BACKEND=yaml
+
+# Ratio asercja:
+pytest tests/test_quote_performance_regression.py -v
+```
+
+Bez prod DB użyj `scripts/_perf_ratio.py` (synthetic mix, jak w teście).
+
+> Patrz `docs/adr/0007-ruleset-cache.md` dla uzasadnienia cache strategy.
+
 ## Historia (najnowsze na górze)
+
+### 2026-05-24 — Faza A5: YAML backend perf optimization
+- LRU cache na `load_ruleset()` (`maxsize=4`) — skip SHA recheck na hot path.
+  Bez cache: ~0.8 ms/quote (3× file read + sha256). Dev reload przez `cache_clear()`.
+- `_build_passive_recipes(ac)` cache keyed na `id(ac)` (frozen Pydantic z polami
+  dict nie jest hashable, więc lru_cache nie pasuje). Bez cache: 270 ms cumulative
+  na 100 quotes z synthetic mix.
+- Ratio yaml/procedural: 3.57× → **1.158×** (mieści się w budżecie 1.20×).
+- Test suite: 815/815 passed (+3 perf regression).
 
 ### 2026-05-01 — Ekstrakcja weapons.py + abilities.py
 - Sekcja 5 wyciągnięta do `abilities.py`, sekcja 6 do `weapons.py`.

@@ -40,10 +40,13 @@ smoke:
 	@echo "Uruchom: make dev  i sprawdz powyzsze w przegladarce."
 
 # Performance profiling for cost engine.  Usage:
-#   make profile                # default ROSTER=10
-#   make profile ROSTER=13      # any roster id
-# Compare results with docs/PERFORMANCE.md baseline.
+#   make profile                            # default ROSTER=10, BACKEND=procedural
+#   make profile ROSTER=13                  # any roster id
+#   make profile BACKEND=yaml               # profile YAML backend (A5)
+#   make profile ROSTER=10 BACKEND=both_assert
+# Compare results with docs/PERFORMANCE.md baseline (A5 ma sekcję per-backend).
 # PYTHONPATH=. so the script can `import app.*` when run from the repo root.
 ROSTER ?= 10
+BACKEND ?= procedural
 profile:
-	PYTHONPATH=. python scripts/profile_quote.py $(ROSTER)
+	PYTHONPATH=. python scripts/profile_quote.py $(ROSTER) --backend $(BACKEND)

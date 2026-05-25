@@ -200,12 +200,22 @@ def _load_ruleset_cached(
     )
 
 
+@lru_cache(maxsize=4)
 def load_ruleset(version: str = "v1") -> RulesetManifest:
     """Public entrypoint — zwraca cache'owany manifest dla podanej wersji.
 
-    Re-czytamy SHA256 wszystkich plików, żeby zmiana w dev triggerowała rewalidację
-    bez ręcznego invalidate'u cache. W prod (pliki zamrożone) SHA jest stabilne
-    → cache hit od drugiego wywołania.
+    **Performance (A5):** outer `@lru_cache` bypassuje SHA recheck na hot path.
+    Pierwszy call czyta + parsuje YAML + waliduje przez Pydantic; każdy następny
+    zwraca cached `RulesetManifest` w O(1). Bez tego cache hot path tracił
+    ~0.27 ms per file × 3 files × quote = ~0.8 ms/quote tylko na SHA256 + I/O.
+
+    Dev workflow (zmiana YAML wymaga reload):
+    ```python
+    from app.services.rulesets import load_ruleset
+    load_ruleset.cache_clear()
+    ```
+    lub restart procesu. Inner `_load_ruleset_cached` (z SHA discriminators)
+    pozostaje dostępny do kontrolowanej rewalidacji w testach migracji.
     """
     if version not in RULESET_VERSIONS:
         raise ValueError(f"Unknown ruleset version: {version!r}; known: {RULESET_VERSIONS}")
