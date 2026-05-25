@@ -42,6 +42,12 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
+### 2026-05-24 — faza-a A3 (parity gate)
+- A3 done w jednej sesji (A3.1 + A3.2 + A3.3). 3 nowe pliki testowe + 1 zmodyfikowany Makefile + 249 nowych testów. Pełna suita **812/812 passed** (563 baseline + 156 parity + 93 yaml mirror). `tests/test_ruleset_parity.py` (156 testów: 100 cartesian + 55 manual + None-unit) pod `both_assert` — wewnętrzny `_assert_quote_parity` raise gdy delta > 1e-3. `tests/yaml_backend/` (93 testów w 4 plikach: passive/active/weapon/mistrzostwo) wymusza `OPR_RULES_BACKEND=yaml` przez conftest. `Makefile`: nowy cel `test-parity` (both_assert + yaml).
+- Odkrycie: nazwa katalogu `tests/yaml/` shadowed PyYAML (`yaml.safe_load` AttributeError) — pytest add testdir do sys.path. Rename na `tests/yaml_backend/`.
+- Pliki: `tests/test_ruleset_parity.py` (NEW), `tests/yaml_backend/{__init__,conftest,test_passive_costs_yaml,test_active_costs_yaml,test_weapon_costs_yaml,test_mistrzostwo_costs_yaml}.py` (NEW), `Makefile` (cel `test-parity`).
+- Następny krok: Faza A5 (perf regression gate) — `tests/test_quote_performance_regression.py`, `scripts/profile_quote.py --backend`, `docs/PERFORMANCE.md` baseline obu backendów, ADR-0007.
+
 ### 2026-05-24 — faza-a A2.6 (ADR-0004 + faza A2 zamknięta)
 - A2.6 done. `docs/adr/0004-cost-dsl.md` (NEW) podsumowuje decyzje strukturalne fazy A2: hardcoded fn-dispatcher (nie eval), callable injection (`passive_cost_fn`, `slug_for_name`), inwariant czystości "no-oracle-import" w `rulesets/*`, świadome odchylenie `transport_multiplier` priority-first vs oracle last-match-wins (parity-bug fix). Plus 5 alternatyw odrzuconych. Faza A2 (DSL + YAML backend) zamknięta — następna jest **A3** (parity tests + CI gate).
 - Pliki: `docs/adr/0004-cost-dsl.md` (NEW), `HANDOFF.md`, `docs/handoffs/HANDOFF_faza-a.md`.

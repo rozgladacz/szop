@@ -1,5 +1,5 @@
 
-.PHONY: dev test test-fast lint smoke check safe-edit profile
+.PHONY: dev test test-fast test-parity lint smoke check safe-edit profile
 
 # Force UTF-8 for every Python invocation in this Makefile.  Windows console
 # defaults to cp1250 which crashes any script that prints arrows or Polish
@@ -14,6 +14,14 @@ test:
 
 test-fast:
 	pytest -q -x --tb=short
+
+# Strumień A, Faza A3 — CI parity gate. Wymusza `both_assert` na pełnej
+# suite parity (`test_ruleset_parity.py`) oraz uruchamia mirror suite
+# `tests/yaml_backend/` pod yaml. Awaria = drift YAML vs procedural > 1e-3.
+# Patrz `docs/handoffs/HANDOFF_faza-a.md` i `docs/adr/0004-cost-dsl.md`.
+test-parity:
+	OPR_RULES_BACKEND=both_assert pytest -q tests/test_ruleset_parity.py
+	OPR_RULES_BACKEND=yaml pytest -q tests/yaml_backend/
 
 lint:
 	python -m ruff check app/

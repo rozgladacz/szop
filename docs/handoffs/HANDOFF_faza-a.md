@@ -1,9 +1,9 @@
 # HANDOFF — faza-a
 
 > **Wątek:** Strumień A planu długofalowego — migracja proceduralnej logiki kosztów do deklaratywnej (YAML + Pydantic v2) pod feature toggle `OPR_RULES_BACKEND`, fazy A0+A1+A2+A3+A5 (A4 świadomie poza scope).
-> **Status:** In progress (A0+A1 done, A2 done — A2.1..A2.6 wszystkie kroki, A3 next)
+> **Status:** In progress (A0+A1+A2+A3 done, A5 next)
 > **Utworzony:** 2026-05-21
-> **Ostatnia aktualizacja:** 2026-05-24 (po A2.6)
+> **Ostatnia aktualizacja:** 2026-05-24 (po A3)
 
 ## Cel
 
@@ -80,14 +80,16 @@ Plan szczegółowy: `C:\Users\mlis\.claude\plans\twoje-zadanie-skoordynowa-prac-
 - [x] `pytest -q` → 563/563 passed (procedural backend default).
 - [ ] Commit: `A2: Cost DSL (13 fn) + _yaml_quote + ability_costs.yaml + ADR-0004`
 
-### Faza A3 — Parity tests + CI gate (~1 sesja)
+### Faza A3 — Parity tests + CI gate (~1 sesja) ✅
 
-- [ ] Krok A3.1: `tests/test_ruleset_parity.py` (NOWY) — 100 cartesian + 50 manual; asercja delta ≤ 1e-3
-- [ ] Krok A3.2: `tests/yaml/test_{passive,active,weapon,mistrzostwo}_costs_yaml.py` (NOWE) — mirror istniejących pod yaml backendem
-- [ ] Krok A3.3: `Makefile` — cel `test-parity`
-- [ ] `OPR_RULES_BACKEND=both_assert pytest -q` → 0 RulesetParityError
-- [ ] Smoke: `make dev` pod both_assert, otwórz dowolną rozpiskę
-- [ ] Commit: `A3: parity tests (100 cartesian + 50 manual) + both_assert CI gate`
+- [x] Krok A3.1: `tests/test_ruleset_parity.py` (NOWY, 156 testów) — 100 cartesian (quality×defense×toughness×flags×weapon-config) + 55 manualnych edge case'ów (passive 12, morale-stack 3, defense-stack 3, aura 6, transport 6, open_transport 3, weapon traits 10, unit-trait interakcje 8, masywny 2, loadout modes 2, count edges 3) + None-unit. Wszystkie pod `OPR_RULES_BACKEND=both_assert` — wewnętrzny `_assert_quote_parity` raise gdy delta > 1e-3.
+- [x] Krok A3.2: `tests/yaml_backend/test_{passive,active,weapon,mistrzostwo}_costs_yaml.py` (NOWE, 93 testy) — mirror scenariuszy z `test_passive_costs/test_active_costs/test_weapon_costs/test_mistrzostwo_costs` pod yaml backendem. **Rename z `tests/yaml/` na `tests/yaml_backend/`** — nazwa `yaml` shadows PyYAML import gdy pytest dodaje dir do sys.path. Conftest wymusza `OPR_RULES_BACKEND=yaml` + fabryki `make_unit/make_weapon/make_quote/assert_quote_parity`.
+- [x] Krok A3.3: `Makefile` — cel `test-parity` (`both_assert` na parity test + `yaml` na mirror suite).
+- [x] `OPR_RULES_BACKEND=both_assert pytest -q tests/test_ruleset_parity.py` → 156/156, 0 RulesetParityError.
+- [x] `OPR_RULES_BACKEND=yaml pytest -q tests/yaml_backend/` → 93/93.
+- [x] `pytest -q` (default procedural) → **812/812 passed** (563 baseline + 156 parity + 93 yaml mirror).
+- [ ] Smoke: `make dev` pod both_assert — deferred (lokalna DB pusta, patrz cross-wątkowa notatka 2026-05-20).
+- [ ] Commit: `A3: parity tests (156) + yaml mirror (93) + Makefile test-parity gate`
 
 ### Faza A5 — Perf regression gate (~0.5 sesji)
 
@@ -229,4 +231,5 @@ $env:OPR_RULES_BACKEND="both_assert"; python -m pytest tests/test_ruleset_parity
 - 2026-05-22: A2.4b — **kluczowe odkrycie: dead code w oracle**. `ability_cost_components_from_name` ma `if desc.startswith("transport"):` (abilities.py:325) który ustawia `base_result = capacity * multiplier`, ale ten wynik jest **natychmiast nadpisywany** przez fallback `else` branch (linia 394+), bo: (a) `transport` ma `type=passive` w katalogu, (b) `passive_cost("transport", tou, aura=False)` zwraca 0 (brak match w switch), (c) `base_result = 0` finalnie. Faktyczny dynamic transport cost jest liczony **w `role_totals.py:_effective_passive_cost`** na podstawie active_set jednostki. YAML usunęło handler `transport` z `ability_costs.yaml` zachowując tylko `open_transport`/`platforma_strzelecka` (te DZIAŁAJĄ bo desc nie zaczyna się od "transport" w if-chain B → trafiają na poprawną gałąź `if`). Note do A2.4c: dynamic transport handling przeniesie do `quote_yaml.py:_effective_passive_cost`.
 - 2026-05-22: A2.4b — pełna parytetność dispatch 37/37 vs oracle: 6 handlerów (open_transport×3, aura×4 z mistrzostwo, mag×2, order_like×4 z mistrzostwo, mistrzostwo×2), fixed_by_desc×4, fixed_by_slug×5, row_delta morale (nieustraszony) + defense (delikatny), weapon_delta (niestrudzony), skip_in_default (przygotowanie), unknown slug. Pytest baseline 296/296.
 - 2026-05-24: A2.5 done. **2 nowe pliki testowe, 267 testów dodanych** (563/563 passed). `test_cost_functions.py` (232) pokrywa per-fn parytet vs oracle (range/ap/blast/deadly/morale/defense/toughness/transport — z asercją YAML priority-first), 5-flag scale_by_tou edge cases (aura_required/aura_alt_base/no_scale/aura_scale), passive_cost_dsl cartesian 35 abilities × aura ON/OFF, base_model_cost 10 scenariuszy, parse_aura_value 7 form, _weapon_cost_yaml 16 traits combinations, mistrzostwo_aura×6, mistrzostwo_weapon×3 (empty/single/skip-existing-trait), weapon_cost_components_yaml×7 + weapon_cost_yaml (ignoruje cache attr). `test_quote_yaml_backend.py` (35) odpala calculate_roster_unit_quote pod 3 backendami × 10 scenariuszy (infantry basic/wojownik/strzelec, count=1, passive Nieustraszony+Zwiadowca, aura Bastion, Transport(6)+Latajacy, Otwarty Transport(8)+Szybki, weapon z Rozprysk+Przebijajaca, loadout per_model, masywny) z asercją shape + numeric parity (1e-2) + `both_assert` no-RulesetParityError + edge cases (count=0, include_item_costs=False, loadout normalization). Cache attr (`effective_cached_cost=999`) świadomie ignorowany — komentarz w `cost_functions.py:619`.
+- 2026-05-24: A3 done w jednej sesji (A3.1 + A3.2 + A3.3). **3 nowe pliki + 249 testów** (812/812 passed). `tests/test_ruleset_parity.py` (156): 100 cartesian (quality×defense×toughness×flags×weapon-config, sample 100 z 512) + 55 manualnych edge'ów (passive scaling 12, morale 3, defense 3, aura 6, transport 6, open_transport 3, weapon stack 10, unit-trait interakcje 8, masywny 2, loadout per_model/total 2, count 0/1/large 3) + None-unit. Wszystko pod `OPR_RULES_BACKEND=both_assert` przez autouse fixture — `_assert_quote_parity` raise gdy delta > 1e-3 na dowolnym polu (selected_total/component/item_cost). `tests/yaml_backend/` (93): conftest z `_yaml_backend` autouse + `make_quote/assert_quote_parity` fixtures, 4 testowe pliki (passive 26, active 18, weapon 36, mistrzostwo 13). `Makefile`: cel `test-parity` (both_assert na parity + yaml na mirror). **Odkrycie**: nazwa katalogu `tests/yaml/` shadowed PyYAML (`yaml.safe_load` AttributeError) — pytest add testdir do sys.path. Rename na `tests/yaml_backend/` rozwiązuje. Smoke UI pod `both_assert` deferred (lokalna DB pusta).
 - 2026-05-24: A2.6 done. `docs/adr/0004-cost-dsl.md` (NEW) zapisuje 4 decyzje strukturalne fazy A2: (D1) podział `cost_functions.py` (13 pure fn) + `dispatcher.py` (registry 9 fn) + `handlers.py` (6 high-level) + `quote_yaml.py` (orchestracja); (D2) callable injection zamiast cyklicznych importów (`passive_cost_fn`, `slug_for_name`); (D3) inwariant czystości "no-oracle-import" w `rulesets/*` — wolno tylko universal-string utils z `costs/primitives` i pure parsers z `costs/passive_state`+`costs/unit_helpers`; (D4) świadome odchylenie `transport_multiplier` priority-first vs oracle last-match-wins jako fix parity-bug (A2.4c). Plus 5 alternatyw odrzuconych (eval/exec, parser wyrażeń, monolit, recipe-podzbiór, reuse oracle przez import). Faza A2 zamknięta — gotowe do Fazy A3 (parity tests + CI gate).
