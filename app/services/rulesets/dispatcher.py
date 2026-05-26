@@ -28,29 +28,15 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from ..costs.primitives import ability_identifier, normalize_name
 from . import cost_functions
-from .models import RulesetTables
+from .models import CostRecipeSpec, RulesetTables
 
-
-# ---------------------------------------------------------------------------
-# Recipe model — walidowany shape pojedynczej receptury DSL.
-# ---------------------------------------------------------------------------
-
-
-class CostRecipe(BaseModel):
-    """Atomowa receptura kosztu: `{fn: <name>, args: <map>}`.
-
-    Walidacja zachodzi raz przy ładowaniu `ability_costs.yaml` (A2.3).
-    Frozen — receptury są dzielone między wątkami (np. w LRU cache loadera).
-    """
-
-    model_config = ConfigDict(frozen=True, extra="forbid", strict=False)
-
-    fn: str
-    args: dict[str, Any] = Field(default_factory=dict)
+# Atomowa receptura kosztu: `{fn: <name>, args: <map>}`. Walidowana raz
+# przy ładowaniu `ability_costs.yaml` (A2.3). Alias na `CostRecipeSpec`
+# z `models.py` — wcześniej była tu duplikatowa klasa, eliminacja
+# rebuild-loopa per quote (A5 cleanup, post-review).
+CostRecipe = CostRecipeSpec
 
 
 # ---------------------------------------------------------------------------

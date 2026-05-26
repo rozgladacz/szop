@@ -27,6 +27,7 @@ from typing import Iterable, Mapping, Sequence
 from ..costs.primitives import (
     ability_identifier,
     extract_number,
+    lookup_with_nearest,
     normalize_name,
     normalize_range_value,
     split_traits,
@@ -34,17 +35,36 @@ from ..costs.primitives import (
 from .models import RulesetTables
 
 
-# ---------------------------------------------------------------------------
-# Pomocnicze lookups (replikują `primitives.lookup_with_nearest`, ale bez
-# zależności od konkretnej tabeli — przyjmują dict jako argument).
-# ---------------------------------------------------------------------------
+# Lookup nearest-key z dict — primitives.lookup_with_nearest jest na allow-list
+# importowej (universal-string utils, nie tabele kosztów). Float-coercion
+# zostawiamy callerom; primitives zwraca już to co siedzi w table.
 
 
-def _lookup_nearest(table: Mapping[int, float], key: int) -> float:
-    if key in table:
-        return float(table[key])
-    nearest = min(table, key=lambda existing: abs(existing - key))
-    return float(table[nearest])
+def _weapon_attr(weapon, base: str, default):
+    """Zwraca `weapon.effective_<base>` jeśli ustawione, inaczej `weapon.<base>`.
+
+    Duck-typed reader replikujący wzorzec z oracle (`weapons._weapon_cost`):
+    `models.Weapon` ma `effective_X` properties cache'ujące derived values,
+    SimpleNamespace fixtures w testach też je dostarczają. Wzorzec
+    `getattr(w, "effective_X", None) or getattr(w, "X", default)` powtarza
+    się w 3 miejscach — extract.
+
+    UWAGA: zachowujemy semantykę `if X is not None` dla numerycznych pól
+    (attacks, ap) — `or` byłoby błędne dla `effective_attacks=0` lub
+    `effective_ap=0`. Per-typ wybór dispatch by caller (range/tags używają
+    `or`, attacks/ap używają `is not None`).
+    """
+    effective = getattr(weapon, f"effective_{base}", None)
+    if effective is not None:
+        return effective
+    return getattr(weapon, base, default)
+
+
+def _weapon_str_attr(weapon, base: str, default: str = "") -> str:
+    """Wariant dla pól tekstowych (range, tags) — `effective` może być pustym
+    stringiem (falsy), wtedy `or` fallback'uje na surowy atrybut. Dokładnie
+    mirror oracle pattern."""
+    return getattr(weapon, f"effective_{base}", None) or getattr(weapon, base, default)
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +73,7 @@ def _lookup_nearest(table: Mapping[int, float], key: int) -> float:
 
 
 def range_multiplier(tables: RulesetTables, range_value: int) -> float:
-    return _lookup_nearest(tables.range_table, int(range_value))
+    return lookup_with_nearest(tables.range_table, int(range_value))
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +82,7 @@ def range_multiplier(tables: RulesetTables, range_value: int) -> float:
 
 
 def ap_modifier(tables: RulesetTables, ap_value: int) -> float:
-    return _lookup_nearest(tables.ap_base, int(ap_value))
+    return lookup_with_nearest(tables.ap_base, int(ap_value))
 
 
 # ---------------------------------------------------------------------------
@@ -323,7 +343,7 @@ def _weapon_cost_yaml(
 
     waagh_penalty = 0.0
     if "waagh" in unit_set:
-        waagh_penalty = _lookup_nearest(tables.waagh_ap_modifier, base_ap)
+        waagh_penalty = lookup_with_nearest(tables.waagh_ap_modifier, base_ap)
 
     if melee and "furia" in unit_set:
         chance += 0.65
@@ -338,7 +358,7 @@ def _weapon_cost_yaml(
     if "szpica" in unit_set:
         chance += 0.5
     if "ostrozny" in unit_set:
-        chance += _lookup_nearest(tables.cautious_hit_bonus, range_value)
+        chance += lookup_with_nearest(tables.cautious_hit_bonus, range_value)
     if not melee and "wojownik" in unit_set:
         mult *= 0.5
     if melee and "strzelec" in unit_set:
@@ -395,13 +415,13 @@ def _weapon_cost_yaml(
             mult *= 1.1
         elif norm in {"impet", "impact"}:
             chance += 0.65
-            ap_mod += _lookup_nearest(tables.ap_lance, base_ap)
+            ap_mod += lookup_with_nearest(tables.ap_lance, base_ap)
         elif norm in {"przebijajaca", "przebijajacy", "penetrating"}:
-            mult *= _lookup_nearest(tables.penetrating_multiplier, base_ap)
+            mult *= lookup_with_nearest(tables.penetrating_multiplier, base_ap)
         elif norm in {"finezja"}:
             finezja = True
         elif norm in {"brutalny", "brutalna", "brutal"}:
-            ap_mod += _lookup_nearest(tables.brutalny_ap_cost, base_ap)
+            ap_mod += lookup_with_nearest(tables.brutalny_ap_cost, base_ap)
         elif norm in {
             "zguba",
             "bez regeneracji",
@@ -423,9 +443,9 @@ def _weapon_cost_yaml(
         elif norm in {"szturmowy", "szturmowa", "assault"}:
             assault = True
         elif norm in {"artyleria", "artillery"}:
-            range_bonus += _lookup_nearest(tables.artillery_range_bonus, range_value)
+            range_bonus += lookup_with_nearest(tables.artillery_range_bonus, range_value)
         elif norm in {"nieporeczny", "unwieldy"}:
-            range_penalty += _lookup_nearest(tables.unwieldy_range_penalty, range_value)
+            range_penalty += lookup_with_nearest(tables.unwieldy_range_penalty, range_value)
         elif norm in {"podkrecenie", "overcharge", "overclock"}:
             overcharge = True
         elif norm in {"burzaca"}:
@@ -506,24 +526,10 @@ def _mistrzostwo_weapon_cost(
 ) -> float:
     total = 0.0
     for wpn in weapons:
-        range_v = normalize_range_value(
-            getattr(wpn, "effective_range", None) or getattr(wpn, "range", "")
-        )
-        existing = list(
-            split_traits(
-                getattr(wpn, "effective_tags", None) or getattr(wpn, "tags", "")
-            )
-        )
-        attacks = float(
-            getattr(wpn, "effective_attacks", None)
-            if getattr(wpn, "effective_attacks", None) is not None
-            else getattr(wpn, "attacks", 1.0)
-        )
-        ap = int(
-            getattr(wpn, "effective_ap", None)
-            if getattr(wpn, "effective_ap", None) is not None
-            else getattr(wpn, "ap", 0)
-        )
+        range_v = normalize_range_value(_weapon_str_attr(wpn, "range"))
+        existing = list(split_traits(_weapon_str_attr(wpn, "tags")))
+        attacks = float(_weapon_attr(wpn, "attacks", 1.0))
+        ap = int(_weapon_attr(wpn, "ap", 0))
         if weapon_slug in {normalize_name(t) for t in existing}:
             continue
         cost_without = _weapon_cost_yaml(
@@ -557,22 +563,10 @@ def weapon_cost_components_yaml(
     unit_traits: Sequence[str],
 ) -> dict[str, float]:
     """Mirror `weapons.weapon_cost_components` — {melee, ranged, total} per weapon."""
-    range_value = normalize_range_value(
-        getattr(weapon, "effective_range", None) or getattr(weapon, "range", "")
-    )
-    traits = split_traits(
-        getattr(weapon, "effective_tags", None) or getattr(weapon, "tags", "")
-    )
-    attacks_value = (
-        getattr(weapon, "effective_attacks", None)
-        if getattr(weapon, "effective_attacks", None) is not None
-        else getattr(weapon, "attacks", 1.0)
-    )
-    ap_value = (
-        getattr(weapon, "effective_ap", None)
-        if getattr(weapon, "effective_ap", None) is not None
-        else getattr(weapon, "ap", 0)
-    )
+    range_value = normalize_range_value(_weapon_str_attr(weapon, "range"))
+    traits = split_traits(_weapon_str_attr(weapon, "tags"))
+    attacks_value = _weapon_attr(weapon, "attacks", 1.0)
+    ap_value = _weapon_attr(weapon, "ap", 0)
     assault = any(
         normalize_name(trait) in {"szturmowy", "szturmowa", "assault"}
         for trait in traits

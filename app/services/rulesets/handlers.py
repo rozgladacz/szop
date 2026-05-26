@@ -17,7 +17,6 @@ z `costs/primitives` i własne moduły rulesets/*.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any, Callable, Mapping, Sequence
 
 from ..costs.primitives import (
@@ -59,46 +58,29 @@ class AbilityCostComponents:
 # ---------------------------------------------------------------------------
 
 
-# Cache keyed on `id(AbilityCosts)`. `AbilityCosts` jest frozen Pydantic
-# z polami `dict[str, ...]` więc NIE jest hashable (pydantic v2 nie konwertuje
-# dict→frozendict auto). `id()` jest stabilne dopóki obiekt żyje — a żyje
-# tak długo jak `load_ruleset.cache_clear()` nie został wywołany. Wpisy
-# o niedostępnych id zostają w cache (memory leak ograniczony bo
-# `load_ruleset` ma `maxsize=4` → maksymalnie 4 wpisy stale).
-_PASSIVE_RECIPES_CACHE: dict[int, Mapping[str, CostRecipe]] = {}
-
-
 def _build_passive_recipes(ac: AbilityCosts) -> Mapping[str, CostRecipe]:
-    """Convert `AbilityCosts.passive_abilities` (CostRecipeSpec) → CostRecipe.
+    """Zwraca `ac.passive_abilities` jako passive recipe map.
 
-    **Performance (A5):** cache keyed na `id(ac)`. Bez cache: 33 alokacji
-    `CostRecipe` (pydantic) per `ability_cost_components_yaml` call
-    (×N_abilities × N_quotes) — profile cProfile pokazał 270 ms cumulative
-    dla 100 quotes z 5-modeli unit. Po cache: ~0.01 ms / quote.
+    **Post-review cleanup**: `CostRecipeSpec` (`models.py`) i dispatcher
+    `CostRecipe` zostały zunifikowane — `passive_abilities` ma już shape
+    `dict[str, CostRecipe]`, brak potrzeby konwersji. Wcześniej ten helper
+    rebuildował 33 nowe `CostRecipe` instancje per call (A5 wymagało
+    id-keyed cache by to zniwelować); teraz to no-op pass-through.
 
-    Frozen AbilityCosts nie jest hashable (zawiera `dict[str, ...]`), więc
-    `lru_cache` nie pasuje — używamy ręcznego dict keyed na `id(ac)`.
-    Bezpieczne bo `AbilityCosts` żyje wewnątrz cached `RulesetManifest`
-    (`load_ruleset()` z `lru_cache`).
-
-    Returns immutable view — caller nie powinien modyfikować shared dict.
+    Pozostaje jako publiczne API żeby caller (`_yaml_quote`, testy A2.5)
+    nie musieli wiedzieć o detalu wewnętrznym.
     """
-    key = id(ac)
-    cached = _PASSIVE_RECIPES_CACHE.get(key)
-    if cached is not None:
-        return cached
-    result = {
-        slug: CostRecipe(fn=spec.fn, args=dict(spec.args))
-        for slug, spec in ac.passive_abilities.items()
-    }
-    _PASSIVE_RECIPES_CACHE[key] = result
-    return result
+    return ac.passive_abilities
 
 
 def _clear_passive_recipes_cache() -> None:
-    """Helper dla testów / dev reload — wyczyść cache rękodzielnie razem z
-    `load_ruleset.cache_clear()`."""
-    _PASSIVE_RECIPES_CACHE.clear()
+    """No-op po unifikacji `CostRecipeSpec`/`CostRecipe` (post-review).
+
+    Zostawione jako stub dla wsteczna kompatybilność z dev workflow
+    (`load_ruleset.cache_clear()` + ten helper). Bezpieczne do usunięcia
+    gdy nikt zewnętrznie nie wywołuje.
+    """
+    return None
 
 
 def _ability_identifier_set(abilities: Sequence[str]) -> set[str]:

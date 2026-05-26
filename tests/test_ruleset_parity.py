@@ -123,11 +123,21 @@ def _assert_parity(unit, loadout=None, count: int = 1) -> dict:
 _QUALITY_VALUES = [3, 4, 5, 6]
 _DEFENSE_VALUES = [2, 3, 4, 5]
 _TOUGHNESS_VALUES = [1, 3, 6, 9]
+# Flag sets dobrane tak, żeby pokryć cztery rodzaje gałęzi dispatchera:
+# - czysty role/no-flag (sanity),
+# - passive scaling (Zwiadowca + morale Nieustraszony),
+# - aura handler (`Aura(...): X`),
+# - transport handler (priority traits).
+# Bez tego pokrycia cartesian dotyka tylko 33 passive recipes z YAML,
+# zostawiając handlery na manual case'ach.
 _FLAG_SETS = [
-    "",
     "Wojownik",
     "Strzelec",
     "Nieustraszony,Zwiadowca",
+    "Aura(6): Bastion",
+    "Transport(6),Latajacy",
+    "Mag(2)",
+    "Mistrzostwo(przebijajaca)",
 ]
 _WEAPON_CONFIGS = [
     {"range_": '18"', "attacks": 1.0, "ap": 1, "tags": ""},
@@ -138,21 +148,41 @@ _WEAPON_CONFIGS = [
 
 
 def _cartesian_ids():
-    """Generator dla cartesian — limitowany do 100 reprezentatywnych kombinacji."""
-    seen = []
-    for q, d, t, f, w in itertools.product(
-        _QUALITY_VALUES, _DEFENSE_VALUES, _TOUGHNESS_VALUES, _FLAG_SETS, _WEAPON_CONFIGS
-    ):
-        seen.append((q, d, t, f, w))
-        if len(seen) >= 100:
-            break
-    return seen
+    """Generator dla cartesian — sample 100 z pełnej kartezjany 4×4×4×4×4=1024.
+
+    Wcześniej brane pierwsze 100 z `itertools.product` co dawało tylko
+    pierwsze (q,d,t) cykle dla pierwszego flag/weapon. Teraz `random.sample`
+    z seed=0 daje deterministyczne ALE zrównoważone pokrycie wszystkich
+    pięciu wymiarów. Failure diagnostics przez `ids=` lambda — czytelne
+    `q4_d3_t6_flags-Strzelec_w-Przebijajaca` zamiast indeksu listy.
+    """
+    import random
+
+    all_combos = list(
+        itertools.product(
+            _QUALITY_VALUES, _DEFENSE_VALUES, _TOUGHNESS_VALUES,
+            _FLAG_SETS, _WEAPON_CONFIGS,
+        )
+    )
+    rng = random.Random(0)
+    return rng.sample(all_combos, k=min(100, len(all_combos)))
+
+
+def _cartesian_id(params: tuple) -> str:
+    q, d, t, flags, w = params
+    flags_short = flags.replace(",", "+") if flags else "none"
+    tags = w.get("tags") or "plain"
+    return f"q{q}_d{d}_t{t}_f-{flags_short}_w-{tags[:20]}"
 
 
 _CARTESIAN_PARAMS = _cartesian_ids()
 
 
-@pytest.mark.parametrize("q,d,t,flags,weapon_cfg", _CARTESIAN_PARAMS)
+@pytest.mark.parametrize(
+    "q,d,t,flags,weapon_cfg",
+    _CARTESIAN_PARAMS,
+    ids=[_cartesian_id(p) for p in _CARTESIAN_PARAMS],
+)
 def test_cartesian_parity(q, d, t, flags, weapon_cfg) -> None:
     unit = _unit(
         quality=q, defense=d, toughness=t, flags=flags, weapon_kwargs=weapon_cfg

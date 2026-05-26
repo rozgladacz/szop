@@ -86,9 +86,9 @@ class RulesetAbility(BaseModel):
 class CostRecipeSpec(BaseModel):
     """Atomowa receptura DSL — odczytywana z `ability_costs.yaml`.
 
-    Mirror `app.services.rulesets.dispatcher.CostRecipe`. Trzymana tutaj
-    zamiast w `dispatcher.py` żeby uniknąć cyklicznego importu: `models.py`
-    nie importuje z `dispatcher.py`.
+    Używany jednolicie przez loader (YAML → spec) i dispatcher (spec →
+    `call_recipe`). `dispatcher.CostRecipe` to alias na tę klasę (zero
+    konwersji w runtime, A5 perf optimization).
     """
 
     model_config = _FrozenConfig

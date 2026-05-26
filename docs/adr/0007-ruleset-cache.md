@@ -7,8 +7,10 @@
 
 ## Decyzja
 
-YAML backend ma **dwa poziomy cache**, oba mieszczące się w budżecie
-≤ 1.20× procedural baseline (`tests/test_quote_performance_regression.py`):
+YAML backend ma **jeden poziom cache** (po post-review cleanup), mieszczący
+się w budżecie ≤ 1.30× procedural baseline na Windows
+(`tests/test_quote_performance_regression.py`, budget ma 0.10 headroom na
+perf noise; bare-metal Linux trzyma się median ~1.10×):
 
 1. **`load_ruleset(version)`** — `@lru_cache(maxsize=4)` na **publicznym
    entrypoincie**. Pomija SHA recheck (3× file read + sha256) na hot path.
@@ -16,21 +18,18 @@ YAML backend ma **dwa poziomy cache**, oba mieszczące się w budżecie
    pozostaje dostępny do kontrolowanego dev reload — po edycji YAML wywołać
    `load_ruleset.cache_clear()` lub restart procesu.
 
-2. **`_build_passive_recipes(ac)`** — manual cache `dict[int, Mapping[...]]`
-   keyed na `id(ac)`. **Nie używamy `@lru_cache`** bo `AbilityCosts` jest
-   frozen Pydantic v2 z polami `dict[str, CostRecipeSpec]` — Pydantic v2
-   nie konwertuje dict→frozendict automatycznie, więc model nie jest hashable.
-   `id(ac)` jest stabilne dopóki `RulesetManifest` żyje w outer LRU cache
-   (`maxsize=4` ⇒ co najwyżej 4 stale wpisy).
+2. ~~**`_build_passive_recipes(ac)` id-keyed cache**~~ — **usunięte w post-review
+   cleanup**. Wcześniej cache był potrzebny żeby uniknąć 33 alokacji
+   `CostRecipe` per `ability_cost_components_yaml` call (przy rebuilding
+   `CostRecipeSpec` → `CostRecipe`). Po unifikacji `CostRecipe = CostRecipeSpec`
+   (alias w `dispatcher.py`) konwersja zniknęła — `ac.passive_abilities`
+   ma już docelowy shape, helper zwraca go bezpośrednio.
 
-Cache invalidation:
+Cache invalidation (uproszczone po cleanup):
 
 ```python
 from app.services.rulesets import load_ruleset
-from app.services.rulesets.handlers import _clear_passive_recipes_cache
-
 load_ruleset.cache_clear()
-_clear_passive_recipes_cache()  # razem z powyższym dla dev reload
 ```
 
 ## Konsekwencje
