@@ -11,19 +11,13 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-a](docs/handoffs/HANDOFF_faza-a.md) | Migracja proceduralnej logiki kosztów do YAML+Pydantic v2 pod feature toggle `OPR_RULES_BACKEND` (A0+A1+A2+A3+A5) | `quote.py`, `config.py`, `requirements.txt`, `app/rulesets/v1/*`, `app/services/rulesets/*`, `Makefile` | In progress |
+| *(brak aktywnych wątków)* | | | |
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `app/services/costs/quote.py` | faza-a | dispatcher (A0) + `_yaml_quote()` (A2) |
-| `app/config.py` | faza-a | `OPR_RULES_BACKEND` ENV var (A0) |
-| `requirements.txt` | faza-a | pydantic v2 + pyyaml (A0) |
-| `app/rulesets/v1/` (NEW) | faza-a | tables.yaml + abilities.yaml + ability_costs.yaml (A1, A2) |
-| `app/services/rulesets/` (NEW) | faza-a | models, loader, cost_functions, dispatcher (A1, A2) |
-| `app/services/costs/errors.py` (NEW) | faza-a | `RulesetParityError` (A0) |
-| `Makefile` | faza-a | cel `test-parity` (A3) |
+| *(brak)* | | |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
@@ -42,27 +36,10 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
-### 2026-05-24 — faza-a A5 (perf gate + LRU cache) — wątek zamknięty (Faza A done)
-- A5 done w jednej sesji. Test `test_quote_performance_regression.py` (NEW, 3 testy) wykrył regresję yaml 3.57× → optymalizacje wymuszone: `@lru_cache(maxsize=4)` na `load_ruleset()` + manual id-keyed cache na `_build_passive_recipes` (frozen Pydantic z dict-pól nie hashable). Po fix ratio **1.158×** (budżet 1.20× ✅). Plus `scripts/profile_quote.py --backend ...` + `Makefile:profile BACKEND=...`, `docs/PERFORMANCE.md` z A5 baseline, ADR-0007 (cache strategy). Pytest 815/815 passed (812 + 3 perf).
-- **Faza A zamknięta — wszystkie zaplanowane podfazy ✅** (A0 toggle, A1 schema, A2 DSL, A3 parity gate, A5 perf gate). A4 (DOCX→YAML drift) świadomie poza scope — osobny wątek gdy wymagane.
-- Pliki: `tests/test_quote_performance_regression.py` (NEW), `app/services/rulesets/loader.py` (lru_cache load_ruleset), `app/services/rulesets/handlers.py` (id-cache _build_passive_recipes), `scripts/profile_quote.py` (--backend), `Makefile` (BACKEND var), `docs/PERFORMANCE.md` (A5 baseline), `docs/adr/0007-ruleset-cache.md` (NEW), HANDOFF.md, HANDOFF_faza-a.md.
-- Wątek `faza-a` gotowy do `/handoff-archive faza-a`. Strumień A odblokowuje strumienie B/C/D.
-
-### 2026-05-24 — faza-a A3 (parity gate)
-- A3 done w jednej sesji (A3.1 + A3.2 + A3.3). 3 nowe pliki testowe + 1 zmodyfikowany Makefile + 249 nowych testów. Pełna suita **812/812 passed** (563 baseline + 156 parity + 93 yaml mirror). `tests/test_ruleset_parity.py` (156 testów: 100 cartesian + 55 manual + None-unit) pod `both_assert` — wewnętrzny `_assert_quote_parity` raise gdy delta > 1e-3. `tests/yaml_backend/` (93 testów w 4 plikach: passive/active/weapon/mistrzostwo) wymusza `OPR_RULES_BACKEND=yaml` przez conftest. `Makefile`: nowy cel `test-parity` (both_assert + yaml).
-- Odkrycie: nazwa katalogu `tests/yaml/` shadowed PyYAML (`yaml.safe_load` AttributeError) — pytest add testdir do sys.path. Rename na `tests/yaml_backend/`.
-- Pliki: `tests/test_ruleset_parity.py` (NEW), `tests/yaml_backend/{__init__,conftest,test_passive_costs_yaml,test_active_costs_yaml,test_weapon_costs_yaml,test_mistrzostwo_costs_yaml}.py` (NEW), `Makefile` (cel `test-parity`).
-- Następny krok: Faza A5 (perf regression gate) — `tests/test_quote_performance_regression.py`, `scripts/profile_quote.py --backend`, `docs/PERFORMANCE.md` baseline obu backendów, ADR-0007.
-
-### 2026-05-24 — faza-a A2.6 (ADR-0004 + faza A2 zamknięta)
-- A2.6 done. `docs/adr/0004-cost-dsl.md` (NEW) podsumowuje decyzje strukturalne fazy A2: hardcoded fn-dispatcher (nie eval), callable injection (`passive_cost_fn`, `slug_for_name`), inwariant czystości "no-oracle-import" w `rulesets/*`, świadome odchylenie `transport_multiplier` priority-first vs oracle last-match-wins (parity-bug fix). Plus 5 alternatyw odrzuconych. Faza A2 (DSL + YAML backend) zamknięta — następna jest **A3** (parity tests + CI gate).
-- Pliki: `docs/adr/0004-cost-dsl.md` (NEW), `HANDOFF.md`, `docs/handoffs/HANDOFF_faza-a.md`.
-- Następny krok: A3.1 (`tests/test_ruleset_parity.py` — 100 cartesian + 50 manual cases, delta ≤ 1e-3).
-
-### 2026-05-24 — faza-a A2.5 (test suite)
-- A2.5 done w jednej sesji. 2 nowe pliki testowe: `tests/test_cost_functions.py` (232 testy) i `tests/test_quote_yaml_backend.py` (35 testów). Pełna suita 563/563 passed. Pokrycie: per-fn parytet 13 DSL prymitywów vs oracle (range/ap/blast/deadly/morale/defense/toughness/transport priority-first), 5-flag scale_by_tou edge cases, cartesian passive_cost_dsl × 35 abilities × aura, base_model_cost 10 scenariuszy, weapon wrappers, mistrzostwo. End-to-end: 3 backendy × 10 scenariuszy (basic/passive/aura/transport/weapon-traits/loadout/masywny) z `both_assert` no-raise + edge cases (count=0, include_item_costs=False, loadout normalization).
-- Pliki: `tests/test_cost_functions.py` (NEW), `tests/test_quote_yaml_backend.py` (NEW), `docs/handoffs/HANDOFF_faza-a.md` (A2.5 odznaczony).
-- Następny krok: A2.6 (`docs/adr/0004-cost-dsl.md`).
+### 2026-05-24 — faza-a (archived)
+- Strumień A planu długofalowego — migracja proceduralnej logiki kosztów do deklaratywnej (YAML + Pydantic v2) pod feature toggle `OPR_RULES_BACKEND ∈ {procedural, yaml, both_assert}`. Procedural pozostał SSOT (oracle); YAML jest niezależną repliką liczącą identycznie (parity ≤ 1e-3). **Wszystkie 5 zaplanowanych podfaz zamknięte ✅** (A0 toggle, A1 schema+87 abilities, A2 cost DSL z 13 fn + 6 handlers + 33 passive recipes, A3 parity gate 156 testów + yaml mirror 93 testów, A5 perf gate 1.158× ≤ budget 1.30×). A4 (DOCX→YAML drift pipeline) świadomie poza scope — osobny wątek gdy wymagane. **Strumień A odblokowuje strumienie B (game engine), C (MCP/RAG), D (boty)** — wszystkie potrzebowały YAML SSOT.
+- Pliki: `app/services/rulesets/{__init__,models,loader,cost_functions,dispatcher,handlers,quote_yaml}.py` (NEW pakiet, ~2300 LOC), `app/rulesets/v1/{tables,abilities,ability_costs}.yaml` (NEW), `app/services/costs/{quote.py:_yaml_quote,errors.py:RulesetParityError}` (zmiany + NEW), `app/config.py` (OPR_RULES_BACKEND), `requirements.txt` (pydantic v2 + PyYAML), `Makefile` (cel `test-parity` + flag BACKEND= dla profile), `scripts/profile_quote.py` (--backend), 8 nowych plików testowych (`test_feature_toggle/tables_migration/abilities_migration/cost_functions/quote_yaml_backend/ruleset_parity/quote_performance_regression.py` + `tests/yaml_backend/` z 4 mirror suite + conftest), 4 nowe ADR (`0003-yaml-pydantic-format`, `0004-cost-dsl`, `0005-feature-toggle`, `0007-ruleset-cache`), `docs/PERFORMANCE.md` (A5 baseline obu backendów). Commity: `ebddf68` (A0), `938da20` (A1), `a70601d` (A2.1-2.4b), `5d02dd5`+`c4e01cd`+`0ed400c`+`1574f42` (sub-wątek A2.4c), `9c19ddb` (A2.5), `da71895` (A2.6), `d7fc8c3` (A3), `610919b` (A5), `08b8662` (post-review cleanup: unify CostRecipe/CostRecipeSpec + dedupe helpers).
+- Weryfikacja: pytest 815/815 passed default procedural; `OPR_RULES_BACKEND=both_assert pytest tests/test_ruleset_parity.py` → 156/156 0 RulesetParityError; `OPR_RULES_BACKEND=yaml pytest tests/yaml_backend/` → 93/93; perf ratio yaml/procedural 1.158× (mediana z 5 runs). Smoke UI pod `both_assert` deferred — lokalna DB pusta, do uruchomienia gdy ktoś zaimportuje prod DB.
 
 ### 2026-05-23 — faza-a-2-dsl-quote (archived)
 - Sub-wątek `faza-a` zamykający A2.4c. NEW `app/services/rulesets/quote_yaml.py` (~440 LOC) — `roster_unit_role_totals_yaml` jako 1:1 port `costs/role_totals.py` z YAML substytucjami (`weapon_cost_components_yaml`, `ability_cost_components_yaml`, `_yaml_ability_cost` z `cost_hint` short-circuit). Body `_yaml_quote()` (~190 LOC) w `quote.py` — mirror `_procedural_quote` end-to-end. Fix parity-bug `transport_multiplier` (priority-first via `break` — był last-match-wins).
