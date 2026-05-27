@@ -111,7 +111,14 @@
       "PowerShell(node --check \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\static\\\\js\\\\modules\\\\roster_rendering.js\")",
       "PowerShell(if \\($?\\) { \"OK warnings.js\" })",
       "PowerShell(if \\($?\\) { \"OK editor.js\" })",
-      "PowerShell(if \\($?\\) { \"OK rendering.js\" })"
+      "PowerShell(if \\($?\\) { \"OK rendering.js\" })",
+      "Bash(OPR_RULES_BACKEND=yaml python -c \"from app.services.costs.quote import calculate_roster_unit_quote; calculate_roster_unit_quote\\(None\\)\")",
+      "Bash(python -m pytest -q tests/test_tables_migration.py tests/test_abilities_migration.py)",
+      "PowerShell(python -c \"from app.services.rulesets.cost_functions import scale_by_tou, defense_modifier, range_multiplier, transport_multiplier, _weapon_cost_yaml, _mistrzostwo_aura_cost; from app.services.rulesets import load_ruleset; m = load_ruleset\\(\\); print\\('range12=', range_multiplier\\(m.tables, 12\\)\\); print\\('def4=', defense_modifier\\(m.tables, 4, ['szpica']\\)\\); print\\('tou_scale_4=', scale_by_tou\\(4.0, 1.0\\)\\); print\\('transport_samolot=', transport_multiplier\\(m.tables, {'samolot'}\\)\\)\")",
+      "PowerShell(python -m pytest -q --tb=short 2>&1)",
+      "PowerShell($env:OPR_RULES_BACKEND=\"both_assert\"; python -m pytest tests/test_ruleset_parity.py -q 2>&1 | Select-Object -Last 5; Remove-Item Env:OPR_RULES_BACKEND)",
+      "Bash(python scripts/rules_extract.py)",
+      "Bash(python -m pytest tests/test_rules_extract.py -v)"
     ]
   }
 }

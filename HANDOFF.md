@@ -11,13 +11,26 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| *(brak aktywnych wątków)* | | | |
+| [HANDOFF_faza-a-4-drift](docs/handoffs/HANDOFF_faza-a-4-drift.md) | Strumień A.4 — pipeline DOCX→YAML drift detection (A4.2 diff, A4.3 geometry, A4.4 PDF SHA, A4.5 Makefile, A4.6 GHA, A4.7 promocja ADR-0006) | `scripts/rules_{drift,classify_geometry,pdf_check}.py`, `Makefile`, `.github/workflows/rules_drift.yml`, `app/rulesets/v1/drift_allowlist.yaml` (wszystkie NEW) | In progress (czeka na A4.1 z sub-wątku) |
+| [HANDOFF_faza-a-4-extract](docs/handoffs/HANDOFF_faza-a-4-extract.md) | Sub `faza-a-4-drift`. A4.1 — parser `SZOP.docx` → `build/rules_extracted.yaml` (spike + impl + golden test) | `scripts/rules_extract.py`, `tests/test_rules_extract.py`, `tests/fixtures/rules_extract/`, `requirements-dev.txt`, `.gitignore` | In progress (przed spike A4.1.1) |
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| *(brak)* | | |
+| `scripts/rules_extract.py` (NEW) | faza-a-4-extract | A4.1 — parser DOCX |
+| `tests/test_rules_extract.py` (NEW) | faza-a-4-extract | A4.1 — golden + sanity |
+| `tests/fixtures/rules_extract/` (NEW) | faza-a-4-extract | A4.1 — minimal DOCX fixture |
+| `requirements-dev.txt` | faza-a-4-extract | A4.1.2 — `python-docx>=1.1.0` |
+| `.gitignore` | faza-a-4-extract | A4.1.5 — dodanie `build/` |
+| `scripts/rules_drift.py` (NEW) | faza-a-4-drift | A4.2 — 4 typy raportów + exit 0/1/2 |
+| `scripts/rules_classify_geometry.py` (NEW) | faza-a-4-drift | A4.3 — lista exclusions dla B0 |
+| `scripts/rules_pdf_check.py` (NEW) | faza-a-4-drift | A4.4 — DOCX↔PDF SHA256 |
+| `app/rulesets/v1/drift_allowlist.yaml` (NEW) | faza-a-4-drift | A4.2 — whitelist drift |
+| `app/rulesets/v1/source_hashes.yaml` (NEW) lub `app/static/docs/*.sha256` | faza-a-4-drift | A4.4 — hash storage (decyzja w A4.4) |
+| `Makefile` | faza-a-4-drift | A4.5 — cel `rules-check` |
+| `.github/workflows/rules_drift.yml` (NEW) | faza-a-4-drift | A4.6 — CI gate |
+| `docs/adr/0006-pipeline-drift.md` | faza-a-4-drift | A4.7 — promocja `Proposed → Accepted` |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
