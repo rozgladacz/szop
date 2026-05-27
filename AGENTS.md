@@ -7,7 +7,8 @@
 | Temat | Plik |
 |---|---|
 | Cel projektu, obszary, stack | [docs/overview.md](docs/overview.md) |
-| Architektura, model danych, mapa submodułów `costs/` | [docs/architecture.md](docs/architecture.md) |
+| Architektura, model danych, mapa submodułów `costs/` + `rulesets/` (YAML backend), feature toggle | [docs/architecture.md](docs/architecture.md) |
+| Decyzje architektoniczne (ADR) | [docs/adr/](docs/adr/) (index w [docs/roadmap.md](docs/roadmap.md#adr-index)) |
 | Roadmapa, aktywne inicjatywy | [docs/roadmap.md](docs/roadmap.md) |
 | Jak planować zadanie (Layer Checklist, performance gate) | [docs/planning.md](docs/planning.md) |
 | Konwencje kodu, INCH, string handling, ekstrakcja submodułów | [docs/developing.md](docs/developing.md) |

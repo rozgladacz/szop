@@ -29,53 +29,52 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ---
 
-## Strumień A — Deklaratywne reguły (YAML + SSOT)
+## Strumień A — Deklaratywne reguły (YAML + SSOT) ✅
 
-> Zamiana hardcoded tabel i `if/elif` na YAML + Pydantic. Feature toggle `OPR_RULES_BACKEND ∈ {procedural, yaml, both_assert}`.
+> Zamiana hardcoded tabel i `if/elif` na YAML + Pydantic. Feature toggle `OPR_RULES_BACKEND ∈ {procedural, yaml, both_assert}`. **Faza A done (2026-05-24); A4 świadomie poza scope — osobny wątek gdy wymagane.** Pełny przebieg: `HANDOFF.md → LOG SESJI → 2026-05-24 — faza-a (archived)`.
 
-### A0. Feature toggle (prereq)
-- [ ] ENV `OPR_RULES_BACKEND` z defaultem `procedural`
-- [ ] Dispatcher w `app/services/costs/quote.py` (procedural | yaml | both_assert)
-- [ ] Tryb `both_assert`: wywołuje oba, loguje `RulesetParityError` jeśli delta > 1e-3, zwraca wynik procedurala
-- [ ] CI uruchamia `OPR_RULES_BACKEND=both_assert pytest` na każdym PR
-- [ ] ADR-0005: Feature toggle — procedural i YAML koexistują do dojrzałości
+### A0. Feature toggle (prereq) ✅
+- [x] ENV `OPR_RULES_BACKEND` z defaultem `procedural`
+- [x] Dispatcher w `app/services/costs/quote.py` (procedural | yaml | both_assert)
+- [x] Tryb `both_assert`: wywołuje oba, raise `RulesetParityError` jeśli delta > 1e-3, zwraca wynik procedurala
+- [x] CI gate: `make test-parity` — uruchamia `both_assert` na `test_ruleset_parity.py` i `yaml` na `tests/yaml_backend/`
+- [x] ADR-0005: Feature toggle — procedural i YAML koexistują do dojrzałości
 
-### A1. Schema + słowniki (3 tyg)
-- [ ] `app/rulesets/v1/` — katalog plików YAML
-- [ ] `app/services/rulesets/models.py` — Pydantic v2 schema (TableDefinition, AbilityDefinition, AbilityCost, RulesetManifest)
-- [ ] `make generate-schema` → `docs/schemas/ruleset_v1.schema.json` (dla VS Code YAML extension)
-- [ ] `app/rulesets/v1/tables.yaml` — migracja tabel z `app/services/costs/_engine.py` (DEFENSE_BASE_VALUES, RANGE_TABLE, AP_BASE, BLAST_MULTIPLIER, …)
-- [ ] `app/rulesets/v1/abilities.yaml` — migracja 98 ability defs z `app/data/abilities.py`
-- [ ] `app/services/rulesets/loader.py` — LRU cache keyed na `(version, sha256(content))`, file mtime check w dev, zero alokacji w hot path
-- [ ] Testy: `tests/test_tables_migration.py`, `tests/test_abilities_migration.py` — exact match vs oryginał
-- [ ] ADR-0003: YAML + Pydantic v2 jako format reguł
+### A1. Schema + słowniki ✅
+- [x] `app/rulesets/v1/` — katalog plików YAML
+- [x] `app/services/rulesets/models.py` — Pydantic v2 schema (`RulesetTables`, `RulesetAbility`, `RulesetManifest`, `TransportMultiplier`)
+- [ ] `make generate-schema` → `docs/schemas/ruleset_v1.schema.json` (deferred — VS Code YAML extension nice-to-have)
+- [x] `app/rulesets/v1/tables.yaml` — migracja 18 tabel z `app/services/costs/_engine.py`
+- [x] `app/rulesets/v1/abilities.yaml` — **87** definicji z `app/data/abilities.py` (nie 98 jak myślano w pre-A1 estymacie)
+- [x] `app/services/rulesets/loader.py` — `@lru_cache(maxsize=4)` na public entrypoincie + SHA256 discriminators dla dev reload
+- [x] Testy: `tests/test_tables_migration.py` (22), `tests/test_abilities_migration.py` (89) — exact match vs oryginał
+- [x] ADR-0003: YAML + Pydantic v2 jako format reguł
 
-### A2. Cost DSL (4–5 tyg)
-- [ ] `app/services/rulesets/cost_functions.py` — ~12–15 czystych funkcji (`scale_by_tou`, `scale_by_quality`, `apply_ap_modifier`, `blast_cost`, …)
-- [ ] `app/rulesets/v1/ability_costs.yaml` — DSL: `{fn: "scale_by_tou", args: {factor: 1.25}}`
-- [ ] `_yaml_quote()` w `app/services/costs/quote.py` — loader → lookup → dispatch → QuoteResult
-- [ ] Testy: `tests/test_cost_functions.py`, `tests/test_quote_yaml_backend.py`
-- [ ] ADR-0004: Cost DSL — function dispatcher zamiast eval
+### A2. Cost DSL ✅
+- [x] `app/services/rulesets/cost_functions.py` — 13 czystych funkcji DSL + wrappery weapon_cost
+- [x] `app/services/rulesets/dispatcher.py` — `_REGISTRY` (9 fn) + `call_recipe()` + `passive_cost_dsl()`
+- [x] `app/services/rulesets/handlers.py` — 6 handlerów (transport/open_transport/aura/mag/order_like/mistrzostwo) + `ability_cost_components_yaml()`
+- [x] `app/services/rulesets/quote_yaml.py` — `roster_unit_role_totals_yaml`, 1:1 port `role_totals.py` z YAML substytucjami
+- [x] `app/rulesets/v1/ability_costs.yaml` — 33 passive recipes + 7 fixed_by_slug + 4 fixed_by_desc + 6 handlers + `skip_in_default`
+- [x] `_yaml_quote()` w `app/services/costs/quote.py` — dispatcher + body mirror `_procedural_quote`
+- [x] Testy: `tests/test_cost_functions.py` (232), `tests/test_quote_yaml_backend.py` (35)
+- [x] ADR-0004: Cost DSL — hardcoded function dispatcher zamiast eval, callable injection (`passive_cost_fn`, `slug_for_name`), inwariant czystości "no-oracle-import" w `rulesets/*`
 
-### A3. Testy (cross-cutting)
-- [ ] Golden tests procedurala (istniejące) — **nie ruszać semantyki**; stają się wzorcem
-- [ ] `tests/yaml/test_*_yaml.py` — te same scenariusze pod `OPR_RULES_BACKEND=yaml`
-- [ ] `tests/test_ruleset_parity.py` — 100 cartesian + 50 ręcznych przypadków; `proc == yaml ± 1e-3`
-- [ ] CI: wszystkie 3 warstwy na każdym PR
+### A3. Testy (cross-cutting) ✅
+- [x] Golden tests procedurala (istniejące) — semantyka nieruszona; baseline dla `both_assert`
+- [x] `tests/yaml_backend/test_*_yaml.py` — te same scenariusze pod `OPR_RULES_BACKEND=yaml` (93 testy w 4 plikach: passive/active/weapon/mistrzostwo)
+- [x] `tests/test_ruleset_parity.py` — 100 cartesian + 55 manual + None-unit = 156 testów pod `both_assert`; delta ≤ 1e-3
+- [x] CI gate: `make test-parity` (cel w Makefile)
 
-### A4. Pipeline DOCX → PDF → YAML (3–4 tyg)
-- [ ] `scripts/rules_extract.py` — DOCX → `build/rules_extracted.yaml` (slug, name, type, description; cost_fn ręcznie)
-- [ ] `scripts/rules_drift.py` — diff extracted vs `abilities.yaml`; 4 rodzaje raportów; exit code 0/1/2; `build/drift_report.md`
-- [ ] `scripts/rules_classify_geometry.py` — klasyfikacja zdolności wg keywords (flanka, tył, obrót, …); `build/geometry_classification.md` → lista exclusions z B MVP
-- [ ] `scripts/rules_pdf_check.py` — DOCX vs PDF integrality; SHA256 w `app/static/docs/SZOP.pdf.sha256`
-- [ ] `make rules-check` — uruchamia cały pipeline
-- [ ] `.github/workflows/rules_drift.yml` — trigger: PR touching `app/static/docs/`, `app/rulesets/`, `app/data/abilities.py`
-- [ ] ADR-0006: Pipeline drift — nie auto-gen, only drift detection
+### A4. Pipeline DOCX → PDF → YAML (świadomie poza scope Fazy A)
+- [ ] *Osobny wątek* — startuje gdy będzie realna potrzeba detekcji drift między DOCX a `abilities.yaml`. Wcześniej YAML jest authoritative; ręczna synchronizacja w `app/data/abilities.py` (87 entries) jest manageable.
 
-### A5. Wydajność
-- [ ] `tests/test_quote_performance_regression.py` — YAML ≤ +20% baseline procedural (fail jeśli > 30%)
-- [ ] Profiling hot path `ability_identifier` (~18 700 callów/quote)
-- [ ] ADR-0007: Cache rulesetów — frozen dataclass + hash LRU
+### A5. Wydajność ✅
+- [x] `tests/test_quote_performance_regression.py` — `min(yaml_time/proc_time)` ≤ 1.30 (3 attempts × min, headroom 0.10 na Windows noise; bare-metal Linux median ~1.10×)
+- [x] **A5 optymalizacje wymuszone przez test:** `@lru_cache(maxsize=4)` na `load_ruleset()` (skip SHA recheck na hot path); `CostRecipe = CostRecipeSpec` alias (eliminacja per-quote rebuild loopa po post-review cleanup). Ratio 3.57× → 1.158×.
+- [x] `scripts/profile_quote.py --backend procedural|yaml|both_assert` (argparse) + `Makefile:profile BACKEND=...`
+- [x] `docs/PERFORMANCE.md` — baseline obu backendów (sekcja "Baseline YAML backend (Faza A5)")
+- [x] ADR-0007: Cache rulesetów — single LRU level (id-keyed cache usunięty w post-review)
 
 ---
 
@@ -279,11 +278,11 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 |---|-------|--------|
 | 0001 | Refaktor app.js — IIFE bez bundlera | ✓ |
 | 0002 | SSOT kosztów: calculate_roster_unit_quote | ✓ |
-| 0003 | Format reguł: YAML + Pydantic v2 | — |
-| 0004 | Cost DSL: function dispatcher | — |
-| 0005 | Feature toggle: procedural + YAML | — |
-| 0006 | Pipeline docx↔yaml: drift-only | — |
-| 0007 | Cache rulesetów: frozen dataclass + LRU | — |
+| 0003 | Format reguł: YAML + Pydantic v2 | ✓ |
+| 0004 | Cost DSL: function dispatcher | ✓ |
+| 0005 | Feature toggle: procedural + YAML | ✓ |
+| 0006 | Pipeline docx↔yaml: drift-only | — (poza scope Fazy A) |
+| 0007 | Cache rulesetów: LRU na load_ruleset | ✓ |
 | 0008 | Pareto MVP: oddział = koło, pełne zasady | — |
 | 0010 | Event-sourced battle log | — |
 | 0010a | Decision freeze (GATE dla B3 actions) | — |
