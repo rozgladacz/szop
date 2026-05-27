@@ -66,8 +66,15 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [x] `tests/test_ruleset_parity.py` — 100 cartesian + 55 manual + None-unit = 156 testów pod `both_assert`; delta ≤ 1e-3
 - [x] CI gate: `make test-parity` (cel w Makefile)
 
-### A4. Pipeline DOCX → PDF → YAML (świadomie poza scope Fazy A)
-- [ ] *Osobny wątek* — startuje gdy będzie realna potrzeba detekcji drift między DOCX a `abilities.yaml`. Wcześniej YAML jest authoritative; ręczna synchronizacja w `app/data/abilities.py` (87 entries) jest manageable.
+### A4. Pipeline DOCX → PDF → YAML (in progress — wątek `faza-a-4-drift` od 2026-05-26)
+- [x] A4.0: ADR-0006 (Proposed) + HANDOFF bootstrap (`faza-a-4-drift` parent + `faza-a-4-extract` sub-thread). Plan 7 faz, decyzja: drift-only (nie auto-gen YAML); 4 typy raportów R1/R4 ERROR + R2/R3 WARN.
+- [x] A4.1: `scripts/rules_extract.py` — DOCX → `build/rules_extracted.yaml`. Parser content-based state machine (brak Headingów w DOCX), `python-docx>=1.1.0` w `requirements-dev.txt`, 29 testów. **85 abilities extracted** vs 87 w `ABILITY_DEFINITIONS` — realny drift do wykrycia w A4.2.
+- [ ] A4.2: `scripts/rules_drift.py` — diff vs `abilities.yaml`, 4 raporty, exit 0/1/2
+- [ ] A4.3: `scripts/rules_classify_geometry.py` — `build/geometry_classification.md` (lista exclusions dla B0 — **hard prereq dla Strumienia B**)
+- [ ] A4.4: `scripts/rules_pdf_check.py` — DOCX vs PDF SHA256
+- [ ] A4.5: `Makefile` cel `rules-check` (orchestracja 4 skryptów)
+- [ ] A4.6: `.github/workflows/rules_drift.yml` (CI gate path-filtered)
+- [ ] A4.7: ADR-0006 promocja `Proposed → Accepted` (8 punktów rewizji w sekcji "Do rewizji")
 
 ### A5. Wydajność ✅
 - [x] `tests/test_quote_performance_regression.py` — `min(yaml_time/proc_time)` ≤ 1.30 (3 attempts × min, headroom 0.10 na Windows noise; bare-metal Linux median ~1.10×)
@@ -281,7 +288,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 | 0003 | Format reguł: YAML + Pydantic v2 | ✓ |
 | 0004 | Cost DSL: function dispatcher | ✓ |
 | 0005 | Feature toggle: procedural + YAML | ✓ |
-| 0006 | Pipeline docx↔yaml: drift-only | — (poza scope Fazy A) |
+| 0006 | Pipeline docx↔yaml: drift-only | Proposed (promocja na Accepted w A4.7) |
 | 0007 | Cache rulesetów: LRU na load_ruleset | ✓ |
 | 0008 | Pareto MVP: oddział = koło, pełne zasady | — |
 | 0010 | Event-sourced battle log | — |

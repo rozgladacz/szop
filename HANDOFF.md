@@ -11,18 +11,12 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-a-4-drift](docs/handoffs/HANDOFF_faza-a-4-drift.md) | Strumień A.4 — pipeline DOCX→YAML drift detection (A4.2 diff, A4.3 geometry, A4.4 PDF SHA, A4.5 Makefile, A4.6 GHA, A4.7 promocja ADR-0006) | `scripts/rules_{drift,classify_geometry,pdf_check}.py`, `Makefile`, `.github/workflows/rules_drift.yml`, `app/rulesets/v1/drift_allowlist.yaml` (wszystkie NEW) | In progress (czeka na A4.1 z sub-wątku) |
-| [HANDOFF_faza-a-4-extract](docs/handoffs/HANDOFF_faza-a-4-extract.md) | Sub `faza-a-4-drift`. A4.1 — parser `SZOP.docx` → `build/rules_extracted.yaml` (spike + impl + golden test) | `scripts/rules_extract.py`, `tests/test_rules_extract.py`, `tests/fixtures/rules_extract/`, `requirements-dev.txt`, `.gitignore` | In progress (przed spike A4.1.1) |
+| [HANDOFF_faza-a-4-drift](docs/handoffs/HANDOFF_faza-a-4-drift.md) | Strumień A.4 — pipeline DOCX→YAML drift detection (A4.2 diff, A4.3 geometry, A4.4 PDF SHA, A4.5 Makefile, A4.6 GHA, A4.7 promocja ADR-0006) | `scripts/rules_{drift,classify_geometry,pdf_check}.py`, `Makefile`, `.github/workflows/rules_drift.yml`, `app/rulesets/v1/drift_allowlist.yaml` (wszystkie NEW) | In progress (A4.1 ✅, gotowe do A4.2) |
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `scripts/rules_extract.py` (NEW) | faza-a-4-extract | A4.1 — parser DOCX |
-| `tests/test_rules_extract.py` (NEW) | faza-a-4-extract | A4.1 — golden + sanity |
-| `tests/fixtures/rules_extract/` (NEW) | faza-a-4-extract | A4.1 — minimal DOCX fixture |
-| `requirements-dev.txt` | faza-a-4-extract | A4.1.2 — `python-docx>=1.1.0` |
-| `.gitignore` | faza-a-4-extract | A4.1.5 — dodanie `build/` |
 | `scripts/rules_drift.py` (NEW) | faza-a-4-drift | A4.2 — 4 typy raportów + exit 0/1/2 |
 | `scripts/rules_classify_geometry.py` (NEW) | faza-a-4-drift | A4.3 — lista exclusions dla B0 |
 | `scripts/rules_pdf_check.py` (NEW) | faza-a-4-drift | A4.4 — DOCX↔PDF SHA256 |
@@ -48,6 +42,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-05-26 — faza-a-4-extract (archived)
+- Sub-wątek `faza-a-4-drift` zamykający A4.1. `scripts/rules_extract.py` (~240 LOC) — content-based state machine DOCX parser (brak Headingów w `SZOP.docx`, tylko `Normal`/`List Paragraph`). Pydantic v2 `ExtractedAbility/RulesExtract`, slug z NFKD + explicit `Ł/ł→L/l` pre-replace (NFKD nie decomposuje Ł/ł). Critical bugs fixed: (1) embedded `\n` (Word soft line break) łączące wiele zdolności w jeden paragraf — fix przez `paragraph.text.split("\n")`; (2) slug "Łatanie"→"atanie" przez ASCII drop — fix przez pre-replace. **Wynik: 85 abilities** vs 87 w `ABILITY_DEFINITIONS` — różnica = **realny drift** (YAML splituje `Szybki/Wolny`, używa `burzaca`/`masywny`/`rozrywajacy`/`unik` zamiast DOCX `przelamanie`/`sekcje`/`podwojny`/`przewidywalny`, ma abstract `aura`, nie ma `AP(X)`) — A4.2 wykryje.
+- Pliki: `scripts/rules_extract.py` (NEW), `tests/test_rules_extract.py` (NEW, 29 testów), `requirements-dev.txt` (`python-docx>=1.1.0,<2.0`), `.gitignore` (`build/`). Plus: ADR-0006 (Proposed), `HANDOFF_faza-a-4-drift.md` (parent, in progress), `HANDOFF_faza-a-4-extract.md` (this, archived).
+- Weryfikacja: pytest 844/844 passed (815 baseline + 29 nowe). Commity: `6f74d26` (chore: untrack __pycache__), `2298d03` (A4.0+A4.1 bundle).
+- Doc updates: `docs/roadmap.md` (A4 section: stan z "poza scope Fazy A" → in progress z checklistą A4.0–A4.7, A4.0+A4.1 ✅; ADR index 0006: `—` → `Proposed`).
+- Następny krok: parent `faza-a-4-drift` startuje A4.2 (`scripts/rules_drift.py`) — `build/rules_extracted.yaml` jest wejściem.
 
 ### 2026-05-24 — faza-a (archived)
 - Strumień A planu długofalowego — migracja proceduralnej logiki kosztów do deklaratywnej (YAML + Pydantic v2) pod feature toggle `OPR_RULES_BACKEND ∈ {procedural, yaml, both_assert}`. Procedural pozostał SSOT (oracle); YAML jest niezależną repliką liczącą identycznie (parity ≤ 1e-3). **Wszystkie 5 zaplanowanych podfaz zamknięte ✅** (A0 toggle, A1 schema+87 abilities, A2 cost DSL z 13 fn + 6 handlers + 33 passive recipes, A3 parity gate 156 testów + yaml mirror 93 testów, A5 perf gate 1.158× ≤ budget 1.30×). A4 (DOCX→YAML drift pipeline) świadomie poza scope — osobny wątek gdy wymagane. **Strumień A odblokowuje strumienie B (game engine), C (MCP/RAG), D (boty)** — wszystkie potrzebowały YAML SSOT.

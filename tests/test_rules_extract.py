@@ -1,12 +1,10 @@
 """A4.1 — testy parsera DOCX → rules_extracted.yaml.
 
 Pokrycie:
-- Slug generation (`make_slug`) — golden cases włącznie z Polish chars i `Ł/ł` (non-decomp).
-- Pełen `SZOP.docx` sanity: count in expected range, unique slugs, no empty fields,
-  types z dozwolonego zbioru.
-- Golden test: programmatic-generated fixture DOCX z 2 zdolności + oczekiwany schema.
-- Edge cases: missing file (exit 1), invalid file (exit 1), empty DOCX (empty list).
-- Embedded newlines: dwie zdolności w jednym paragrafie split przez `\n`.
+- `make_slug` — Polish chars, parens, slashes, Ł/ł non-decomposing.
+- Pełen `SZOP.docx` sanity: count, unique slugs, no empty fields, valid types.
+- Golden test: programmatic fixture DOCX (2 zdolności + embedded `\\n`).
+- CLI error handling: missing / invalid / empty DOCX.
 """
 
 from __future__ import annotations
@@ -23,6 +21,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
+from app.services.rulesets.models import RulesetAbility  # noqa: E402
 from scripts.rules_extract import (  # noqa: E402
     extract_abilities,
     main,
@@ -57,9 +56,7 @@ REAL_DOCX = ROOT_DIR / "app" / "static" / "docs" / "SZOP.docx"
         ("Ociężałość", "ociezalosc"),
         ("Przełamanie", "przelamanie"),
         ("Otwarty transport(X)", "otwarty_transport"),
-        # Edge: special punctuation
         ("Waagh!", "waagh"),
-        # Empty edges
         ("AP(X)", "ap"),
     ],
 )
@@ -70,33 +67,24 @@ def test_make_slug(name: str, expected_slug: str) -> None:
 # --- Validation -------------------------------------------------------------
 
 
-def test_validate_uniqueness_passes_on_unique() -> None:
-    from scripts.rules_extract import ExtractedAbility
+def _ability(slug: str, name: str, type_: str = "passive") -> RulesetAbility:
+    return RulesetAbility(slug=slug, name=name, type=type_, description="desc")
 
-    abilities = [
-        ExtractedAbility(slug="a", name="A", type="passive", description="desc"),
-        ExtractedAbility(slug="b", name="B", type="active", description="desc"),
-    ]
-    # Should not raise
-    validate_uniqueness(abilities)
+
+def test_validate_uniqueness_passes_on_unique() -> None:
+    validate_uniqueness([_ability("a", "A"), _ability("b", "B", "active")])
 
 
 def test_validate_uniqueness_raises_on_duplicate() -> None:
-    from scripts.rules_extract import ExtractedAbility
-
-    abilities = [
-        ExtractedAbility(slug="a", name="A1", type="passive", description="d1"),
-        ExtractedAbility(slug="a", name="A2", type="active", description="d2"),
-    ]
     with pytest.raises(ValueError, match="Duplicate slugs"):
-        validate_uniqueness(abilities)
+        validate_uniqueness([_ability("a", "A1"), _ability("a", "A2", "active")])
 
 
 # --- Real DOCX sanity -------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
-def real_abilities() -> list:
+def real_abilities() -> list[RulesetAbility]:
     return extract_abilities(REAL_DOCX)
 
 
@@ -127,7 +115,6 @@ def test_real_docx_types_from_valid_set(real_abilities: list) -> None:
 
 
 def test_real_docx_known_abilities_present(real_abilities: list) -> None:
-    """Smoke: kilka stabilnych zdolności musi być w extract."""
     slugs = {a.slug for a in real_abilities}
     must_have = {"bohater", "zasadzka", "zwiadowca", "transport", "mag", "ap"}
     missing = must_have - slugs
@@ -135,14 +122,13 @@ def test_real_docx_known_abilities_present(real_abilities: list) -> None:
 
 
 def test_real_docx_type_distribution(real_abilities: list) -> None:
-    """Sanity: oczekujemy że passive dominuje (~60%), weapon ~25%, active+aura reszta."""
     by_type: dict[str, int] = {}
     for ab in real_abilities:
         by_type[ab.type] = by_type.get(ab.type, 0) + 1
-    assert by_type.get("passive", 0) >= 30, f"Suspicious type distribution: {by_type}"
-    assert by_type.get("weapon", 0) >= 15, f"Suspicious type distribution: {by_type}"
-    assert by_type.get("active", 0) >= 5, f"Suspicious type distribution: {by_type}"
-    assert by_type.get("aura", 0) >= 2, f"Suspicious type distribution: {by_type}"
+    assert by_type.get("passive", 0) >= 30, f"Suspicious distribution: {by_type}"
+    assert by_type.get("weapon", 0) >= 15, f"Suspicious distribution: {by_type}"
+    assert by_type.get("active", 0) >= 5, f"Suspicious distribution: {by_type}"
+    assert by_type.get("aura", 0) >= 2, f"Suspicious distribution: {by_type}"
 
 
 # --- Golden test (programmatic fixture) -------------------------------------
@@ -150,7 +136,7 @@ def test_real_docx_type_distribution(real_abilities: list) -> None:
 
 @pytest.fixture
 def minimal_docx(tmp_path: Path) -> Path:
-    """Stwórz minimalną fixture DOCX z 2 zdolnościami pod sekcją Pasywne:."""
+    """5 abilities pod sekcjami Pasywne:/Aktywne:; 2 ostatnie split przez embedded `\\n`."""
     doc = Document()
     doc.add_paragraph("Ignored game rules section.")
     doc.add_paragraph("More rules to skip.")
@@ -159,7 +145,6 @@ def minimal_docx(tmp_path: Path) -> Path:
     doc.add_paragraph("Zdolność B(X): Druga z parametrem X.")
     doc.add_paragraph("Aktywne:")
     doc.add_paragraph("Akcja C: Trzecia jest aktywna.")
-    # Embedded newline (Shift+Enter) — two abilities in one paragraph
     p = doc.add_paragraph("Akcja D: Czwarta na początku.")
     p.add_run("\nAkcja E: Piąta po Shift+Enter.")
     doc.add_paragraph("Koszt oddziału jest sumą kosztów modeli w nim.")
@@ -176,27 +161,21 @@ def test_golden_minimal_docx(minimal_docx: Path) -> None:
     assert len(abilities) == 5, f"Expected 5 abilities, got {len(abilities)}: {[a.name for a in abilities]}"
 
     by_name = {a.name: a for a in abilities}
-    assert "Zdolność A" in by_name
     assert by_name["Zdolność A"].type == "passive"
     assert by_name["Zdolność A"].slug == "zdolnosc_a"
     assert by_name["Zdolność A"].description == "Pierwsza zdolność testowa."
 
-    assert "Zdolność B(X)" in by_name
     assert by_name["Zdolność B(X)"].slug == "zdolnosc_b"
     assert by_name["Zdolność B(X)"].type == "passive"
 
-    assert "Akcja C" in by_name
     assert by_name["Akcja C"].type == "active"
 
-    # Embedded \n split — both should be present
-    assert "Akcja D" in by_name
+    # Embedded \n split — D i E muszą być osobne, oba w sekcji active.
     assert by_name["Akcja D"].type == "active"
-    assert "Akcja E" in by_name
     assert by_name["Akcja E"].type == "active"
 
 
 def test_golden_cli_smoke(minimal_docx: Path, tmp_path: Path) -> None:
-    """Run via CLI entry point — should exit 0 + create file."""
     output = tmp_path / "out.yaml"
     rc = main(["--input", str(minimal_docx), "--output", str(output)])
     assert rc == 0
@@ -212,33 +191,44 @@ def test_golden_cli_smoke(minimal_docx: Path, tmp_path: Path) -> None:
 # --- Error handling --------------------------------------------------------
 
 
-def test_missing_file_returns_exit_1(tmp_path: Path) -> None:
-    """Wywołanie CLI z nieistniejącym plikiem → exit 1."""
-    result = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH), "--input", str(tmp_path / "missing.docx"), "--output", str(tmp_path / "out.yaml")],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
-    assert "ERROR" in result.stderr
-    assert "not found" in result.stderr.lower() or "no such" in result.stderr.lower()
-
-
-def test_invalid_docx_returns_exit_1(tmp_path: Path) -> None:
-    """Wywołanie z plikiem nie-DOCX (txt) → exit 1 z czytelnym message."""
+@pytest.fixture
+def invalid_docx(tmp_path: Path) -> Path:
+    """Plik z `.docx` extension ale niepoprawnym content — python-docx raise."""
     bad = tmp_path / "notdocx.docx"
     bad.write_text("this is not a docx", encoding="utf-8")
+    return bad
+
+
+@pytest.mark.parametrize(
+    "input_path_fixture, expected_error_pattern",
+    [
+        ("missing", "not found"),
+        ("invalid", "ERROR"),
+    ],
+)
+def test_cli_exit_1_on_bad_input(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    input_path_fixture: str,
+    expected_error_pattern: str,
+) -> None:
+    """CLI subprocess smoke: missing file lub invalid DOCX → exit 1 z stderr message."""
+    if input_path_fixture == "missing":
+        input_path = tmp_path / "missing.docx"
+    else:
+        input_path = request.getfixturevalue("invalid_docx")
+
     result = subprocess.run(
-        [sys.executable, str(SCRIPT_PATH), "--input", str(bad), "--output", str(tmp_path / "out.yaml")],
+        [sys.executable, str(SCRIPT_PATH), "--input", str(input_path), "--output", str(tmp_path / "out.yaml")],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 1
-    assert "ERROR" in result.stderr
+    assert expected_error_pattern.lower() in result.stderr.lower()
 
 
 def test_empty_docx_returns_empty_list(tmp_path: Path) -> None:
-    """DOCX bez `Pasywne:` header — start marker nigdy nie trafiony, pusta lista."""
+    """DOCX bez `Pasywne:` start marker — pusta lista bez raise."""
     doc = Document()
     doc.add_paragraph("Just some text.")
     doc.add_paragraph("No section headers here.")

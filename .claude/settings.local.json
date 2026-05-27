@@ -118,7 +118,8 @@
       "PowerShell(python -m pytest -q --tb=short 2>&1)",
       "PowerShell($env:OPR_RULES_BACKEND=\"both_assert\"; python -m pytest tests/test_ruleset_parity.py -q 2>&1 | Select-Object -Last 5; Remove-Item Env:OPR_RULES_BACKEND)",
       "Bash(python scripts/rules_extract.py)",
-      "Bash(python -m pytest tests/test_rules_extract.py -v)"
+      "Bash(python -m pytest tests/test_rules_extract.py -v)",
+      "Bash(python -m pytest tests/test_rules_extract.py -q)"
     ]
   }
 }

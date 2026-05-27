@@ -1,19 +1,18 @@
-"""Extract ability definitions from SZOP.docx into build/rules_extracted.yaml.
+"""Extract ability definitions from DOCX into a YAML drift snapshot.
 
-A4.1 — pierwsze ogniwo pipeline'u drift (ADR-0006). Czyta paragraphy z DOCX,
-emituje schema `{slug, name, type, description}` per zdolność.
+Pierwszy etap pipeline'u drift-only (ADR-0006). Czyta paragrafy z `SZOP.docx`,
+emituje schema kompatybilny z `app/rulesets/v1/abilities.yaml`. `cost_fn` /
+wartości kosztów pozostają poza scope — drift sprawdza tylko shape
+(slug/name/type/description), nie liczby.
 
-Schema mirror: `app/rulesets/v1/abilities.yaml` (version 1).
+Schema wynikowy: `RulesetAbility` z `app/services/rulesets/models.py` (reuse,
+nie duplikat) — pole `value_*` zawsze None bo DOCX ich nie nosi.
 
-Parser strategy (decyzja z A4.1.1 spike, patrz docs/handoffs/HANDOFF_faza-a-4-extract.md):
-- Brak Headingów w DOCX (wszystko Normal/List Paragraph) → content-based state machine.
-- Sekcje delimitowane paragrafami końca dwukropkiem: `Pasywne:`/`Aktywne:`/`Aury:`/`Broni:`.
-- Start parsingu: pierwszy `^Pasywne:$` (skip game rules paragrafy 0-30).
-- Stop parsingu: paragraf zaczynający się `Koszt oddziału jest sumą`.
-- Zdolność: `^<Name>: <description>$` (regex). Multi-paragraph descriptions: następne
-  paragrafy nie pasujące do regex/section-header dołączane do bieżącego opisu.
-- Table 2 (passive ability prices) świadomie pominięta — to dane do `ability_costs.yaml`.
-- Type derywowany z section header.
+Parser jest content-based (DOCX nie ma Headingów, tylko `Normal`/`List
+Paragraph`). Sekcje rozpoznawane przez paragrafy końca dwukropkiem:
+`Pasywne:`/`Aktywne:`/`Aury:`/`Broni:`. Word soft line break (Shift+Enter)
+emituje `\\n` wewnątrz `paragraph.text` — kilka zdolności potrafi dzielić
+jeden paragraf, dlatego rozbijamy `text.split("\\n")`.
 
 Użycie:
     python scripts/rules_extract.py
@@ -27,32 +26,29 @@ import re
 import sys
 import unicodedata
 from pathlib import Path
-from typing import Literal
 
 import yaml
 from docx import Document
 from pydantic import BaseModel, ConfigDict, Field
 
-# --- Schema -----------------------------------------------------------------
+# Pozwala uruchamiać skrypt bezpośrednio (`python scripts/rules_extract.py`) —
+# bez tego `import app.*` failuje gdy CWD != project root.
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
-AbilityType = Literal["passive", "active", "aura", "weapon", "unknown"]
-
-
-class ExtractedAbility(BaseModel):
-    model_config = ConfigDict(frozen=True, extra="forbid")
-
-    slug: str
-    name: str
-    type: AbilityType
-    description: str
+# Reuse istniejący schema — A4 jest klientem rulesets, nie tworzy własnego.
+from app.services.rulesets.models import AbilityType, RulesetAbility  # noqa: E402
 
 
 class RulesExtract(BaseModel):
+    """Korzeń `build/rules_extracted.yaml` — wersja + ścieżka źródła + lista."""
+
     model_config = ConfigDict(frozen=True, extra="forbid")
 
-    version: int = 1
-    source: str = Field(description="Względna ścieżka do DOCX")
-    abilities: list[ExtractedAbility]
+    version: int = Field(default=1, ge=1)
+    source: str
+    abilities: tuple[RulesetAbility, ...]
 
 
 # --- Parser constants -------------------------------------------------------
@@ -64,14 +60,14 @@ SECTION_MAP: dict[str, AbilityType] = {
     "Broni": "weapon",
 }
 
-# Pattern: <Name> (no colon inside) : <description>
-# Name: 2-60 chars, no colon, no period (unlikely in ability names)
+# Pattern: <Name> (no colon/period inside) : <description>
+# Name: 2-60 chars; description: ≥1 char.
 NAME_DESC = re.compile(r"^([^:.]{2,60}?):\s+(.+)$")
 
 START_MARKER = "Pasywne:"
 STOP_MARKER = "Koszt oddziału jest sumą"
 
-# Some single-line section headers don't introduce abilities themselves, just context
+# Wielowyrazowe nagłówki sekcji bez własnych zdolności — flush + skip.
 IGNORED_HEADERS = {
     "Dodatkowe zdolności:",
     "Zasady Armii: (zdolności pasywne wycenianie przy założeniu, że ma je prawie każdy oddział w rozpisce)",
@@ -80,14 +76,17 @@ IGNORED_HEADERS = {
 
 # --- Slug generation --------------------------------------------------------
 
-# NFKD doesn't decompose Ł/ł (separate Latin chars in Unicode). Pre-replace.
+# Polish `Ł`/`ł` to osobne Latin chars w Unicode, nie precomposed z combining
+# marks — NFKD nie rozkłada ich, więc `encode("ascii", "ignore")` je dropuje.
 _POLISH_NONDECOMP = {"ł": "l", "Ł": "L"}
 
 
 def make_slug(name: str) -> str:
-    """Deterministic slug: NFKD-decompose → strip accents → lowercase → spaces→underscore.
+    """Deterministic slug: NFKD → strip accents → lowercase → spaces→underscore.
 
-    Special chars (parens, slashes, X param) stripped — slug must be a stable identifier.
+    `(X)` parameter notation jest odrzucana; slashe i spacje stają się
+    underscorem. Slug musi być stabilnym identyfikatorem niezależnym od
+    formatowania DOCX.
 
     Examples:
         "Bohater" → "bohater"
@@ -98,122 +97,131 @@ def make_slug(name: str) -> str:
         "Łatanie" → "latanie"
         "Ociężałość" → "ociezalosc"
     """
-    # Drop "(X)" parameter notation
     cleaned = re.sub(r"\(\w+\)", "", name).strip()
-    # Pre-replace Polish chars that don't decompose under NFKD
     for orig, repl in _POLISH_NONDECOMP.items():
         cleaned = cleaned.replace(orig, repl)
-    # NFKD decompose remaining Polish chars to ASCII + combining marks
     decomposed = unicodedata.normalize("NFKD", cleaned)
     ascii_only = decomposed.encode("ascii", "ignore").decode("ascii")
-    # Lowercase, normalize whitespace/separators
     lowered = ascii_only.lower()
-    # Replace slashes and whitespace with underscore
     underscored = re.sub(r"[/\s]+", "_", lowered)
-    # Strip remaining non-alphanum-underscore
     return re.sub(r"[^a-z0-9_]", "", underscored).strip("_")
 
 
 # --- Extractor --------------------------------------------------------------
 
-def extract_abilities(docx_path: Path) -> list[ExtractedAbility]:
-    """Walk paragraphs in SZOP.docx, return list of extracted abilities."""
+class _PendingAbility:
+    """Mutable accumulator dla bieżącej zdolności podczas parsingu.
 
-    if not docx_path.exists():
-        raise FileNotFoundError(f"DOCX not found: {docx_path}")
+    Trzymamy mutable dict zamiast frozen `RulesetAbility` żeby uniknąć
+    per-paragraph rebuilds; finalna immutable instancja powstaje raz przy
+    flush.
+    """
+
+    __slots__ = ("slug", "name", "type", "description_parts")
+
+    def __init__(self, slug: str, name: str, type: AbilityType, description: str) -> None:
+        self.slug = slug
+        self.name = name
+        self.type = type
+        self.description_parts: list[str] = [description]
+
+    def append(self, text: str) -> None:
+        self.description_parts.append(text)
+
+    def finalize(self) -> RulesetAbility:
+        return RulesetAbility(
+            slug=self.slug,
+            name=self.name,
+            type=self.type,
+            description=" ".join(self.description_parts).strip(),
+        )
+
+
+def extract_abilities(docx_path: Path) -> list[RulesetAbility]:
+    """Walk paragraphs in DOCX, return list of extracted abilities.
+
+    Raises:
+        RuntimeError: jeśli DOCX nie da się otworzyć (`python-docx` exception
+            opakowywana w czytelny message; sam plik-nie-istnieje przepuszczamy
+            `Document(...)` żeby nie duplikować TOCTOU check).
+    """
 
     try:
         document = Document(str(docx_path))
-    except Exception as exc:  # python-docx raises various exceptions
+    except FileNotFoundError:
+        # Przekazujemy oryginalny FileNotFoundError — CLI obsłuży w main().
+        raise
+    except Exception as exc:
         raise RuntimeError(f"Failed to open DOCX (not a valid .docx?): {exc}") from exc
 
     started = False
     current_section: AbilityType | None = None
-    abilities: list[ExtractedAbility] = []
-    pending: ExtractedAbility | None = None
-    description_parts: list[str] = []
+    abilities: list[RulesetAbility] = []
+    pending: _PendingAbility | None = None
 
-    def flush_pending() -> None:
-        """Append pending ability with accumulated description to results."""
-        nonlocal pending, description_parts
+    def flush() -> None:
+        nonlocal pending
         if pending is not None:
-            full_desc = " ".join(description_parts).strip()
-            # Pydantic frozen → rebuild
-            abilities.append(
-                ExtractedAbility(
-                    slug=pending.slug,
-                    name=pending.name,
-                    type=pending.type,
-                    description=full_desc,
-                )
-            )
+            abilities.append(pending.finalize())
         pending = None
-        description_parts = []
 
     for paragraph in document.paragraphs:
-        # Word soft line breaks (Shift+Enter) come through as `\n` inside paragraph.text.
-        # Multiple abilities can share a paragraph this way (e.g., Porażenie/Zguba/Dezintegracja).
-        # Split and process each line as a logical paragraph.
+        # Word soft line break (Shift+Enter) emituje `\n` wewnątrz paragraph.text.
+        # Wiele zdolności potrafi dzielić jeden paragraf (np. Porażenie/Zguba/Dezintegracja).
         for raw_line in paragraph.text.split("\n"):
             text = raw_line.strip()
             if not text:
                 continue
 
-            # Start gate: skip game rules until first "Pasywne:" header
+            # Faza 1: skip wszystkiego przed pierwszym `Pasywne:`.
             if not started:
                 if text == START_MARKER:
                     started = True
                     current_section = SECTION_MAP["Pasywne"]
                 continue
 
-            # Stop gate: cost formulas section
+            # Faza 2: stop na sekcji formuł kosztu.
             if text.startswith(STOP_MARKER):
-                flush_pending()
+                flush()
                 return abilities
 
-            # Section header check: single word + colon
+            # Faza 3: nagłówek sekcji single-word — przełącz current_section.
             section_match = re.match(r"^(\w+):$", text)
-            if section_match:
-                header = section_match.group(1)
-                if header in SECTION_MAP:
-                    flush_pending()
-                    current_section = SECTION_MAP[header]
-                    continue
-
-            # Multi-word headers (e.g., "Dodatkowe zdolności:")
-            if text in IGNORED_HEADERS:
-                flush_pending()
+            if section_match and section_match.group(1) in SECTION_MAP:
+                flush()
+                current_section = SECTION_MAP[section_match.group(1)]
                 continue
 
-            # Try to match "<Name>: <description>"
+            # Faza 4: nagłówek wielowyrazowy do zignorowania (Dodatkowe zdolności / Zasady Armii).
+            if text in IGNORED_HEADERS:
+                flush()
+                continue
+
+            # Faza 5: linia "Name: desc" → nowa zdolność.
             match = NAME_DESC.match(text)
             if match and current_section is not None:
-                # New ability starts → flush previous
-                flush_pending()
+                flush()
                 name = match.group(1).strip()
-                description = match.group(2).strip()
-                pending = ExtractedAbility(
+                pending = _PendingAbility(
                     slug=make_slug(name),
                     name=name,
                     type=current_section,
-                    description=description,
+                    description=match.group(2).strip(),
                 )
-                description_parts = [description]
-            else:
-                # Continuation of previous ability's description
-                if pending is not None:
-                    description_parts.append(text)
-                # else: orphan paragraph (e.g., instruction outside ability) — ignore
+                continue
 
-    # End of doc — flush last pending
-    flush_pending()
+            # Faza 6: linia continuation — dolep do bieżącej zdolności.
+            if pending is not None:
+                pending.append(text)
+
+    flush()
     return abilities
 
 
 # --- Validation -------------------------------------------------------------
 
-def validate_uniqueness(abilities: list[ExtractedAbility]) -> None:
-    """Raise if duplicate slugs."""
+def validate_uniqueness(abilities: list[RulesetAbility]) -> None:
+    """Raise `ValueError` z listą duplikatów slug → name1 vs name2."""
     seen: dict[str, str] = {}
     duplicates: list[tuple[str, str, str]] = []
     for ab in abilities:
@@ -231,7 +239,7 @@ def validate_uniqueness(abilities: list[ExtractedAbility]) -> None:
 # --- YAML serializer --------------------------------------------------------
 
 def write_yaml(extract: RulesExtract, output_path: Path) -> None:
-    """Serialize RulesExtract to YAML with conventions matching abilities.yaml."""
+    """Serialize do YAML z konwencjami `abilities.yaml` (UTF-8, no sort, wide)."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "version": extract.version,
@@ -279,7 +287,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         abilities = extract_abilities(args.input)
     except FileNotFoundError as exc:
-        print(f"ERROR: {exc}", file=sys.stderr)
+        print(f"ERROR: DOCX not found: {exc.filename or args.input}", file=sys.stderr)
         return 1
     except RuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
@@ -294,7 +302,7 @@ def main(argv: list[str] | None = None) -> int:
     extract = RulesExtract(
         version=1,
         source=str(args.input).replace("\\", "/"),
-        abilities=abilities,
+        abilities=tuple(abilities),
     )
 
     write_yaml(extract, args.output)
