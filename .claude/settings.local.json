@@ -119,7 +119,11 @@
       "PowerShell($env:OPR_RULES_BACKEND=\"both_assert\"; python -m pytest tests/test_ruleset_parity.py -q 2>&1 | Select-Object -Last 5; Remove-Item Env:OPR_RULES_BACKEND)",
       "Bash(python scripts/rules_extract.py)",
       "Bash(python -m pytest tests/test_rules_extract.py -v)",
-      "Bash(python -m pytest tests/test_rules_extract.py -q)"
+      "Bash(python -m pytest tests/test_rules_extract.py -q)",
+      "Bash(python scripts/rules_drift.py)",
+      "Bash(python -m pytest tests/test_rules_extract.py::test_real_docx_count_in_expected_range -v)",
+      "Bash(python -m pytest tests/test_rules_drift.py -v)",
+      "Bash(python -m pytest tests/test_rules_drift.py tests/test_rules_extract.py -q)"
     ]
   }
 }

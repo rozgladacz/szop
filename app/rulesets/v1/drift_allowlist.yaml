@@ -1,0 +1,50 @@
+# Świadomie dozwolone rozjazdy YAML vs DOCX (A4.2, ADR-0006).
+#
+# Wpisy poniżej są raportowane przez `scripts/rules_drift.py` jako WHITELISTED
+# (INFO) i NIE kontrybuują do exit code. Każdy wpis musi mieć `reason` —
+# `until_date` opcjonalny (`~` = null = permanent).
+#
+# Review cadence: kwartalnie (sprawdź czy reason nadal aktualny, until_date
+# nie minął, czy DOCX nie zaczął zawierać wpisu).
+#
+# Schema:
+#   allowed_yaml_only:
+#     - slug: <ascii_underscore_slug>
+#       reason: "<krótkie uzasadnienie>"
+#       until_date: <YYYY-MM-DD | ~>
+
+allowed_yaml_only:
+  # Abstract concepts (DOCX nie nazywa, YAML używa per-ability lub w cost DSL).
+  - slug: aura
+    reason: "Abstract concept dla cost DSL (handlers w ability_costs.yaml) — DOCX go nie nazywa, używa per-ability."
+    until_date: ~
+
+  # Split z DOCX compound names (jeden DOCX → wiele YAML).
+  - slug: szybki
+    reason: "Split z DOCX 'Szybki/Wolny' (DOCX trzyma jako 1 ability z +/- 2\" wariantem)."
+    until_date: ~
+  - slug: wolny
+    reason: "Split z DOCX 'Szybki/Wolny' — wariant negatywny."
+    until_date: ~
+  - slug: dobrze_strzela
+    reason: "Split z DOCX 'Dobrze/źle strzela' (DOCX trzyma jako 1 ability z 4/5 wariantem)."
+    until_date: ~
+  - slug: zle_strzela
+    reason: "Split z DOCX 'Dobrze/źle strzela' — wariant negatywny."
+    until_date: ~
+
+  # YAML używa innych slugów (po polskim nazewnictwie wg konceptu) niż DOCX
+  # (po polskim nazewnictwie wg efektu). YAML jest pre-istniejące, DOCX będzie
+  # alignowany w przyszłej rewizji DOCX — patrz ADR-0006 sekcja "Do rewizji".
+  - slug: burzaca
+    reason: "YAML slug dla 'Przełamanie' (DOCX). Różne nazwy konceptu — YAML wybrał 'burząca' (niszczycielska), DOCX 'przełamanie'."
+    until_date: 2026-12-31
+  - slug: masywny
+    reason: "YAML slug dla 'Sekcje' (DOCX). YAML opisuje stan, DOCX strukturę modelu."
+    until_date: 2026-12-31
+  - slug: rozrywajacy
+    reason: "YAML slug dla 'Podwójny' (DOCX). YAML opisuje efekt (rozrywający trafienia), DOCX mechanikę (podwójne 6)."
+    until_date: 2026-12-31
+  - slug: unik
+    reason: "YAML slug dla 'Przewidywalny' (DOCX). YAML opisuje obronę celu, DOCX cechę celu."
+    until_date: 2026-12-31

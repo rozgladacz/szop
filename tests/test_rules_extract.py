@@ -89,10 +89,16 @@ def real_abilities() -> list[RulesetAbility]:
 
 
 def test_real_docx_count_in_expected_range(real_abilities: list) -> None:
-    """Sanity: znamy ~87 abilities w `ABILITY_DEFINITIONS`; DOCX może odbiegać o ±10
-    przez compound names (Szybki/Wolny), różne slugi (burzaca/przelamanie)."""
+    """Sanity: znamy ~87 abilities w `ABILITY_DEFINITIONS`; DOCX może odbiegać
+    przez compound names (Szybki/Wolny), różne slugi (burzaca/przelamanie),
+    i bieżące edycje DOCX (drift report wykrywa konkretną liczbę zmian).
+
+    Lower bound 70 ma zostać szeroki — drift jest sprawdzany przez
+    `rules_drift.py`, nie ten test. Tu chronimy tylko przed parser regression
+    (gdy nagle wracamy do 0/10 abilities — coś jest fundamentalnie złamane).
+    """
     n = len(real_abilities)
-    assert 80 <= n <= 100, f"Expected 80-100 abilities, got {n} — parser regression?"
+    assert 70 <= n <= 110, f"Expected 70-110 abilities, got {n} — parser regression?"
 
 
 def test_real_docx_all_slugs_unique(real_abilities: list) -> None:

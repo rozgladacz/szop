@@ -64,19 +64,16 @@ Pełen plan A4.1.1–A4.1.6 + decyzje (parser=`python-docx>=1.1.0`, schema=`{slu
 
 **Cel:** `python scripts/rules_drift.py` → `build/drift_report.md` z 4 typami raportów + exit codes 0/1/2. Wymaga A4.1 zamkniętego.
 
-- [ ] A4.2.1: implementacja — wejścia: `build/rules_extracted.yaml` + `app/rulesets/v1/abilities.yaml`. 4 raporty:
-  - **R1 — Missing in YAML:** zdolność w DOCX, brak w YAML → musi być dodana (severity: ERROR, exit 1)
-  - **R2 — Missing in DOCX:** zdolność w YAML, brak w DOCX → dead code / przestarzała (severity: WARN, exit 2 chyba że whitelisted)
-  - **R3 — Name/description mismatch:** ten sam slug, różny tekst → świadoma aktualizacja YAML (severity: WARN, exit 2)
-  - **R4 — Type mismatch:** ten sam slug, różny `type` (passive/active/aura) → potencjalny bug kosztu (severity: ERROR, exit 1)
-- [ ] A4.2.2: `--whitelist app/rulesets/v1/drift_allowlist.yaml` (NOWY, opcjonalny) — świadomie dozwolone deltyfikacje
-- [ ] A4.2.3: `tests/test_rules_drift.py` (NOWY) — fixture z 4 scenariuszami (R1+R2+R3+R4 + clean baseline)
-- [ ] A4.2.4: smoke run real DOCX vs real YAML — udokumentować obecny dryf w HANDOFF (oczekiwany: 0 lub udokumentowany)
+**Decyzje (zatwierdzone 2026-05-28):**
+- **Q1 → R3 = WARN** (exit 2): wording może drift bez zmiany semantyki; ERROR powodowałby paraliż każdej redakcji DOCX.
+- **Q2 → text normalize = NFKC + strip + collapse whitespace**: `unicodedata.normalize("NFKC", s).strip()` + `re.sub(r"\s+", " ", s)`. Łapie typografię Unicode i artefakty whitespace z DOCX export; zachowuje case + merytoryczne różnice.
+- **Q3 → R2 = WARN + whitelist** (`app/rulesets/v1/drift_allowlist.yaml`): świadomie dozwolone YAML-only slugi (np. `aura` abstract, split `szybki`/`wolny`, `przygotowanie` `skip_in_default`). Whitelist trzyma `reason` + `until_date` per wpis.
+- **R3 trigger granularity = string-level** (porównanie całego znormalizowanego description). Per-line diff w raporcie OK jako *format prezentacji*, ale wykrycie zmiany jest na poziomie całego string.
 
-**Otwarte pytania A4.2:**
-- Q1: Severity dla R3 (description mismatch) — ERROR czy WARN? Sugeruję WARN bo wording może drift bez zmiany semantyki.
-- Q2: Jak normalizować whitespace/Unicode w description diff? Sugeruję `unicodedata.normalize("NFKC", s).strip()`.
-- Q3: Czy R2 (YAML-only) powinno blokować PR? Sugeruję WARN + whitelist z uzasadnieniem (np. `przygotowanie` jest skipowane w default — patrz `ability_costs.yaml`).
+- [x] A4.2.1: `scripts/rules_drift.py` (NEW, ~290 LOC) — pełny pipeline: `load_abilities`, `load_whitelist`, `normalize_description`, `compute_drift`, `render_report`, CLI `main(argv)`. Reuse `RulesetAbility` z `app/services/rulesets/models`. Exit codes 0/1/2 (ERROR wygrywa nad WARN).
+- [x] A4.2.2: `app/rulesets/v1/drift_allowlist.yaml` (NEW) — startowy whitelist 9 wpisów (`aura` abstract, `szybki/wolny/dobrze_strzela/zle_strzela` splits, `burzaca/masywny/rozrywajacy/unik` concept renames). Każdy wpis ma `reason` + `until_date` (null = permanent, 2026-12-31 = review po roku).
+- [x] A4.2.3: `tests/test_rules_drift.py` (NEW, **27 testów**) — `normalize_description` parametrized (5), whitelist loader (4), compute_drift (10 scenariuszy: clean + R1 + R2 not-whitelisted + R2 whitelisted + R2 mixed + R3 + R3 normalization-eliminates + R4 + R4+R3 independent + ERROR wins), report rendering (2), CLI (4: clean/error/warn/whitelist + missing-input subprocess). pytest 871/871.
+- [x] A4.2.4: smoke real DOCX vs real YAML → udokumentowane w "Notatki / odkrycia w trakcie" sekcji poniżej. **Wynik: exit 1 (ERROR), R1=7 + R4=1 (DOCX edytowany od A4.1)**.
 
 ### Faza A4.3 — Geometric classification (~0.5-1 sesja, sub-wątek opcjonalnie)
 
@@ -190,3 +187,20 @@ python -m pytest -q  # baseline 815 + nowe A4 = ~830-840
 - 2026-05-26: **Korekta:** `build/` brak w `.gitignore` — A4.1.5 (w sub-wątku `faza-a-4-extract`) dodaje.
 - 2026-05-26: A4 jest **hard prereq dla B0** (`build/geometry_classification.md` → lista exclusions). Pozostałe deliverables A4 (extract, drift report, PDF check, GHA) blokują tylko inwariant SSOT.
 - 2026-05-26: Sesja Plan zamknięta. Nowe pliki: `docs/adr/0006-pipeline-drift.md` (Proposed), `docs/handoffs/HANDOFF_faza-a-4-extract.md`. Edytowane: `HANDOFF.md` (2 aktywne wątki + 13 zablokowanych zasobów), ten plik (oznaczone A4.0 ✅ + A4.1 wydzielone). 0 zmian w kodzie. Następna sesja startuje sub-wątek `faza-a-4-extract` od spike A4.1.1.
+- 2026-05-28: **A4.2 zaimplementowane** w jednej sesji. 4 decyzje zatwierdzone przez usera (R3=WARN, normalize=rozszerzony NFKC+strip+collapse, R2=whitelist, R3 trigger=string). 27 nowych testów, pełna suita 871/871. 3 nowe pliki: `scripts/rules_drift.py`, `app/rulesets/v1/drift_allowlist.yaml`, `tests/test_rules_drift.py`. Plus update `tests/test_rules_extract.py` (count bound 80→70-110 — DOCX live edits).
+- 2026-05-28: **Odkrycie podczas A4.2.4 smoke:** `SZOP.docx` został edytowany od czasu A4.1 sesji (2026-05-26). Extract obecnie zwraca **77 abilities** (vs 85 wcześniej). Refactor parsera A4.1 nie ma w tym udziału — to realne edycje contentu DOCX. Konkretnie wykryte zmiany:
+  - **+1 nowa ability w DOCX:** `Parowanie` (passive, "Ma osłonę podczas walki wręcz") — para 121. Brak w YAML.
+  - **5 actives usunięte z DOCX** (były w poprzedniej sesji para 171-175): Przekaźnik, Koordynacja, Przepowiednia, Mobilizacja, Presja. Nadal w YAML.
+  - **1 type re-categorization:** Męczennik teraz w DOCX `Aktywne:` (active) zamiast `Aury:` (aura) — para 130 vs YAML aura.
+  - **Inne struktury sekcji**: shift o +12 paragrafów (sekcja Pasywne: była na 89, teraz na 101).
+- 2026-05-28: **Drift report (pierwszy real run):** R1=7 ERROR + R2=8 WARN (+ 9 whitelisted) + R3=36 WARN + R4=1 ERROR → **exit 1**.
+  - **R1 ERROR (7):** `ap`, `dobrze_zle_strzela`, `parowanie`, `podwojny`, `przelamanie`, `przewidywalny`, `szybki_wolny` — większość to DOCX-side split/rename pair (np. DOCX `szybki_wolny` ↔ YAML `szybki`+`wolny`). Decyzja do podjęcia: dodać `allowed_docx_only` do whitelist (symetria z `allowed_yaml_only`) lub bring up jako prawdziwy bug do YAML aktualizacji. Najlogiczniejszy `parowanie` jest **prawdziwą nową ability** wymagającą dopisania do YAML.
+  - **R2 non-whitelisted (8):** 5 usuniętych actives (Przekaźnik+Koordynacja+Przepowiednia+Mobilizacja+Presja) + `otwarty_transport`/`platforma_strzelecka` (Transport variants nie miały paragrafu w DOCX?) + `ucieczka`. Wszystkie wskazują że DOCX został "ucięty" lub te abilities były tylko w `ABILITY_DEFINITIONS`.
+  - **R2 whitelisted (9):** zadziałało jak zaplanowano (`aura`, `szybki`, `wolny`, `dobrze_strzela`, `zle_strzela`, `burzaca`, `masywny`, `rozrywajacy`, `unik`).
+  - **R3 (36):** głównie whitespace artefakty (`Bohater` opis różni się przez "z którym dzieli pozostałe..." dodane w YAML) + wording polish (`Dywersant` "twój oddział" vs "ten oddział" w YAML).
+  - **R4 (1):** Męczennik DOCX=active vs YAML=aura — należy świadomie rozstrzygnąć źródło (re-categorization DOCX czy bug YAML).
+- 2026-05-28: **Kolejne decyzje do podjęcia (deferred do następnej sesji):**
+  - Czy dodać `allowed_docx_only` whitelist (symetria R1 vs R2) — rozjazdy split/rename są szumowe w R1.
+  - Czy `parowanie` to bug (nowa zdolność do dodania do YAML) czy świadoma ekstensja DOCX.
+  - Czy 5 usuniętych actives = celowa redukcja DOCX czy oversight (YAML `ABILITY_DEFINITIONS` ma 87, dlaczego DOCX 77).
+  - R4 Męczennik: który backend ma rację (DOCX active = po nowemu, YAML aura = pre-existing).
