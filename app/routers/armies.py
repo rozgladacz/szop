@@ -110,6 +110,8 @@ def _base_passive_definitions() -> list[dict]:
     ]
     entries: list[dict] = []
     for definition in ability_catalog.definitions_by_type("passive"):
+        if definition.blocked:
+            continue
         entry = ability_catalog.to_dict(definition)
         if _is_hidden_trait(entry.get("slug")):
             continue
