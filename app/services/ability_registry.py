@@ -184,8 +184,8 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
     else:
         sync_definitions(session)
         cache = _get_definition_payload_cache(session)
-    definitions = ability_catalog.definitions_by_type(ability_type)
-    passive_definitions = ability_catalog.definitions_by_type("passive")
+    definitions = [d for d in ability_catalog.definitions_by_type(ability_type) if not d.blocked]
+    passive_definitions = [d for d in ability_catalog.definitions_by_type("passive") if not d.blocked]
     records = (
         session.execute(
             select(models.Ability)

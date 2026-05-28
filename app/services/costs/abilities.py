@@ -86,7 +86,9 @@ def passive_cost(
     if slug == "samolot":
         return 3.0 * tou
     if slug == "kontra":
-        return 2.0 * tou
+        return 1.0 * tou
+    if slug == "parowanie":
+        return 1.5 * tou
     if slug == "maskowanie":
         return 2.0 * tou
     if slug == "okopany":
