@@ -61,7 +61,9 @@
 - Run: `make dev`
 - Test: `make test` (pełna), `make test-fast` (szybka)
 - Lint: `make lint`
-- Windows fallback (gdy `make` poza PATH): `python -m pytest -x --tb=short -q`
+- Profile cost engine: `make profile ROSTER=10 BACKEND=procedural|yaml|both_assert`
+- **A4 drift pipeline**: `make rules-check` (orchestrator 5 skryptów: sources-check + extract DOCX + extract MD + classify geometry + drift). Subcele selektywne: `rules-extract`, `rules-extract-md`, `rules-drift`, `rules-classify`, `rules-sources-check`. Detale: [scripts/README.md](scripts/README.md) + [docs/adr/0006-pipeline-drift.md](docs/adr/0006-pipeline-drift.md).
+- Windows fallback (gdy `make` poza PATH): `python -m pytest -x --tb=short -q` / `python scripts/rules_*.py` bezpośrednio.
 
 ## Workflow oczekiwany
 

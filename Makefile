@@ -1,5 +1,6 @@
 
-.PHONY: dev test test-fast test-parity lint smoke check safe-edit profile
+.PHONY: dev test test-fast test-parity lint smoke check safe-edit profile \
+        rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check
 
 # Force UTF-8 for every Python invocation in this Makefile.  Windows console
 # defaults to cp1250 which crashes any script that prints arrows or Polish
@@ -50,3 +51,43 @@ ROSTER ?= 10
 BACKEND ?= procedural
 profile:
 	PYTHONPATH=. python scripts/profile_quote.py $(ROSTER) --backend $(BACKEND)
+
+# ---------------------------------------------------------------------------
+# Strumień A, Faza A4 — pipeline drift detection (ADR-0006).
+# Pełen orchestrator: `make rules-check` uruchamia wszystkie 5 skryptów
+# sekwencyjnie, propaguje pierwszy non-zero exit (fail-fast).
+#
+# Exit codes per skrypt:
+#   rules_extract.py         : 0 / 1 (parse error)
+#   rules_extract_md.py      : 0 / 1 (parse error)
+#   rules_drift.py           : 0 / 1 (ERROR) / 2 (WARN)
+#   rules_classify_geometry  : 0 / 1
+#   rules_sources_check.py   : 0 / 1 (mismatch) / 2 (missing)
+#
+# Targety selektywne dla debugowania pojedynczego etapu. CI gate (A4.6 GHA
+# workflow `rules_drift.yml`) triggeruje `make rules-check` na PR-ach
+# modyfikujących app/static/docs/**, app/rulesets/**, app/data/abilities.py.
+# Kolejność: source-check (najszybszy fail), extract×2 (potrzebne do drift),
+# classify (niezależny od drift), drift LAST. Powód: rules-drift może wyjść
+# z exit=2 (WARN-only) co stops chain — kolejność daje pełen artifact set
+# (rules_extracted.yaml, rules_md.yaml, geometry_classification.md,
+# drift_report.md) NAWET gdy chain stops at drift.
+rules-check: rules-sources-check rules-extract rules-extract-md rules-classify rules-drift
+	@echo "==> rules-check: pipeline complete (all 5 steps passed)"
+
+rules-extract:
+	python scripts/rules_extract.py
+
+rules-extract-md:
+	python scripts/rules_extract_md.py
+
+# rules-drift wymaga `build/rules_extracted.yaml` (z rules-extract). Make
+# dispatcher zapewnia poprawną kolejność przez explicit dependency wyżej.
+rules-drift:
+	python scripts/rules_drift.py
+
+rules-classify:
+	python scripts/rules_classify_geometry.py
+
+rules-sources-check:
+	python scripts/rules_sources_check.py

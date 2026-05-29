@@ -106,11 +106,13 @@ Pełen plan A4.1.1–A4.1.6 + decyzje (parser=`python-docx>=1.1.0`, schema=`{slu
 
 **Otwarte (deferred):** text-extraction PDF vs DOCX diff (text-level zamiast binary). Decyzja w A4.7 review — start od SHA (cheaper); text-extract dorzucimy gdy SHA okaże się niewystarczające.
 
-### Faza A4.5 — Makefile orchestration (~0.25 sesji)
+### Faza A4.5 — Makefile orchestration ✅ (2026-05-29)
 
-- [ ] A4.5.1: `Makefile` cel `rules-check` — uruchamia 4 skrypty sekwencyjnie, propaguje pierwszy non-zero exit
-- [ ] A4.5.2: subcele `rules-extract`, `rules-drift`, `rules-classify`, `rules-pdf-check` — selektywne uruchomienie
-- [ ] A4.5.3: aktualizacja `AGENTS.md` (sekcja "Komendy") + `docs/testing.md` z nowym celem
+- [x] A4.5.1: `Makefile` cel `rules-check` — orchestrator 5 skryptów (rozszerzono z planowanych 4: dodatkowo `rules-extract-md` po A4.2+). Kolejność: sources-check → extract → extract-md → classify → **drift LAST** (powód: drift może wyjść z exit=2 WARN — drift LAST gwarantuje pełen artifact set nawet gdy chain stops).
+- [x] A4.5.2: 5 subceli: `rules-extract`, `rules-extract-md`, `rules-drift`, `rules-classify`, `rules-sources-check`. Wszystkie dodane do `.PHONY:`. Fail-fast semantyka — Make default zatrzymuje na pierwszym non-zero.
+- [x] A4.5.3: `AGENTS.md` Komendy section + `docs/testing.md` nowa sekcja "A4 drift pipeline" + `scripts/README.md` (już zaktualizowane w A4.1-A4.4).
+
+**Smoke test (Windows fallback, brak `make`):** uruchomione 5 skryptów sekwencyjnie ręcznie — sources-check CLEAN, extract 77 abilities, extract-md 77, classify 88→3 excluded, drift R1=0/R1w=6/R2=0/R2w=17/R3=31/R4=0 → exit 2 WARN. Wszystkie artefakty (`build/rules_extracted.yaml`, `rules_md.yaml`, `geometry_classification.md`, `drift_report.md`) wygenerowane.
 
 ### Faza A4.6 — GitHub Actions (~0.5 sesji)
 
