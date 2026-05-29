@@ -204,3 +204,17 @@ python -m pytest -q  # baseline 815 + nowe A4 = ~830-840
   - Czy `parowanie` to bug (nowa zdolność do dodania do YAML) czy świadoma ekstensja DOCX.
   - Czy 5 usuniętych actives = celowa redukcja DOCX czy oversight (YAML `ABILITY_DEFINITIONS` ma 87, dlaczego DOCX 77).
   - R4 Męczennik: który backend ma rację (DOCX active = po nowemu, YAML aura = pre-existing).
+- 2026-05-29: **A4.2+ — extension dla SZOP_Zdolnosci.md** (user request: "Uwzględnij w dryfie pliki .md w folderze docs zawierające te same zasady ale w bardziej formalnym ujęciu"). Dodany trzeci strumień drift:
+  - `scripts/rules_extract_md.py` (~190 LOC) parsuje `app/static/docs/SZOP_Zdolnosci.md` (formalna curated wersja, 79 `### N. Name` headers + 4 sekcje + 1:1 quoted descriptions + dodatkowe metadane: efekty/koszt/aura_tak/rozkaz_tak/zakres/mistrzostwo_tak). Output `build/rules_md.yaml` w schema identycznym jak DOCX extract.
+  - `tests/test_rules_extract_md.py` (15 testów) — real MD sanity + programmatic golden + Konwencje skip + multi-line opis + Polish char slug.
+  - `rules_drift.py` reused without changes — przyjmuje dowolne YAML w schema `RulesetAbility`, więc 3-way drift przez pairwise runs.
+- 2026-05-29: **3-way drift findings (`build/drift_*.md`):**
+  - **MD vs YAML:** R1=7 + R2=8 + R3=42 + R4=1 → ERROR exit 1. Prawie identyczne struktury vs DOCX vs YAML (różnica R3 36→42 bo MD ma 1:1 cytaty, YAML ma edited wording).
+  - **DOCX vs MD:** R1=0 + R2=0 + R4=0 + R3=18 → WARN exit 2. **Strukturalna zgodność idealna** (same slugs+types). Różnice R3 to formatowanie (DOCX raw text vs MD curated quotes).
+  - **Wniosek strukturalny:** DOCX + MD reprezentują **identyczny author canon** (77 abilities). YAML jest outlierem (87 abilities — pre-dating obecny stan author).
+- 2026-05-29: **Implikacje dla decyzji deferred:**
+  - `parowanie`, `przelamanie`, `przewidywalny`, `podwojny`, `dobrze_zle_strzela`, `szybki_wolny`, `ap` (R1 DOCX vs YAML) — wszystkie obecne też w MD (potwierdza że to nie DOCX parsing bug, to świadome author state). Następna decyzja: czy YAML musi być re-synchronizowany do 77 (DOCX+MD canon) czy YAML ma być source of truth wymagającym docx update.
+  - 5 usuniętych actives (Przekaznik/Koordynacja/Przepowiednia/Mobilizacja/Presja) — brak też w MD. Confirms intentional removal.
+  - Męczennik R4 (DOCX=active, YAML=aura) — MD też ma `typ: aktywna` → trzy źródła nie zgadzają się (1 vs 2). YAML jest mniejszością.
+  - **Sugerowany kierunek:** ADR-0006 promocja powinna zawierać decyzję resolution direction. MD+DOCX zgadzają się na 77, więc YAML wymaga update. Po update — pipeline będzie clean.
+- 2026-05-29: Pliki dotknięte (commit pending): `scripts/rules_extract_md.py` (NEW), `tests/test_rules_extract_md.py` (NEW, 15 testów), `scripts/README.md` (extension dla MD). Pytest 886/886 passed (815 + 29 A4.1 + 27 A4.2 + 15 A4.2+).

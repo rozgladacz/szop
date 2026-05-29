@@ -123,7 +123,10 @@
       "Bash(python scripts/rules_drift.py)",
       "Bash(python -m pytest tests/test_rules_extract.py::test_real_docx_count_in_expected_range -v)",
       "Bash(python -m pytest tests/test_rules_drift.py -v)",
-      "Bash(python -m pytest tests/test_rules_drift.py tests/test_rules_extract.py -q)"
+      "Bash(python -m pytest tests/test_rules_drift.py tests/test_rules_extract.py -q)",
+      "Bash(python scripts/rules_drift.py --extracted build/rules_md.yaml --yaml app/rulesets/v1/abilities.yaml --report build/drift_md_vs_yaml.md)",
+      "Bash(python scripts/rules_drift.py --extracted build/rules_extracted.yaml --yaml build/rules_md.yaml --whitelist /dev/null --report build/drift_docx_vs_md.md)",
+      "Bash(python -m pytest tests/test_rules_extract_md.py -v)"
     ]
   }
 }

@@ -35,6 +35,11 @@ ze schema `{slug, name, type, description}` per zdolność. Schema reuse
 [`RulesetAbility`](../app/services/rulesets/models.py) z pól `value_*` =
 `None` (DOCX ich nie nosi).
 
+**Sister script:** [`rules_extract_md.py`](#rules_extract_mdpy--a42) — ten
+sam schema output, ale parsing `SZOP_Zdolnosci.md` (formalna curated MD
+wersja zasad). Drift pipeline (`rules_drift.py`) traktuje oba strumienie
+identycznie.
+
 ```powershell
 # Default paths (CWD = project root):
 python scripts/rules_extract.py
@@ -67,19 +72,65 @@ python scripts/rules_extract.py --input app/static/docs/SZOP.docx --output build
 real DOCX sanity (count/types/distribution), programmatic-generated golden
 fixture DOCX, CLI subprocess smoke, edge cases.
 
-### `rules_drift.py` ⏳ (A4.2 — planowane)
+### `rules_extract_md.py` ✅ (A4.2+)
 
-Porównuje `build/rules_extracted.yaml` vs `app/rulesets/v1/abilities.yaml`,
-generuje `build/drift_report.md` z 4 typami raportów:
+Czyta `app/static/docs/SZOP_Zdolnosci.md` (formalna curated wersja
+SZOP zasad z 1:1 cytatami opisów + dodatkowe metadane: efekty, koszt,
+aura_tak, rozkaz_tak, zakres, mistrzostwo_tak). Emituje
+`build/rules_md.yaml` ze schema identycznym jak `rules_extract.py`.
+
+```powershell
+python scripts/rules_extract_md.py
+python scripts/rules_extract_md.py --input app/static/docs/SZOP_Zdolnosci.md --output build/rules_md.yaml
+```
+
+**Parser:** Markdown jest dużo prostsze do parse niż DOCX (no Word soft
+breaks, no encoding issues). Sekcje wyznaczone explicit `## Pasywne`/
+`## Aktywne`/`## Aury`/`## Broni`. Zdolności wyznaczone `### N. Name`
+(numbered, stable id). `typ:` field daje explicit type (Polish → English
+mapping). Multi-line `opis:` continuation łączymy póki nie nowy field/
+ability/sekcja.
+
+**Drift integration:** `rules_drift.py` przyjmuje dowolny YAML w tym
+samym schema — można drift'ować pairwise:
+- DOCX vs YAML: `rules_drift.py --extracted build/rules_extracted.yaml --yaml app/rulesets/v1/abilities.yaml`
+- MD vs YAML: `rules_drift.py --extracted build/rules_md.yaml --yaml app/rulesets/v1/abilities.yaml --report build/drift_md_vs_yaml.md`
+- DOCX vs MD: `rules_drift.py --extracted build/rules_extracted.yaml --yaml build/rules_md.yaml --report build/drift_docx_vs_md.md`
+
+**Testy:** `tests/test_rules_extract_md.py` (15 testów) — real MD sanity
++ programmatic golden fixture + section detection + multi-line opis +
+Konwencje skip + Polish char slug.
+
+### `rules_drift.py` ✅ (A4.2)
+
+Porównuje dwa pliki YAML w schema `RulesetAbility` i generuje
+`build/drift_report.md` z 4 typami raportów:
 
 | ID | Sytuacja | Severity | Exit |
 |---|---|---|---|
-| R1 | Slug w DOCX, brak w YAML | ERROR | 1 |
-| R2 | Slug w YAML, brak w DOCX | WARN | 2 (chyba że whitelisted) |
-| R3 | Ten sam slug, różny `description` (po NFKC + strip) | WARN | 2 |
+| R1 | Slug w `--extracted`, brak w `--yaml` | ERROR | 1 |
+| R2 | Slug w `--yaml`, brak w `--extracted` | WARN | 2 (chyba że whitelisted) |
+| R3 | Ten sam slug, różny `description` (po NFKC + strip + collapse ws) | WARN | 2 |
 | R4 | Ten sam slug, różny `type` | ERROR | 1 |
 
-Whitelist: `app/rulesets/v1/drift_allowlist.yaml` (opcjonalny).
+```powershell
+# Default: DOCX-extract vs YAML ruleset
+python scripts/rules_drift.py
+
+# Custom: MD-extract vs YAML ruleset
+python scripts/rules_drift.py --extracted build/rules_md.yaml --report build/drift_md_vs_yaml.md
+
+# Sanity: DOCX-extract vs MD-extract (powinno być małe — oba reflect author canon)
+python scripts/rules_drift.py --extracted build/rules_extracted.yaml --yaml build/rules_md.yaml --report build/drift_docx_vs_md.md
+```
+
+Whitelist (`app/rulesets/v1/drift_allowlist.yaml`, opcjonalny): wpisy z
+`allowed_yaml_only` są raportowane jako WHITELISTED (INFO) i nie
+kontrybuują do exit code. Każdy wpis ma `slug`, `reason`, opcjonalnie
+`until_date` (null = permanent).
+
+**Testy:** `tests/test_rules_drift.py` (27 testów) — normalize parametrized
++ whitelist loader + 4 buckets z exit codes + CLI smoke.
 
 ### `rules_classify_geometry.py` ⏳ (A4.3 — planowane)
 
