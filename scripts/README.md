@@ -132,12 +132,38 @@ kontrybuują do exit code. Każdy wpis ma `slug`, `reason`, opcjonalnie
 **Testy:** `tests/test_rules_drift.py` (27 testów) — normalize parametrized
 + whitelist loader + 4 buckets z exit codes + CLI smoke.
 
-### `rules_classify_geometry.py` ⏳ (A4.3 — planowane)
+### `rules_classify_geometry.py` ✅ (A4.3)
 
-Klasyfikuje zdolności wg keywords geometrycznych (flanka, tył, obrót, łuk,
-…). Generuje `build/geometry_classification.md` — listę exclusions dla
-**Strumienia B MVP** (Game Engine Pareto: oddział = koło, brak orientacji).
-**Hard prereq** dla B0.
+Czyta `app/rulesets/v1/abilities.yaml`, dopasowuje regex keywords w
+`description`, grupuje zdolności wg 7 kategorii geometrycznych. Wynik:
+`build/geometry_classification.md` z **listą exclusions dla Strumienia B
+MVP** (hard prereq dla B0 per `docs/roadmap.md`).
+
+```powershell
+python scripts/rules_classify_geometry.py
+python scripts/rules_classify_geometry.py --input app/rulesets/v1/abilities.yaml --output build/geometry_classification.md
+```
+
+**Kategorie:**
+
+| Kategoria | B MVP excluded | Powód |
+|---|---|---|
+| `facing` | ⛔ | Pareto: oddział=koło, brak `facing_deg`. ADR-0042 (E3). |
+| `per_model` | ⛔ | Oddział=blob, brak per-model granularity. E1 (post-stable). |
+| `los_complex` | ⛔ | Łuki/stożki wymagają analitycznej geometrii. ADR-0043 N=16 sampling. |
+| `los_simple` | OK | niebezpośredni, Wysoki — proste flagi. |
+| `range_special` | OK | Zasięg od trzeciego elementu (Artyleria) — center-of-mass lookup. |
+| `placement_special` | OK | Zasadzka/Rezerwa = pre-game setup, nie runtime geometry. |
+| `movement_special` | OK | Latający (ignore terrain), Samolot (linia) — branche w move resolver. |
+
+**Heurystyka jest konserwatywna** — false-positives akceptowalne (raport
+do ręcznego przeglądu, nie auto-decyzja). Sample current output (88
+abilities):
+- 3 excluded: `zwrot` (facing), `precyzyjny` (per_model), `dywersant` (false-positive na "strefy rozstawienia").
+- 77 uncategorized (większość = stat-based, no geometric concerns).
+
+**Testy:** `tests/test_rules_classify_geometry.py` (28 testów) — normalize
+parametrized + per-category synthetic + real YAML sanity + render + CLI.
 
 ### `rules_pdf_check.py` ⏳ (A4.4 — planowane)
 

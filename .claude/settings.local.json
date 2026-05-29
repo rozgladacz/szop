@@ -136,7 +136,8 @@
       "PowerShell(cd \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\"; git show HEAD~1:app/routers/rosters.py | Select-String -Pattern \"def _base_cost_per_model\" -Context 0 | ForEach-Object { $_.LineNumber })",
       "Bash(.venv/Scripts/python -m py_compile app/data/abilities.py)",
       "Bash(python -m pytest tests/test_abilities_migration.py -q)",
-      "PowerShell(python -m pytest tests/test_abilities_migration.py -q 2>&1)"
+      "PowerShell(python -m pytest tests/test_abilities_migration.py -q 2>&1)",
+      "Bash(python scripts/_inspect_geometry.py)"
     ]
   }
 }

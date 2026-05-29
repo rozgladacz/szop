@@ -75,16 +75,23 @@ Pełen plan A4.1.1–A4.1.6 + decyzje (parser=`python-docx>=1.1.0`, schema=`{slu
 - [x] A4.2.3: `tests/test_rules_drift.py` (NEW, **27 testów**) — `normalize_description` parametrized (5), whitelist loader (4), compute_drift (10 scenariuszy: clean + R1 + R2 not-whitelisted + R2 whitelisted + R2 mixed + R3 + R3 normalization-eliminates + R4 + R4+R3 independent + ERROR wins), report rendering (2), CLI (4: clean/error/warn/whitelist + missing-input subprocess). pytest 871/871.
 - [x] A4.2.4: smoke real DOCX vs real YAML → udokumentowane w "Notatki / odkrycia w trakcie" sekcji poniżej. **Wynik: exit 1 (ERROR), R1=7 + R4=1 (DOCX edytowany od A4.1)**.
 
-### Faza A4.3 — Geometric classification (~0.5-1 sesja, sub-wątek opcjonalnie)
+### Faza A4.3 — Geometric classification ✅ (2026-05-29)
 
-**Cel:** `python scripts/rules_classify_geometry.py` → `build/geometry_classification.md` — lista zdolności wymagających geometrii (flanka, tył, obrót, LoS niestandardowy). Wynik = lista exclusions dla MVP Strumienia B (Pareto: oddział = koło, brak orientacji).
+**Cel:** `python scripts/rules_classify_geometry.py` → `build/geometry_classification.md` — lista zdolności wymagających geometrii. Wynik = exclusion list dla Strumień B MVP (Pareto: oddział = koło, brak orientacji per-model). **B0 odblokowany.**
 
-- [ ] A4.3.1: keyword list (heurystyka, ~20 słów: flanka, tył, obrót, kierunek, łuk, stożek, przewlekły, w polu widzenia, etc.)
-- [ ] A4.3.2: implementacja — czyta `abilities.yaml` (description), regexp match na keywords, grupuje wg kategorii
-- [ ] A4.3.3: format output: tabela markdown `| slug | name | keywords | excluded_in_b_mvp |`
-- [ ] A4.3.4: `tests/test_rules_classify_geometry.py` (NOWY) — sanity (znana zdolność `zwiadowca` → flanka kategoria)
+- [x] A4.3.1: 7 kategorii zdefiniowane (facing/per_model/los_complex/los_simple/range_special/placement_special/movement_special) z `excluded_in_b_mvp` flag per kategoria + rationale.
+- [x] A4.3.2: `scripts/rules_classify_geometry.py` (~290 LOC) — czyta `abilities.yaml`, ASCII-fold normalize (Polish chars), regex match per kategoria, multi-category support (ability może trafić w kilka).
+- [x] A4.3.3: format output Markdown — exclusion list (top), per-category breakdown z matched keywords, uncategorized list.
+- [x] A4.3.4: `tests/test_rules_classify_geometry.py` (28 testów) — normalize parametrized, per-category synthetic, real YAML sanity (zwrot/precyzyjny/artyleria/latający), render, CLI.
 
-**Status blokujący:** B0 (`docs/roadmap.md`) eksplicytnie wymaga `build/geometry_classification.md`. To **jedyny** deliverable A4 z hard prereq dla innego strumienia.
+**Real classification results (88 abilities z `abilities.yaml`):**
+- **3 excluded w B MVP:** `zwrot` (facing — strefy/kierunki), `precyzyjny` (per_model — rozdziela rany), `dywersant` (facing — false-positive na "strefy rozstawienia", do manual review).
+- Per kategoria: facing=2, per_model=1, los_complex=0, los_simple=2 (wysoki+niebezposredni), range_special=1 (artyleria), placement_special=3 (zasadzka+rezerwa+odwody), movement_special=2 (latajacy+samolot).
+- Uncategorized: 77 (większość stat-based — modyfikatory testów, AP, Rozprysk, etc.).
+
+**Heurystyka jest konserwatywna** — raport do ręcznego przeglądu architekta B MVP, nie auto-decyzja. `dywersant` false-positive może być whitelistowany w przyszłej iteracji.
+
+**Status blokujący:** ✅ **Strumień B0 odblokowany** — `build/geometry_classification.md` istnieje i ma jasną exclusion list.
 
 ### Faza A4.4 — PDF integrity check (~0.5 sesji)
 
