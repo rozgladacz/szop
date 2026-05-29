@@ -1,6 +1,20 @@
-"""Regenerator abilities.yaml from app/data/abilities.py — used during YAML sync.
+"""Internal helper: regenerate abilities.yaml from app/data/abilities.py.
 
-Inline helper. Not part of permanent pipeline (used podczas merge'u z Rozwoj).
+**Nie jest częścią A4 pipeline'u** (`make rules-check` go nie wywołuje).
+Underscore prefix oznacza ad-hoc dev helper — używany podczas YAML sync
+gdy `app/data/abilities.py` ulega zmianie (np. merge/cherry-pick z innej
+gałęzi z nowymi `ABILITY_DEFINITIONS`).
+
+Workflow:
+    1. Cherry-pick / merge zmiany w `app/data/abilities.py` (procedural SSOT).
+    2. `python scripts/_regen_abilities_yaml.py` — regeneruje YAML mirror.
+    3. Sprawdź `pytest tests/test_abilities_migration.py` — exact match.
+    4. Update `app/rulesets/v1/{tables,ability_costs}.yaml` ręcznie jeśli
+       zmieniły się cost path tables (transport_multipliers, scale_by_tou args).
+    5. Sprawdź `OPR_RULES_BACKEND=both_assert pytest tests/test_ruleset_parity.py`.
+
+Test parity (`tests/test_abilities_migration.py`) jest źródłem prawdy —
+ten skrypt to tylko convenience generator.
 """
 
 from __future__ import annotations

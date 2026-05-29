@@ -1,9 +1,9 @@
 # HANDOFF — faza-a-4-drift
 
-> **Wątek:** Strumień A.4 — pipeline DOCX→YAML drift detection (extract z `SZOP.docx`, diff vs `app/rulesets/v1/abilities.yaml`, klasyfikacja geometryczna, DOCX↔PDF SHA256, `make rules-check`, GHA, ADR-0006).
-> **Status:** In progress (faza Plan)
+> **Wątek:** Strumień A.4 — pipeline DOCX→YAML drift detection (extract z `SZOP.docx` + `SZOP_Zdolnosci.md`, diff vs `app/rulesets/v1/abilities.yaml`, klasyfikacja geometryczna, 4-source SHA256, `make rules-check`, GHA, ADR-0006).
+> **Status:** Done (A4.0 → A4.7 wszystkie zamknięte 2026-05-29; gotowy do `/handoff-archive`).
 > **Utworzony:** 2026-05-26
-> **Ostatnia aktualizacja:** 2026-05-26
+> **Ostatnia aktualizacja:** 2026-05-29 (po A4.7 — ADR-0006 Accepted, Faza A4 done)
 
 ## Cel
 
@@ -140,10 +140,23 @@ Pełen plan A4.1.1–A4.1.6 + decyzje (parser=`python-docx>=1.1.0`, schema=`{slu
 
 **Deferred:** weryfikacja na dummy PR (nie da się bez push'a na origin). Workflow będzie tested at first relevant PR.
 
-### Faza A4.7 — ADR-0006 (~0.25 sesji, alternatywnie razem z A4.0)
+### Faza A4.7 — ADR-0006 promocja Proposed → Accepted ✅ (2026-05-29)
 
-- [ ] A4.7.1: `docs/adr/0006-pipeline-drift.md` — drift-only, nie auto-gen; 3 alternatywy odrzucone (auto-codegen, manual review, embedding diff)
-- [ ] A4.7.2: aktualizacja `docs/roadmap.md` (ADR index: 0006 ✓)
+- [x] A4.7.1: `docs/adr/0006-pipeline-drift.md` przepisany — `Status: Proposed → Accepted`. 8 punktów rewizji rozstrzygniętych empirycznie (każdy punkt = decyzja podjęta na podstawie rzeczywistego użycia pipeline'u w A4.1-A4.6). Sekcja "Do rewizji przed promocją" zastąpiona "Decyzje empiryczne". Plus: zaktualizowana tabela komponentów (dodany `rules_extract_md.py`, `rules_pdf_check.py` → `rules_sources_check.py` z extended scope), sekcja "Artefakty i metryki" z commit-by-commit chronology, real drift report stats (R1=0/R1w=6/R2=0/R2w=17/R3=31/R4=0/exit 2 WARN), B0 exclusion list (3 abilities).
+- [x] A4.7.2: `docs/roadmap.md`:
+  - ADR index `0006: Proposed → ✓` (Accepted).
+  - A4 section: dodany checkbox A4.7 ✅ done + "**Faza A4 done. Strumień B0 odblokowany.**".
+- [x] A4.7.3: `scripts/_regen_abilities_yaml.py` — wzbogacony docstring z workflow YAML sync (cherry-pick → regen → test → cost path → both_assert parity). Underscore prefix marks it as internal ad-hoc helper. `scripts/README.md` dopisana sekcja z notką "nie część stabilnego pipeline'u".
+
+**Resolved review points (z ADR-0006 "Do rewizji" → "Decyzje empiryczne"):**
+1. R3 severity = WARN (Q1 A4.2, weryfikowane danymi: R3=31/88 = ~35%).
+2. R2 severity = WARN + whitelist (Q3 A4.2, 17 wpisów aktualnie).
+3. Whitelist format = `{slug, reason, until_date}` (Pydantic + YAML). Symmetric `allowed_yaml_only` + `allowed_docx_only`.
+4. A4.4 PDF check = SHA256 only (text-extract deferred).
+5. Hash file = centralized `source_hashes.yaml` (A4.4 user decision).
+6. CI failure mode = ERROR fail, WARN pass z annotation.
+7. Whitelist review cadence = kwartalnie (audit przez `until_date`).
+8. Slug generation = deterministic NFKD + ASCII-fold + `Ł/ł` pre-replace.
 
 ### Faza A4.W — Weryfikacja end-to-end (po A4.6)
 

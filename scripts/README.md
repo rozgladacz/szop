@@ -236,6 +236,15 @@ Analiza ostatnich 10 transkryptów Claude Code, generuje
 `FRICTION_REPORT.md` z pattern counts + zaleceniami dla `AGENTS.md`.
 Trigger: skill `/reflect-and-improve`.
 
+### `_regen_abilities_yaml.py` (internal helper, ad-hoc)
+
+Underscore prefix = nie część stabilnego pipeline'u. Regeneruje
+`app/rulesets/v1/abilities.yaml` z `ABILITY_DEFINITIONS`
+(procedural SSOT). Używany podczas YAML sync gdy `app/data/abilities.py`
+zmienia się przez merge/cherry-pick z innej gałęzi (np. YAML sync z `Rozwoj`
+2026-05-29). Test parity (`tests/test_abilities_migration.py`) wymusza
+exact match — ten helper to tylko convenience generator.
+
 ### `setup-tests.ps1` / `run-node-parity-tests.ps1`
 
 PowerShell helpery dla testów node parity (frontend payload adapters).

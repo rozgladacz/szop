@@ -76,6 +76,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [x] A4.4: `scripts/rules_sources_check.py` — SHA256 dla 4 source files (extended scope vs PDF-only). `app/rulesets/v1/source_hashes.yaml` centralizacja, 21 testów.
 - [x] A4.5: `Makefile` cel `rules-check` (orchestracja 5 skryptów; drift LAST żeby exit 2 WARN nie zatrzymał wcześniejszych artefaktów). + AGENTS.md/docs/testing.md udokumentowane.
 - [x] A4.6: `.github/workflows/rules_drift.yml` — CI gate path-filtered (PR+push), exit code semantics (0=pass, 1=fail, 2=warn-pass), artifact upload + step summary z raportów.
+- [x] A4.7: ADR-0006 promocja `Proposed → Accepted` — 8 punktów rewizji rozstrzygnięte empirycznie po A4.1–A4.6. **Faza A4 done. Strumień B0 odblokowany.**
 - [ ] A4.7: ADR-0006 promocja `Proposed → Accepted` (8 punktów rewizji w sekcji "Do rewizji")
 
 ### A5. Wydajność ✅
@@ -290,7 +291,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 | 0003 | Format reguł: YAML + Pydantic v2 | ✓ |
 | 0004 | Cost DSL: function dispatcher | ✓ |
 | 0005 | Feature toggle: procedural + YAML | ✓ |
-| 0006 | Pipeline docx↔yaml: drift-only | Proposed (promocja na Accepted w A4.7) |
+| 0006 | Pipeline docx↔yaml: drift-only | ✓ |
 | 0007 | Cache rulesetów: LRU na load_ruleset | ✓ |
 | 0008 | Pareto MVP: oddział = koło, pełne zasady | — |
 | 0010 | Event-sourced battle log | — |
