@@ -1,0 +1,18 @@
+# SHA256 checksums of canonical SZOP source files.
+# Regenerated via: python scripts/rules_sources_check.py --update
+# Verified via:   python scripts/rules_sources_check.py
+
+version: 1
+sources:
+- path: app/static/docs/SZOP.docx
+  sha256: bcd983ef4a85e268e6cabf34f8e9a101c168e620c04eb17ac23f91d1a83f8960
+  role: Word document — primary author source
+- path: app/static/docs/SZOP.pdf
+  sha256: e233844fadcd666fef3ae7f2bf02ac3b1a6865fefd718cb4588758c1ce03bebe
+  role: PDF export — should track DOCX changes
+- path: app/static/docs/SZOP_Zdolnosci.md
+  sha256: b1a7785d79a5d7b5342b9d0846f2107284530eaa6f0e75325c5962c14f788396
+  role: Curated MD version of abilities — 1:1 quotes from SZOP
+- path: app/static/docs/SZOP_Rozjemca.md
+  sha256: 06371a6f253f284469caf9901527ded2d8036119135477f655d2847d7114cdab
+  role: Game rules narrative (referee version)

@@ -165,11 +165,44 @@ abilities):
 **Testy:** `tests/test_rules_classify_geometry.py` (28 testów) — normalize
 parametrized + per-category synthetic + real YAML sanity + render + CLI.
 
-### `rules_pdf_check.py` ⏳ (A4.4 — planowane)
+### `rules_sources_check.py` ✅ (A4.4)
 
-Wykrywa silent edit `SZOP.pdf` bez aktualizacji `SZOP.docx` przez SHA256
-checksum (lokalizacja hash file TBD w A4.4 — patrz HANDOFF_faza-a-4-drift,
-sekcja "Decyzje").
+Wykrywa **silent edit** plików źródłowych (`SZOP.docx`, `SZOP.pdf`,
+`SZOP_Zdolnosci.md`, `SZOP_Rozjemca.md`) przez SHA256 checksum.
+Centralna lokalizacja hashes: `app/rulesets/v1/source_hashes.yaml`
+(decyzja A4.4 — centralizacja vs `*.sha256` per-file).
+
+```powershell
+# Check mode (default): verify current hashes match recorded.
+python scripts/rules_sources_check.py
+
+# Update mode: regenerate hashes after świadomej edycji source files.
+python scripts/rules_sources_check.py --update
+```
+
+**Exit codes:**
+- `0` — wszystkie hashes match (clean)
+- `1` — co najmniej jeden mismatch (silent edit detected — wymaga review)
+- `2` — co najmniej jeden source file missing (priority over mismatch)
+
+**Schema `source_hashes.yaml`:**
+```yaml
+version: 1
+sources:
+  - path: app/static/docs/SZOP.docx
+    sha256: <hex>
+    role: "Word document — primary author source"
+  # ... more entries
+```
+
+**Workflow:** po świadomej edycji DOCX/PDF/MD (np. nowa wersja po
+klaryfikacji zasad) commit `--update` razem ze zmianami source files.
+CI gate (A4.6) wykryje gdy ktoś edytuje source bez aktualizacji hashes.
+
+**Testy:** `tests/test_rules_sources_check.py` (21 testów) — sha256
+deterministic + load/save round-trip + match/mismatch/missing scenarios
++ exit codes priority + role preservation + CLI smoke + real sources
+integration test.
 
 ### `make rules-check` ⏳ (A4.5 — planowane)
 

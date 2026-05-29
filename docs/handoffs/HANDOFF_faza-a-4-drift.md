@@ -93,16 +93,18 @@ Pełen plan A4.1.1–A4.1.6 + decyzje (parser=`python-docx>=1.1.0`, schema=`{slu
 
 **Status blokujący:** ✅ **Strumień B0 odblokowany** — `build/geometry_classification.md` istnieje i ma jasną exclusion list.
 
-### Faza A4.4 — PDF integrity check (~0.5 sesji)
+### Faza A4.4 — Source files SHA256 check ✅ (2026-05-29)
 
-**Cel:** Wykryć, gdy ktoś podmienił `SZOP.pdf` bez aktualizacji `SZOP.docx`. SHA256 PDF + DOCX persisted w git.
+**Cel:** Wykryć silent edit plików źródłowych — extended scope vs original PDF-only: SZOP.docx, SZOP.pdf, SZOP_Zdolnosci.md, SZOP_Rozjemca.md. User wybrał **centralizację** hashes (`source_hashes.yaml`) vs per-file `.sha256` z `.gitignore` exception.
 
-- [ ] A4.4.1: `app/static/docs/SZOP.pdf.sha256` (NOWY) — `sha256(SZOP.pdf)` w hex
-- [ ] A4.4.2: opcjonalnie `app/static/docs/SZOP.docx.sha256`
-- [ ] A4.4.3: `scripts/rules_pdf_check.py` — wczytuje hash z `.sha256`, liczy aktualny, exit 1 gdy mismatch
-- [ ] A4.4.4: `tests/test_rules_pdf_check.py` (NOWY) — fixture z dummy file + intentional mismatch
+- [x] A4.4.1: `app/rulesets/v1/source_hashes.yaml` (NOWY) — schema `{version, sources: [{path, sha256, role}]}`. Centralizacja w `app/rulesets/v1/` (nie w `app/static/docs/` które jest gitignored).
+- [x] A4.4.2: `scripts/rules_sources_check.py` (~220 LOC) — check mode (default) + `--update` mode. Schema reuse minimalny (own `SourceEntry` dataclass). Exit codes 0/1/2 z priorytetem MISSING > MISMATCH > CLEAN.
+- [x] A4.4.3: `tests/test_rules_sources_check.py` (21 testów) — sha256 deterministic + load/save round-trip + match/mismatch/missing + exit code priority + role preservation + CLI 4 scenarios + real sources integration test.
+- [x] A4.4.4: Inicjalne hashes wygenerowane dla 4 source files: SZOP.docx (51KB), SZOP.pdf (167KB), SZOP_Zdolnosci.md, SZOP_Rozjemca.md.
 
-**Otwarte pytanie:** Czy A4.4 ma robić text-extraction PDF vs DOCX (text-level diff), czy tylko binary SHA? Roadmap mówi "DOCX vs PDF integrality" — sugeruję start od SHA (cheaper), text-extract w przyszłej iteracji jeśli SHA nie wystarczy.
+**Rozszerzenie poza original scope:** A4.4 z PDF-only do **4-source check**. MD files też ważne (są źródłem prawdy dla `rules_extract_md.py` w A4.2+). Workflow: po świadomej edycji jakiegokolwiek source → `--update` w tym samym commicie. CI gate (A4.6) wykryje "silent edit" wzorzec.
+
+**Otwarte (deferred):** text-extraction PDF vs DOCX diff (text-level zamiast binary). Decyzja w A4.7 review — start od SHA (cheaper); text-extract dorzucimy gdy SHA okaże się niewystarczające.
 
 ### Faza A4.5 — Makefile orchestration (~0.25 sesji)
 
