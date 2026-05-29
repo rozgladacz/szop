@@ -119,7 +119,9 @@
       "Bash(ls data *)",
       "Bash(python -m pytest tests/test_rosters_from_fixtures.py -k \"test_roster\" --collect-only)",
       "PowerShell(cd \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\"; git show HEAD~1:app/routers/rosters.py | Select-String -Pattern \"def _base_cost_per_model\" -Context 0 | ForEach-Object { $_.LineNumber })",
-      "Bash(.venv/Scripts/python -m py_compile app/data/abilities.py)"
+      "Bash(.venv/Scripts/python -m py_compile app/data/abilities.py)",
+      "Bash(cd \"/d/OneDrive - KBJ S.A/Dokumenty/GitHub/OPR\" && find . -type f -name \"*.html\" | grep -E \"\\(roster|edit\\)\" | head -20)",
+      "Bash(python -m pytest -x -q)"
     ]
   }
 }

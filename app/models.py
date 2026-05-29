@@ -473,6 +473,7 @@ class Roster(TimestampMixin, Base):
     army_id: Mapped[int] = mapped_column(ForeignKey("armies.id"), nullable=False)
     owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     points_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    strategic_cards_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     army: Mapped[Army] = relationship(back_populates="rosters")
     owner: Mapped[Optional[User]] = relationship(back_populates="rosters")

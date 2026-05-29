@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Karty Strategiczne - {{ roster.name }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <h2 class="mb-0">Karty Strategiczne: {{ roster.name }}</h2>
+</div>
+
+{% if not can_edit %}
+<div class="alert alert-warning">Tylko właściciel rozpiski może zmieniać wybór kart.</div>
+{% endif %}
+
+{% set selected_tasks_set = selected.tasks | reject('equalto', '') | list %}
+{% set selected_supports_set = selected.supports | reject('equalto', '') | list %}
+
+<form method="post" action="/rosters/{{ roster.id }}/strategic-cards" id="cards-form">
+  <input type="hidden" name="redirect_to" id="redirect_to" value="self" />
+
+  <div class="mb-4">
+    <h4>Zadania <span class="badge bg-secondary" id="tasks-count">{{ selected_tasks_set|length }}/3</span></h4>
+    <p class="text-muted small">Wybierz dokładnie 3 (kolumny na wydruku).</p>
+    <div class="d-flex flex-column gap-2" id="tasks-list">
+      {% for card in tasks %}
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox"
+               name="tasks" value="{{ card.slug }}"
+               id="task-{{ card.slug }}"
+               {% if card.slug in selected_tasks_set %}checked{% endif %}
+               {% if not can_edit %}disabled{% endif %} />
+        <label class="form-check-label" for="task-{{ card.slug }}">{{ card.text }}</label>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="mb-4">
+    <h4>Wsparcia <span class="badge bg-secondary" id="supports-count">{{ selected_supports_set|length }}/3</span></h4>
+    <p class="text-muted small">Wybierz dokładnie 3 (wiersze na wydruku).</p>
+    <div class="d-flex flex-column gap-2" id="supports-list">
+      {% for card in supports %}
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox"
+               name="supports" value="{{ card.slug }}"
+               id="support-{{ card.slug }}"
+               {% if card.slug in selected_supports_set %}checked{% endif %}
+               {% if not can_edit %}disabled{% endif %} />
+        <label class="form-check-label" for="support-{{ card.slug }}">{{ card.text }}</label>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if can_edit %}
+  <div class="d-flex gap-2 flex-wrap">
+    <button class="btn btn-primary" type="submit" onclick="setRedirect('self')">Zapisz</button>
+    <button class="btn btn-outline-primary" type="submit" onclick="setRedirect('print')">Zapisz i drukuj</button>
+    <button class="btn btn-outline-secondary" type="submit" onclick="setRedirect('roster')">Zapisz i wróć</button>
+  </div>
+  {% else %}
+  <div class="d-flex gap-2 flex-wrap">
+    <a class="btn btn-outline-primary" href="/rosters/{{ roster.id }}/strategic-cards/print" target="_blank">Drukuj</a>
+    <a class="btn btn-outline-secondary" href="/rosters/{{ roster.id }}">Wróć do rozpiski</a>
+  </div>
+  {% endif %}
+</form>
+
+<script>
+function setRedirect(val) {
+  document.getElementById('redirect_to').value = val;
+}
+(function () {
+  var MAX = 3;
+  function setupLimit(groupId, counterId) {
+    var group = document.getElementById(groupId);
+    if (!group) return;
+    var counter = document.getElementById(counterId);
+    function refresh() {
+      var checked = group.querySelectorAll('input[type="checkbox"]:checked').length;
+      if (counter) counter.textContent = checked + '/' + MAX;
+      // Blokuj niezaznaczone gdy już 3
+      group.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+        if (!cb.checked) cb.disabled = checked >= MAX;
+      });
+    }
+    group.addEventListener('change', refresh);
+    refresh();
+  }
+  setupLimit('tasks-list', 'tasks-count');
+  setupLimit('supports-list', 'supports-count');
+})();
+</script>
+{% endblock %}

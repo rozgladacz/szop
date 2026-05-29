@@ -19,7 +19,7 @@
     if (value == null) return "";
     let text = String(value).trim().toLowerCase();
     if (text.normalize) {
-      text = text.normalize("NFD").replace(/[̀-ͯ]/g, "");
+      text = text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     }
     return text;
   }
@@ -398,6 +398,46 @@
     return weapons;
   }
 
+  function repositionSpellsTile(state) {
+    const tile = document.querySelector("[data-battle-spells-tile]");
+    if (!tile) return;
+    const section = document.querySelector("[data-battle-section]");
+    if (!section) return;
+
+    let mageGroupIds;
+    try { mageGroupIds = JSON.parse(tile.dataset.mageGroupIds || "[]"); } catch (e) { mageGroupIds = []; }
+    if (!mageGroupIds.length) { section.appendChild(tile); return; }
+
+    const anyMageAlive = mageGroupIds.some(function (gid) {
+      return !state.groups?.[String(gid)]?.defeated;
+    });
+
+    const wrappers = Array.prototype.slice.call(
+      section.querySelectorAll("[data-battle-card-wrapper]")
+    );
+
+    if (anyMageAlive) {
+      // Place after the last non-defeated wrapper (before first defeated)
+      var lastAlive = null;
+      for (var i = wrappers.length - 1; i >= 0; i--) {
+        var gc = wrappers[i].querySelector("[data-battle-group]");
+        var gid = gc && gc.dataset.groupId;
+        if (gid && !state.groups?.[gid]?.defeated) {
+          lastAlive = wrappers[i];
+          break;
+        }
+      }
+      if (lastAlive) {
+        lastAlive.after(tile);
+      } else {
+        section.appendChild(tile);
+      }
+    } else {
+      // All mages defeated: place at the very end
+      section.appendChild(tile);
+    }
+  }
+
   function reorderDefeated(state) {
     const sections = document.querySelectorAll("[data-battle-section]");
     sections.forEach((section) => {
@@ -414,6 +454,7 @@
       });
       wrappers.forEach((w) => section.appendChild(w));
     });
+    repositionSpellsTile(state);
   }
 
   function updateSummaryBadge(state, groupCards) {

@@ -362,6 +362,17 @@ def roster_battle_state(
                 "show_wounds_any": any(m.get("show_wounds") for m in group_members),
             }
         )
+
+    spell_entries = _army_spell_entries(roster, roster_items)
+    mage_group_ids: list[int] = []
+    if spell_entries:
+        for entry in roster_items:
+            slugs = entry.get("active_slugs") or []
+            if any(str(s).strip().casefold() == "mag" for s in slugs):
+                gid = entry.get("group_id")
+                if gid is not None and int(gid) not in mage_group_ids:
+                    mage_group_ids.append(int(gid))
+
     return templates.TemplateResponse(
         "roster_battle_state.html",
         {
@@ -374,6 +385,8 @@ def roster_battle_state(
             "total_cost_rounded": utils.round_points(total_cost),
             "army_rules_detail": army_rules_detail,
             "ability_descriptions": ability_descriptions,
+            "spell_entries": spell_entries,
+            "mage_group_ids": mage_group_ids,
         },
     )
 
