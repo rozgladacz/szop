@@ -114,13 +114,31 @@ Pełen plan A4.1.1–A4.1.6 + decyzje (parser=`python-docx>=1.1.0`, schema=`{slu
 
 **Smoke test (Windows fallback, brak `make`):** uruchomione 5 skryptów sekwencyjnie ręcznie — sources-check CLEAN, extract 77 abilities, extract-md 77, classify 88→3 excluded, drift R1=0/R1w=6/R2=0/R2w=17/R3=31/R4=0 → exit 2 WARN. Wszystkie artefakty (`build/rules_extracted.yaml`, `rules_md.yaml`, `geometry_classification.md`, `drift_report.md`) wygenerowane.
 
-### Faza A4.6 — GitHub Actions (~0.5 sesji)
+### Faza A4.6 — GitHub Actions ✅ (2026-05-29)
 
-- [ ] A4.6.1: `.github/workflows/rules_drift.yml` (NEW) — trigger na PR touching `app/static/docs/**`, `app/rulesets/**`, `app/data/abilities.py`
-- [ ] A4.6.2: job uruchamia `make rules-check`, komentuje raport w PR (artifact `build/drift_report.md`)
-- [ ] A4.6.3: weryfikacja na dummy PR
+- [x] A4.6.1: `.github/workflows/rules_drift.yml` (NEW) — path-filtered trigger. PR + push (main/Faza_A/Rozwoj) na zmianach: `app/static/docs/**`, `app/rulesets/**`, `app/data/abilities.py`, `scripts/rules_*.py`, `Makefile`, `.github/workflows/rules_drift.yml` (self-test).
+- [x] A4.6.2: Job `drift-check` (ubuntu-latest, Python 3.13) — 8 steps:
+  1. checkout
+  2. setup Python z pip cache
+  3. install requirements-dev.txt
+  4. **Run rules-check pipeline** — capture exit code, emit GitHub annotation per exit (0 notice, 1 error, 2 warning, default error). Wzorzec `set +e; make rules-check; EXIT_CODE=$?; set -e` zapewnia że exit nie killuje step'u.
+  5. **Upload artifacts** (`if: always()`) — `build/` directory (4 raporty + extracted/md YAML) jako artifact `drift-pipeline-${run_id}`, retention 30 days, `if-no-files-found: warn`.
+  6. **Summary** (`if: always()`) — `$GITHUB_STEP_SUMMARY` zawiera pierwsze 80 linii drift_report.md + sekcja "B MVP Exclusion List" z geometry_classification.md (via `sed -n`).
+  7. Fail on exit 1 — workflow fail jeśli pipeline ERROR.
+  8. Fail on unexpected — workflow fail dla exit codes innych niż 0/1/2.
+- [x] A4.6.3: YAML syntax verified (PyYAML parse OK, 8 steps wykryte). Existing workflows (`test.yml`, `release.yml`) jako style reference — mirror Python 3.13 + pip cache pattern.
 
-**Otwarte pytanie:** czy istnieją już inne workflowy GHA? Sprawdzić `.github/workflows/` w A4.6.1.
+**Exit code semantics:**
+| Exit | Pipeline outcome | Workflow result | Annotation |
+|---|---|---|---|
+| 0 | CLEAN | ✅ pass | `::notice::` |
+| 1 | ERROR (R1/R4 drift, sources mismatch, parse error) | ❌ **fail** | `::error::` |
+| 2 | WARN (R2/R3 drift, missing sources) | ⚠️ **pass z annotation** | `::warning::` |
+| other | unexpected | ❌ fail | `::error::` |
+
+**Decyzja: WARN = pass.** Powód: Q1 z A4.2 (R3 = WARN). PR z description drift nie powinno blokować merge, tylko sygnalizować. CI artifact + step summary daje pełną widoczność. Strict mode (treat WARN as fail) możliwy w przyszłości jako separate workflow lub workflow input.
+
+**Deferred:** weryfikacja na dummy PR (nie da się bez push'a na origin). Workflow będzie tested at first relevant PR.
 
 ### Faza A4.7 — ADR-0006 (~0.25 sesji, alternatywnie razem z A4.0)
 

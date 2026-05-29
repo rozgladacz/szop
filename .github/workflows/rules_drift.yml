@@ -1,0 +1,115 @@
+name: Rules Drift
+
+# Strumień A Faza A4 (ADR-0006). Pipeline drift-only — DOCX/MD/YAML ruleset
+# consistency check. Triggeruje TYLKO na zmianach plików source-of-truth lub
+# ruleset mirror, żeby nie marnować CI cycles na unrelated PRs.
+#
+# Exit code semantyka (z `make rules-check`):
+#   0 — clean (wszystko match)
+#   1 — ERROR (R1/R4 drift, sources mismatch, parse error) → workflow FAILS
+#   2 — WARN  (R2/R3 drift, missing sources)              → workflow PASSES z annotation
+#
+# Artifact: `build/` directory z 4 raportami (drift_report.md,
+# geometry_classification.md, rules_extracted.yaml, rules_md.yaml).
+
+on:
+  pull_request:
+    paths:
+      - 'app/static/docs/**'
+      - 'app/rulesets/**'
+      - 'app/data/abilities.py'
+      - 'scripts/rules_*.py'
+      - 'Makefile'
+      - '.github/workflows/rules_drift.yml'
+  push:
+    branches: ['main', 'Faza_A', 'Rozwoj']
+    paths:
+      - 'app/static/docs/**'
+      - 'app/rulesets/**'
+      - 'app/data/abilities.py'
+      - 'scripts/rules_*.py'
+
+jobs:
+  drift-check:
+    name: DOCX/MD/YAML drift detection
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run rules-check pipeline
+        id: pipeline
+        run: |
+          set +e
+          make rules-check
+          EXIT_CODE=$?
+          set -e
+          echo "exit_code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+          case $EXIT_CODE in
+            0)
+              echo "::notice::rules-check CLEAN — żadnego drift detected."
+              ;;
+            1)
+              echo "::error::rules-check ERROR (exit 1) — R1/R4 drift lub sources mismatch lub parse error. See build/drift_report.md w artifact."
+              ;;
+            2)
+              echo "::warning::rules-check WARN (exit 2) — R2/R3 drift (description differences). See build/drift_report.md w artifact. Non-blocking."
+              ;;
+            *)
+              echo "::error::rules-check unexpected exit code $EXIT_CODE."
+              ;;
+          esac
+
+      - name: Upload pipeline artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-pipeline-${{ github.run_id }}
+          path: build/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Rules Drift Pipeline" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Exit code: ${{ steps.pipeline.outputs.exit_code }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f build/drift_report.md ]; then
+            echo "### Drift Report (first 80 lines)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```markdown' >> "$GITHUB_STEP_SUMMARY"
+            head -n 80 build/drift_report.md >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          if [ -f build/geometry_classification.md ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "### Geometric Classification (B MVP exclusions)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```markdown' >> "$GITHUB_STEP_SUMMARY"
+            sed -n '/^## B MVP Exclusion List/,/^## Per-category/p' build/geometry_classification.md >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Fail workflow on ERROR exit code
+        if: steps.pipeline.outputs.exit_code == '1'
+        run: |
+          echo "Pipeline returned ERROR (exit 1). Failing workflow."
+          exit 1
+
+      - name: Fail workflow on unexpected exit code
+        if: |
+          steps.pipeline.outputs.exit_code != '0' &&
+          steps.pipeline.outputs.exit_code != '1' &&
+          steps.pipeline.outputs.exit_code != '2'
+        run: |
+          echo "Pipeline returned unexpected exit ${{ steps.pipeline.outputs.exit_code }}. Failing workflow."
+          exit 1
