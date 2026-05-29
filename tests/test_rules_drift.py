@@ -73,14 +73,18 @@ def _write_whitelist(path: Path, entries: list[dict]) -> None:
 
 
 def test_load_whitelist_missing_file_returns_empty(tmp_path: Path) -> None:
-    assert load_whitelist(tmp_path / "nonexistent.yaml") == {}
+    result = load_whitelist(tmp_path / "nonexistent.yaml")
+    assert result.yaml_only == {}
+    assert result.docx_only == {}
 
 
 def test_load_whitelist_none_path_returns_empty() -> None:
-    assert load_whitelist(None) == {}
+    result = load_whitelist(None)
+    assert result.yaml_only == {}
+    assert result.docx_only == {}
 
 
-def test_load_whitelist_parses_entries(tmp_path: Path) -> None:
+def test_load_whitelist_parses_yaml_only(tmp_path: Path) -> None:
     path = tmp_path / "allowlist.yaml"
     _write_whitelist(
         path,
@@ -90,10 +94,28 @@ def test_load_whitelist_parses_entries(tmp_path: Path) -> None:
         ],
     )
     result = load_whitelist(path)
-    assert set(result.keys()) == {"aura", "szybki"}
-    assert result["aura"].reason == "Abstract concept."
-    assert result["aura"].until_date is None
-    assert result["szybki"].until_date == "2026-12-31"
+    assert set(result.yaml_only.keys()) == {"aura", "szybki"}
+    assert result.yaml_only["aura"].reason == "Abstract concept."
+    assert result.yaml_only["aura"].until_date is None
+    assert result.yaml_only["szybki"].until_date == "2026-12-31"
+    assert result.docx_only == {}
+
+
+def test_load_whitelist_parses_docx_only(tmp_path: Path) -> None:
+    """Symetria: `allowed_docx_only` filtruje R1."""
+    path = tmp_path / "allowlist.yaml"
+    path.write_text(
+        yaml.safe_dump({
+            "allowed_docx_only": [
+                {"slug": "szybki_wolny", "reason": "DOCX split.", "until_date": None},
+            ]
+        }),
+        encoding="utf-8",
+    )
+    result = load_whitelist(path)
+    assert result.yaml_only == {}
+    assert set(result.docx_only.keys()) == {"szybki_wolny"}
+    assert result.docx_only["szybki_wolny"].reason == "DOCX split."
 
 
 def test_load_whitelist_handles_missing_reason(tmp_path: Path) -> None:
@@ -101,7 +123,7 @@ def test_load_whitelist_handles_missing_reason(tmp_path: Path) -> None:
     path = tmp_path / "allowlist.yaml"
     path.write_text(yaml.safe_dump({"allowed_yaml_only": [{"slug": "x"}]}), encoding="utf-8")
     result = load_whitelist(path)
-    assert result["x"].reason == "(no reason given)"
+    assert result.yaml_only["x"].reason == "(no reason given)"
 
 
 # --- Drift computation ------------------------------------------------------
@@ -131,6 +153,22 @@ def test_drift_r1_missing_in_yaml() -> None:
     report = compute_drift(docx, yaml_abs, whitelist={})
     assert [a.slug for a in report.r1_missing_in_yaml] == ["only_docx"]
     assert report.exit_code == 1
+
+
+def test_drift_r1_whitelisted_does_not_affect_exit() -> None:
+    """`allowed_docx_only` filtruje R1 → INFO, exit 0."""
+    from scripts.rules_drift import Allowlist
+
+    docx = [_ability("only_docx")]
+    yaml_abs: list[RulesetAbility] = []
+    allowlist = Allowlist(
+        yaml_only={},
+        docx_only={"only_docx": WhitelistEntry(slug="only_docx", reason="known split")},
+    )
+    report = compute_drift(docx, yaml_abs, whitelist=allowlist)
+    assert report.r1_missing_in_yaml == []
+    assert [a.slug for a, _ in report.r1_whitelisted] == ["only_docx"]
+    assert report.exit_code == 0
 
 
 def test_drift_r2_missing_in_docx_not_whitelisted() -> None:

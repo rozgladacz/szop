@@ -163,9 +163,7 @@ brutalny_ap_cost:
 # Kolejność istotna: pierwsze dopasowanie wygrywa (jak w procedural).
 transport_multipliers:
   - traits: [samolot]
-    multiplier: 3.5
-  - traits: [zasadzka, zwiadowca]
-    multiplier: 2.5
+    multiplier: 4.0
   - traits: [latajacy]
     multiplier: 1.5
   - traits: [szybki, zwinny]

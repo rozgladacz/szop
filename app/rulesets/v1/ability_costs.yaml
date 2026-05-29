@@ -50,7 +50,8 @@ passive_abilities:
   niezgrabny:   { fn: scale_by_tou, args: { base: -0.5 } }
   latajacy:     { fn: scale_by_tou, args: { base: 1.0 } }
   samolot:      { fn: scale_by_tou, args: { base: 3.0 } }
-  kontra:       { fn: scale_by_tou, args: { base: 2.0 } }
+  kontra:       { fn: scale_by_tou, args: { base: 1.0 } }
+  parowanie:    { fn: scale_by_tou, args: { base: 1.5 } }
   maskowanie:   { fn: scale_by_tou, args: { base: 2.0 } }
   okopany:      { fn: scale_by_tou, args: { base: 1.0 } }
   tarcza:       { fn: scale_by_tou, args: { base: 1.25 } }

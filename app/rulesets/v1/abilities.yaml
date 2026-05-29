@@ -22,7 +22,7 @@ abilities:
 - slug: zwiadowca
   name: Zwiadowca
   type: passive
-  description: Rozstawia się po rozstawieniu wszystkich pozostałych jednostek, w odległości do 12” od normalnie dozwolonej pozycji. Gracze na zmianę rozmieszczają jednostki zwiadowcy, zaczynając od gracza, który dokonuje aktywacji jako następny. Jeżeli nie rozstawiłeś oddziałów bez tej zdolności, możesz później zamiast rozstawiać oddział raz aktywować ten oddział w rundzie rozstawienia (nie może w niej atakować).
+  description: Jeżeli nie rozstawiłeś przed tym oddziałem, oddziałów bez zdolności Zwiadowca lub Samolot, możesz raz ruszyć ten oddział o 6” zamiast rozstawić następny.
 - slug: odwody
   name: Odwody
   type: passive
@@ -62,7 +62,7 @@ abilities:
 - slug: samolot
   name: Samolot
   type: passive
-  description: Wysoki. Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. Nie może być przyszpilony, kontrolować punktów, szarżować, ani być celem szarży. Nie blokuje ruchu ani widzenia innych jednostek, a podczas ruchu ignoruje teren. Ma osłonę a jednostki strzelające do niego mają -12” zasięgu. Nie może być atakowany bronią Niebezpośrednią.
+  description: Nie możesz aktywować oddziału bez tej zdolności, jeżeli masz nieaktywowany oddział z nią.Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. Nie może być przyszpilony, kontrolować punktów, szarżować, ani być celem szarży. Nie blokuje ruchu ani widzenia innych jednostek.Ma osłonę, a jednostki strzelające do niego mają -12” zasięgu. Wysoki, Latający, Zwinny
 - slug: wysoki
   name: Wysoki
   type: passive
@@ -98,7 +98,7 @@ abilities:
 - slug: kontra
   name: Kontra
   type: passive
-  description: Może wykonać kontratak przed szarżującym odziałem, a ten ignoruje swoją zdolność Impet.
+  description: Może wykonać kontratak przed atakami szarżującego oddziału, a ten przestaje być uznawany za szarżującego.
 - slug: regeneracja
   name: Regeneracja
   type: passive
@@ -146,7 +146,7 @@ abilities:
 - slug: transport
   name: Transport
   type: passive
-  description: Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. Transportowany oddział nie znajduje się na planszy, zawsze pozostaje w zasięgu transportującego oddziału, może oddziaływać wyłącznie na siebie i transportujący oddział. Jako swoją akcję ruchu może zostać rozstawiony. Wszystkie jego modele muszą zostać ustawione w odległości do 3” od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany. Oddział, którego wszystkie modele znajdują się do 3” od transportującego oddziału, może jako swoją akcję ruchu zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. Jeżeli część modeli transportującego oddziału zostanie zniszczona, transportowane oddziały mogą tymczasowo przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie zniszczony, wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się przyszpilone. Jeżeli transportujący oddział wykona podwójny ruch lub początkowy ruch zdolności Samolot, wszystkie transportowane oddziały zostają wyczerpane. Transportowane oddziały są rozstawiane razem z transporterem.
+  description: 'Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. Transportowany oddział jako swoją akcję może zostać rozstawiony: wszystkie jego modele muszą zostać ustawione w odległości do 3” od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany. Oddział, którego wszystkie modele znajdują się do 3” od transportującego oddziału, może jako swoją akcję zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. Jeżeli część modeli transportującego oddziału zostanie zniszczona, transportowane oddziały mogą tymczasowo przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie zniszczony, nadmiarowe rany przechodzą na najliczniejszy transportowany oddział, a następnie wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się Wyczerpane. Jeżeli transportujący oddział wykona podwójny ruch lub początkowy ruch zdolności Samolot, wszystkie transportowane oddziały zostają Przyszpilone. Transportowane oddziały są rozstawiane razem z transporterem w jednej aktywacji i muszą mieć te same zdolności wpływające na Rozstawienie.'
   value_label: X
   value_type: number
 - slug: platforma_strzelecka
@@ -164,11 +164,15 @@ abilities:
 - slug: straznik
   name: Strażnik
   type: passive
-  description: Gdy wrogi odział zakończy ruch, możesz przerwać aby zaatakować. Następnie ten odział zostaje wyczerpany.
+  description: Możesz przerwać w aktywacji przeciwnika, aby wykonać Ostrzał. Następnie twój oddział zostaje wyczerpany.
 - slug: bastion
   name: Bastion
   type: passive
   description: Nie zostajesz wyczerpany po kontrataku.
+- slug: parowanie
+  name: Parowanie
+  type: passive
+  description: Ma osłonę podczas walki wręcz.
 - slug: zemsta
   name: Zemsta
   type: passive
@@ -283,8 +287,8 @@ abilities:
   description: Teren w zasięgu 12” jest uznawany za niebezpieczny dla wrogich oddziałów.
 - slug: meczennik
   name: Męczennik
-  type: aura
-  description: Jeżeli wróg może cię pokonać, musi to zrobić.
+  type: active
+  description: W twojej aktywacji możesz zostać pokonany, aby twój oddział odzyskał liczbę ran równą twojej wytrzymałości. Nie możesz zostać przywrócony podczas tej aktywacji.
 - slug: rozprysk
   name: Rozprysk
   type: weapon
@@ -298,7 +302,7 @@ abilities:
 - slug: zabojczy
   name: Zabójczy
   type: weapon
-  description: Zamiast jednej przydziel X ran, ale nie więcej niż wytrzymałość wybranego modelu, który, jeżeli to możliwe, zostaje pokonany.Jeżeli w wyniku tego, zmieniała się maksymalna wytrzymałość oddziału, odrzuć tyle ran, aby nie było ich mniej niż ona.
+  description: Zamiast jednej zadaj X ran, ale nie więcej niż najniższa, jeżeli przydziela obrońca, lub najwyższa, jeżeli przydziela atakujący, wytrzymałość w oddziale.
   value_label: X
   value_type: number
   value_choices:
@@ -308,7 +312,7 @@ abilities:
 - slug: niebezposredni
   name: Niebezpośredni
   type: weapon
-  description: Nie wymaga linii wzroku.
+  description: Nie wymaga linii wzroku. Nie może atakować celów Latających.
 - slug: artyleria
   name: Artyleria
   type: weapon
@@ -380,7 +384,7 @@ abilities:
 - slug: zguba
   name: Zguba
   type: weapon
-  description: Zmniejsz liczbę odzyskanych ran w tej aktywacji o liczbę ran otrzymanych tą bronią. Modele pokonane tą bronią nie mogą wrócić do gry.
+  description: Licz rany otrzymane taką bronią w aktywacji. Zmniejsz liczbę ran odzyskanych o nią. Modele pokonane przez przydzielenie pierwszych ran do tej liczby zostają zniszczone i nie mogą wrócić do gry.
 - slug: dezintegracja
   name: Dezintegracja
   type: weapon

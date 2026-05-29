@@ -78,30 +78,49 @@ class WhitelistEntry:
     until_date: str | None = None
 
 
-def load_whitelist(path: Path | None) -> dict[str, WhitelistEntry]:
-    """Załaduj `drift_allowlist.yaml`. Brak pliku = pusty allowlist (OK).
+@dataclass(frozen=True)
+class Allowlist:
+    """Whitelist dwukierunkowy: filtruje R2 (YAML-only) i R1 (DOCX-only)."""
 
-    Schema:
-        allowed_yaml_only:
-          - slug: aura
-            reason: "Abstract concept dla cost DSL — DOCX nie nazywa, używa per-ability."
-            until_date: ~  # null = permanent
-    """
-    if path is None or not path.exists():
-        return {}
+    yaml_only: dict[str, WhitelistEntry]
+    docx_only: dict[str, WhitelistEntry]
 
-    with open(path, encoding="utf-8") as fh:
-        data = yaml.safe_load(fh) or {}
 
-    entries: dict[str, WhitelistEntry] = {}
-    for raw in data.get("allowed_yaml_only", []):
+def _parse_entries(raw_list: list) -> dict[str, WhitelistEntry]:
+    out: dict[str, WhitelistEntry] = {}
+    for raw in raw_list:
         slug = raw["slug"]
-        entries[slug] = WhitelistEntry(
+        out[slug] = WhitelistEntry(
             slug=slug,
             reason=raw.get("reason", "(no reason given)"),
             until_date=raw.get("until_date"),
         )
-    return entries
+    return out
+
+
+def load_whitelist(path: Path | None) -> Allowlist:
+    """Załaduj `drift_allowlist.yaml`. Brak pliku = pusty allowlist (OK).
+
+    Schema:
+        allowed_yaml_only:  # filtruje R2 (YAML-only)
+          - slug: aura
+            reason: "..."
+            until_date: ~  # null = permanent
+        allowed_docx_only:  # filtruje R1 (DOCX-only) — symetria
+          - slug: szybki_wolny
+            reason: "..."
+            until_date: ~
+    """
+    if path is None or not path.exists():
+        return Allowlist(yaml_only={}, docx_only={})
+
+    with open(path, encoding="utf-8") as fh:
+        data = yaml.safe_load(fh) or {}
+
+    return Allowlist(
+        yaml_only=_parse_entries(data.get("allowed_yaml_only", [])),
+        docx_only=_parse_entries(data.get("allowed_docx_only", [])),
+    )
 
 
 # --- Abilities loader -------------------------------------------------------
@@ -123,6 +142,7 @@ def load_abilities(path: Path) -> list[RulesetAbility]:
 @dataclass(frozen=True)
 class DriftReport:
     r1_missing_in_yaml: list[RulesetAbility]
+    r1_whitelisted: list[tuple[RulesetAbility, WhitelistEntry]]
     r2_missing_in_docx: list[RulesetAbility]
     r2_whitelisted: list[tuple[RulesetAbility, WhitelistEntry]]
     r3_description_mismatch: list[tuple[RulesetAbility, RulesetAbility]]  # (docx, yaml)
@@ -148,19 +168,36 @@ class DriftReport:
 def compute_drift(
     docx_abilities: list[RulesetAbility],
     yaml_abilities: list[RulesetAbility],
-    whitelist: dict[str, WhitelistEntry],
+    whitelist: Allowlist | dict[str, WhitelistEntry] | None = None,
 ) -> DriftReport:
-    """Porównaj listy ability po slug — wygeneruj 4 buckety raportu."""
+    """Porównaj listy ability po slug — wygeneruj 5 bucketów raportu.
+
+    `whitelist` accepts: Allowlist (preferred), dict (legacy — treated as yaml_only),
+    or None (empty allowlist).
+    """
+    if whitelist is None:
+        whitelist = Allowlist(yaml_only={}, docx_only={})
+    elif isinstance(whitelist, dict):
+        whitelist = Allowlist(yaml_only=whitelist, docx_only={})
+
     docx_by_slug = {a.slug: a for a in docx_abilities}
     yaml_by_slug = {a.slug: a for a in yaml_abilities}
 
     docx_slugs = set(docx_by_slug)
     yaml_slugs = set(yaml_by_slug)
 
-    r1 = sorted(
+    r1_all = sorted(
         (docx_by_slug[s] for s in docx_slugs - yaml_slugs),
         key=lambda a: a.slug,
     )
+    r1_missing: list[RulesetAbility] = []
+    r1_whitelisted: list[tuple[RulesetAbility, WhitelistEntry]] = []
+    for ab in r1_all:
+        entry = whitelist.docx_only.get(ab.slug)
+        if entry is None:
+            r1_missing.append(ab)
+        else:
+            r1_whitelisted.append((ab, entry))
 
     r2_all = sorted(
         (yaml_by_slug[s] for s in yaml_slugs - docx_slugs),
@@ -169,7 +206,7 @@ def compute_drift(
     r2_missing: list[RulesetAbility] = []
     r2_whitelisted: list[tuple[RulesetAbility, WhitelistEntry]] = []
     for ab in r2_all:
-        entry = whitelist.get(ab.slug)
+        entry = whitelist.yaml_only.get(ab.slug)
         if entry is None:
             r2_missing.append(ab)
         else:
@@ -187,7 +224,8 @@ def compute_drift(
             r3.append((d, y))
 
     return DriftReport(
-        r1_missing_in_yaml=r1,
+        r1_missing_in_yaml=r1_missing,
+        r1_whitelisted=r1_whitelisted,
         r2_missing_in_docx=r2_missing,
         r2_whitelisted=r2_whitelisted,
         r3_description_mismatch=r3,
@@ -211,8 +249,9 @@ def render_report(
 ) -> str:
     """Wygeneruj `build/drift_report.md` jako pełen markdown."""
     today = _dt.date.today().isoformat()
+    whitelist_total = len(report.r1_whitelisted) + len(report.r2_whitelisted)
     whitelist_info = (
-        f"`{whitelist_path}` ({len(report.r2_whitelisted)} matched)"
+        f"`{whitelist_path}` ({whitelist_total} matched)"
         if whitelist_path is not None and whitelist_path.exists()
         else "(none)"
     )
@@ -230,8 +269,9 @@ def render_report(
         "",
         "| Type | Description | Count | Severity | Exit contribution |",
         "|---|---|---|---|---|",
-        f"| R1 | Missing in YAML (DOCX → YAML gap) | {len(report.r1_missing_in_yaml)} | ERROR | "
+        f"| R1 | Missing in YAML (non-whitelisted) | {len(report.r1_missing_in_yaml)} | ERROR | "
         f"{'1' if report.r1_missing_in_yaml else '—'} |",
+        f"| R1w | Missing in YAML (whitelisted) | {len(report.r1_whitelisted)} | INFO | — |",
         f"| R2 | Missing in DOCX (non-whitelisted) | {len(report.r2_missing_in_docx)} | WARN | "
         f"{'2' if report.r2_missing_in_docx else '—'} |",
         f"| R2w | Missing in DOCX (whitelisted) | {len(report.r2_whitelisted)} | INFO | — |",
@@ -251,6 +291,18 @@ def render_report(
             lines.append(f"**DOCX description:** {ab.description}")
             lines.append("")
             lines.append("**Action:** dodaj do `app/rulesets/v1/abilities.yaml` lub zarejestruj świadomy skip.")
+            lines.append("")
+    else:
+        lines.append("_(none)_\n")
+
+    # R1 whitelisted (INFO) — symetria do R2w
+    lines.append(_section_header("R1 (whitelisted) — Missing in YAML, świadomie dozwolone", len(report.r1_whitelisted), "INFO"))
+    if report.r1_whitelisted:
+        for ab, entry in report.r1_whitelisted:
+            until = f" (until {entry.until_date})" if entry.until_date else " (permanent)"
+            lines.append(f"### `{ab.slug}` ({ab.name}) — `{ab.type}`{until}")
+            lines.append("")
+            lines.append(f"**Reason:** {entry.reason}")
             lines.append("")
     else:
         lines.append("_(none)_\n")
@@ -364,6 +416,7 @@ def main(argv: list[str] | None = None) -> int:
     severity = "ERROR" if report.has_errors else ("WARN" if report.has_warnings else "CLEAN")
     print(
         f"Drift: R1={len(report.r1_missing_in_yaml)} "
+        f"R1w={len(report.r1_whitelisted)} "
         f"R2={len(report.r2_missing_in_docx)} "
         f"R2w={len(report.r2_whitelisted)} "
         f"R3={len(report.r3_description_mismatch)} "
