@@ -1,7 +1,7 @@
 # HANDOFF — faza-b-engine-mvp
 
-> **Wątek:** Strumień B — Game Engine MVP. Bootstrap (B0 założenia + 4 ADR-y) + następne podfazy B2 (modele) → B3 (rule executor) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed).
-> **Status:** In progress (B0 deliverables + ADR-y bootstrap)
+> **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + następne podfazy B2 (modele) → B3 (rule executor) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, ...).
+> **Status:** In progress — B0 ✅ (commits `67740c4`+`2e01894`+`53de635`), B3 sub-wątek `faza-b-3-executor` started 2026-05-30
 > **Utworzony:** 2026-05-30
 > **Ostatnia aktualizacja:** 2026-05-30
 
@@ -26,14 +26,12 @@ Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odb
 - `docs/adr/0014-per-unit-wounds.md` (NEW) — Status: Accepted
 - `docs/roadmap.md` — statusy B0 ✅ + ADR-y Accepted
 
-**Sub-wątki B2+ (do wpisania gdy startują):**
-- `app/services/engine/` (cały NEW pakiet — B2-B3)
-- `app/models.py` — Battle, BattleEvent, BattleInvite, BattleSnapshot, AgentToken, AgentAuditLog; rozszerzenie Unit (base_size_mm, base_shape) (B2)
-- Alembic migration `XXX_add_battle_models.py` (B2)
-- `app/routers/battles.py` (NEW, B4)
-- `szop_client/` (NEW pakiet, B5)
-- `tests/test_engine_*.py` (NEW, B3-B7)
-- `tests/fixtures/battles/*.yaml` (NEW, B7)
+**Sub-wątki B2+ (delegacja zakresów):**
+- **`faza-b-3-executor`** (active od 2026-05-30, [HANDOFF](HANDOFF_faza-b-3-executor.md)) — `app/services/engine/` cały NEW pakiet (`state`/`events`/`dice`/`los`/`prediction`/`combat`/`effects`/`interrupts`/`phases`/`resolver`), `tests/test_engine_*.py` + `tests/test_los_geometry.py` + `tests/test_prediction_vs_simulation.py`, ADR-y 0011/0012/0015/0015a/0043/0044, `build/b3_action_ability_audit.md` (GATE pkt 3). Status: B3.0 preflight.
+- **`faza-b-2-models`** (NIE uruchomione — odłożone do startu B4) — `app/models.py` (Battle/BattleEvent/BattleInvite/BattleSnapshot/AgentToken/AgentAuditLog + Unit.base_size_mm/base_shape), Alembic migration `XXX_add_battle_models.py`. Powód: executor pure-function (B3) nie potrzebuje ORM/DB do testów.
+- **`faza-b-4-api`** — `app/routers/battles.py` (NEW). Po B3.7 + faza-b-2-models.
+- **`faza-b-5-client`** — `szop_client/` (NEW pakiet). Równolegle z B4.
+- **`faza-b-7-test-bed`** — `tests/fixtures/battles/*.yaml` (NEW). Po B3.7.
 
 **Read-only przez cały Strumień B (źródła prawdy):**
 - `app/static/docs/SZOP_Rozjemca.md` — reguły gry (mechaniki)
@@ -54,7 +52,7 @@ Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odb
 
 ## Plan implementacji
 
-### B0 — Pareto MVP założenia + 4 ADR-y (~1 sesja) — **IN PROGRESS**
+### B0 — Pareto MVP założenia + 4 ADR-y (~1 sesja) — **DONE 2026-05-30**
 
 **Decyzje wejściowe (z sesji 2026-05-28+2026-05-30):**
 
@@ -92,14 +90,16 @@ Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odb
 
 **Kroki B0:**
 
-- [ ] B0.1: `app/rulesets/v1/tables.yaml` — dodaj sekcję `b_mvp` (move_inches=6, base_area_inches_sq_per_toughness=1, pi_approx)
-- [ ] B0.2: `app/rulesets/v1/b_mvp_exclusions.yaml` (NEW) — 6 entries z {slug, reason, category}
-- [ ] B0.3: `app/services/rulesets/models.py` — `BMvpConfig`, `BMvpExclusion`, `BMvpExclusions` Pydantic schemas; rozszerz `RulesetTables` o opcjonalne pole `b_mvp`
-- [ ] B0.4: `app/services/rulesets/loader.py` — `load_b_mvp_exclusions()` z `@lru_cache`
-- [ ] B0.5: `tests/test_b_mvp_tables.py` (NEW) — b_mvp sekcja + helper `compute_radius`
-- [ ] B0.6: `tests/test_b_mvp_config.py` (NEW) — 6 entries, slug set, sanity link do abilities.yaml
-- [ ] B0.7: ADR-0008 (Pareto MVP), ADR-0010 (event-sourced), ADR-0010a (decision freeze), ADR-0014 (per-unit wounds) — wszystkie Status: Accepted
-- [ ] B0.8: `docs/roadmap.md` — B0 ✅, ADR-y 0008/0010/0010a/0014 Accepted
+- [x] B0.1: `app/rulesets/v1/tables.yaml` — dodaj sekcję `b_mvp` (move_inches=6, base_area_inches_sq_per_toughness=1, pi_approx)
+- [x] B0.2: `app/rulesets/v1/b_mvp_exclusions.yaml` (NEW) — 6 entries z {slug, reason, category}
+- [x] B0.3: `app/services/rulesets/models.py` — `BMvpConfig`, `BMvpExclusion`, `BMvpExclusions` Pydantic schemas; rozszerz `RulesetTables` o opcjonalne pole `b_mvp`
+- [x] B0.4: `app/services/rulesets/loader.py` — `load_b_mvp_exclusions()` z `@lru_cache`
+- [x] B0.5: `tests/test_b_mvp_tables.py` (NEW) — b_mvp sekcja + helper `compute_radius`
+- [x] B0.6: `tests/test_b_mvp_config.py` (NEW) — 6 entries, slug set, sanity link do abilities.yaml
+- [x] B0.7: ADR-0008 (Pareto MVP), ADR-0010 (event-sourced), ADR-0010a (decision freeze), ADR-0014 (per-unit wounds) — wszystkie Status: Accepted
+- [x] B0.8: `docs/roadmap.md` — B0 ✅, ADR-y 0008/0010/0010a/0014 Accepted
+
+> **Note (2026-05-30):** GATE pkt 3 ADR-0010a (audit akcji pkt 14 ↔ aktywne zdolności z SZOP_Zdolnosci.md) przesunięty z B0.W do **B3.0.1 preflight** w sub-wątku [HANDOFF_faza-b-3-executor](HANDOFF_faza-b-3-executor.md). Powód: B0 zamknięte deliverable-side, audit to pre-implementation requirement dla B3.
 
 ### B2 — Modele danych (4 tyg, sub-wątek `faza-b-2-models`)
 
@@ -107,9 +107,11 @@ Per `docs/roadmap.md#b2-modele-danych`. ORM (Battle, BattleEvent, BattleInvite, 
 
 ADR-0010 (event-sourced) i ADR-0014 (per-unit wounds) z B0 dyktują strukturę. ADR-0042 (facing) odłożony do E3.
 
-### B3 — Rule Executor + dice (5-7 tyg, gate: ADR-0010a + decision freeze, sub-wątek `faza-b-3-executor`)
+### B3 — Rule Executor + dice (5-7 tyg, gate: ADR-0010a + decision freeze, sub-wątek `faza-b-3-executor`) — **STARTED 2026-05-30**
 
-Per `docs/roadmap.md#b3-rule-executor--dice`. 7 modułów: dice, los, prediction, combat, effects, interrupts, phases, resolver. ADR-y wymagane: 0011, 0012, 0015, 0015a, 0043, 0044.
+Sub-wątek: [HANDOFF_faza-b-3-executor.md](HANDOFF_faza-b-3-executor.md). Status: B3.0 preflight.
+
+Per `docs/roadmap.md#b3-rule-executor--dice`. 7 modułów + substrate: state/events (B3.0), dice (B3.1), los (B3.2), prediction (B3.3), combat (B3.4), effects+interrupts (B3.5), phases (B3.6), resolver (B3.7). ADR-y wymagane: 0011, 0012, 0015, 0015a, 0043, 0044. **GATE pkt 3 ADR-0010a (audit akcji ↔ zdolności) zrobi się w B3.0.1** (przesunięte z B0.W).
 
 ### B4 — API (3 tyg, sub-wątek `faza-b-4-api`)
 
@@ -164,3 +166,5 @@ python -c "from app.services.rulesets.loader import load_b_mvp_exclusions; print
 ## Notatki / odkrycia w trakcie
 
 - 2026-05-30: HANDOFF utworzony. Strumień A pełen (A0-A5 + A4); ADR-y 0001-0007 Accepted. ADR-y B (0008/0010/0010a/0014) do utworzenia w B0. `abilities.yaml` ma 88 entries po YAML sync z `Rozwoj` w trakcie A4. Wszystkie 6 slug-ów B exclusions audytowane jako obecne w YAML.
+- 2026-05-30: B0 done (3 commits: `67740c4` ADR-y, `2e01894` deliverables, `53de635` roadmap). 4 ADR-y Accepted, `b_mvp` w `tables.yaml`, `b_mvp_exclusions.yaml` (6 entries), Pydantic + loader + testy. Parent przechodzi w tryb koordynacji sub-wątków.
+- 2026-05-30: **Sub-wątek `faza-b-3-executor` started** ([HANDOFF](HANDOFF_faza-b-3-executor.md)). Decyzja: B3 leci przed pełnym B2 ORM — executor pure-function nie potrzebuje DB, minimum runtime substrate (state/events + apply_events) zrobi się w B3.0. Pełne B2 ORM (`faza-b-2-models`) odłożone do startu B4 API. GATE ADR-0010a pkt 3 (audit) → B3.0.1.

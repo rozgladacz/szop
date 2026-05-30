@@ -11,7 +11,8 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP. B0 (Pareto MVP założenia + 4 ADR-y) → B2 (modele) → B3 (executor) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). | `app/rulesets/v1/{tables.yaml b_mvp section, b_mvp_exclusions.yaml NEW}`, `app/services/rulesets/{models.py BMvp*, loader.py load_b_mvp_exclusions}`, `tests/test_b_mvp_{config,tables}.py NEW`, `docs/adr/{0008,0010,0010a,0014}-*.md NEW` | In progress (B0) |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ → B2 → B3 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3 sub-wątek started) |
+| [HANDOFF_faza-b-3-executor](docs/handoffs/HANDOFF_faza-b-3-executor.md) | Sub-wątek B3 — Rule Executor + dice. 7 modułów engine (`dice`/`los`/`prediction`/`combat`/`effects`/`interrupts`/`phases`/`resolver`) + runtime substrate (`state.py`/`events.py`) + 6 ADR-ów. | `app/services/engine/{__init__,state,events,dice,los,prediction,combat,effects,interrupts,phases,resolver}.py NEW`, `tests/test_engine_*.py` + `tests/test_los_geometry.py` + `tests/test_prediction_vs_simulation.py NEW`, `docs/adr/{0011,0012,0015,0015a,0043,0044}-*.md NEW`, `build/b3_action_ability_audit.md NEW` | In progress (B3.0 preflight) |
 
 ## Zasoby zablokowane (reverse lookup)
 
@@ -27,6 +28,25 @@
 | `docs/adr/0010-event-sourced-battle-log.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted |
 | `docs/adr/0010a-decision-freeze.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted (GATE dla B3) |
 | `docs/adr/0014-per-unit-wounds.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted |
+| `app/services/engine/` (NEW pakiet) | faza-b-3-executor | B3.0-B3.7 — runtime substrate + 7 modułów pure-functions |
+| `app/services/engine/state.py` (NEW) | faza-b-3-executor | B3.0.2 — `UnitBlob`/`BattleState`/`TerrainCircle`/`TerrainLine` + `apply_events` |
+| `app/services/engine/events.py` (NEW) | faza-b-3-executor | B3.0.3 — 8 event types + JSON serializer |
+| `app/services/engine/dice.py` (NEW) | faza-b-3-executor | B3.1 — `DeterministicDice(seed)` |
+| `app/services/engine/los.py` (NEW) | faza-b-3-executor | B3.2 — `check_los` 3-state N=16 sampling |
+| `app/services/engine/prediction.py` (NEW) | faza-b-3-executor | B3.3 — `expected_damage` analytic binomial CDF |
+| `app/services/engine/combat.py` (NEW) | faza-b-3-executor | B3.4 — `resolve_ranged_attack`/`resolve_melee_attack` + reactive window |
+| `app/services/engine/effects.py` (NEW) | faza-b-3-executor | B3.5 — `EFFECT_REGISTRY` per slug |
+| `app/services/engine/interrupts.py` (NEW) | faza-b-3-executor | B3.5 — `InterruptManager` 4 zamknięte punkty |
+| `app/services/engine/phases.py` (NEW) | faza-b-3-executor | B3.6 — `setup_phase`/`activation_phase`/`round_end_phase` |
+| `app/services/engine/resolver.py` (NEW) | faza-b-3-executor | B3.7 — pure `apply(state, action, dice, ruleset, terrain)` |
+| `tests/test_engine_*.py` (NEW) + `tests/test_los_geometry.py` + `tests/test_prediction_vs_simulation.py` | faza-b-3-executor | B3.0–B3.7 — testy modułów engine |
+| `docs/adr/0011-rule-executor.md` (NEW) | faza-b-3-executor | B3.0.6 Proposed → B3.7 Accepted |
+| `docs/adr/0012-dice-deterministic.md` (NEW) | faza-b-3-executor | B3.1 — Status: Accepted |
+| `docs/adr/0015-interrupt-points.md` (NEW) | faza-b-3-executor | B3.5 — Status: Accepted |
+| `docs/adr/0015a-reactive-window.md` (NEW) | faza-b-3-executor | B3.4 — Status: Accepted |
+| `docs/adr/0043-los-3-state.md` (NEW) | faza-b-3-executor | B3.2 — Status: Accepted |
+| `docs/adr/0044-prediction-module.md` (NEW) | faza-b-3-executor | B3.3 — Status: Accepted |
+| `build/b3_action_ability_audit.md` (NEW) | faza-b-3-executor | B3.0.1 — wynik GATE pkt 3 ADR-0010a |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
