@@ -1,7 +1,7 @@
 # HANDOFF — faza-b-3-executor
 
 > **Wątek:** Strumień B, Faza B3 — Rule Executor + dice. Sub-wątek `faza-b-engine-mvp`. 7 modułów engine pure-functions (`dice`, `los`, `prediction`, `combat`, `effects`, `interrupts`, `phases`, `resolver`) + minimalny substrate runtime (`state.py` + `events.py`) + 6 nowych ADR-ów.
-> **Status:** In progress (B3.0 ✅ + B3.1 dice ✅ done 2026-05-30; GATE OPEN; B3.2 LoS next)
+> **Status:** In progress (B3.0 ✅ + B3.1 dice ✅ + B3.2 LoS ✅ done 2026-05-30; GATE OPEN; B3.3 prediction next)
 > **Utworzony:** 2026-05-30
 > **Ostatnia aktualizacja:** 2026-05-30
 
@@ -80,12 +80,12 @@ Plan długofalowy: [docs/roadmap.md#b3-rule-executor--dice](../roadmap.md). Pare
 - [x] Testy `tests/test_engine_dice.py` (24 testy): reproducibility (same seed → same sequence × 10), different seeds → different (anti-collision), distribution (chi-square 10k rolls < 20.515 dla df=5 p=0.001), threshold semantics (basic 4+, natural 1 always fail, natural 6 auto-success default), Brutalny case (`natural_6_auto_success=False`), Delikatny case (analogicznie, plus natural 6 jeszcze success gdy ≥ threshold), modifier (+/-/clamp to 2+), edge cases (count=0, negative raises), RollResult frozen + natural rolls preserved.
 - [x] ADR-0012 (`docs/adr/0012-dice-deterministic.md`) Status: Accepted — `random.Random(seed)` z stdlib (brak zewnętrznej biblioteki), 4 inwarianty replay, 6 alternatyw odrzuconych (numpy, secrets, `dice` lib, globalny random.seed(), inline rolling, NamedTuple).
 
-### B3.2 — LoS (Line of Sight, 3-state)
+### B3.2 — LoS (Line of Sight, 3-state) — **DONE 2026-05-30**
 
-- [ ] `app/services/engine/los.py`: `check_los(attacker_blob, target_blob, terrain, N=16) → LoSState ∈ {WIDZI, NIE_WIDZI, OSŁONA}` — sampling N=16 deterministycznych punktów na okręgu celu, blokady przez `TerrainCircle`/`TerrainLine` z cechą `Zasłaniający` (per `SZOP_Rozjemca.md pkt 6`)
-- [ ] Helper `_los_blocking_lines(attacker_edge, target_point, terrain) → list[blocked_segments]`
-- [ ] Testy `tests/test_los_geometry.py`: ≥30 hand-crafted scenarios (clear / partial occlusion / full block / edge tangent / terrain z różnymi cechami)
-- [ ] ADR-0043 (`docs/adr/0043-los-3-state.md`) Status: Accepted — N=16, plan B: N=32 lub analytic tangent jeśli false-positives > 5%
+- [x] `app/services/engine/los.py` (~210 LOC): `LoSState` Enum (WIDZI/NIE_WIDZI/OSLONA), `check_los(attacker, target, terrain, n_samples=16) → LoSState`. Sampling N=16 punktów na obwodzie celu (równomierne kąty 2π·i/N). Attacker edge point na obwodzie ku celowi. Filtruje Blokujący (zawsze) + Zasłaniający (z wyjątkiem pkt 4.c.iii — atakujący/cel wewnątrz pozwala pass-through).
+- [x] Geometry helpers (private, pure): `_distance`, `_point_in_circle`, `_segment_intersects_circle` (closest point projection + clamp), `_segments_intersect` (CCW orientation test z colinearity), `_blob_inside_terrain` (proxy przez centrum bloba, line zawsze False).
+- [x] Testy `tests/test_los_geometry.py` (43 testy): geometry primitives (12: distance/point-in-circle/segment-circle/segments), Blokujący scenarios (4: full block circle/line, partial OSLONA, far terrain), Zasłaniający scenarios (5: neither/attacker-inside/target-inside/both-inside/Blokujący nie ma wyjątku), multiple terrain (2), non-blocking features ignored (3: Trudny/Obronny/multi-feature), edge cases (4: n_samples=0/-N/default/1), enum (2), realistic battle scenarios (2: thin pillar, wall behind).
+- [x] ADR-0043 (`docs/adr/0043-los-3-state.md`) Status: Accepted — uzasadnienie N=16 (Pareto sweet spot ~1.96″ spacing dla cel r=5″), trade-off table (N=4/8/16/32), 6 alternatyw odrzuconych (binary LoS, analytic tangent, ray-marching, sample-on-attacker, modele blokery from day 1, LoSState as string), plan B (N=32 lub analytic tangent jeśli >5% false-positive).
 
 ### B3.3 — Prediction (analytic, no RNG)
 
@@ -193,3 +193,4 @@ python scripts/engine_smoke_replay.py  # NEW w B3.9 — minimal 2v2 battle repla
 - 2026-05-30: `app/services/engine/` katalog NIE istnieje jeszcze (zweryfikowane przed bootstrap sub-wątku). Pełna struktura zostanie utworzona w B3.0.2 + dotworzona per moduł w B3.1+.
 - 2026-05-30 (post-B3.0): **B3.0 zamknięte.** `app/services/engine/` powstał z `__init__.py` + `state.py` + `events.py`. Audit B3.0.1 wykazał że abilities.yaml ma **12** aktywnych zdolności (różnica od MD: 5 dodanych w Rozwoj YAML sync: koordynacja, mobilizacja, presja, przekaznik, przepowiednia). Wszystkie 12 sklasyfikowanych: 6× akcja w aktywacji (14.e), 6× przerwanie (pkt 12). Pytest 998/998 (962 baseline + 36 nowych z test_engine_state + test_engine_events). GATE ADR-0010a → **OPEN**. B3.1 dice w następnej sesji.
 - 2026-05-30 (post-B3.1): **B3.1 dice zamknięte.** `app/services/engine/dice.py` (~110 LOC) + `RollResult` frozen + dokładnie zaszyte 4 reguły z pkt 1 (a-d) + flagi dla Brutalny/Delikatny. 24 nowe testy zielone (reproducibility, distribution chi-square, threshold semantics, modifier clamp). ADR-0012 Accepted. Pytest 1022/1022 (998 baseline + 24 nowych). Logika konkretnych zdolności (Furia, Niewrazliwy, Podwójny) deferred do `combat.py`/`effects.py` (B3.4-B3.5) — `RollResult.rolls` preserves natural values for inspection. Następny krok: B3.2 LoS (3-state).
+- 2026-05-30 (post-B3.2): **B3.2 LoS zamknięte.** `app/services/engine/los.py` (~210 LOC) — `check_los` z sampling N=16, attacker edge point + N target points na obwodzie celu, segment-vs-circle / segment-vs-segment intersection, Zasłaniający exception pkt 4.c.iii. 43 nowe testy (geometry primitives 12, Blokujący 4, Zasłaniający 5, multi-terrain 2, non-blocking 3, edge cases 4, enum 2, realistic 2 — plus integration). ADR-0043 Accepted (N=16 Pareto sweet spot, plan B N=32/analytic). Pytest 1065/1065. Następny krok: B3.3 prediction (analytic expected_damage, no RNG).
