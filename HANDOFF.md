@@ -11,13 +11,22 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| *(brak aktywnych wątków)* | | | |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP. B0 (Pareto MVP założenia + 4 ADR-y) → B2 (modele) → B3 (executor) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). | `app/rulesets/v1/{tables.yaml b_mvp section, b_mvp_exclusions.yaml NEW}`, `app/services/rulesets/{models.py BMvp*, loader.py load_b_mvp_exclusions}`, `tests/test_b_mvp_{config,tables}.py NEW`, `docs/adr/{0008,0010,0010a,0014}-*.md NEW` | In progress (B0) |
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| *(brak)* | | |
+| `app/rulesets/v1/tables.yaml` | faza-b-engine-mvp | B0.1 — sekcja `b_mvp` (move_inches, base_area_inches_sq_per_toughness) |
+| `app/rulesets/v1/b_mvp_exclusions.yaml` (NEW) | faza-b-engine-mvp | B0.2 — hand-curated lista 6 wykluczeń |
+| `app/services/rulesets/models.py` | faza-b-engine-mvp | B0.3 — `BMvpConfig`, `BMvpExclusion`, `BMvpExclusions` Pydantic |
+| `app/services/rulesets/loader.py` | faza-b-engine-mvp | B0.4 — `load_b_mvp_exclusions()` z lru_cache |
+| `tests/test_b_mvp_tables.py` (NEW) | faza-b-engine-mvp | B0.5 |
+| `tests/test_b_mvp_config.py` (NEW) | faza-b-engine-mvp | B0.6 |
+| `docs/adr/0008-pareto-mvp.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted |
+| `docs/adr/0010-event-sourced-battle-log.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted |
+| `docs/adr/0010a-decision-freeze.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted (GATE dla B3) |
+| `docs/adr/0014-per-unit-wounds.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
