@@ -1,7 +1,7 @@
 # HANDOFF — faza-b-3-executor
 
 > **Wątek:** Strumień B, Faza B3 — Rule Executor + dice. Sub-wątek `faza-b-engine-mvp`. 7 modułów engine pure-functions (`dice`, `los`, `prediction`, `combat`, `effects`, `interrupts`, `phases`, `resolver`) + minimalny substrate runtime (`state.py` + `events.py`) + 6 nowych ADR-ów.
-> **Status:** In progress (B3.0 ✅ done 2026-05-30; GATE OPEN; B3.1 dice next)
+> **Status:** In progress (B3.0 ✅ + B3.1 dice ✅ done 2026-05-30; GATE OPEN; B3.2 LoS next)
 > **Utworzony:** 2026-05-30
 > **Ostatnia aktualizacja:** 2026-05-30
 
@@ -74,11 +74,11 @@ Plan długofalowy: [docs/roadmap.md#b3-rule-executor--dice](../roadmap.md). Pare
 - [x] **B3.0.6 — ADR-0011 (Proposed):** `docs/adr/0011-rule-executor.md` — hardcoded klasy/funkcje na MVP (zamiast YAML rule engine). Sekcja "Do rewizji przed promocją na Accepted (po B3.7)" lista 8 punktów do weryfikacji empirycznej (size of effects.py, combat complexity, Action polimorfizm, etc.).
 - [x] **B3.0.7 — GATE check:** **GATE → OPEN** ✅. Wszystkie 5 punktów ADR-0010a spełnione: (1) SZOP_Rozjemca.md w repo, (2) SZOP_Zdolnosci.md w repo, (3) mapping audit kompletny (B3.0.1), (4) b_mvp_exclusions.yaml zatwierdzony, (5) ADR-y 0008/0010/0014 Accepted + 0010a sam w użyciu (Status: Accepted). **B3.1 (dice) może startować w następnej sesji.**
 
-### B3.1 — Dice (~80 LOC, 1 ADR)
+### B3.1 — Dice — **DONE 2026-05-30**
 
-- [ ] `app/services/engine/dice.py`: `DeterministicDice(seed)`, `roll_d6(count, modifiers)`, `roll_with_threshold(pool, threshold) → successes_count`
-- [ ] Testy `tests/test_engine_dice.py`: reproducibility (same seed → same sequence), distribution (chi-square dla 10k rzutów), threshold edge cases (naturalna 1/6 per `SZOP_Rozjemca.md pkt 1.c`)
-- [ ] ADR-0012 (`docs/adr/0012-dice-deterministic.md`) Status: Accepted — `secrets`/`random.Random(seed)`, brak biblioteki zewnętrznej; argumentacja reproducibility + audit trail
+- [x] `app/services/engine/dice.py` (~110 LOC): `DeterministicDice(seed)` wrapping `random.Random`, `roll_d6(count) -> tuple[int, ...]`, `roll_with_threshold(count, threshold, *, modifier=0, natural_6_auto_success=True, natural_1_auto_failure=True) -> RollResult`. `RollResult` frozen+slots z `rolls/successes/effective_threshold/base_threshold/modifier`. Pełne reguły `SZOP_Rozjemca.md pkt 1` (a/b/c/d) zaszyte; logika konkretnych zdolności (Brutalny/Delikatny/Furia/Niewrazliwy) flagami / inspekcją natural rolls przez combat.py.
+- [x] Testy `tests/test_engine_dice.py` (24 testy): reproducibility (same seed → same sequence × 10), different seeds → different (anti-collision), distribution (chi-square 10k rolls < 20.515 dla df=5 p=0.001), threshold semantics (basic 4+, natural 1 always fail, natural 6 auto-success default), Brutalny case (`natural_6_auto_success=False`), Delikatny case (analogicznie, plus natural 6 jeszcze success gdy ≥ threshold), modifier (+/-/clamp to 2+), edge cases (count=0, negative raises), RollResult frozen + natural rolls preserved.
+- [x] ADR-0012 (`docs/adr/0012-dice-deterministic.md`) Status: Accepted — `random.Random(seed)` z stdlib (brak zewnętrznej biblioteki), 4 inwarianty replay, 6 alternatyw odrzuconych (numpy, secrets, `dice` lib, globalny random.seed(), inline rolling, NamedTuple).
 
 ### B3.2 — LoS (Line of Sight, 3-state)
 
@@ -192,3 +192,4 @@ python scripts/engine_smoke_replay.py  # NEW w B3.9 — minimal 2v2 battle repla
 - 2026-05-30: Audyt sygnatur do napisania w B3.0.1: `SZOP_Zdolnosci.md` ma 77 zdolności (`grep -c "^### " ≈ 77`), z tego pasywnych ~60, aktywnych ~17. Aktywne mapują się na akcję 14.e (Akcja specjalna). Pasywne mapują się przez `EFFECT_REGISTRY` bez akcji.
 - 2026-05-30: `app/services/engine/` katalog NIE istnieje jeszcze (zweryfikowane przed bootstrap sub-wątku). Pełna struktura zostanie utworzona w B3.0.2 + dotworzona per moduł w B3.1+.
 - 2026-05-30 (post-B3.0): **B3.0 zamknięte.** `app/services/engine/` powstał z `__init__.py` + `state.py` + `events.py`. Audit B3.0.1 wykazał że abilities.yaml ma **12** aktywnych zdolności (różnica od MD: 5 dodanych w Rozwoj YAML sync: koordynacja, mobilizacja, presja, przekaznik, przepowiednia). Wszystkie 12 sklasyfikowanych: 6× akcja w aktywacji (14.e), 6× przerwanie (pkt 12). Pytest 998/998 (962 baseline + 36 nowych z test_engine_state + test_engine_events). GATE ADR-0010a → **OPEN**. B3.1 dice w następnej sesji.
+- 2026-05-30 (post-B3.1): **B3.1 dice zamknięte.** `app/services/engine/dice.py` (~110 LOC) + `RollResult` frozen + dokładnie zaszyte 4 reguły z pkt 1 (a-d) + flagi dla Brutalny/Delikatny. 24 nowe testy zielone (reproducibility, distribution chi-square, threshold semantics, modifier clamp). ADR-0012 Accepted. Pytest 1022/1022 (998 baseline + 24 nowych). Logika konkretnych zdolności (Furia, Niewrazliwy, Podwójny) deferred do `combat.py`/`effects.py` (B3.4-B3.5) — `RollResult.rolls` preserves natural values for inspection. Następny krok: B3.2 LoS (3-state).
