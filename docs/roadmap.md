@@ -92,12 +92,14 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 > Symulator pełnej bitwy 1v1. Uproszczony model: oddział = koło, tereny = koła/linie, brak orientacji/per-model loadout. Pełne zasady przebiegu rundy.
 
-### B0. Pareto MVP — założenia (prereq)
-- [ ] Zdefiniuj w `tables.yaml`: wzór na radius_inches = f(models_count, toughness, base_size_mm)
-- [ ] Globalna stała ruchu: 6" w `tables.yaml` (nie per-unit)
-- [ ] Lista exclusions z `build/geometry_classification.md` (A4) — engine raise `UnsupportedAbilityError` dla tych zdolności
-- [ ] ADR-0008: Pareto MVP specification
-- [ ] ADR-0010a: Decision freeze — "rules text dojrzały do implementacji B3 actions" (GATE)
+### B0. Pareto MVP — założenia (prereq) ✅ (2026-05-30, wątek `faza-b-engine-mvp`)
+- [x] `tables.yaml > b_mvp`: `move_inches=6`, `base_area_inches_sq_per_toughness=1` (podstawka modelu = 1 in²/punkt wytrzymałości), `pi_approx`. Wzór: `radius_inches = sqrt(sum(toughness)/pi)`; Bohater (id 2) liczy się jako `toughness/2`.
+- [x] `b_mvp_exclusions.yaml` (NEW): hand-curated 6 entries (samolot/wrak/wysoki/zwrot/sterowany/zuzywalny). Rozbieżność z A4.3 (3 entries: dywersant/precyzyjny/zwrot) udokumentowana w ADR-0008 — A4.3 jest heurystyką keyword match, B0 list to user decision.
+- [x] `app/services/rulesets/{models.py BMvpConfig/Exclusion/Exclusions, loader.py load_b_mvp_exclusions}` — Pydantic + lru_cache; engine raise `UnsupportedAbilityError` przy budowie BattleState
+- [x] ADR-0008: Pareto MVP specification (Accepted)
+- [x] ADR-0010: Event-sourced battle log (Accepted; sub-decyzja 0010b scalona)
+- [x] ADR-0010a: Decision freeze GATE — 5 warunków (Accepted)
+- [x] ADR-0014: Per-unit wounds — 4 kategorie ran (Accepted; Zguba/Zemsta wykluczone)
 
 ### B2. Modele danych (4 tyg)
 
@@ -293,14 +295,14 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 | 0005 | Feature toggle: procedural + YAML | ✓ |
 | 0006 | Pipeline docx↔yaml: drift-only | ✓ |
 | 0007 | Cache rulesetów: LRU na load_ruleset | ✓ |
-| 0008 | Pareto MVP: oddział = koło, pełne zasady | — |
-| 0010 | Event-sourced battle log | — |
-| 0010a | Decision freeze (GATE dla B3 actions) | — |
-| 0010b | Eventy + immutable state; ORM tylko persistence | — |
+| 0008 | Pareto MVP: oddział = koło, pełne zasady | ✓ |
+| 0010 | Event-sourced battle log | ✓ |
+| 0010a | Decision freeze (GATE dla B3 actions) | ✓ |
+| 0010b | Eventy + immutable state; ORM tylko persistence | ✓ (scalone w ADR-0010) |
 | 0011 | Rule executor: hardcoded → YAML handlers | — |
 | 0012 | Dice: własna biblioteka, deterministyczny seed | — |
 | 0013 | Engine headless-first | — |
-| 0014 | Obrażenia per-oddział (= Stan bitewny) | — |
+| 0014 | Obrażenia per-oddział (= Stan bitewny) — 4 kategorie ran | ✓ |
 | 0015 | 4 zamknięte interrupt points | — |
 | 0015a | Reactive window w akcji ataku (atomowe) | — |
 | 0016 | szop_client jako wydzielony moduł | — |
@@ -327,6 +329,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - **Hierarchia oddziałów = dziedziczenie z różnicami.** Wariant trzyma tylko delta.
 - **Monolityczne pliki dzielimy stopniowo.** Komentarze sekcji w `app.js`, `_engine.py` — patrz `docs/developing.md`.
 - **Reguły gry (`app/static/docs/`) = source of truth.** Niedopuszczalna dywergencja kod ↔ DOCX.
+- **SSOT split (od 2026-05-30, B0):** `SZOP_Rozjemca.md` + `SZOP_Zdolnosci.md` = SSOT dla **engine** (mechaniki, drift target). `SZOP.docx`/`SZOP.pdf` = SSOT dla **rules-as-prose** (oficjalny tekst reguł). A4 drift gate weryfikuje synchronizację 4 plików źródłowych.
 - **Procedural ↔ YAML parity = CI gate.** `both_assert` wykrywa każdą rozbieżność > 1e-3.
 - **Game engine = czyste funkcje + event sourcing.** ORM tylko do persistence, brak logiki gry w ORM.
 - **MCP agent = klient HTTP, nie direct DB.** Jeden mechanizm uprawnień, jeden audit trail.
