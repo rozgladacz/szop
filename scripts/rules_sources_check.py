@@ -16,8 +16,12 @@ Tryby:
 
 Exit codes:
 - `0` — wszystkie hashes zgadzają się (clean).
-- `1` — co najmniej jeden mismatch (silent edit detected — wymaga review).
-- `2` — co najmniej jeden source file missing (nie istnieje).
+- `1` — verification failed: mismatch (silent edit) lub missing source file (broken setup).
+
+Note: zarówno MISMATCH jak MISSING zwracają exit 1 — workflow GHA (`rules_drift.yml`)
+traktuje exit 2 jako WARN/pass, exit 1 jako fail/block. Missing source musi
+zatrzymać CI (verification incomplete), więc kolapsujemy oba do exit 1.
+Distinction widoczna w `_print_results` output (per linia: MISSING/MISMATCH/OK).
 
 Użycie:
     python scripts/rules_sources_check.py
@@ -144,12 +148,13 @@ def check_entries(entries: list[SourceEntry], project_root: Path) -> list[CheckR
 
 
 def exit_code_from_results(results: list[CheckResult]) -> int:
-    """0=clean, 1=mismatch, 2=missing (missing wygrywa nad mismatch)."""
-    has_missing = any(r.status == CheckStatus.MISSING for r in results)
-    has_mismatch = any(r.status == CheckStatus.MISMATCH for r in results)
-    if has_missing:
-        return 2
-    if has_mismatch:
+    """0=clean, 1=verification failed (mismatch lub missing).
+
+    MISSING i MISMATCH oba zwracają exit 1 — workflow GHA musi blokować CI
+    w obu przypadkach (missing = broken setup, mismatch = silent edit).
+    Distinction widoczna w `_print_results` (MISSING/MISMATCH/OK per linia).
+    """
+    if any(r.status in (CheckStatus.MISSING, CheckStatus.MISMATCH) for r in results):
         return 1
     return 0
 
@@ -170,13 +175,26 @@ def compute_current_entries(
     project_root: Path,
     existing: list[SourceEntry] | None = None,
 ) -> list[SourceEntry]:
-    """Wygeneruj fresh hashes dla `DEFAULT_SOURCES` + zachowaj `role` z `existing` jeśli był."""
+    """Wygeneruj fresh hashes dla `DEFAULT_SOURCES` + zachowaj entries z `existing`
+    których ścieżki nie są w `DEFAULT_SOURCES` (legacy tracking, np. tymczasowy
+    SZOP_Errata.md dodany manualnie przez usera). Te legacy entries też dostają
+    refresh SHA256.
+
+    Zachowuje `role` z `existing` jeśli wpis istniał — pozwala na customizację
+    role text bez utraty przy `--update`.
+    """
+    default_paths = {path for path, _ in DEFAULT_SOURCES}
     role_by_path: dict[str, str] = {}
+    legacy_paths: list[str] = []
     if existing is not None:
         for e in existing:
             role_by_path[e.path] = e.role
+            if e.path not in default_paths:
+                legacy_paths.append(e.path)
 
-    entries = []
+    entries: list[SourceEntry] = []
+
+    # Canonical sources (always tracked).
     for path_str, default_role in DEFAULT_SOURCES:
         full_path = project_root / path_str
         if not full_path.exists():
@@ -185,6 +203,23 @@ def compute_current_entries(
         sha = compute_sha256(full_path)
         role = role_by_path.get(path_str, default_role)
         entries.append(SourceEntry(path=path_str, sha256=sha, role=role))
+
+    # Legacy entries — preserve user-added tracking. Refresh SHA, keep role.
+    for path_str in legacy_paths:
+        full_path = project_root / path_str
+        if not full_path.exists():
+            print(
+                f"WARNING: legacy source missing, dropped from hash file: {path_str}",
+                file=sys.stderr,
+            )
+            continue
+        sha = compute_sha256(full_path)
+        print(
+            f"NOTE: preserved legacy entry (not in DEFAULT_SOURCES): {path_str}",
+            file=sys.stderr,
+        )
+        entries.append(SourceEntry(path=path_str, sha256=sha, role=role_by_path[path_str]))
+
     return entries
 
 

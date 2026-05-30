@@ -171,6 +171,24 @@ def test_drift_r1_whitelisted_does_not_affect_exit() -> None:
     assert report.exit_code == 0
 
 
+def test_drift_accepts_legacy_dict_whitelist() -> None:
+    """Backward-compat: dict[str, WhitelistEntry] traktowane jak yaml_only.
+
+    Regression: ten path był nieprzetestowany — jeśli refaktor by usunął
+    isinstance(dict) gałąź, legacy callers crashowali by przy uruchomieniu.
+    """
+    docx: list[RulesetAbility] = []
+    yaml_abs = [_ability("only_yaml")]
+    # Pass dict bezpośrednio (legacy API z A4.2 przed wprowadzeniem Allowlist).
+    whitelist_dict = {"only_yaml": WhitelistEntry(slug="only_yaml", reason="legacy")}
+    report = compute_drift(docx, yaml_abs, whitelist=whitelist_dict)
+
+    # Dict treated as yaml_only — slug trafia w R2 whitelisted bucket.
+    assert report.r2_missing_in_docx == []
+    assert [a.slug for a, _ in report.r2_whitelisted] == ["only_yaml"]
+    assert report.exit_code == 0
+
+
 def test_drift_r2_missing_in_docx_not_whitelisted() -> None:
     """Slug w YAML, brak w DOCX, brak whitelist → WARN exit 2."""
     docx: list[RulesetAbility] = []

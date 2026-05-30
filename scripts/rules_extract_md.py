@@ -65,7 +65,11 @@ TYPE_MAP: dict[str, AbilityType] = {
     "broni": "weapon",
 }
 
-SECTION_HEADER = re.compile(r"^##\s+(\w+)\s*$")  # `## Pasywne`
+# Section header — `## <pierwsze słowo + opcjonalne dodatkowe>`. Lookup w
+# SECTION_MAP idzie po **pierwszym słowie** (split by whitespace).
+# Pozwala na future MD edits typu "## Pasywne Specjalne" bez breakage —
+# pierwsze słowo nadal mapuje na sekcję, reszta jest pomijana.
+SECTION_HEADER = re.compile(r"^##\s+(.+?)\s*$")
 ABILITY_HEADER = re.compile(r"^###\s+\d+\.\s+(.+?)\s*$")  # `### 1. Bastion`
 TYPE_FIELD = re.compile(r"^\s*-\s*typ:\s*(\w+)\s*$")
 OPIS_FIELD = re.compile(r"^\s*-\s*opis:\s*(.+?)\s*$")
@@ -122,11 +126,14 @@ def extract_abilities_md(md_path: Path) -> list[RulesetAbility]:
         stripped = line.strip()
 
         # Sekcja: `## Pasywne` / `## Aktywne` / etc. (ignore `## Konwencje`).
+        # Multi-word headers (e.g., `## Pasywne Specjalne`) — lookup po pierwszym
+        # słowie. Niezmapowane sekcje (Konwencje, Wstęp, etc.) → current_section=None.
         section_match = SECTION_HEADER.match(line)
         if section_match:
             flush()
-            header = section_match.group(1)
-            current_section = SECTION_MAP.get(header)  # None for "Konwencje" etc.
+            header_text = section_match.group(1).strip()
+            first_word = header_text.split(maxsplit=1)[0] if header_text else ""
+            current_section = SECTION_MAP.get(first_word)
             continue
 
         # Nowa ability: `### N. Name`.
@@ -149,6 +156,16 @@ def extract_abilities_md(md_path: Path) -> list[RulesetAbility]:
             mapped = TYPE_MAP.get(polish_type)
             if mapped is not None:
                 pending_type = mapped
+            else:
+                # Unknown typ value (np. typo 'pasywne' zamiast 'pasywna') —
+                # zachowaj section fallback ale ostrzeż usera. Bez tej diagnostyki
+                # MD typo prowadziłoby do silent miscategorization → drift R4.
+                print(
+                    f"WARNING: unknown `typ: {polish_type!r}` for ability "
+                    f"{pending_name!r} — falling back to section type "
+                    f"{pending_type!r}",
+                    file=sys.stderr,
+                )
             continue
 
         # `- opis: "<text>"` field (potencjalnie multi-line).

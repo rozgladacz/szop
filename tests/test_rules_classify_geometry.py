@@ -78,6 +78,43 @@ def test_classify_facing_keyword_directional() -> None:
     assert result.excluded_in_b_mvp is True
 
 
+def test_classify_facing_obrot_keyword() -> None:
+    """`obrót`/`obrotowy` → facing (rotation, B MVP excluded). Regression for
+    broken `\\bobr\\w+ obrotowy\\w*` regex (fixed → `\\bobrot\\w*`)."""
+    ab = _ability("test", "Wykonuje obrót o 90 stopni przed atakiem.")
+    result = classify_ability(ab)
+    assert "facing" in result.categories
+    assert result.excluded_in_b_mvp is True
+
+
+def test_classify_los_complex_stopni() -> None:
+    """`N stopni` notation → los_complex (Polish angle notation)."""
+    ab = _ability("test", "Atak w łuku 180 stopni z przodu.", type_="weapon")
+    result = classify_ability(ab)
+    assert "los_complex" in result.categories
+    assert result.excluded_in_b_mvp is True
+
+
+def test_classify_no_dead_degree_symbol_pattern() -> None:
+    """Regression: `°` U+00B0 jest stripowane przez NFKD ascii-fold —
+    pattern `r'180°'` był dead w starej wersji. Tekst po normalize traci `°`,
+    łapie się tylko Polish 'stopni' alternative.
+
+    Test używa neutralnego wording (bez 'łuk'/'stożek'/'sektor'/'kąt') żeby
+    izolować failure degree symbol pattern.
+    """
+    # "180°" → "180" after normalize; nie matchuje los_complex (no 'stopni' fallback).
+    ab = _ability("test", "Obraca się o 180°.", type_="weapon")
+    result = classify_ability(ab)
+    # Może matchnąć facing (obraca/obrot), ale NIE los_complex.
+    assert "los_complex" not in result.categories
+
+    # Ale "180 stopni" matchuje los_complex.
+    ab2 = _ability("test2", "Obraca się o 180 stopni.", type_="weapon")
+    result2 = classify_ability(ab2)
+    assert "los_complex" in result2.categories
+
+
 def test_classify_facing_keyword_strefy() -> None:
     """`strefy` → facing (zones)."""
     ab = _ability("test", "Atakujący w tylnej strefie ma -1.")

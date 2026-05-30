@@ -71,13 +71,16 @@ CATEGORIES: tuple[Category, ...] = (
         label="Orientacja / strefy (front/tył/flank)",
         excluded_in_b_mvp=True,
         rationale="B MVP Pareto: oddział = koło, brak facing. Wymaga `BattleUnit.facing_deg` field (ADR-0042).",
+        # Wszystkie keyword patterns OPERUJĄ NA TEKŚCIE PO `_normalize_for_match`
+        # (ASCII-fold + lowercase). Patterny muszą być w ASCII — Polish chars
+        # tylko w fallback test cases, nie w live patterns.
         keywords=(
             r"\bzwrot\b",
             r"\bprzod\b", r"\btyl\b", r"\blewo\b", r"\bprawo\b",
             r"\bstrefa\b", r"\bstrefie\b", r"\bstrefy\b",
             r"\busytuowanie\b",
             r"\bflank\w*",
-            r"\bobr\w+ obrotowy\w*",  # obrót, obrotowy
+            r"\bobrot\w*",  # obrót, obrotów, obrotowy, obrotowa (po NFKD ó→o)
         ),
     ),
     Category(
@@ -99,13 +102,15 @@ CATEGORIES: tuple[Category, ...] = (
         label="LoS — łuki / stożki / sektory",
         excluded_in_b_mvp=True,
         rationale="B MVP LoS: 3-state (Widzi/Nie widzi/Osłona) via sampling N=16 (ADR-0043). Łuki/stożki wymagają analitycznej geometrii.",
+        # Note: '°' (U+00B0) jest stripowane przez ASCII normalize — NIE używać
+        # w live patterns. Polish nazewnictwo ('stopni', 'stopnie') jako primary;
+        # angle keywords ('kat\w*' łapie kąt/kąta/kątem) jako fallback.
         keywords=(
             r"\bluk\b", r"\bluku\b",
             r"\bstozek\b", r"\bstozka\b",
             r"\bsektor\w*",
-            r"\bkat\w*",  # kąt
-            r"180°", r"90°", r"45°",  # ° degrees
-            r"180\s*stopni", r"90\s*stopni",
+            r"\bkat\w*",  # kąt (po NFKD ą→a)
+            r"\d+\s*stopni\w*",  # 180 stopni, 90 stopni, ... — Polish notation
         ),
     ),
     Category(

@@ -280,3 +280,45 @@ def test_empty_md_returns_empty_list(tmp_path: Path) -> None:
     path.write_text("# Just a title\n\nNo sections.\n", encoding="utf-8")
     abilities = extract_abilities_md(path)
     assert abilities == []
+
+
+def test_multiword_section_header_uses_first_word(tmp_path: Path) -> None:
+    """`## Pasywne Specjalne` → section 'Pasywne' (lookup po pierwszym słowie).
+
+    Regression: stara wersja `\\w+` regex nie matchowała multi-word headers,
+    silnie miscategorizing abilities pod tą sekcją.
+    """
+    content = """## Pasywne Specjalne
+
+### 1. AbilityA
+- typ: pasywna
+- opis: "Special passive."
+"""
+    path = tmp_path / "multiword.md"
+    path.write_text(content, encoding="utf-8")
+    abilities = extract_abilities_md(path)
+    assert len(abilities) == 1
+    assert abilities[0].type == "passive"
+
+
+def test_unknown_typ_warns_and_falls_back(tmp_path: Path, capsys) -> None:
+    """Unknown `typ:` value → WARNING stderr + fallback na section type.
+
+    Regression: stara wersja silently zachowywała section default — bug R8.
+    Teraz warning loguje root cause dla potencjalnej R4 drift.
+    """
+    content = """## Aktywne
+
+### 1. AbilityWithTypo
+- typ: aktywne
+- opis: "Description."
+"""
+    path = tmp_path / "typo.md"
+    path.write_text(content, encoding="utf-8")
+    abilities = extract_abilities_md(path)
+    assert len(abilities) == 1
+    # Fallback to section type (active)
+    assert abilities[0].type == "active"
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.err
+    assert "aktywne" in captured.err  # the unknown value

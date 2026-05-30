@@ -162,17 +162,22 @@ def test_exit_code_any_mismatch_is_one() -> None:
     assert exit_code_from_results([_result(CheckStatus.MATCH), _result(CheckStatus.MISMATCH)]) == 1
 
 
-def test_exit_code_any_missing_is_two() -> None:
-    assert exit_code_from_results([_result(CheckStatus.MATCH), _result(CheckStatus.MISSING)]) == 2
+def test_exit_code_any_missing_is_one() -> None:
+    """MISSING jest tak samo blokujące jak MISMATCH — oba zwracają exit 1.
+
+    Powód: workflow GHA traktuje exit 2 jako WARN-pass (przeznaczone dla
+    `rules_drift.py` description differences). Missing source musi blokować CI.
+    """
+    assert exit_code_from_results([_result(CheckStatus.MATCH), _result(CheckStatus.MISSING)]) == 1
 
 
-def test_exit_code_missing_wins_over_mismatch() -> None:
-    """Missing severity > mismatch → exit 2 priorytetowo."""
-    results = [
-        _result(CheckStatus.MISMATCH),
-        _result(CheckStatus.MISSING),
-    ]
-    assert exit_code_from_results(results) == 2
+def test_exit_code_missing_and_mismatch_both_one() -> None:
+    """Oba failure modes (MISSING + MISMATCH) zwracają exit 1.
+
+    Status distinction widoczna w `_print_results` (per linia: MISSING/MISMATCH/OK).
+    """
+    results = [_result(CheckStatus.MISMATCH), _result(CheckStatus.MISSING)]
+    assert exit_code_from_results(results) == 1
 
 
 # --- compute_current_entries -----------------------------------------------
@@ -212,6 +217,53 @@ def test_compute_current_skips_missing(tmp_path: Path, monkeypatch) -> None:
     fresh = compute_current_entries(tmp_path, existing=None)
     assert len(fresh) == 1
     assert fresh[0].path == "present.bin"
+
+
+def test_compute_current_preserves_legacy_entries(tmp_path: Path, monkeypatch) -> None:
+    """Entries z `existing` które nie są w DEFAULT_SOURCES — preserve + refresh SHA."""
+    from scripts import rules_sources_check
+
+    fake_sources = (("default.bin", "Default role"),)
+    monkeypatch.setattr(rules_sources_check, "DEFAULT_SOURCES", fake_sources)
+
+    (tmp_path / "default.bin").write_bytes(b"x")
+    (tmp_path / "legacy.bin").write_bytes(b"legacy content")
+
+    existing = [
+        SourceEntry(path="default.bin", sha256="old_default_sha", role="Custom default"),
+        SourceEntry(path="legacy.bin", sha256="old_legacy_sha", role="User-added tracking"),
+    ]
+
+    fresh = compute_current_entries(tmp_path, existing=existing)
+    by_path = {e.path: e for e in fresh}
+    # Default entry refreshed; role preserved.
+    assert "default.bin" in by_path
+    assert by_path["default.bin"].role == "Custom default"
+    assert by_path["default.bin"].sha256 != "old_default_sha"
+    # Legacy entry preserved with role + refreshed SHA.
+    assert "legacy.bin" in by_path
+    assert by_path["legacy.bin"].role == "User-added tracking"
+    assert by_path["legacy.bin"].sha256 != "old_legacy_sha"
+
+
+def test_compute_current_drops_missing_legacy(tmp_path: Path, monkeypatch) -> None:
+    """Legacy entry whose file disappeared → dropped (with WARNING)."""
+    from scripts import rules_sources_check
+
+    fake_sources = (("default.bin", "Default"),)
+    monkeypatch.setattr(rules_sources_check, "DEFAULT_SOURCES", fake_sources)
+
+    (tmp_path / "default.bin").write_bytes(b"x")
+    # No legacy.bin on disk
+    existing = [
+        SourceEntry(path="default.bin", sha256="x", role="ok"),
+        SourceEntry(path="legacy_gone.bin", sha256="x", role="vanished"),
+    ]
+
+    fresh = compute_current_entries(tmp_path, existing=existing)
+    paths = {e.path for e in fresh}
+    assert "default.bin" in paths
+    assert "legacy_gone.bin" not in paths
 
 
 # --- CLI ------------------------------------------------------------------
@@ -264,7 +316,8 @@ def test_cli_check_mismatch_returns_1(tmp_path: Path) -> None:
     assert rc == 1
 
 
-def test_cli_check_missing_returns_2(tmp_path: Path) -> None:
+def test_cli_check_missing_returns_1(tmp_path: Path) -> None:
+    """Missing source file → exit 1 (blocks CI). Patrz `exit_code_from_results`."""
     hashes_path = tmp_path / "hashes.yaml"
     save_hashes(hashes_path, [
         SourceEntry(path="never_existed.bin", sha256="x", role="test")
@@ -274,7 +327,7 @@ def test_cli_check_missing_returns_2(tmp_path: Path) -> None:
         "--hashes", str(hashes_path),
         "--project-root", str(tmp_path),
     ])
-    assert rc == 2
+    assert rc == 1
 
 
 def test_cli_no_hashes_file_returns_2(tmp_path: Path) -> None:
