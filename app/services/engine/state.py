@@ -85,6 +85,8 @@ class UnitBlob:
     radius_inches: float
     models_alive: int
     toughness_per_model: int
+    quality: int = 4  # jakość modelu (threshold for hit per pkt 17.a); default Q4
+    defense: int = 5  # obrona modelu (threshold for defense per pkt 17.b); default D5
     is_hero_unit: bool = False  # czy w oddziale jest model z zdolnością Bohater (id 2)
     passives: tuple[str, ...] = ()
     status_flags: tuple[str, ...] = ()
@@ -185,6 +187,8 @@ def build_initial_state(
                     radius_inches=radius,
                     models_alive=models,
                     toughness_per_model=tou,
+                    quality=int(unit.get("quality", 4)),
+                    defense=int(unit.get("defense", 5)),
                     is_hero_unit=is_hero,
                     passives=unit_slugs,
                 )

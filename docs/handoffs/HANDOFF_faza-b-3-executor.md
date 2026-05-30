@@ -1,7 +1,7 @@
 # HANDOFF — faza-b-3-executor
 
 > **Wątek:** Strumień B, Faza B3 — Rule Executor + dice. Sub-wątek `faza-b-engine-mvp`. 7 modułów engine pure-functions (`dice`, `los`, `prediction`, `combat`, `effects`, `interrupts`, `phases`, `resolver`) + minimalny substrate runtime (`state.py` + `events.py`) + 6 nowych ADR-ów.
-> **Status:** In progress (B3.0 ✅ + B3.1 dice ✅ + B3.2 LoS ✅ done 2026-05-30; GATE OPEN; B3.3 prediction next)
+> **Status:** In progress (B3.0 ✅ + B3.1 dice ✅ + B3.2 LoS ✅ + B3.4 combat ✅ done 2026-05-30; GATE OPEN; B3.3 prediction lub B3.5 effects/interrupts next)
 > **Utworzony:** 2026-05-30
 > **Ostatnia aktualizacja:** 2026-05-30
 
@@ -95,17 +95,19 @@ Plan długofalowy: [docs/roadmap.md#b3-rule-executor--dice](../roadmap.md). Pare
 - [ ] Testy `tests/test_prediction_vs_simulation.py`: 100 scenariuszy × 1000 Monte Carlo via `DeterministicDice(seed_i)`; assert `analytic.mean within ±3σ of simulated.mean`; Chi-square dla pmf (p > 0.01)
 - [ ] ADR-0044 (`docs/adr/0044-prediction-module.md`) Status: Accepted — agentom-botom (Strumień D) i MCP (`simulate_engagement`) potrzebny tanie expected_damage bez full simulation
 
-### B3.4 — Combat (ranged + melee, 3 fazy + reactive window)
+### B3.4 — Combat (ranged + melee, 3 fazy + reactive window) — **DONE 2026-05-30** (kontratak/Szarża/reactive window deferred do B3.5+)
 
-- [ ] `app/services/engine/combat.py`:
-  - `resolve_ranged_attack(state, attacker, target, weapon, dice, ruleset, terrain) → CombatResult`
-  - Faza 1: Declare + attacker modifiers (osłona, broń modifiers) — **REACTIVE WINDOW** dla obrońcy (`Strażnik` id ?, jednorazowe, atomowe, nie generuje nowych okien per ADR-0015a)
-  - Faza 2: Dice resolution (test trafienia → test obrony per `SZOP_Rozjemca.md pkt 17.a–b`)
-  - Faza 3: Wound allocation (pkt 17.d–e + 18) — `wounds_pending` (obrońca) / `wounds_pending_precise` (atakujący, dla `Precyzyjny` id 68 + naturalna 1)
-  - `resolve_melee_attack(state, attacker, target, weapon, dice, ruleset, terrain)` — analogicznie + `melee_balance` accounting per pkt 20.c (Porażenie id 67 → ×2 mnożnik)
-- [ ] `CombatResult` dataclass: `(events: list[BattleEvent], state_delta: dict)`
-- [ ] Testy `tests/test_engine_combat.py`: cartesian scenarios (broń × statystyka × osłona × reactive window aktywny/nie) + `precyzyjny` w heterogenicznym oddziale (Bohater + zwykli)
-- [ ] ADR-0015a (`docs/adr/0015a-reactive-window.md`) Status: Accepted — atomowość: 1 reactive ability per attack, kontratak (pkt 14.d.iv) jako szczególny przypadek
+- [x] `app/services/engine/combat.py` (~430 LOC):
+  - `WeaponProfile` frozen (slug/name/range/attacks/ap/attack_quality_override/weapon_abilities)
+  - `CombatResult` frozen (events/new_attacker/new_defender)
+  - `resolve_ranged_attack(state, attacker, defender, weapon, dice, sequence, terrain)` — 3-fazowa semantyka pkt 17 + 19. Faza 1 declare + Osłona (compute_cover, compute_attack_modifiers, compute_defense_modifier). Faza 2 hit/defense rolls (dice.roll_with_threshold + Brutalny flag). Faza 3 wound allocation pkt 17.d-e (pula attacker precise / pula defender) + pkt 18 (model kills).
+  - `resolve_melee_attack(...)` — analogicznie + `melee_balance` accounting per pkt 20.c (attacker += wounds, defender -= wounds). Bez Szarży/kontrataku — pojedynczy atak.
+  - Helpers: `compute_cover` (LoS OSLONA lub defender wewnątrz Obronny pkt 4.c.vi), `compute_attack_modifiers` (pkt 19: -1 trafienie LUB +1 obrony gdy threshold≥6), `compute_defense_modifier` (AP + bonus), `_allocate_wounds_to_defender` (pkt 18 model kills + prefer_hero dla puli precyzyjnej), `_blob_inside_circle`.
+- [x] Weapon abilities MVP: **AP(X)** (id 55), **Brutalny** (id 57 — `natural_6_auto_success=False`), **Precyzyjny** (id 68 — wszystkie rany → pula atakującego, prefer_hero kills hero first). Pozostałe (Furia/Impet/Podwójny/Przebijająca/Zabójczy/Dezintegracja/etc.) — TODO docstring, integracja w B3.5 `effects.py`.
+- [x] Testy `tests/test_engine_combat.py` (37 testów): WeaponProfile/CombatResult frozen (3), compute_cover (4: no terrain, OSLONA partial block, Obronny inside, clear), compute_attack_modifiers (4: no cover, cover Q4, cover Q6→def bonus, Q7), compute_defense_modifier (4: combinations AP/bonus), _allocate_wounds (7: marker, kill, multiple, mixed, defeated, prefer hero, no prefer), resolve_ranged (9: ShotResolved, no hits, attacker unchanged, deterministic replay, AP↑wounds, Precyzyjny→hero killed first, Brutalny↑wounds, sequence, full kill), resolve_melee (4: MeleeResolved, balance, no wounds no balance, pure function), immutability (2).
+- [x] State update: `UnitBlob` rozszerzony o `quality: int = 4` + `defense: int = 5` (per SZOP_Rozjemca pkt 1 + 17.a-b). `build_initial_state` czyta z rosters (`quality`/`defense` keys, defaults). 100% backward compat — istniejące testy state.py + dice.py + los.py zielone (103/103).
+- [x] ADR-0015a (`docs/adr/0015a-reactive-window.md`) Status: Accepted — jednorazowe, atomowe, brak nested. Rozróżnienie reactive window (combat.py) vs interrupt pkt 12 (interrupts.py B3.5). Strażnik (id 31) jako interrupt, Kontratak (pkt 14.d.iv) i Kontra (id 10) jako reactive window. 4 inwarianty replay. Framework gotowy, **konkretne reactive zdolności + kontratak w Szarży w B3.5+** (`resolve_charge_attack`).
+- **Note:** B3.4 zamknięte w **uproszczonym zakresie** — pełny `resolve_charge_attack` z reactive window kontrataku (pkt 14.d.iv) wymaga effects/interrupts substrate; przeniesione do follow-up (część B3.5 lub B3.6 phases).
 
 ### B3.5 — Effects + Interrupts
 
@@ -194,3 +196,4 @@ python scripts/engine_smoke_replay.py  # NEW w B3.9 — minimal 2v2 battle repla
 - 2026-05-30 (post-B3.0): **B3.0 zamknięte.** `app/services/engine/` powstał z `__init__.py` + `state.py` + `events.py`. Audit B3.0.1 wykazał że abilities.yaml ma **12** aktywnych zdolności (różnica od MD: 5 dodanych w Rozwoj YAML sync: koordynacja, mobilizacja, presja, przekaznik, przepowiednia). Wszystkie 12 sklasyfikowanych: 6× akcja w aktywacji (14.e), 6× przerwanie (pkt 12). Pytest 998/998 (962 baseline + 36 nowych z test_engine_state + test_engine_events). GATE ADR-0010a → **OPEN**. B3.1 dice w następnej sesji.
 - 2026-05-30 (post-B3.1): **B3.1 dice zamknięte.** `app/services/engine/dice.py` (~110 LOC) + `RollResult` frozen + dokładnie zaszyte 4 reguły z pkt 1 (a-d) + flagi dla Brutalny/Delikatny. 24 nowe testy zielone (reproducibility, distribution chi-square, threshold semantics, modifier clamp). ADR-0012 Accepted. Pytest 1022/1022 (998 baseline + 24 nowych). Logika konkretnych zdolności (Furia, Niewrazliwy, Podwójny) deferred do `combat.py`/`effects.py` (B3.4-B3.5) — `RollResult.rolls` preserves natural values for inspection. Następny krok: B3.2 LoS (3-state).
 - 2026-05-30 (post-B3.2): **B3.2 LoS zamknięte.** `app/services/engine/los.py` (~210 LOC) — `check_los` z sampling N=16, attacker edge point + N target points na obwodzie celu, segment-vs-circle / segment-vs-segment intersection, Zasłaniający exception pkt 4.c.iii. 43 nowe testy (geometry primitives 12, Blokujący 4, Zasłaniający 5, multi-terrain 2, non-blocking 3, edge cases 4, enum 2, realistic 2 — plus integration). ADR-0043 Accepted (N=16 Pareto sweet spot, plan B N=32/analytic). Pytest 1065/1065. Następny krok: B3.3 prediction (analytic expected_damage, no RNG).
+- 2026-05-30 (post-B3.4): **B3.4 combat zamknięte (uproszczone — pojedyncze ranged/melee bez Szarży/kontrataku).** `app/services/engine/combat.py` (~430 LOC) z WeaponProfile + CombatResult, resolve_ranged_attack i resolve_melee_attack jako pure functions; compute_cover/attack_modifiers/defense_modifier helpers; _allocate_wounds_to_defender z prefer_hero. Weapon abilities MVP: AP(X)/Brutalny/Precyzyjny. UnitBlob rozszerzony o quality+defense (backward compat). 37 nowych testów. ADR-0015a Accepted (reactive window framework gotowy, konkretne zdolności w B3.5). Pytest **1102/1102** (1065 + 37). Następny krok: **B3.5 effects + interrupts** (passive abilities + InterruptManager + Strażnik + kontratak/Kontra). **Alternatywa: B3.3 prediction** (analytic expected_damage, używa same logic co combat ale bez RNG) — może być teraz pisany lub po B3.5.
