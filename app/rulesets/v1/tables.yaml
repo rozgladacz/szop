@@ -172,3 +172,12 @@ transport_multipliers:
 # Skalary globalne.
 overcharge_multiplier: 1.05
 base_cost_factor: 5.0
+
+# B0 — Pareto MVP konstantne dla game engine (ADR-0008).
+# Nie używane w Strumieniu A (koszty); konsumowane przez app/services/engine/.
+# Podstawka modelu = 1 in² na punkt wytrzymałości.
+# radius_inches = sqrt(sum(toughness_modelu) / pi); Bohater (id 2) liczy się jako toughness/2.
+b_mvp:
+  move_inches: 6  # SZOP_Rozjemca pkt 15.a
+  base_area_inches_sq_per_toughness: 1
+  pi_approx: 3.141592653589793

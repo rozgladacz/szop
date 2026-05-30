@@ -33,6 +33,21 @@ class TransportMultiplier(BaseModel):
         return frozenset(self.traits)
 
 
+class BMvpConfig(BaseModel):
+    """B0 Pareto MVP konstantne dla game engine (ADR-0008).
+
+    Subsekcja `b_mvp` w `tables.yaml`. Konsumowane przez `app/services/engine/`,
+    nie używane w Strumieniu A (koszty). Pole opcjonalne w `RulesetTables` —
+    YAML bez sekcji `b_mvp` nadal parsuje (backward compat).
+    """
+
+    model_config = _FrozenConfig
+
+    move_inches: int = Field(ge=1)
+    base_area_inches_sq_per_toughness: float = Field(gt=0)
+    pi_approx: float = Field(gt=0)
+
+
 class RulesetTables(BaseModel):
     """Wszystkie tabele kosztów z `_engine.py:23-79`.
 
@@ -60,6 +75,7 @@ class RulesetTables(BaseModel):
     transport_multipliers: tuple[TransportMultiplier, ...]
     overcharge_multiplier: float
     base_cost_factor: float
+    b_mvp: BMvpConfig | None = None
 
 
 AbilityType = Literal["passive", "active", "aura", "weapon"]
@@ -164,3 +180,37 @@ class RulesetManifest(BaseModel):
     tables: RulesetTables
     abilities: tuple[RulesetAbility, ...]
     ability_costs: AbilityCosts
+
+
+class BMvpExclusion(BaseModel):
+    """Pojedynczy wpis w `b_mvp_exclusions.yaml` (ADR-0008).
+
+    Hand-curated decyzja: zdolności wykluczone z B MVP. Engine raise
+    `UnsupportedAbilityError` przy budowie BattleState gdy roster zawiera
+    oddział z którąkolwiek z tych zdolności.
+    """
+
+    model_config = _FrozenConfig
+
+    slug: str
+    reason: str
+    category: str
+
+
+class BMvpExclusions(BaseModel):
+    """Korzeń `b_mvp_exclusions.yaml` — lista wykluczeń + version.
+
+    Loader (`load_b_mvp_exclusions()`) zwraca cache'owany frozen-model.
+    """
+
+    model_config = _FrozenConfig
+
+    version: int = Field(ge=1)
+    excluded_abilities: tuple[BMvpExclusion, ...]
+
+    def slugs(self) -> frozenset[str]:
+        """Frozen set slugów — O(1) lookup w runtime."""
+        return frozenset(e.slug for e in self.excluded_abilities)
+
+    def is_excluded(self, slug: str) -> bool:
+        return slug in self.slugs()

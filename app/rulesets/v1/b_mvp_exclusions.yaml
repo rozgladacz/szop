@@ -1,0 +1,38 @@
+# B0 — Pareto MVP exclusion list (ADR-0008).
+#
+# Hand-curated lista zdolności wykluczonych z game engine MVP. Engine raise
+# `UnsupportedAbilityError` przy budowie BattleState gdy roster zawiera oddział
+# z którąkolwiek z poniższych. Ustalona manualnie 2026-05-30 (decyzja user).
+#
+# Rozbieżność z A4.3 (`build/geometry_classification.md` — 3 entries):
+# - A4.3 to heurystyka keyword match; ten plik = authoritative source dla engine
+# - Wspólny tylko `zwrot` (facing). A4.3 wynik (dywersant/precyzyjny) NIE
+#   wchodzi do exclusion list: `dywersant` to false-positive na "strefy
+#   rozstawienia"; `precyzyjny` obsługujemy w MVP przez `wounds_pending_precise`
+#   (ADR-0014). Zob. szczegóły w docs/adr/0008-pareto-mvp.md.
+
+version: 1
+excluded_abilities:
+  - slug: samolot
+    reason: minimalny ruch 30-36" w prostej linii + LoS niestandardowy (-12" zasięgu wroga)
+    category: ruch_specjalny
+
+  - slug: wrak
+    reason: pokonanie tworzy teren z 3 cechami (niebezpieczny/trudny/obronny) do końca gry
+    category: terrain_generation
+
+  - slug: wysoki
+    reason: LoS sprawdzane jakby z podwyższenia (niestandardowy modyfikator linii wzroku)
+    category: los_niestandardowy
+
+  - slug: zwrot
+    reason: 4 strefy 180° (przód/tył/lewo/prawo) — wymaga orientacji modelu (facing_deg field)
+    category: orientacja
+
+  - slug: sterowany
+    reason: 2 znaczniki broni na planszy z osobnym ruchem; persistent state w aktywacji
+    category: tokeny_na_planszy
+
+  - slug: zuzywalny
+    reason: raz na grę + max 1 broń tego typu per oddział; persistent session_state
+    category: session_state

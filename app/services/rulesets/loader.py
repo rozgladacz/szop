@@ -20,6 +20,8 @@ import yaml
 
 from .models import (
     AbilityCosts,
+    BMvpExclusion,
+    BMvpExclusions,
     CostRecipeSpec,
     HandlerMatch,
     HandlerSpec,
@@ -224,3 +226,46 @@ def load_ruleset(version: str = "v1") -> RulesetManifest:
     abilities_sha = _sha256(_read_bytes(base / "abilities.yaml"))
     ability_costs_sha = _sha256(_read_bytes(base / "ability_costs.yaml"))
     return _load_ruleset_cached(version, tables_sha, abilities_sha, ability_costs_sha)
+
+
+@lru_cache(maxsize=2)
+def _load_b_mvp_exclusions_cached(version: str, payload_sha: str) -> BMvpExclusions:
+    """Inner cached builder — keyed on (version, sha256 b_mvp_exclusions.yaml)."""
+    del payload_sha  # cache discriminator
+    base = _RULESETS_ROOT / version
+    doc = _parse_yaml(_read_bytes(base / "b_mvp_exclusions.yaml"))
+
+    if not isinstance(doc, dict):
+        raise ValueError(
+            f"{base / 'b_mvp_exclusions.yaml'}: top-level must be a mapping"
+        )
+
+    version_field = int(doc.get("version", 0))
+    if version_field <= 0:
+        raise ValueError(f"b_mvp_exclusions.yaml: invalid version {version_field}")
+
+    excluded_raw = doc.get("excluded_abilities", []) or []
+    if not isinstance(excluded_raw, list):
+        raise ValueError(
+            f"b_mvp_exclusions.yaml: 'excluded_abilities' must be a list"
+        )
+
+    excluded = tuple(BMvpExclusion.model_validate(item) for item in excluded_raw)
+    return BMvpExclusions(version=version_field, excluded_abilities=excluded)
+
+
+@lru_cache(maxsize=2)
+def load_b_mvp_exclusions(version: str = "v1") -> BMvpExclusions:
+    """Public entrypoint dla `b_mvp_exclusions.yaml` (ADR-0008, B0).
+
+    Cache analogiczny do `load_ruleset()` — pierwszy call parsuje YAML +
+    waliduje przez Pydantic; kolejne zwracają cached instance w O(1).
+    Engine konsumuje przez `is_excluded(slug) -> bool` (frozenset lookup).
+    """
+    if version not in RULESET_VERSIONS:
+        raise ValueError(
+            f"Unknown ruleset version: {version!r}; known: {RULESET_VERSIONS}"
+        )
+    base = _RULESETS_ROOT / version
+    payload_sha = _sha256(_read_bytes(base / "b_mvp_exclusions.yaml"))
+    return _load_b_mvp_exclusions_cached(version, payload_sha)
