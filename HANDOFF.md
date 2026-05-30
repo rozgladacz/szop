@@ -11,20 +11,13 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-a-4-drift](docs/handoffs/HANDOFF_faza-a-4-drift.md) | Strumień A.4 — pipeline DOCX→YAML drift detection (A4.2 diff, A4.3 geometry, A4.4 PDF SHA, A4.5 Makefile, A4.6 GHA, A4.7 promocja ADR-0006) | `scripts/rules_{drift,classify_geometry,pdf_check}.py`, `Makefile`, `.github/workflows/rules_drift.yml`, `app/rulesets/v1/drift_allowlist.yaml` (wszystkie NEW) | In progress (A4.1 ✅, gotowe do A4.2) |
+| *(brak aktywnych wątków)* | | | |
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `scripts/rules_drift.py` (NEW) | faza-a-4-drift | A4.2 — 4 typy raportów + exit 0/1/2 |
-| `scripts/rules_classify_geometry.py` (NEW) | faza-a-4-drift | A4.3 — lista exclusions dla B0 |
-| `scripts/rules_pdf_check.py` (NEW) | faza-a-4-drift | A4.4 — DOCX↔PDF SHA256 |
-| `app/rulesets/v1/drift_allowlist.yaml` (NEW) | faza-a-4-drift | A4.2 — whitelist drift |
-| `app/rulesets/v1/source_hashes.yaml` (NEW) lub `app/static/docs/*.sha256` | faza-a-4-drift | A4.4 — hash storage (decyzja w A4.4) |
-| `Makefile` | faza-a-4-drift | A4.5 — cel `rules-check` |
-| `.github/workflows/rules_drift.yml` (NEW) | faza-a-4-drift | A4.6 — CI gate |
-| `docs/adr/0006-pipeline-drift.md` | faza-a-4-drift | A4.7 — promocja `Proposed → Accepted` |
+| *(brak)* | | |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
@@ -42,6 +35,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-05-29 — faza-a-4-drift (archived) — Faza A4 done, Strumień B0 odblokowany
+- Strumień A4 (pipeline drift detection DOCX/MD↔YAML, ADR-0006). 6 nowych skryptów `scripts/rules_*.py` (extract DOCX, extract MD, drift, classify geometry, sources SHA256, + `_regen_abilities_yaml.py` helper), `Makefile` cel `rules-check` orchestrator z 5 subceli, `.github/workflows/rules_drift.yml` GHA CI gate path-filtered z exit code semantics (0=pass / 1=fail / 2=warn-pass). 4 nowe YAML files: `abilities.yaml` zregenerowane (88 entries po YAML sync z Rozwoj), `drift_allowlist.yaml` symetric (`allowed_yaml_only` + `allowed_docx_only`), `source_hashes.yaml` (centralna SHA256 dla 4 source files: DOCX+PDF+2×MD). ADR-0006 promoted `Proposed → Accepted` z 8 punktami rewizji rozstrzygniętymi empirycznie. **Sub-wątek `faza-a-4-extract` archived 2026-05-26 (A4.1).** **YAML sync z `Rozwoj`** (cherry-pick `a051bb4` Bugfix + `313fb1d` Klaryfikacja zasad): abilities.py +blocked field +parowanie, kontra 2.0→1.0, transport_multipliers update (usunięte zasadzka/zwiadowca pair, samolot 3.5→4.0). **3-source canonical state** (DOCX+MD strukturalnie identyczne, YAML mirror sync). **Real drift report:** R1=0/R1w=6/R2=0/R2w=17/R3=31/R4=0 → exit 2 WARN (description wording differences akceptowane jako WARN per Q1 A4.2). **B MVP exclusion list (A4.3):** 3 abilities — `zwrot` (facing), `precyzyjny` (per_model), `dywersant` (false-positive na "strefy rozstawienia"). **Strumień B0 odblokowany** — `build/geometry_classification.md` daje hard prereq input.
+- Pliki: `scripts/rules_{extract,extract_md,drift,classify_geometry,sources_check}.py` (NEW, ~1300 LOC łącznie), `scripts/_regen_abilities_yaml.py` (NEW, internal helper), `scripts/README.md` (NEW, ~200 LOC dokumentacji), `tests/test_rules_{extract,extract_md,drift,classify_geometry,sources_check}.py` (NEW, **123 nowe testy**), `app/rulesets/v1/{abilities.yaml regen, ability_costs.yaml, tables.yaml, drift_allowlist.yaml NEW, source_hashes.yaml NEW}`, `app/data/abilities.py` + `app/services/costs/{_engine,abilities,role_totals}.py` + `app/services/ability_registry.py` + `app/routers/armies.py` (z YAML sync z Rozwoj), `Makefile` (cel `rules-check` + 5 subcele), `.github/workflows/rules_drift.yml` (NEW), `requirements-dev.txt` (`python-docx>=1.1.0,<2.0`), `.gitignore` (`build/`), `app/static/docs/SZOP.docx/pdf` (z Rozwoj canon). Plus: `docs/adr/0006-pipeline-drift.md` (Proposed→Accepted), `docs/roadmap.md` (A4 all done + ADR index ✓), `docs/testing.md` (sekcja A4 pipeline), `AGENTS.md` (Komendy section), `scripts/README.md`. **Commit chain (11 commitów na `Faza_A`):** `6f74d26` (chore pyc), `2298d03` (A4.0+A4.1), `5f34ec7` (A4.1 archive + post-review), `6205c1e` (A4.2), `594f323` (A4.2+ MD), `707914f` (DOCX sync), `b15bf40`+`e6c76ec` (Rozwoj cherry-picks), `70e5444` (YAML sync), `b2bb5d3` (A4.3), `dfa0552` (A4.4), `0be37e5` (A4.5), `d4e28c5` (A4.6), `752a6b0` (A4.7 ADR Accepted).
+- Weryfikacja: pytest **938/938 passed** (815 baseline + 123 nowych A4: 29 extract + 27 drift + 15 extract_md + 28 classify + 21 sources_check + 3 abilities migration delta z +1 ability). `OPR_RULES_BACKEND=both_assert pytest test_ruleset_parity.py` → **156/156** (procedural ↔ yaml parity zachowana po Rozwoj YAML sync — kontra=1.0, parowanie=1.5, transport_multipliers update wszystkie zsynchronizowane). Simulated `make rules-check` na Windows fallback (brak `make` w PATH per cross-thread notatka): sources-check CLEAN + extract 77 + extract-md 77 + classify 88→3 excluded + drift exit 2. GHA dry-run deferred (wymaga push'a na origin) — pierwszy realny PR z paths-match przetestuje workflow.
+- Doc updates: `docs/roadmap.md` (A4 wszystkie checkboxy ✅, ADR index 0006 ✓), `docs/testing.md` (sekcja "A4 drift pipeline — `make rules-check`"), `AGENTS.md` Komendy (dodane `make rules-check` + `make profile`), `scripts/README.md` (NEW, pełna dokumentacja per skrypt + konwencje pisania CLI), `docs/README.md` (link do `scripts/README.md`). `docs/architecture.md` + `docs/overview.md` świadomie nieaktualizowane — A4 to dev tooling/CI gate, nie runtime architecture.
+- Faza A4 zamknięta — Strumień A pełen (A0–A5 + A4). Pipeline drift detection operational. **Strumień B0 odblokowany** przez `build/geometry_classification.md`. Następne strumienie (B/C/D) mogą startować — wszystkie miały soft/hard prereq na YAML SSOT z Strumienia A.
 
 ### 2026-05-26 — faza-a-4-extract (archived)
 - Sub-wątek `faza-a-4-drift` zamykający A4.1. `scripts/rules_extract.py` (~240 LOC) — content-based state machine DOCX parser (brak Headingów w `SZOP.docx`, tylko `Normal`/`List Paragraph`). Pydantic v2 `ExtractedAbility/RulesExtract`, slug z NFKD + explicit `Ł/ł→L/l` pre-replace (NFKD nie decomposuje Ł/ł). Critical bugs fixed: (1) embedded `\n` (Word soft line break) łączące wiele zdolności w jeden paragraf — fix przez `paragraph.text.split("\n")`; (2) slug "Łatanie"→"atanie" przez ASCII drop — fix przez pre-replace. **Wynik: 85 abilities** vs 87 w `ABILITY_DEFINITIONS` — różnica = **realny drift** (YAML splituje `Szybki/Wolny`, używa `burzaca`/`masywny`/`rozrywajacy`/`unik` zamiast DOCX `przelamanie`/`sekcje`/`podwojny`/`przewidywalny`, ma abstract `aura`, nie ma `AP(X)`) — A4.2 wykryje.
