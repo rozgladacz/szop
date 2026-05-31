@@ -55,10 +55,60 @@ from app.services.engine.state import (
     UnitBlob,
 )
 
+
+def effective_attack_quality(weapon: WeaponProfile, attacker: UnitBlob) -> int:
+    """Quality threshold po uwzględnieniu weapon abilities (Niezawodny id 63).
+
+    Niezawodny: "Atakuje z jakością 2+" — overrides attacker.quality do 2.
+    `weapon.attack_quality_override` (jeśli ustawione) ma niższy priorytet niż
+    Niezawodny — Niezawodny zawsze ma 2 niezależnie od profilu.
+    """
+    if ABILITY_NIEZAWODNY in weapon.weapon_abilities:
+        return 2
+    if weapon.attack_quality_override is not None:
+        return weapon.attack_quality_override
+    return attacker.quality
+
+
+def _apply_podwojny_extra_hits(hit_result, weapon: WeaponProfile) -> int:
+    """Podwojny (id 66): "6 na trafienie dają dodatkowe normalne trafienie".
+
+    Post-process inspekcja `hit_result.rolls`: za każdą naturalną 6 dorzucamy
+    +1 trafienie (poza zwykłym sukcesem z auto-6). Zwraca total hits po
+    augmentation.
+    """
+    hits = hit_result.successes
+    if ABILITY_PODWOJNY in weapon.weapon_abilities:
+        extra = sum(1 for r in hit_result.rolls if r == 6)
+        hits += extra
+    return hits
+
+
+def _aggregate_passive_attack(attacker: UnitBlob, **ctx_kwargs: object) -> int:
+    """Lazy import + delegacja do effects.aggregate_attack_modifier.
+
+    Lazy import unika cyclic dependency combat ↔ effects (effects.py importuje
+    WeaponProfile z combat.py).
+    """
+    from app.services.engine.effects import EffectContext, aggregate_attack_modifier
+
+    ctx = EffectContext(blob=attacker, **ctx_kwargs)  # type: ignore[arg-type]
+    return aggregate_attack_modifier(ctx)
+
+
+def _aggregate_passive_defense(defender: UnitBlob, **ctx_kwargs: object) -> int:
+    """Lazy import + delegacja do effects.aggregate_defense_modifier."""
+    from app.services.engine.effects import EffectContext, aggregate_defense_modifier
+
+    ctx = EffectContext(blob=defender, **ctx_kwargs)  # type: ignore[arg-type]
+    return aggregate_defense_modifier(ctx)
+
 # Weapon ability sluggi (zob. `app/rulesets/v1/abilities.yaml` type=weapon)
 ABILITY_AP = "ap"
 ABILITY_BRUTALNY = "brutalny"
 ABILITY_PRECYZYJNY = "precyzyjny"
+ABILITY_NIEZAWODNY = "niezawodny"  # weapon Q=2+ (id 63)
+ABILITY_PODWOJNY = "podwojny"  # natural 6 hit → dodatkowe trafienie (id 66)
 
 FEATURE_OBRONNY = "Obronny"
 
@@ -286,13 +336,17 @@ def resolve_ranged_attack(
 
     # Faza 1 — Declare + modifiers
     has_cover = compute_cover(attacker, defender, terrain_list)
-    attack_quality = weapon.attack_quality_override or attacker.quality
+    attack_quality = effective_attack_quality(weapon, attacker)
     attack_modifier, extra_defense_bonus = compute_attack_modifiers(
         attacker_quality=attack_quality, has_cover=has_cover
     )
     defense_modifier = compute_defense_modifier(
         weapon_ap=weapon.ap, extra_defense_bonus=extra_defense_bonus
     )
+
+    # Passive modifiers z effects.py (Cierpliwy/Tarcza/Ostrożny/etc.)
+    attack_modifier += _aggregate_passive_attack(attacker, weapon=weapon)
+    defense_modifier += _aggregate_passive_defense(defender, weapon=weapon)
 
     is_precyzyjny = ABILITY_PRECYZYJNY in weapon.weapon_abilities
     is_brutalny = ABILITY_BRUTALNY in weapon.weapon_abilities
@@ -304,7 +358,8 @@ def resolve_ranged_attack(
         threshold=attack_quality,
         modifier=attack_modifier,
     )
-    hits = hit_result.successes
+    # Podwójny (id 66): natural 6 trafienia → dodatkowe normalne trafienie
+    hits = _apply_podwojny_extra_hits(hit_result, weapon)
 
     # Per trafienie → test obrony
     wounds_pending = 0
@@ -414,19 +469,23 @@ def resolve_melee_attack(
        - `attacker.melee_balance += wounds_dealt`
        - `defender.melee_balance -= wounds_dealt`
     """
-    del state, terrain  # melee MVP: brak osłony / cover; passives w B3.5
-    attack_quality = weapon.attack_quality_override or attacker.quality
+    del state, terrain  # melee MVP: brak osłony / cover (Parowanie id 24 → B3.5+)
+    attack_quality = effective_attack_quality(weapon, attacker)
     is_precyzyjny = ABILITY_PRECYZYJNY in weapon.weapon_abilities
     is_brutalny = ABILITY_BRUTALNY in weapon.weapon_abilities
+
+    # Passive modifiers (Cierpliwy/Tarcza dla obrońcy; Ostrożny/Przygotowanie/etc. dla atakującego)
+    attack_modifier = _aggregate_passive_attack(attacker, weapon=weapon)
+    defense_modifier = -weapon.ap + _aggregate_passive_defense(defender, weapon=weapon)
 
     # Faza 2 — Dice
     total_attacks = attacker.models_alive * weapon.attacks
     hit_result = dice.roll_with_threshold(
         count=total_attacks,
         threshold=attack_quality,
-        modifier=0,  # MVP: brak modifierów wręcz poza weapon abilities
+        modifier=attack_modifier,
     )
-    hits = hit_result.successes
+    hits = _apply_podwojny_extra_hits(hit_result, weapon)
 
     wounds_pending = 0
     wounds_pending_precise = 0
@@ -434,7 +493,7 @@ def resolve_melee_attack(
         defense_result = dice.roll_with_threshold(
             count=hits,
             threshold=defender.defense,
-            modifier=-weapon.ap,
+            modifier=defense_modifier,
             natural_6_auto_success=not is_brutalny,
         )
         failed_count = hits - defense_result.successes
@@ -496,5 +555,154 @@ def resolve_melee_attack(
     return CombatResult(
         events=tuple(events),
         new_attacker=new_attacker,
+        new_defender=new_defender,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public — resolve_charge_attack (Szarża pkt 14.d + reactive kontratak pkt 14.d.iv)
+# ---------------------------------------------------------------------------
+
+# Status flag (wartości z effects.STATUS_*)
+STATUS_WYCZERPANY = "Wyczerpany"
+
+# Passive ability sluggi dotyczące reactive kontrataku (Szarża pkt 14.d.iv)
+ABILITY_BASTION = "bastion"  # nie zostajesz Wyczerpany po kontrataku (id 1)
+ABILITY_KONTRA = "kontra"  # kontratak przed atakami szarżującego (id 10)
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeResult:
+    """Output `resolve_charge_attack` per pkt 14.d.
+
+    `events` — sekwencyjne eventy w kolejności: charger MoveExecuted (Związanie),
+    potencjalnie defender MeleeResolved + ModelKilled (kontratak pkt 14.d.iv),
+    charger MeleeResolved + ModelKilled (główny atak).
+    `new_charger` / `new_defender` — zaktualizowane bloby.
+    """
+
+    events: tuple[BattleEvent, ...]
+    new_charger: UnitBlob
+    new_defender: UnitBlob
+
+
+def resolve_charge_attack(
+    state: BattleState,
+    charger: UnitBlob,
+    defender: UnitBlob,
+    weapon: WeaponProfile,
+    dice: DeterministicDice,
+    sequence: int,
+    *,
+    counter_attack_declared: bool = True,
+) -> ChargeResult:
+    """Pełna Szarża (pkt 14.d.i-vi) z reactive window kontrataku (ADR-0015a).
+
+    Sekwencja:
+    1. **Pkt 14.d.ii (Związanie)** — emit `MoveExecuted` z `move_type="binding"`
+       od `charger.position` do pozycji 1″ od `defender.position`.
+    2. **Pkt 14.d.iv (Kontratak — reactive window)** — jeśli defender NIE
+       Wyczerpany i `counter_attack_declared`: defender wykonuje pełen
+       `resolve_melee_attack` jako attacker → charger; po kontrataku defender
+       otrzymuje status `Wyczerpany` (chyba że ma `bastion`, id 1).
+       Per **ADR-0015a**: reactive jednorazowe + atomowe + bez nested.
+    3. **Pkt 14.d.iii (Główny atak)** — charger wykonuje `resolve_melee_attack`.
+       Pominięty jeśli charger został pokonany w kontrataku.
+    4. **Pkt 14.d.vi** — Szarża można wykonać raz w aktywacji (enforce w `phases.py`).
+
+    Kontra (id 10) modyfikuje timing kontrataku (sygnalizowane przez Kontra w
+    `defender.passives`); semantyka MVP: kontratak nadal "przed atakami" — to
+    zgodne z default sequence (pkt 14.d.iv mówi "przerwać żeby kontratak").
+    Wpływ na zdolności Furia/Impet (wyłącza "szarżującego") — implementacja
+    odłożona do momentu gdy Furia/Impet są w combat scope.
+
+    Args:
+        state, charger, defender, weapon, dice, sequence: jak w resolve_melee_attack
+        counter_attack_declared: czy obrońca deklaruje kontratak (gracz/AI decyzja
+            spoza engine; default True dla MVP).
+
+    Returns:
+        ChargeResult z eventami w kolejności + new_charger + new_defender.
+    """
+    events: list[BattleEvent] = []
+    next_seq = sequence
+
+    # Faza 1: Związanie (pkt 14.d.ii) — emit MoveExecuted
+    # MVP: binding ruch do 1″ od defendera w kierunku straight line
+    dx = defender.position.x - charger.position.x
+    dy = defender.position.y - charger.position.y
+    dist = (dx * dx + dy * dy) ** 0.5
+    if dist > 0:
+        # Pozycja końcowa: na linii charger→defender, w odległości 1″ od defendera
+        # min_gap = defender.radius + 1″
+        min_gap = defender.radius_inches + 1.0
+        if dist > min_gap:
+            t = (dist - min_gap) / dist
+            new_x = charger.position.x + t * dx
+            new_y = charger.position.y + t * dy
+        else:
+            # Już w zasięgu — bez ruchu
+            new_x = charger.position.x
+            new_y = charger.position.y
+        from app.services.engine.events import MoveExecuted as _MoveExecuted
+
+        events.append(
+            _MoveExecuted(
+                sequence=next_seq,
+                unit_id=charger.id,
+                from_pos=(charger.position.x, charger.position.y),
+                to_pos=(new_x, new_y),
+                move_type="binding",
+            )
+        )
+        next_seq += 1
+        new_charger = replace(charger, position=Position(new_x, new_y))
+    else:
+        new_charger = charger
+
+    new_defender = defender
+
+    # Faza 2: Kontratak pkt 14.d.iv (reactive window — ADR-0015a)
+    can_counter = (
+        counter_attack_declared
+        and STATUS_WYCZERPANY not in defender.status_flags
+        and defender.models_alive > 0
+    )
+    if can_counter:
+        # Defender używa SWOJEJ broni — w MVP zakładamy że ma tę samą broń
+        # (weapon argument). Faktyczna lista broni obrońcy → przyszła iteracja
+        # gdy roster→engine ma broń per unit.
+        counter_result = resolve_melee_attack(
+            state, new_defender, new_charger, weapon, dice, next_seq
+        )
+        events.extend(counter_result.events)
+        next_seq += len(counter_result.events)
+        # Po kontrataku: Wyczerpany (chyba że Bastion id 1)
+        post_counter_defender = counter_result.new_attacker
+        if ABILITY_BASTION not in post_counter_defender.passives:
+            post_counter_defender = replace(
+                post_counter_defender,
+                status_flags=tuple(
+                    list(post_counter_defender.status_flags) + [STATUS_WYCZERPANY]
+                )
+                if STATUS_WYCZERPANY not in post_counter_defender.status_flags
+                else post_counter_defender.status_flags,
+            )
+        new_defender = post_counter_defender
+        new_charger = counter_result.new_defender
+
+    # Faza 3: Główny atak szarżującego pkt 14.d.iii — pominięty jeśli charger pokonany
+    if new_charger.models_alive > 0 and new_defender.models_alive > 0:
+        charge_result = resolve_melee_attack(
+            state, new_charger, new_defender, weapon, dice, next_seq
+        )
+        events.extend(charge_result.events)
+        next_seq += len(charge_result.events)
+        new_charger = charge_result.new_attacker
+        new_defender = charge_result.new_defender
+
+    return ChargeResult(
+        events=tuple(events),
+        new_charger=new_charger,
         new_defender=new_defender,
     )

@@ -34,11 +34,13 @@ from typing import Iterable
 
 from app.services.engine.combat import (
     ABILITY_BRUTALNY,
+    ABILITY_PODWOJNY,
     ABILITY_PRECYZYJNY,
     WeaponProfile,
     compute_attack_modifiers,
     compute_cover,
     compute_defense_modifier,
+    effective_attack_quality,
 )
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
@@ -180,9 +182,15 @@ def expected_damage(
     weapon abilities (Furia/Impet/etc.) ignorowane (dorzucane w przyszłych
     iteracjach wraz z combat.py rozszerzeniem).
     """
+    from app.services.engine.effects import (
+        EffectContext,
+        aggregate_attack_modifier,
+        aggregate_defense_modifier,
+    )
+
     terrain_list = list(terrain)
     has_cover = compute_cover(attacker, defender, terrain_list)
-    attack_quality = weapon.attack_quality_override or attacker.quality
+    attack_quality = effective_attack_quality(weapon, attacker)
     attack_modifier, extra_defense_bonus = compute_attack_modifiers(
         attacker_quality=attack_quality, has_cover=has_cover
     )
@@ -190,17 +198,25 @@ def expected_damage(
         weapon_ap=weapon.ap, extra_defense_bonus=extra_defense_bonus
     )
 
+    # Passive modifiers — consistency z combat.py
+    attack_modifier += aggregate_attack_modifier(EffectContext(blob=attacker, weapon=weapon))
+    defense_modifier += aggregate_defense_modifier(EffectContext(blob=defender, weapon=weapon))
+
     is_brutalny = ABILITY_BRUTALNY in weapon.weapon_abilities
 
     p_hit = _success_probability(
         threshold=attack_quality, modifier=attack_modifier
     )
+    # Podwójny (id 66): natural 6 trafienia dodaje +1 hit (E[extra hits per die] = 1/6).
+    # Mean approximation — pmf shape jest multinomial, ale mean parity ±3σ OK.
+    extra_hit_rate = 1 / 6 if ABILITY_PODWOJNY in weapon.weapon_abilities else 0
+    effective_p_hit = min(1.0, p_hit + extra_hit_rate)
     p_save = _success_probability(
         threshold=defender.defense,
         modifier=defense_modifier,
         natural_6_auto_success=not is_brutalny,
     )
-    p_wound_per_attack = p_hit * (1.0 - p_save)
+    p_wound_per_attack = effective_p_hit * (1.0 - p_save)
 
     n_attacks = attacker.models_alive * weapon.attacks
     if n_attacks == 0 or p_wound_per_attack == 0:

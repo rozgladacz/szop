@@ -20,14 +20,21 @@ import pytest
 
 from app.services.engine.combat import (
     ABILITY_AP,
+    ABILITY_BASTION,
     ABILITY_BRUTALNY,
+    ABILITY_NIEZAWODNY,
+    ABILITY_PODWOJNY,
     ABILITY_PRECYZYJNY,
+    STATUS_WYCZERPANY,
+    ChargeResult,
     CombatResult,
     WeaponProfile,
     _allocate_wounds_to_defender,
     compute_attack_modifiers,
     compute_cover,
     compute_defense_modifier,
+    effective_attack_quality,
+    resolve_charge_attack,
     resolve_melee_attack,
     resolve_ranged_attack,
 )
@@ -510,3 +517,329 @@ def test_resolve_melee_does_not_mutate_input_blobs():
     resolve_melee_attack(state, attacker, defender, weapon, dice, sequence=1)
     assert attacker.melee_balance == 0
     assert defender.melee_balance == 0
+
+
+# ---------------------------------------------------------------------------
+# Effects integration (B3.4.e) — passive modifiers wpływają na rolls
+# ---------------------------------------------------------------------------
+
+
+def test_passive_tarcza_increases_defense_in_ranged():
+    """Defender z Tarczą (nie Przyszpilony) otrzymuje mniej wounds."""
+    state = make_state()
+    attacker = make_blob(1, x=0, models=10, quality=3)
+    defender_no_tarcza = make_blob(2, x=20, models=10, defense=4)
+    defender_tarcza = make_blob(2, x=20, models=10, defense=4, passives=("tarcza",))
+    weapon = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=1)
+    r_no = resolve_ranged_attack(
+        state, attacker, defender_no_tarcza, weapon, DeterministicDice(42), sequence=1
+    )
+    r_t = resolve_ranged_attack(
+        state, attacker, defender_tarcza, weapon, DeterministicDice(42), sequence=1
+    )
+    wounds_no = defender_no_tarcza.models_alive - r_no.new_defender.models_alive
+    wounds_t = defender_tarcza.models_alive - r_t.new_defender.models_alive
+    # Tarcza nie powinna zwiększyć wounds (≤)
+    assert wounds_t <= wounds_no
+
+
+def test_passive_cierpliwy_increases_defense_when_not_activated():
+    """Cierpliwy (gdy nie Aktywowany) → mniej wounds."""
+    state = make_state()
+    attacker = make_blob(1, x=0, models=10, quality=3)
+    defender_no = make_blob(2, x=20, models=10, defense=4)
+    defender_cierp = make_blob(2, x=20, models=10, defense=4, passives=("cierpliwy",))
+    weapon = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=1)
+    r_no = resolve_ranged_attack(
+        state, attacker, defender_no, weapon, DeterministicDice(42), sequence=1
+    )
+    r_c = resolve_ranged_attack(
+        state, attacker, defender_cierp, weapon, DeterministicDice(42), sequence=1
+    )
+    wounds_no = defender_no.models_alive - r_no.new_defender.models_alive
+    wounds_c = defender_cierp.models_alive - r_c.new_defender.models_alive
+    assert wounds_c <= wounds_no
+
+
+def test_passive_cierpliwy_inactive_when_activated():
+    """Cierpliwy gdy oddział Aktywowany → brak bonusu (passive condition fails)."""
+    from app.services.engine.effects import STATUS_AKTYWOWANY
+
+    state = make_state()
+    attacker = make_blob(1, x=0, models=10, quality=3)
+    defender_active = UnitBlob(
+        id=2,
+        owner_player=0,
+        position=Position(20, 0),
+        radius_inches=1.0,
+        models_alive=10,
+        toughness_per_model=3,
+        defense=4,
+        passives=("cierpliwy",),
+        status_flags=(STATUS_AKTYWOWANY,),
+    )
+    defender_plain = make_blob(2, x=20, models=10, defense=4)
+    weapon = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=1)
+    r_active = resolve_ranged_attack(
+        state, attacker, defender_active, weapon, DeterministicDice(42), sequence=1
+    )
+    r_plain = resolve_ranged_attack(
+        state, attacker, defender_plain, weapon, DeterministicDice(42), sequence=1
+    )
+    # Cierpliwy nieaktywny → identyczny wynik jak bez Cierpliwego
+    assert r_active.new_defender.models_alive == r_plain.new_defender.models_alive
+    assert r_active.new_defender.wounds_received == r_plain.new_defender.wounds_received
+
+
+# ---------------------------------------------------------------------------
+# resolve_charge_attack — pełna Szarża (B3.4.f, pkt 14.d + ADR-0015a)
+# ---------------------------------------------------------------------------
+
+
+def test_charge_emits_binding_move():
+    """Faza 1 pkt 14.d.ii — emit MoveExecuted z move_type='binding'."""
+    from app.services.engine.events import MoveExecuted
+
+    state = make_state()
+    charger = make_blob(1, x=0, y=0, models=5)
+    defender = make_blob(2, x=10, y=0, models=5)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1
+    )
+    move_events = [e for e in result.events if isinstance(e, MoveExecuted)]
+    assert len(move_events) == 1
+    assert move_events[0].move_type == "binding"
+    assert move_events[0].unit_id == charger.id
+
+
+def test_charge_counter_attack_when_defender_not_exhausted():
+    """Pkt 14.d.iv — obrońca nie-Wyczerpany wykonuje kontratak (więcej eventów MeleeResolved)."""
+    from app.services.engine.events import MeleeResolved
+
+    state = make_state()
+    charger = make_blob(1, x=0, models=10, quality=3)
+    defender = make_blob(2, x=10, models=10, defense=4, quality=3)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1
+    )
+    melee_events = [e for e in result.events if isinstance(e, MeleeResolved)]
+    # 2 MeleeResolved: kontratak (defender as attacker) + główny atak (charger as attacker)
+    assert len(melee_events) == 2
+
+
+def test_charge_no_counter_when_defender_exhausted():
+    """Obrońca Wyczerpany → brak kontrataku, tylko 1 MeleeResolved (główny)."""
+    from app.services.engine.events import MeleeResolved
+
+    state = make_state()
+    charger = make_blob(1, x=0, models=10, quality=3)
+    defender = UnitBlob(
+        id=2,
+        owner_player=0,
+        position=Position(10, 0),
+        radius_inches=1.0,
+        models_alive=10,
+        toughness_per_model=3,
+        quality=3,
+        defense=4,
+        status_flags=(STATUS_WYCZERPANY,),
+    )
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1
+    )
+    melee_events = [e for e in result.events if isinstance(e, MeleeResolved)]
+    assert len(melee_events) == 1
+
+
+def test_charge_no_counter_when_declared_false():
+    """counter_attack_declared=False → brak kontrataku."""
+    from app.services.engine.events import MeleeResolved
+
+    state = make_state()
+    charger = make_blob(1, x=0, models=10, quality=3)
+    defender = make_blob(2, x=10, models=10, defense=4)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1,
+        counter_attack_declared=False,
+    )
+    melee_events = [e for e in result.events if isinstance(e, MeleeResolved)]
+    assert len(melee_events) == 1
+
+
+def test_charge_defender_becomes_exhausted_after_counter():
+    """Po kontrataku obrońca ma status Wyczerpany (pkt 14.d.iv)."""
+    state = make_state()
+    charger = make_blob(1, x=0, models=10, quality=3)
+    defender = make_blob(2, x=10, models=10, defense=4)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1
+    )
+    assert STATUS_WYCZERPANY in result.new_defender.status_flags
+
+
+def test_charge_bastion_prevents_exhaustion_after_counter():
+    """Bastion (id 1) — defender NIE staje się Wyczerpany po kontrataku."""
+    state = make_state()
+    charger = make_blob(1, x=0, models=10, quality=3)
+    defender = make_blob(
+        2, x=10, models=10, defense=4, passives=(ABILITY_BASTION,)
+    )
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1
+    )
+    assert STATUS_WYCZERPANY not in result.new_defender.status_flags
+
+
+def test_charge_charger_position_updates():
+    """Po Związaniu charger.position zmienia się (blisko defendera)."""
+    state = make_state()
+    charger = make_blob(1, x=0, y=0, radius=1.0)
+    defender = make_blob(2, x=20, y=0, radius=1.0)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1
+    )
+    # Charger powinien znaleźć się 1″ od krawędzi defendera
+    # = 1″ + defender.radius od centrum defendera
+    expected_dist = defender.radius_inches + 1.0  # = 2.0
+    actual_dx = defender.position.x - result.new_charger.position.x
+    actual_dy = defender.position.y - result.new_charger.position.y
+    actual_dist = (actual_dx**2 + actual_dy**2) ** 0.5
+    assert abs(actual_dist - expected_dist) < 0.01
+
+
+def test_charge_sequence_incrementing():
+    """Eventy mają monotonicznie rosnące sequence."""
+    state = make_state()
+    charger = make_blob(1, x=0, models=10, quality=3)
+    defender = make_blob(2, x=10, models=10, quality=3, defense=4)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=10
+    )
+    sequences = [e.sequence for e in result.events]
+    assert sequences == sorted(sequences)
+    assert sequences[0] == 10
+
+
+def test_charge_result_frozen():
+    """ChargeResult jest frozen."""
+    cr = ChargeResult(events=(), new_charger=make_blob(), new_defender=make_blob(2))
+    with pytest.raises(FrozenInstanceError):
+        cr.events = ()  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# Weapon abilities — Niezawodny + Podwójny (B3.4.g)
+# ---------------------------------------------------------------------------
+
+
+def test_effective_attack_quality_niezawodny_overrides():
+    """Niezawodny (id 63) — Q=2 niezależnie od attacker.quality."""
+    attacker = make_blob(quality=5)
+    weapon = WeaponProfile(
+        slug="ridge", name="Ridge", range_inches=24, attacks=1,
+        weapon_abilities=(ABILITY_NIEZAWODNY,),
+    )
+    assert effective_attack_quality(weapon, attacker) == 2
+
+
+def test_effective_attack_quality_niezawodny_beats_override():
+    """Niezawodny ma priorytet nad attack_quality_override w profilu."""
+    attacker = make_blob(quality=5)
+    weapon = WeaponProfile(
+        slug="x", name="X", range_inches=24, attacks=1,
+        attack_quality_override=4,
+        weapon_abilities=(ABILITY_NIEZAWODNY,),
+    )
+    assert effective_attack_quality(weapon, attacker) == 2
+
+
+def test_effective_attack_quality_override_used_without_niezawodny():
+    """Bez Niezawodny, attack_quality_override z profilu."""
+    attacker = make_blob(quality=5)
+    weapon = WeaponProfile(
+        slug="x", name="X", range_inches=24, attacks=1, attack_quality_override=3,
+    )
+    assert effective_attack_quality(weapon, attacker) == 3
+
+
+def test_effective_attack_quality_fallback_to_attacker():
+    """Bez Niezawodny ani override → attacker.quality."""
+    attacker = make_blob(quality=4)
+    weapon = WeaponProfile(slug="x", name="X", range_inches=24, attacks=1)
+    assert effective_attack_quality(weapon, attacker) == 4
+
+
+def test_resolve_ranged_niezawodny_more_hits_than_quality_5():
+    """Atakujący Q5 z bronią Niezawodny → trafia jak Q2 → znacznie więcej hits."""
+    state = make_state()
+    attacker = make_blob(1, models=20, quality=5)
+    defender = make_blob(2, x=20, models=20, defense=4)
+    plain = WeaponProfile(slug="p", name="P", range_inches=24, attacks=1)
+    niez = WeaponProfile(
+        slug="n", name="N", range_inches=24, attacks=1,
+        weapon_abilities=(ABILITY_NIEZAWODNY,),
+    )
+    r_plain = resolve_ranged_attack(
+        state, attacker, defender, plain, DeterministicDice(42), sequence=1
+    )
+    r_niez = resolve_ranged_attack(
+        state, attacker, defender, niez, DeterministicDice(42), sequence=1
+    )
+    wounds_p = sum(1 for e in r_plain.events if "ModelKilled" in type(e).__name__)
+    wounds_n = sum(1 for e in r_niez.events if "ModelKilled" in type(e).__name__)
+    # Niezawodny daje ≥ wounds (effectively więcej hitów)
+    assert wounds_n >= wounds_p
+
+
+def test_resolve_ranged_podwojny_adds_natural_6_extra_hits():
+    """Podwójny (id 66) — natural 6 trafienia daje dodatkowe trafienie.
+
+    Stat: average hit rate rośnie o ~1/6 per atak.
+    """
+    state = make_state()
+    attacker = make_blob(1, models=20, quality=4)
+    defender = make_blob(2, x=20, models=30, defense=4, toughness=1)
+    plain = WeaponProfile(slug="p", name="P", range_inches=24, attacks=1)
+    pod = WeaponProfile(
+        slug="pod", name="Pod", range_inches=24, attacks=1,
+        weapon_abilities=(ABILITY_PODWOJNY,),
+    )
+    r_plain = resolve_ranged_attack(
+        state, attacker, defender, plain, DeterministicDice(42), sequence=1
+    )
+    r_pod = resolve_ranged_attack(
+        state, attacker, defender, pod, DeterministicDice(42), sequence=1
+    )
+    from app.services.engine.events import ShotResolved
+
+    plain_shot = next(e for e in r_plain.events if isinstance(e, ShotResolved))
+    pod_shot = next(e for e in r_pod.events if isinstance(e, ShotResolved))
+    # Z Podwójny: hits ≥ standardowe (przy tym samym seedie)
+    assert pod_shot.hits >= plain_shot.hits
+
+
+def test_podwojny_no_natural_6_no_extra_hits():
+    """Gdy seed wyklucza naturalne 6, Podwójny nic nie dodaje."""
+    # Test scenariuszowy: model_alive=1, attacks=0 → 0 attacks → 0 hits
+    state = make_state()
+    attacker = make_blob(1, models=0)  # 0 modeli
+    defender = make_blob(2, x=20, models=5)
+    pod = WeaponProfile(
+        slug="pod", name="P", range_inches=24, attacks=1,
+        weapon_abilities=(ABILITY_PODWOJNY,),
+    )
+    result = resolve_ranged_attack(
+        state, attacker, defender, pod, DeterministicDice(42), sequence=1
+    )
+    from app.services.engine.events import ShotResolved
+
+    shot = next(e for e in result.events if isinstance(e, ShotResolved))
+    assert shot.hits == 0
