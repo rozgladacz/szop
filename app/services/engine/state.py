@@ -97,6 +97,20 @@ class UnitBlob:
 
 
 @dataclass(frozen=True, slots=True)
+class Objective:
+    """Cel misji (pkt 5).
+
+    `controller` ∈ {None, 0, 1}: None = niezajęty; 0/1 = owner_player kontrolujący.
+    Per pkt 5.d: zajęty gdy w 3″ od celu tylko oddziały tego gracza. Pozostaje
+    zajęty między rundami (pkt 5.d ostatnie zdanie).
+    """
+
+    id: int
+    position: Position
+    controller: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class BattleState:
     """Immutable snapshot stanu bitwy.
 
@@ -109,9 +123,11 @@ class BattleState:
     activations_remaining: tuple[int, int]  # per player
     blobs: tuple[UnitBlob, ...]
     terrain: tuple[TerrainCircle | TerrainLine, ...]
+    objectives: tuple[Objective, ...] = ()  # 5 celów per pkt 5.a
     pending_effects: tuple[str, ...] = ()  # placeholder dla B3.5
     pending_interrupts: tuple[str, ...] = ()  # placeholder dla B3.5
     score: tuple[int, int] = (0, 0)  # zajęte cele per player (pkt 5.f)
+    is_game_over: bool = False  # True po round_end_phase rundy 4 (pkt 5.f)
 
 
 def compute_radius_inches(
