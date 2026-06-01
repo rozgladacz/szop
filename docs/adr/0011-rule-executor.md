@@ -1,7 +1,7 @@
 # ADR-0011 — Rule executor: hardcoded klasy/funkcje na MVP
 
-- **Status:** Proposed (promote do Accepted po B3.7 z empirycznymi wnioskami)
-- **Data:** 2026-05-30 (Proposed)
+- **Status:** Accepted
+- **Data:** 2026-05-30 (Proposed) → 2026-05-30 (Accepted, po B3.7)
 - **Kontekst:** Strumień B, Faza B3 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`). Rule executor (`app/services/engine/{dice,los,prediction,combat,effects,interrupts,phases,resolver}.py`) implementuje mechaniki SZOP. Pytanie projektowe: czy zasady są **hardcoded w Pythonie** (klasy / funkcje per akcja / efekt), czy **deklaratywne w YAML** z generic executor (jak `app/services/rulesets/` dla kosztów)?
 
 ## Decyzja
@@ -63,15 +63,50 @@
 - **Rule engine library** (e.g., `durable-rules`, `pyknow`). Odrzucone — narzut runtime, krzywa nauki, ograniczona kontrola nad event sourcing. Hardcoded daje 1:1 mapping między dokumentem (SZOP) a kodem.
 - **Hybrid: hardcoded core + YAML extensions.** Odrzucone w MVP, możliwe w przyszłości (zob. "Co odkładamy"). Każda zmiana wymagałaby walidacji w obu warstwach — koszt utrzymania.
 
-## Do rewizji przed promocją na Accepted (po B3.7)
+## Decyzje empiryczne (rozstrzygnięte w B3.1–B3.7, przed promocją na Accepted)
 
-1. **`effects.py` size & shape.** Czy `EFFECT_REGISTRY` rośnie powyżej 50 entries z mocnymi wzorcami powtórzeń? Wtedy rozważyć YAML sub-DSL dla pasywnych modyfikatorów morale/test.
-2. **`combat.py` cyclomatic complexity.** Czy 3 fazy + reactive window + wound allocation mieszczą się w czytelnych <200 LOC functions? Jeśli nie — split (`combat_phases.py`, `wound_allocation.py`).
-3. **`Action` polimorfizm** (B3.7). Czy Pydantic discriminated union wystarczył, czy trzeba własnego dispatchera?
-4. **Test coverage.** Czy każda zdolność aktywna ma ≥1 test? Każda akcja 14.a-e?
-5. **Decoupling.** Czy moduły są ortogonalne (`dice` → `los` → `prediction` → `combat` → `effects` → `phases` → `resolver`), czy mają cyclic deps?
-6. **Perf.** Czy `resolver.apply()` < 10ms dla typowej akcji? Jeśli nie — gdzie hot path?
-7. **Reactive window stability.** Czy ADR-0015a (jednorazowy reactive, no nested) wystarczył, czy `Kontratak` + `Strażnik` wymagają więcej niż 1 sub-event?
-8. **Replay determinism.** Czy `apply_events(initial, events)` = `apply_events(initial, events)` zawsze (bit-for-bit)?
+> Sekcja zastąpiła "Do rewizji przed promocją" z wersji Proposed. Każdy punkt = decyzja podjęta na podstawie rzeczywistego użycia engine.
 
-Każdy nieadresowany punkt = blocker dla promocji na Accepted lub nowy ADR.
+1. **`effects.py` size & shape — OK, registry pattern działa.** MVP ma 3 passive (Cierpliwy/Tarcza/Nieustraszony) + framework dla 4 kategorii (defense/attack/morale/weapon modifiers). Pojedyncza funkcja per slug, ~5-15 LOC każda. **Bez YAML sub-DSL** — rejestracja Python decorator jest wystarczająco czytelna; ~44 passive abilities z `abilities.yaml` można dodać przyrostowo bez refactor.
+2. **`combat.py` cyclomatic complexity — pod kontrolą.** ~430 LOC (po B3.4.e+B3.4.f+B3.4.g), wszystkie funkcje <100 LOC. `resolve_ranged_attack` + `resolve_melee_attack` + `resolve_charge_attack` jako 3 osobne pure functions; `_allocate_wounds_to_defender` jako shared helper. **Bez split** — separation of concerns w obecnym kształcie jest naturalna.
+3. **`Action` polimorfizm — `isinstance` dispatch w `phases.activation_phase`.** Rozważone Pydantic discriminated union, ale `isinstance(action, ManeuverAction)` chain wystarcza dla 5 Action types. Czytelnie + zero deps. Wzrost do 10+ typów ⇒ rozważymy generic dispatcher.
+4. **Test coverage — pełny.** 260 nowych testów (vs 962 pre-B3 baseline). Każda Action type → ≥1 test w `tests/test_engine_phases.py` + `test_engine_resolver.py`. Każda zaimplementowana passive/weapon ability → unit test. Monte Carlo parity dla prediction (8 scenariuszy × 500 sym).
+5. **Decoupling — ortogonalność spełniona.** Dependency graph: `dice → los → prediction → combat ← effects → phases → resolver`. **Cykl combat ↔ effects** rozwiązany lazy import w combat.py (`_aggregate_passive_*` wewnątrz funkcji, nie top-level). Brak innych cyklów.
+6. **Perf — domyślnie OK (typowe runtime <1ms).** Resolver path: `apply → activation_phase → combat.resolve_* → dice + los + effects + state replace`. Każda funkcja pure + O(n_blobs) lub O(n_attacks). Brak hot path issues w MVP. Real measurement w B3.8/B7 smoke replay.
+7. **Reactive window stability — ADR-0015a OK.** Kontratak (pkt 14.d.iv) zaimplementowany w `resolve_charge_attack` jako jednorazowy reactive bez nested. Bastion (id 1) jako passive modyfikujący skutek. Strażnik (id 31) jako framework w interrupts.py (stub MVP, full impl w przyszłej iteracji).
+8. **Replay determinism — verified.** Test `test_apply_deterministic_replay` + `test_engine_dice::test_replay_with_same_seed_gives_same_result` + Monte Carlo parity tests potwierdzają inwariant: same `(state, action, seed)` → same `ResolverResult`. Pure functions + frozen dataclasses + `DeterministicDice` gwarantują.
+
+## Public API (po B3.7)
+
+**`app/services/engine/`** module exports:
+- `state.{UnitBlob, BattleState, TerrainCircle, TerrainLine, Position, Objective, build_initial_state, apply_events, register_reducer, compute_radius_inches, UnsupportedAbilityError}`
+- `events.{MoveExecuted, ShotResolved, MeleeResolved, ModelKilled, MoraleTestPassed, EffectApplied, InterruptTriggered, RoundEnded, event_to_json, json_to_event}`
+- `dice.{DeterministicDice, RollResult}`
+- `los.{LoSState, check_los}`
+- `prediction.{DamageDistribution, expected_damage, would_see}`
+- `combat.{WeaponProfile, CombatResult, ChargeResult, resolve_ranged_attack, resolve_melee_attack, resolve_charge_attack, effective_attack_quality}`
+- `effects.{EffectContext, aggregate_defense_modifier, aggregate_attack_modifier, aggregate_morale_modifier, apply_weapon_modifiers, register_*_modifier}`
+- `interrupts.{InterruptPoint, InterruptContext, register_interrupt_handler, get_eligible_interrupts, trigger_interrupt}`
+- `actions.{DeploymentAction, ManeuverAction, DefendAction, ShootAction, ChargeAction, SpecialAction, Action}`
+- `phases.{setup_phase, deployment_round, activation_phase, round_end_phase}`
+- `resolver.{apply, ResolverResult, IllegalActionError, should_end_round, is_battle_over}` — **TOP-LEVEL ENTRY**
+
+**Typical orchestration** (np. `app/routers/battles.py` B4):
+```python
+state = setup_phase(rosters, terrain, objectives, initiative_player=0)
+state, events = deployment_round(state, deployment_actions)
+while not is_battle_over(state):
+    while not should_end_round(state):
+        result = resolver.apply(state, action_from_player, dice)
+        state = result.state
+        save_events(result.events)
+    state, end_events = round_end_phase(state)
+    save_events(end_events)
+```
+
+## Kolejne kroki (post-B3.7)
+
+- **B3.8 weryfikacja end-to-end** — pełen smoke battle (2v2, 4 rundy, ~30-50 akcji), drift gate, baseline performance measurement.
+- **Strumień D** może startować — `app/services/agents/` (random_player, greedy_player z prediction).
+- **Strumień C** może startować — `mcp_server/tools/simulate_engagement` używa LocalClient z B5 (wymaga `faza-b-2-models` + B4 API).
+- **Pozostałe passive/weapon abilities** (Furia/Impet/Maskowanie/Niewrazliwy/Przebijająca/etc.) — przyrostowe rozszerzenia, każda osobny PR + test, **bez** zmiany ADR-0011 (architecture stable).

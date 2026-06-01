@@ -299,7 +299,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 | 0010 | Event-sourced battle log | ✓ |
 | 0010a | Decision freeze (GATE dla B3 actions) | ✓ |
 | 0010b | Eventy + immutable state; ORM tylko persistence | ✓ (scalone w ADR-0010) |
-| 0011 | Rule executor: hardcoded → YAML handlers | — |
+| 0011 | Rule executor: hardcoded klasy/funkcje na MVP | ✓ |
 | 0012 | Dice: własna biblioteka, deterministyczny seed | — |
 | 0013 | Engine headless-first | — |
 | 0014 | Obrażenia per-oddział (= Stan bitewny) — 4 kategorie ran | ✓ |
