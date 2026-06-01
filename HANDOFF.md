@@ -11,8 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ → B2 → B3 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3 sub-wątek started) |
-| [HANDOFF_faza-b-3-executor](docs/handoffs/HANDOFF_faza-b-3-executor.md) | Sub-wątek B3 — Rule Executor + dice. 7 modułów engine (`dice`/`los`/`prediction`/`combat`/`effects`/`interrupts`/`phases`/`resolver`) + runtime substrate (`state.py`/`events.py`) + 6 ADR-ów. | `app/services/engine/{__init__,state,events,dice,los,prediction,combat,effects,interrupts,phases,resolver}.py NEW`, `tests/test_engine_*.py` + `tests/test_los_geometry.py` + `tests/test_prediction_vs_simulation.py NEW`, `docs/adr/{0011,0012,0015,0015a,0043,0044}-*.md NEW`, `build/b3_action_ability_audit.md NEW` | In progress (B3.0 preflight) |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3 done; B4 lub D pierwsze) |
 
 ## Zasoby zablokowane (reverse lookup)
 
@@ -28,25 +27,6 @@
 | `docs/adr/0010-event-sourced-battle-log.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted |
 | `docs/adr/0010a-decision-freeze.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted (GATE dla B3) |
 | `docs/adr/0014-per-unit-wounds.md` (NEW) | faza-b-engine-mvp | B0.7 — Status: Accepted |
-| `app/services/engine/` (NEW pakiet) | faza-b-3-executor | B3.0-B3.7 — runtime substrate + 7 modułów pure-functions |
-| `app/services/engine/state.py` (NEW) | faza-b-3-executor | B3.0.2 — `UnitBlob`/`BattleState`/`TerrainCircle`/`TerrainLine` + `apply_events` |
-| `app/services/engine/events.py` (NEW) | faza-b-3-executor | B3.0.3 — 8 event types + JSON serializer |
-| `app/services/engine/dice.py` (NEW) | faza-b-3-executor | B3.1 — `DeterministicDice(seed)` |
-| `app/services/engine/los.py` (NEW) | faza-b-3-executor | B3.2 — `check_los` 3-state N=16 sampling |
-| `app/services/engine/prediction.py` (NEW) | faza-b-3-executor | B3.3 — `expected_damage` analytic binomial CDF |
-| `app/services/engine/combat.py` (NEW) | faza-b-3-executor | B3.4 — `resolve_ranged_attack`/`resolve_melee_attack` + reactive window |
-| `app/services/engine/effects.py` (NEW) | faza-b-3-executor | B3.5 — `EFFECT_REGISTRY` per slug |
-| `app/services/engine/interrupts.py` (NEW) | faza-b-3-executor | B3.5 — `InterruptManager` 4 zamknięte punkty |
-| `app/services/engine/phases.py` (NEW) | faza-b-3-executor | B3.6 — `setup_phase`/`activation_phase`/`round_end_phase` |
-| `app/services/engine/resolver.py` (NEW) | faza-b-3-executor | B3.7 — pure `apply(state, action, dice, ruleset, terrain)` |
-| `tests/test_engine_*.py` (NEW) + `tests/test_los_geometry.py` + `tests/test_prediction_vs_simulation.py` | faza-b-3-executor | B3.0–B3.7 — testy modułów engine |
-| `docs/adr/0011-rule-executor.md` (NEW) | faza-b-3-executor | B3.0.6 Proposed → B3.7 Accepted |
-| `docs/adr/0012-dice-deterministic.md` (NEW) | faza-b-3-executor | B3.1 — Status: Accepted |
-| `docs/adr/0015-interrupt-points.md` (NEW) | faza-b-3-executor | B3.5 — Status: Accepted |
-| `docs/adr/0015a-reactive-window.md` (NEW) | faza-b-3-executor | B3.4 — Status: Accepted |
-| `docs/adr/0043-los-3-state.md` (NEW) | faza-b-3-executor | B3.2 — Status: Accepted |
-| `docs/adr/0044-prediction-module.md` (NEW) | faza-b-3-executor | B3.3 — Status: Accepted |
-| `build/b3_action_ability_audit.md` (NEW) | faza-b-3-executor | B3.0.1 — wynik GATE pkt 3 ADR-0010a |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
@@ -64,6 +44,17 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-05-30 — faza-b-3-executor (archived) — B3 Game Engine MVP done
+
+- Sub-wątek `faza-b-engine-mvp` zamykający Strumień B3 (Rule Executor + dice) — pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności mapowanych (3 passive Cierpliwy/Tarcza/Nieustraszony + 5 weapon AP/Brutalny/Precyzyjny/Niezawodny/Podwójny + Bohater id 2 w build_initial_state + 6 wykluczeń pkt ADR-0008 + Bastion id 1 reactive + Strażnik id 31 framework stub). Pure functions + event sourcing per ADR-0010/0011.
+- **8 etapów (B3.0–B3.7) + B3.8 weryfikacja** w 8 commitach na `Faza_A`: `3072488` (B3.0 preflight GATE+state+events), `6f163d6` (B3.1 dice), `f2b39a5` (B3.2 LoS), `fe5fcfc` (B3.4 combat base), `9886151` (B3.5 effects/interrupts framework), `f97dd7c` (B3.3 prediction analytic), `622f61f` (B3.4 extension: Szarża+kontratak+effects integration+Niezawodny/Podwójny), `3907f6e` (B3.6 phases), `81023e6` (B3.7 resolver + ADR-0011 Accepted), `<this>` (B3.8 weryfikacja + smoke + architecture.md + archiwizacja).
+- Pliki NEW: `app/services/engine/{__init__,state,events,dice,los,prediction,combat,effects,interrupts,actions,phases,resolver}.py` (~2400 LOC łącznie), `tests/test_engine_{state,events,dice,combat,effects,interrupts,phases,resolver}.py` + `tests/test_los_geometry.py` + `tests/test_prediction_vs_simulation.py`, `scripts/engine_smoke_replay.py`, `build/b3_action_ability_audit.md` (gitignored), `docs/adr/{0011,0012,0015,0015a,0043,0044}-*.md` (6 nowych Accepted ADR).
+- Weryfikacja: pytest **1244/1244 passed** (962 baseline + 282 nowych w B3.x); parity gate niezmieniona (`both_assert` 156/156 + `yaml` 93/93); drift gate CLEAN (4/4 sources SHA256 + R1=0/R2=0/R3=31 acceptable WARN); smoke replay 21 events w 7 typach reprezentowanych.
+- Doc updates: `docs/architecture.md` sekcja "Game engine" z mapą modułów + event-sourced data flow + typowa orkiestracja, `docs/roadmap.md` (B3.x wszystkie ✅, ADR-y 0011/0012/0015/0015a/0043/0044 ✓), ADR-0011 promote Proposed → Accepted z 8 punktami empirycznymi rozstrzygniętymi w B3.1-B3.7.
+- **Public API engine zdefiniowane** w ADR-0011 — gotowe do konsumpcji przez Strumień D (`app/services/agents/`), B4 routers (po B2 ORM), B5 szop_client, Strumień C (`mcp_server.tools.simulate_engagement` po B4).
+- **GATE ADR-0010a** spełniony (5/5 punktów). **Co odkładamy do przyrostowych PR-ów** (bez zmiany ADR-0011): pozostałe ~30 passive/weapon abilities (Furia/Impet/Maskowanie/Niewrazliwy/Przebijająca/Zabójczy/Łatanie/Mag/...), full Strażnik impl, multi-target Ostrzał (pkt 14.c.i: 1-2 cele), pełna interrupt orchestracja w phases (Klątwa/Rozkaz/Oznaczenie/Usprawnienie).
+- **Następne strumienie odblokowane:** B4 (API — wymaga B2 ORM models), B5 (klient), D (agenci-boty mogą startować na bazie public API). Sub-wątek `faza-b-2-models` (ORM B2) → otworzymy gdy B4 startuje.
 
 ### 2026-05-29 — faza-a-4-drift (archived) — Faza A4 done, Strumień B0 odblokowany
 - Strumień A4 (pipeline drift detection DOCX/MD↔YAML, ADR-0006). 6 nowych skryptów `scripts/rules_*.py` (extract DOCX, extract MD, drift, classify geometry, sources SHA256, + `_regen_abilities_yaml.py` helper), `Makefile` cel `rules-check` orchestrator z 5 subceli, `.github/workflows/rules_drift.yml` GHA CI gate path-filtered z exit code semantics (0=pass / 1=fail / 2=warn-pass). 4 nowe YAML files: `abilities.yaml` zregenerowane (88 entries po YAML sync z Rozwoj), `drift_allowlist.yaml` symetric (`allowed_yaml_only` + `allowed_docx_only`), `source_hashes.yaml` (centralna SHA256 dla 4 source files: DOCX+PDF+2×MD). ADR-0006 promoted `Proposed → Accepted` z 8 punktami rewizji rozstrzygniętymi empirycznie. **Sub-wątek `faza-a-4-extract` archived 2026-05-26 (A4.1).** **YAML sync z `Rozwoj`** (cherry-pick `a051bb4` Bugfix + `313fb1d` Klaryfikacja zasad): abilities.py +blocked field +parowanie, kontra 2.0→1.0, transport_multipliers update (usunięte zasadzka/zwiadowca pair, samolot 3.5→4.0). **3-source canonical state** (DOCX+MD strukturalnie identyczne, YAML mirror sync). **Real drift report:** R1=0/R1w=6/R2=0/R2w=17/R3=31/R4=0 → exit 2 WARN (description wording differences akceptowane jako WARN per Q1 A4.2). **B MVP exclusion list (A4.3):** 3 abilities — `zwrot` (facing), `precyzyjny` (per_model), `dywersant` (false-positive na "strefy rozstawienia"). **Strumień B0 odblokowany** — `build/geometry_classification.md` daje hard prereq input.

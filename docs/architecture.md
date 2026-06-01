@@ -93,6 +93,88 @@ Pliki YAML w `app/rulesets/v1/`:
 
 Detale: [ADR-0003](adr/0003-yaml-pydantic-format.md), [ADR-0004](adr/0004-cost-dsl.md).
 
+## Game engine — `app/services/engine/` (Strumień B, B3 zamknięte 2026-05-30)
+
+Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). **Pure functions + event sourcing** per [ADR-0010](adr/0010-event-sourced-battle-log.md) + [ADR-0011](adr/0011-rule-executor.md). Pareto MVP: oddział = koło, brak orientacji, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych: `samolot/wrak/wysoki/zwrot/sterowany/zuzywalny` ([ADR-0008](adr/0008-pareto-mvp.md) + `app/rulesets/v1/b_mvp_exclusions.yaml`).
+
+### Mapa modułów (dependency graph)
+
+```
+                  loader (Strumień A)
+                       │
+                       ▼
+                    state ◄────── events ── (serializer JSON↔dataclass)
+                       │              ▲
+                       │              │
+       ┌───────────────┼──────────────┼─────────────────┐
+       ▼               ▼              │                 │
+     dice ──────►   los    ──────► prediction    interrupts (ADR-0015)
+       │              │                ▲                 │
+       │              │                │                 │
+       └──────► combat ────────────────┴── effects ◄─────┘
+                  │ (lazy import)         (passive registry, ADR-0015a kontratak)
+                  ▼
+               phases  ── (setup/deployment/activation/round_end per pkt 7-21)
+                  │
+                  ▼
+              resolver  ── PUBLIC API: apply(state, action, dice) -> ResolverResult
+```
+
+| Moduł | LOC | Zakres |
+|---|---|---|
+| `state.py` | ~290 | `UnitBlob` (4 kategorie ran per ADR-0014), `BattleState`, `Position`, `TerrainCircle/Line`, `Objective`, `apply_events` + `register_reducer` (event replay), `build_initial_state` (raise `UnsupportedAbilityError` dla wykluczeń) |
+| `events.py` | ~210 | 8 event types (`MoveExecuted/ShotResolved/MeleeResolved/ModelKilled/MoraleTestPassed/EffectApplied/InterruptTriggered/RoundEnded`) + `event_to_json` / `json_to_event` |
+| `dice.py` | ~110 | `DeterministicDice(seed)` na `random.Random` (ADR-0012), `RollResult` z natural rolls, `roll_with_threshold` pełna semantyka pkt 1 (a/b/c/d) |
+| `los.py` | ~210 | `check_los` 3-state (WIDZI/NIE_WIDZI/OSŁONA) z sampling N=16 (ADR-0043), Zasłaniający exception pkt 4.c.iii, geometry primitives (segment-circle/segment-segment intersection) |
+| `prediction.py` | ~210 | Analytic binomial bez RNG (ADR-0044), `expected_damage(...) → DamageDistribution`, `would_see` hipotetyczny LoS. **Monte Carlo parity** ±3σ z combat.resolve_ranged_attack |
+| `combat.py` | ~570 | `WeaponProfile` + `CombatResult` + `ChargeResult` + `resolve_ranged_attack` (3 fazy pkt 17 + osłona pkt 19) + `resolve_melee_attack` (z melee_balance pkt 20.c) + `resolve_charge_attack` (pkt 14.d + reactive kontratak ADR-0015a). Weapon abilities MVP: AP/Brutalny/Precyzyjny/Niezawodny/Podwójny |
+| `effects.py` | ~210 | Per-hook registry (4 kategorie: defense/attack/morale/weapon modifiers), `EffectContext` frozen, `aggregate_*_modifier` aggregators. MVP passive: Cierpliwy/Tarcza/Nieustraszony |
+| `interrupts.py` | ~150 | `InterruptManager` z 4 zamkniętymi punktami per [ADR-0015](adr/0015-interrupt-points.md), `register_interrupt_handler(point, slug)` decorator, `get_eligible_interrupts` / `trigger_interrupt`. Strażnik (id 31) jako MVP stub |
+| `actions.py` | ~80 | 6 Action types frozen (`DeploymentAction/ManeuverAction/DefendAction/ShootAction/ChargeAction/SpecialAction`) + `Action` Union alias |
+| `phases.py` | ~420 | `setup_phase` (pkt 7+9), `deployment_round` (pkt 13), `activation_phase` (pkt 11.b dispatch + Przegrupowanie pkt 20 z passive morale modifiers), `round_end_phase` (pkt 8.c + objective control pkt 5.d + game over pkt 5.f) |
+| `resolver.py` | ~140 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` z walidacją (5 reguł IllegalActionError) + switch active_player pkt 8.a. Helpers `should_end_round` / `is_battle_over` |
+
+### Event-sourced data flow
+
+```
+Player action ──► resolver.apply() ──► validate ──► phases.activation_phase()
+                       │                                     │
+                       │                                     ▼
+                       │                            combat.resolve_*() ──► [BattleEvent...]
+                       │                                     │
+                       │                            phases._regroup_test()
+                       │                                     │
+                       ▼                                     ▼
+              ResolverResult(state, events, next_sequence)  apply_events(state, events) → BattleState
+                       │                                     │
+                       ▼                                     ▼
+            persistence.save_events() (B2)            replay path (audit/debug)
+```
+
+### Typowa orkiestracja (z ADR-0011)
+
+```python
+state = setup_phase(rosters, terrain, objectives, initiative_player=0)
+state, events = deployment_round(state, deployment_actions)
+while not is_battle_over(state):
+    while not should_end_round(state):
+        result = resolver.apply(state, action_from_player, dice)
+        state = result.state
+        save_events(result.events)  # do BattleEvent ORM (B2)
+    state, end_events = round_end_phase(state)
+    save_events(end_events)
+```
+
+### Status B3 (zamknięte 2026-05-30)
+
+- **1244/1244 testów** (962 baseline + 282 nowych w B3)
+- **10 ADR-ów Accepted dla Strumienia B**: 0008/0010/0010a/0011/0012/0014/0015/0015a/0043/0044
+- **Smoke replay**: `scripts/engine_smoke_replay.py` — minimal 2v2 battle, 21 events (wszystkie 7 typów reprezentowane)
+- **GATE OPEN** per ADR-0010a (5/5 punktów spełnionych)
+- **Consumers ready**: Strumień D (`app/services/agents/` random_player/greedy_player z prediction), B4 routers (po B2 ORM), B5 `szop_client` (LocalClient)
+
+Pozostałe rozszerzenia (Furia/Impet/Maskowanie/Niewrazliwy/Przebijająca/Zabójczy/Łatanie/Mag/etc.) → przyrostowe PR-y bez zmian ADR-0011 (architecture stable).
+
 ## Frontend JS — mapa modułów
 
 Aktualna mapa zależności i lista call sites po podziale `app/static/js/app.js`: `docs/frontend_js_modules.md`.

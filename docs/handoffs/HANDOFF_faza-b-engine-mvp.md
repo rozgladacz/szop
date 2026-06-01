@@ -1,7 +1,7 @@
 # HANDOFF — faza-b-engine-mvp
 
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + następne podfazy B2 (modele) → B3 (rule executor) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, ...).
-> **Status:** In progress — B0 ✅ (commits `67740c4`+`2e01894`+`53de635`), B3 sub-wątek `faza-b-3-executor` started 2026-05-30
+> **Status:** In progress — B0 ✅ + B3 ✅ (sub-wątek `faza-b-3-executor` archived 2026-05-30, 8 commitów B3.0-B3.8, pytest 1244/1244, 10 ADR-ów Accepted). Następne: B2 ORM + B4 API + Strumień D.
 > **Utworzony:** 2026-05-30
 > **Ostatnia aktualizacja:** 2026-05-30
 

@@ -128,50 +128,66 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [ ] `load_events(session, battle_id, since=0)` — odczyt z db
 - [ ] `create_snapshot()` — optionally save snapshot (MVP: nie wywoływane)
 
-- [ ] ADR-0010: Event-sourced battle log
-- [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence
-- [ ] ADR-0014: Obrażenia per-oddział (zgodne z „Stan bitewny")
+- [ ] ADR-0010: Event-sourced battle log ✓
+- [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence ✓ (scalone z 0010)
+- [ ] ADR-0014: Obrażenia per-oddział (zgodne z „Stan bitewny") ✓
 
-### B3. Rule Executor + dice (5–7 tyg, gate: ADR-0010a)
+### B3. Rule Executor + dice — **DONE 2026-05-30** (sub-wątek `faza-b-3-executor`, 8 commitów)
 
-**Dice (`app/services/engine/dice.py`, ~80 linii):**
-- [ ] `DeterministicDice(seed)` — `roll_d6(count, modifiers)`, `roll_with_threshold(pool, threshold)`
-- [ ] Testy: reproducibility, distribution, threshold
-- [ ] ADR-0012: Własna biblioteka dice, deterministic seed
+Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 weapon + Bohater + 6 wykluczeń + Strażnik stub + reactive Bastion). Pure functions + event sourcing. **1244/1244 testów** (282 nowych vs 962 pre-B3 baseline). **10 ADR-ów Accepted**: 0008/0010/0010a/0011/0012/0014/0015/0015a/0043/0044.
+
+**Dice (`app/services/engine/dice.py`):**
+- [x] `DeterministicDice(seed)` na `random.Random` (stdlib), `roll_d6(count)`, `roll_with_threshold(count, threshold, modifier, natural_6/1 flags)` per pkt 1 a-d. `RollResult` frozen z natural rolls.
+- [x] 24 testy (reproducibility, distribution chi-square, threshold semantics, Brutalny/Delikatny, modifier clamp).
+- [x] ADR-0012 Accepted: `random.Random` z stdlib, brak biblioteki zewnętrznej, 4 inwarianty replay.
 
 **LoS (`app/services/engine/los.py`):**
-- [ ] 3-state: `WIDZI` / `NIE_WIDZI` / `OSŁONA` — via N=16 deterministycznych punktów na okręgu celu
-- [ ] `check_los(attacker, target, terrain, N=16) → LoSState`
-- [ ] Testy: `tests/test_los_geometry.py` — 30 hand-crafted scenarios
-- [ ] ADR-0043: LoS 3-stanowy — sampling N=16, plan B: N=32 lub analytic tangent
+- [x] 3-state `LoSState ∈ {WIDZI, NIE_WIDZI, OSŁONA}` z sampling N=16 punktów na obwodzie celu, Zasłaniający exception pkt 4.c.iii.
+- [x] Geometry primitives: `_segment_intersects_circle` (closest point projection), `_segments_intersect` (CCW orientation).
+- [x] 43 testy (geometry 12, Blokujący 4, Zasłaniający 5, multi-terrain 2, non-blocking 3, edge cases 4, enum 2, realistic 2).
+- [x] ADR-0043 Accepted: N=16 Pareto sweet spot, plan B N=32/analytic.
 
 **Prediction (`app/services/engine/prediction.py`):**
-- [ ] `expected_damage(attacker, defender, weapon_slug, terrain, ruleset) → DamageDistribution` — analitycznie, binomial CDF, bez RNG
-- [ ] `DamageDistribution(mean, pmf, p_at_least(), p_kill())`
-- [ ] `would_see(pos, target, terrain) → LoSState`
-- [ ] Testy: `tests/test_prediction_vs_simulation.py` — 100 scenariuszy × 1000 Monte Carlo; mean ±3σ; Chi-square dla pmf
-- [ ] ADR-0044: Prediction module dla agentów (bez symulacji)
+- [x] `expected_damage(attacker, defender, weapon, terrain)` analityczny binomial bez RNG. `DamageDistribution(pmf, mean, p_at_least, p_kill, p_full_kill, expected_models_killed)`. `would_see` hipotetyczny LoS.
+- [x] REUSES `compute_cover/compute_attack_modifiers/compute_defense_modifier` z combat.py (consistency invariant).
+- [x] 38 testów + **Monte Carlo parity 8 scenariuszy × 500 sym + cover** — ±3σ tolerance.
+- [x] ADR-0044 Accepted: analytic dla agents/MCP, 5 planowanych konsumentów.
 
 **Combat (`app/services/engine/combat.py`):**
-- [ ] `resolve_ranged_attack(attacker, defender, weapon, dice, terrain, ruleset) → CombatResult`
-- [ ] Faza 1: Declare + attacker modifiers; REACTIVE WINDOW dla broniącego (jednorazowe, atomowe); Faza 2: Dice resolution; Faza 3: Wound allocation
-- [ ] `resolve_melee_attack(…)` — analogicznie
-- [ ] ADR-0015a: Reactive window — jednorazowa, atomowa, nie generuje nowych okien
+- [x] `WeaponProfile` + `CombatResult` + `ChargeResult` frozen.
+- [x] `resolve_ranged_attack` (pkt 17 + 19): osłona, AP, Brutalny, Precyzyjny, hit/defense rolls, wound allocation pkt 17.d-e + pkt 18 z prefer_hero.
+- [x] `resolve_melee_attack`: + bilans wręcz pkt 20.c.
+- [x] `resolve_charge_attack`: pełna Szarża pkt 14.d.i-vi z reactive kontratakiem pkt 14.d.iv (ADR-0015a) + Bastion id 1.
+- [x] Helpers: `effective_attack_quality` (Niezawodny id 63 → Q=2), `_apply_podwojny_extra_hits` (Podwójny id 66).
+- [x] Lazy import z effects.py — Cierpliwy/Tarcza/Nieustraszony faktycznie modyfikują rolls.
+- [x] 56 testów (combat base 37 + extension 19).
+- [x] ADR-0015a Accepted: reactive jednorazowy/atomowy/no nested.
 
-**Effects + Interrupts (`app/services/engine/effects.py`, `interrupts.py`):**
-- [ ] `EFFECT_REGISTRY` — `{slug: apply_fn}`; każda funkcja czysta: `(unit, context) → unit`
-- [ ] `InterruptManager` — 4 zamknięte punkty: `activation_start`, `after_action`, `before_regroup`, `after_regroup`; constraint: interrupt nie generuje nowego punktu
-- [ ] ADR-0015: 4 zamknięte interrupt points
+**Effects + Interrupts (`app/services/engine/{effects,interrupts}.py`):**
+- [x] `EffectContext` frozen + 4 per-hook registries (defense/attack/morale/weapon modifiers). `aggregate_*_modifier` aggregators. MVP passive: Cierpliwy/Tarcza/Nieustraszony.
+- [x] `InterruptPoint` enum (4 punkty per ADR-0015), `register_interrupt_handler(point, slug)`, `get_eligible_interrupts`, `trigger_interrupt`. Strażnik (id 31) MVP stub.
+- [x] 38 testów (21 effects + 17 interrupts).
+- [x] ADR-0015 Accepted: 4 zamknięte punkty per pkt 12, no nested.
 
 **Phases (`app/services/engine/phases.py`):**
-- [ ] `setup_phase(roster_p0, roster_p1, scenario, ruleset) → BattleState`
-- [ ] `deployment_round(state, actions) → (BattleState, events)`
-- [ ] `activation_phase(state, action) → (BattleState, events)`
-- [ ] `round_end_phase(state) → (BattleState, events)`
+- [x] `setup_phase(rosters, terrain, objectives, initiative)` — pkt 7+9.
+- [x] `deployment_round(state, actions)` — pkt 13, emit MoveExecuted move_type="deploy".
+- [x] `activation_phase(state, action, dice)` — dispatch per Action type → akcja → Przegrupowanie pkt 20 (uwzględnia pkt 20.b/c/d + passive morale modifiers) → Aktywowany.
+- [x] `round_end_phase(state)` — pkt 8.c reset Aktywowany + `_check_objective_control` pkt 5.d (Przyszpilony nie kontroluje pkt 22.b.ii) + RoundEnded + is_game_over po round 4 pkt 5.f.
+- [x] 25 testów.
 
-**Resolver (`app/services/engine/resolver.py`):**
-- [ ] `apply(state, action, dice, ruleset, terrain) → (BattleState, list[BattleEvent])` — czysta funkcja, zero DB access
-- [ ] ADR-0011: Rule executor — hardcoded klasy na MVP
+**Resolver (`app/services/engine/resolver.py`) — PUBLIC API:**
+- [x] `apply(state, action, dice, sequence) → ResolverResult(state, events, next_sequence)` — pure function dispatcher.
+- [x] Walidacja `IllegalActionError` (5 powodów). Switch active_player pkt 8.a + fallback. Helpers `should_end_round` / `is_battle_over`.
+- [x] 22 testów (per Action type, walidacja, switch, determinism, smoke 2v2 + game over after round 4).
+- [x] ADR-0011 Accepted: hardcoded klasy/funkcje, isinstance dispatch dla 5 Action types, lazy import dla combat↔effects cycle. Public API engine zdefiniowane.
+
+**B3.8 weryfikacja end-to-end:**
+- [x] Pytest **1244/1244** (962 baseline + 282 nowych w B3)
+- [x] Parity gate Strumień A: `both_assert` 156/156, `yaml` 93/93 — niezmieniony
+- [x] Drift gate: 4/4 sources SHA256 CLEAN, R1=0/R2=0/R3=31 (acceptable warn per ADR-0006)
+- [x] Smoke replay: `scripts/engine_smoke_replay.py` — minimal 2v2 battle, 21 events, 7 typów eventów reprezentowanych
+- [x] `docs/architecture.md` — sekcja "Game engine" z mapą modułów + event-sourced data flow + typowa orkiestracja
 
 ### B4. API (3 tyg)
 - [ ] `app/routers/battles.py` — endpointy: `POST /battles/invite`, `POST /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `GET /battles/{id}/events`, `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST /battles/{id}/replay`
@@ -300,11 +316,11 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 | 0010a | Decision freeze (GATE dla B3 actions) | ✓ |
 | 0010b | Eventy + immutable state; ORM tylko persistence | ✓ (scalone w ADR-0010) |
 | 0011 | Rule executor: hardcoded klasy/funkcje na MVP | ✓ |
-| 0012 | Dice: własna biblioteka, deterministyczny seed | — |
+| 0012 | Dice: własna biblioteka, deterministyczny seed | ✓ |
 | 0013 | Engine headless-first | — |
 | 0014 | Obrażenia per-oddział (= Stan bitewny) — 4 kategorie ran | ✓ |
-| 0015 | 4 zamknięte interrupt points | — |
-| 0015a | Reactive window w akcji ataku (atomowe) | — |
+| 0015 | 4 zamknięte interrupt points | ✓ |
+| 0015a | Reactive window w akcji ataku (atomowe) | ✓ |
 | 0016 | szop_client jako wydzielony moduł | — |
 | 0017 | Telemetria od dnia 1 | — |
 | 0020 | MCP runtime: Python SDK | — |
@@ -317,8 +333,8 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 | 0040 | Migration blob → per-model | — |
 | 0041 | Terrain shapes beyond circle/line | — |
 | 0042 | Facing: wprowadzane z Zwrot | — |
-| 0043 | LoS 3-stanowy (sampling N=16) | — |
-| 0044 | Prediction module (damage PMF + visibility) | — |
+| 0043 | LoS 3-stanowy (sampling N=16) | ✓ |
+| 0044 | Prediction module (damage PMF + visibility) | ✓ |
 
 ---
 
