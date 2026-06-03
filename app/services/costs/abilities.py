@@ -98,7 +98,7 @@ def passive_cost(
     if slug == "regeneracja":
         return 4.0 * tou
     if slug == "dywersant":
-        return 1.25 * (tou if aura else 1.0)
+        return 3.25 if aura else 0.0
     if slug == "zdobywca":
         return 3.0 * tou
     if slug == "straznik":
@@ -115,9 +115,7 @@ def passive_cost(
             return 3.0
         if slug == "niestrudzony":
             return 8.0
-        if slug == "nieustraszony":
-            return 2.25 * tou
-        if slug in {"ucieczka", "stracency"}:
+        if slug in {"nieustraszony", "ucieczka", "stracency"}:
             return 1.5 * tou
         if slug == "delikatny":
             return 0.5 * tou

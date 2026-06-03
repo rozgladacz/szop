@@ -44,8 +44,11 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Bohater",
         type="passive",
         description=(
-            "Może być dołączony do dowolnego oddziału z którym dzieli pozostałe zdolności pasywne." "Może wykonywać testy przegrupowania za cały oddział, ale musi korzystać z jego obrony, dopóki są w nim inne modele."
-            "Jego rozmiar jest traktowany  jakby miał 2 razy mniejszą wytrzymałość."
+            "Może być dołączony do dowolnego oddziału. "
+            "Jeżeli w wyniku tego część oddziału będzie miała zdolności wpływające na cały oddział, przeciwnik wybiera czy są aktywne. "
+            "Może wykonywać testy przegrupowania za cały oddział, ale oddział korzysta z obrony wybranej przez przeciwnika. "
+            "Nie może zostać przywrócony do gry. "
+            "Jego rozmiar jest traktowany jakby miał 2 razy mniejszą wytrzymałość."
         ),
     ),
     AbilityDefinition(
@@ -99,7 +102,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="harcownik",
         name="Harcownik",
         type="passive",
-        description="Przed przegrupowaniem możesz się ruszyć o 2”.",
+        description="Przed Leczeniem możesz się ruszyć o 2”.",
     ),
     AbilityDefinition(
         slug="instynkt",
@@ -165,7 +168,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="nieustraszony",
         name="Nieustraszony",
         type="passive",
-        description="Wykonuje jeden test przegrupowania mniej.",
+        description="Nie testuje przegrupowania, gdy oddział jest powyżej połowy początkowej wytrzymałości.",
     ),
     AbilityDefinition(
         slug="niestrudzony",
@@ -221,9 +224,8 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Dywersant",
         type="passive",
         description=(
-            "Jeżeli oddział któremu w wyniku ataku zadałeś rany w tej aktywacji wykonuje test przegrupowania podczas "
-            "gdy znajduje się bliżej twojej strefy rozstawienia niż ten oddział lub ten odział znajduje się bliżej jego "
-            "strefy rozstawienia niż on, wykonuje on dodatkowy test przegrupowania."
+            "Jeżeli jesteś bliżej strefy rozstawienia przeciwnika niż atakowany oddział, "
+            "przed wykonaniem ataków przeciwnik wybiera, czy podwaja ich liczbę, czy zostaje Przyszpilony."
         ),
     ),
     AbilityDefinition(
@@ -355,10 +357,8 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Zemsta",
         type="passive",
         description=(
-            "Gdy przydzielasz rany, nie musisz od razu pokonywać modeli."
-            "Zamiast tego na końcu aktywacji oddziału, przed przegrupowaniem, "
-            "pokonaj tyle modeli, aby liczba ran była niższa od wytrzymałości oddziału. "
-            "Przeciwnik przydzielający rany, nie może używać wcześniej przydzielonych ran do pokonania modelu."
+            "Nie przydzielaj ran od razu, tylko przed Leczeniem w aktywacji tego oddziału. "
+            "Przeciwnik przydziela rany w zwykłym momencie, ale nie może używać wcześniej przydzielonych ran."
         ),
     ),
     AbilityDefinition(
