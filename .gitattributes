@@ -14,6 +14,7 @@ scripts/docker-entrypoint.sh text eol=lf
 *.cfg text
 *.ini text
 Dockerfile text eol=lf
+Caddyfile text eol=lf
 
 # Pliki binarne — bez konwersji
 *.db binary

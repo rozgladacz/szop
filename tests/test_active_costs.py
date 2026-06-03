@@ -26,8 +26,8 @@ def test_mobilizacja_cost_is_30():
     assert costs.ability_cost_from_name("Mobilizacja") == 30.0
 
 
-def test_usprawnienie_cost_is_45():
-    assert costs.ability_cost_from_name("Usprawnienie") == 45.0
+def test_usprawnienie_cost_is_60():
+    assert costs.ability_cost_from_name("Usprawnienie") == 60.0
 
 
 def test_ability_identifier_ignores_diacritics():

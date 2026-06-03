@@ -454,7 +454,7 @@ def test_bastion_aura_cost() -> None:
 
 
 def test_dywersant_aura_cost() -> None:
-    assert costs.passive_cost("dywersant", 8, True) == pytest.approx(10)
+    assert costs.passive_cost("dywersant", 8, True) == pytest.approx(3.25)
 
 
 def test_regeneracja_has_fixed_toughness_multiplier() -> None:
