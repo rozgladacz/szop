@@ -128,7 +128,6 @@ class TestAdminCreateUser:
             request=_fake_request(),
             username="nowak",
             password="haslo123",
-            is_admin=False,
             db=session,
             current_user=admin,
         )
@@ -141,7 +140,8 @@ class TestAdminCreateUser:
         assert created is not None
         assert not created.is_admin
 
-    def test_creates_admin_user(self):
+    def test_created_user_is_never_admin(self):
+        """Nowe konta zawsze mają is_admin=False, bez wyjątków."""
         session = _build_session()
         admin = _seed_admin(session)
 
@@ -149,7 +149,6 @@ class TestAdminCreateUser:
             request=_fake_request(),
             username="koadmin",
             password="tajne123",
-            is_admin=True,
             db=session,
             current_user=admin,
         )
@@ -158,7 +157,7 @@ class TestAdminCreateUser:
             select(models.User).where(models.User.username == "koadmin")
         ).scalar_one_or_none()
         assert created is not None
-        assert created.is_admin
+        assert not created.is_admin
 
     def test_duplicate_username_rejected(self):
         """Duplikat nazwy — użytkownik NIE zostaje dodany do bazy."""
@@ -173,7 +172,6 @@ class TestAdminCreateUser:
                 request=_fake_request(),
                 username="duplikat",
                 password="haslo123",
-                is_admin=False,
                 db=session,
                 current_user=admin,
             )
@@ -193,7 +191,6 @@ class TestAdminCreateUser:
                 request=_fake_request(),
                 username="ktos",
                 password="ab",
-                is_admin=False,
                 db=session,
                 current_user=admin,
             )
@@ -214,7 +211,6 @@ class TestAdminCreateUser:
                 request=_fake_request(),
                 username="   ",
                 password="haslo123",
-                is_admin=False,
                 db=session,
                 current_user=admin,
             )
@@ -234,7 +230,6 @@ class TestAdminCreateUser:
                 request=_fake_request(),
                 username="haker",
                 password="haslo123",
-                is_admin=False,
                 db=session,
                 current_user=regular,
             )

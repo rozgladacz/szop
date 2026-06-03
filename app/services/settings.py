@@ -32,9 +32,16 @@ def _read() -> dict:
 
 
 def _write(data: dict) -> None:
-    tmp = _SETTINGS_FILE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(tmp, _SETTINGS_FILE)
+    payload = json.dumps(data, ensure_ascii=False, indent=2)
+    tmp = _SETTINGS_FILE.with_name(_SETTINGS_FILE.stem + ".tmp.json")
+    tmp.write_text(payload, encoding="utf-8")
+    try:
+        os.replace(tmp, _SETTINGS_FILE)  # atomowy na Linux
+    except PermissionError:
+        # Windows: os.replace może wymagać że plik docelowy nie jest zajęty.
+        # Fallback: bezpośredni zapis (nie atomowy, ale akceptowalny dla tej skali).
+        tmp.unlink(missing_ok=True)
+        _SETTINGS_FILE.write_text(payload, encoding="utf-8")
 
 
 def get_registration_open() -> bool:

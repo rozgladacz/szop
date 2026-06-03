@@ -181,7 +181,6 @@ def create_user(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
-    is_admin: bool = Form(False),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
@@ -216,7 +215,7 @@ def create_user(
     new_user = models.User(
         username=username,
         password_hash=hash_password(password),
-        is_admin=is_admin,
+        is_admin=False,
     )
     db.add(new_user)
     db.commit()
