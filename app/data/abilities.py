@@ -494,6 +494,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description=(
             "Przerwij, aby oddział w zasięgu 12” do końca aktywacji zwiększył AP wszystkich swoich broni o 1."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="rozkaz",

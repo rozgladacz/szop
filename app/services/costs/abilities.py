@@ -115,7 +115,9 @@ def passive_cost(
             return 3.0
         if slug == "niestrudzony":
             return 8.0
-        if slug in {"nieustraszony", "ucieczka", "stracency"}:
+        if slug == "nieustraszony":
+            return 2.25 * tou
+        if slug in {"ucieczka", "stracency"}:
             return 1.5 * tou
         if slug == "delikatny":
             return 0.5 * tou
@@ -368,7 +370,7 @@ def ability_cost_components_from_name(
     elif slug == "presja":
         base_result = 45.0
     elif slug == "usprawnienie":
-        base_result = 45.0
+        base_result = 60.0
     elif desc.startswith("rozkaz") or desc.startswith("klatwa") or desc.startswith("oznaczenie"):
         ability_ref = value or (desc.split(":", 1)[1].strip() if ":" in desc else "")
         if ability_ref.startswith("mistrzostwo:"):

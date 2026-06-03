@@ -83,7 +83,7 @@ STRATEGIC_SUPPORTS: List[StrategicCard] = [
         'Odrzuć tę i dodatkową kartę, zamiast oddać inicjatywę.',
     ),
     StrategicCard(
-        'ulecz-i-przenies',
+        'wystaw_ponownie',
         'Odrzuć kartę, aby w pełni uleczyć i przenieść wybrany przez przeciwnika'
         ' twój pokonany oddział do rezerw. Możesz najpierw pokonać swój oddział.',
     ),
@@ -94,13 +94,26 @@ STRATEGIC_SUPPORTS: List[StrategicCard] = [
     ),
     StrategicCard(
         'szarza-inny-cel',
-        'Przerwij w aktywacji twojego oddziału który wykonał Szarżę.'
-        ' Wykonuje Szarżę na inny cel i zostaje Wyczerpany.',
+        'Przerwij swoją aktywację, aktywny oddział możne w niej wielokrotnie '
+        'wykonywać Szarżę, jeżeli mają różne cele.',
     ),
     StrategicCard(
         'ostrzal-inny-cel',
-        'Przerwij w aktywacji twojego oddziału który wykonał Ostrzał.'
-        ' Wykonuje Ostrzał na inny cel i zostaje Wyczerpany.',
+        'Przerwij swoją aktywację. Aktywny oddział wykonuje test trudnego terenu i'
+        ' może w niej wielokrotnie wykonywać Ostrzał, jeżeli mają różne cele',
+    ),
+    StrategicCard(
+        'usun-teren',
+        'Przerwij, aby usunąć z gry jeden element Niedostępnego lub blokującego terenu'
+        ' nie będącego 3” od celu.',
+    ),
+        StrategicCard(
+        'odnow-zdolnosci',
+        'Odnów twoje zdolności tak, jakby zmieniła się runda.',
+    ),
+        StrategicCard(
+        'bonus-ap',
+        'Przerwij, +1AP dla aktywnego oddziału w tej aktywacji.',
     ),
 ]
 

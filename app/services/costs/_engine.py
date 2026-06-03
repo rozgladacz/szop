@@ -21,7 +21,7 @@ from ..utils import ARMY_RULE_OFF_PREFIX, passive_flags_to_payload
 
 
 MORALE_ABILITY_MULTIPLIERS = {
-    "nieustraszony": 0.5,
+    "nieustraszony": 0.25,
     "ucieczka": 0.5,
     "stracency": 0.5,
 }
