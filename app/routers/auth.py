@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
-from ..security import get_current_user, hash_password, verify_password
+from ..security import get_current_user, hash_password, is_valid_username, verify_password
 from ..services.settings import get_registration_open
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -70,6 +70,17 @@ def register(
             "auth_register.html",
             {"request": request, "error": None, "registration_open": False},
             status_code=403,
+        )
+    username = username.strip()
+    if not is_valid_username(username):
+        return templates.TemplateResponse(
+            "auth_register.html",
+            {
+                "request": request,
+                "error": "Nazwa użytkownika może zawierać tylko litery, cyfry, spację oraz znaki . _ -",
+                "registration_open": True,
+            },
+            status_code=400,
         )
     existing = db.execute(select(models.User).where(models.User.username == username)).scalar_one_or_none()
     if existing:

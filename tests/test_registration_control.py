@@ -234,3 +234,50 @@ class TestAdminCreateUser:
                 current_user=regular,
             )
         assert exc_info.value.status_code == 403
+
+    def test_username_with_js_injection_chars_rejected(self):
+        """Nazwa z cudzysłowem/nawiasami (próba wstrzyknięcia JS) — konto nie powstaje."""
+        session = _build_session()
+        admin = _seed_admin(session)
+
+        payload = "'); alert(1);//"
+        try:
+            users_router.create_user(
+                request=_fake_request(),
+                username=payload,
+                password="haslo123",
+                db=session,
+                current_user=admin,
+            )
+        except Exception:
+            pass
+        created = session.execute(
+            select(models.User).where(models.User.username == payload)
+        ).scalar_one_or_none()
+        assert created is None
+
+
+# ── walidacja nazwy użytkownika ───────────────────────────────────────────────
+
+class TestUsernameValidation:
+    def test_accepts_plain_names(self):
+        from app.security import is_valid_username
+        assert is_valid_username("admin")
+        assert is_valid_username("Gracz_1")
+        assert is_valid_username("jan.kowalski")
+        assert is_valid_username("Żółć-99")
+        assert is_valid_username("dwa słowa")
+
+    def test_rejects_dangerous_chars(self):
+        from app.security import is_valid_username
+        assert not is_valid_username("'); alert(1);//")
+        assert not is_valid_username('<script>')
+        assert not is_valid_username('a"b')
+        assert not is_valid_username("a'b")
+        assert not is_valid_username("a&b")
+        assert not is_valid_username("a/b")
+
+    def test_rejects_empty_and_overlong(self):
+        from app.security import is_valid_username, USERNAME_MAX_LENGTH
+        assert not is_valid_username("")
+        assert not is_valid_username("a" * (USERNAME_MAX_LENGTH + 1))

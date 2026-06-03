@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
-from ..security import get_current_user, hash_password
+from ..security import get_current_user, hash_password, is_valid_username
 from ..services import backup as backup_service
 from ..services import db_restore
 from ..services.settings import get_registration_open, set_registration_open
@@ -193,6 +193,12 @@ def create_user(
         return _render_user_list(
             request, db, current_user,
             create_error="Nazwa użytkownika nie może być pusta.",
+            status_code=400,
+        )
+    if not is_valid_username(username):
+        return _render_user_list(
+            request, db, current_user,
+            create_error="Nazwa użytkownika może zawierać tylko litery, cyfry, spację oraz znaki . _ -",
             status_code=400,
         )
     if len(password) < 4:

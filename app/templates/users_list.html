@@ -120,7 +120,8 @@
             <form
               method="post"
               action="/users/{{ item.id }}/delete"
-              onsubmit="return confirm('Czy na pewno usunąć użytkownika {{ item.username }}?');"
+              data-confirm-delete
+              data-username="{{ item.username }}"
             >
               <button class="btn btn-sm btn-outline-danger w-100" type="submit"
                 {% if item.id == user.id %}disabled title="Nie można usunąć własnego konta"{% endif %}>
@@ -141,4 +142,18 @@
     </tbody>
   </table>
 </div>
+
+<script>
+  // Potwierdzenie usunięcia — nazwa użytkownika czytana z atrybutu data-*
+  // (wartość, nie kod) zamiast interpolacji do inline-JS, aby uniknąć
+  // wstrzyknięcia przez nazwę użytkownika.
+  document.querySelectorAll("form[data-confirm-delete]").forEach(function (form) {
+    form.addEventListener("submit", function (event) {
+      var name = form.getAttribute("data-username") || "";
+      if (!window.confirm("Czy na pewno usunąć użytkownika " + name + "?")) {
+        event.preventDefault();
+      }
+    });
+  });
+</script>
 {% endblock %}
