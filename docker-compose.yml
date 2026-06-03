@@ -1,11 +1,27 @@
 services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"   # HTTP/3 (QUIC)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      szop-app:
+        condition: service_healthy
+
   szop-app:
     image: ghcr.io/rozgladacz/szop:latest
     restart: unless-stopped
-    ports:
-      # Tylko loopback — Tailscale serve wystawia port 443 na tailnet.
-      # Na czas testów lokalnych zmień na "8000:8000" aby był dostępny na LAN.
-      - "127.0.0.1:8000:8000"
+    # Brak sekcji "ports" — szop-app dostępny tylko wewnątrz sieci Docker.
+    # Caddy proxy do szop-app:8000 przez sieć wewnętrzną.
+    # Aby testować lokalnie bez Caddy: odkomentuj poniższe:
+    # ports:
+    #   - "127.0.0.1:8000:8000"
     volumes:
       - ./data:/app/data
       # Docker socket — pozwala panelowi admina na "docker compose pull + up".
@@ -37,3 +53,7 @@ services:
     depends_on:
       szop-app:
         condition: service_healthy
+
+volumes:
+  caddy_data:    # Certyfikaty Let's Encrypt — persystentne między restartami
+  caddy_config:

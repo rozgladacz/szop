@@ -1,6 +1,10 @@
 # Instrukcja wdrożenia — administrator serwera
 
-Dokument opisuje jak uruchomić i utrzymywać **SZOP - Kreator armii** na prywatnym serwerze Linux z Tailscale.
+Dokument opisuje jak uruchomić i utrzymywać **SZOP - Kreator armii**.
+
+Dwa warianty dostępu:
+- **[Wariant A] Tailscale** — prywatny, tylko zaproszeni, zero konfiguracji TLS
+- **[Wariant B] Caddy + DuckDNS** — publiczny dostęp przez internet, HTTPS automatyczny
 
 ---
 
@@ -10,35 +14,107 @@ Dokument opisuje jak uruchomić i utrzymywać **SZOP - Kreator armii** na prywat
 |---|---|
 | Docker Engine | 24+ |
 | Docker Compose | v2 (plugin, nie standalone) |
-| Tailscale | najnowszy |
 | RAM | ~512 MB wolnych |
 | Dysk | ~2 GB (obraz + dane) |
 | OS | Debian/Ubuntu LTS lub podobny |
 
 ---
 
-## Pierwsza instalacja (5 kroków)
+## [Wariant A] Instalacja z Tailscale (prywatna sieć)
 
 ```bash
 # 1. Utwórz katalog roboczy
 mkdir -p /srv/szop && cd /srv/szop
 
-# 2. Pobierz docker-compose.yml z repozytorium
+# 2. Pobierz konfigurację
 curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/docker-compose.yml -o docker-compose.yml
 
-# 3. (Opcjonalnie) pobierz przykładowy .env i dostosuj
-# curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/.env.example -o .env
+# 3. Odkomentuj sekcję "ports" w docker-compose.yml dla szop-app:
+#    ports:
+#      - "127.0.0.1:8000:8000"
+#    i usuń (lub zostaw) serwis "caddy" — przy Tailscale nie jest potrzebny
 
 # 4. Uruchom aplikację
-docker compose up -d
+docker compose up -d szop-app szop-backup
 
-# 5. Udostępnij przez Tailscale HTTPS (zastąp 'szop' swoją nazwą hosta)
+# 5. Udostępnij przez Tailscale HTTPS
 tailscale serve --bg --https=443 http://127.0.0.1:8000
 ```
 
-Aplikacja jest dostępna pod adresem: `https://<hostname>.<tailnet>.ts.net`
+Aplikacja dostępna pod: `https://<hostname>.<tailnet>.ts.net`
+
+---
+
+## [Wariant B] Instalacja z Caddy + DuckDNS (dostęp publiczny)
+
+### ⚠️ Przed uruchomieniem przeczytaj
+
+**Otwarta rejestracja + publiczny internet = każdy może założyć konto.**
+Aplikacja domyślnie pozwala rejestrować się komukolwiek. Przy publicznym dostępie
+boty i skanery *znajdą* twój endpoint i zarejestrują się.
+
+Przed wystawieniem publicznie: zaloguj się jako admin i usuń lub zablokuj
+niechciane konta. Docelowo rozważ dodanie flagi wyłączającej rejestrację.
+
+### Krok 1 — DuckDNS
+
+1. Wejdź na [duckdns.org](https://www.duckdns.org), zaloguj się
+2. Utwórz subdomenę (np. `moj-szop`) → dostaniesz `moj-szop.duckdns.org`
+3. Wpisz publiczne IP serwera w polu IP dla tej subdomeny
+4. Jeśli IP serwera jest dynamiczne — ustaw cron aktualizujący DuckDNS co 5 minut:
+
+```bash
+# Pobierz skrypt aktualizacji (podmień TOKEN i SUBDOMAIN)
+echo "*/5 * * * * curl -s 'https://www.duckdns.org/update?domains=SUBDOMAIN&token=TOKEN&ip=' > /dev/null" \
+  | crontab -
+```
+
+### Krok 2 — Porty na firewallu serwera
+
+Otwórz porty 80 i 443 (potrzebne dla Let's Encrypt i ruchu HTTPS):
+
+```bash
+# UFW (Ubuntu/Debian)
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw allow 443/udp   # HTTP/3 opcjonalnie
+
+# OCI Always Free — Security List w konsoli OCI:
+# Ingress: TCP port 80 i 443 z 0.0.0.0/0
+```
+
+### Krok 3 — Konfiguracja
+
+```bash
+mkdir -p /srv/szop && cd /srv/szop
+
+# Pobierz pliki konfiguracyjne
+curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/docker-compose.yml -o docker-compose.yml
+curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/Caddyfile -o Caddyfile
+curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/.env.example -o .env
+
+# Edytuj Caddyfile — podmień domenę
+sed -i 's/twoja-domena.duckdns.org/moj-szop.duckdns.org/' Caddyfile
+
+# Edytuj .env — podmień domenę i włącz HTTPS
+sed -i 's/# TRUSTED_HOSTS=.*/TRUSTED_HOSTS=moj-szop.duckdns.org/' .env
+# SESSION_HTTPS_ONLY=true jest już domyślnie w .env.example
+```
+
+### Krok 4 — Uruchomienie
+
+```bash
+docker compose up -d
+```
+
+Caddy automatycznie pobierze certyfikat Let's Encrypt przy pierwszym starcie
+(wymaga działającego DNS i otwartego portu 80).
+
+Aplikacja dostępna pod: `https://moj-szop.duckdns.org`
 
 > **Pierwsze logowanie:** `admin` / `admin` — **zmień hasło natychmiast** w panelu administratora.
+
+---
 
 ---
 
