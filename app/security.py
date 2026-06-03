@@ -1,3 +1,4 @@
+import re
 from typing import Optional
 
 import bcrypt
@@ -12,6 +13,18 @@ pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
     deprecated="auto",
 )
+
+# Dozwolone znaki nazwy użytkownika: litery (w tym Unicode/polskie), cyfry,
+# podkreślenie, spacja, kropka i myślnik. Whitelist celowo NIE dopuszcza
+# cudzysłowów, nawiasów ostrokątnych, ampersanda ani innych znaków, które
+# mogłyby wyłamać się z kontekstu HTML/JS przy renderowaniu nazwy.
+USERNAME_MAX_LENGTH = 64
+_USERNAME_RE = re.compile(r"^[\w][\w .\-]{0,%d}$" % (USERNAME_MAX_LENGTH - 1), re.UNICODE)
+
+
+def is_valid_username(username: str) -> bool:
+    """Czy nazwa użytkownika zawiera wyłącznie bezpieczne znaki."""
+    return bool(_USERNAME_RE.fullmatch(username))
 
 
 def hash_password(password: str) -> str:

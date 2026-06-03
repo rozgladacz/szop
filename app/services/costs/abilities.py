@@ -308,6 +308,13 @@ def ability_cost_components_from_name(
             abilities_without,
         )
 
+    # Effective toughness used for aura/order cost scaling.
+    # Default 6 gives 4/3 * 6 = 8, matching the previous fixed value.
+    _carrier_tou = float(toughness) if toughness is not None else 6.0
+
+    def _aura_eff_tou(extra: float = 0.0) -> float:
+        return max(8.0, min(24.0, (4.0 / 3.0) * _carrier_tou)) + extra
+
     weapon_delta = 0.0
     if (
         weapons
@@ -343,16 +350,12 @@ def ability_cost_components_from_name(
             parts = value.split("|", 1)
             w_slug = parts[0][len("mistrzostwo:"):].strip()
             aura_range_val = extract_number(parts[1]) if len(parts) == 2 else 6.0
-            cost = _mistrzostwo_aura_cost(w_slug) * 8.0
-            if abs(aura_range_val - 12.0) < 1e-6:
-                cost *= 2.0
-            base_result = cost
+            extra = 8.0 if abs(aura_range_val - 12.0) < 1e-6 else 0.0
+            base_result = _mistrzostwo_aura_cost(w_slug) * _aura_eff_tou(extra)
         else:
             ability_slug, aura_range = _parse_aura_value(name, value)
-            cost = passive_cost(ability_slug, 8.0, True)
-            if abs(aura_range - 12.0) < 1e-6:
-                cost *= 2.0
-            base_result = cost
+            extra = 8.0 if abs(aura_range - 12.0) < 1e-6 else 0.0
+            base_result = passive_cost(ability_slug, _aura_eff_tou(extra), True)
     elif desc.startswith("mag"):
         base_result = 8.0 * extract_number(value or name)
     elif desc == "przekaznik":
@@ -373,10 +376,10 @@ def ability_cost_components_from_name(
         ability_ref = value or (desc.split(":", 1)[1].strip() if ":" in desc else "")
         if ability_ref.startswith("mistrzostwo:"):
             w_slug = ability_ref[len("mistrzostwo:"):].strip()
-            base_result = _mistrzostwo_aura_cost(w_slug) * 10.0
+            base_result = _mistrzostwo_aura_cost(w_slug) * _aura_eff_tou(2.0)
         else:
             ability_slug = ability_catalog.slug_for_name(ability_ref) or ability_identifier(ability_ref)
-            base_result = passive_cost(ability_slug, 10.0, True)
+            base_result = passive_cost(ability_slug, _aura_eff_tou(2.0), True)
     elif desc == "radio":
         base_result = 3.0
     elif slug == "ociezalosc":
