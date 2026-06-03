@@ -10,6 +10,7 @@ from .. import models
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user, hash_password, verify_password
+from ..services.settings import get_registration_open
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -50,7 +51,11 @@ def register_form(
 ):
     if current_user:
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("auth_register.html", {"request": request, "error": None})
+    registration_open = get_registration_open()
+    return templates.TemplateResponse(
+        "auth_register.html",
+        {"request": request, "error": None, "registration_open": registration_open},
+    )
 
 
 @router.post("/register")
@@ -60,11 +65,17 @@ def register(
     password: str = Form(...),
     db: Session = Depends(get_db),
 ):
+    if not get_registration_open():
+        return templates.TemplateResponse(
+            "auth_register.html",
+            {"request": request, "error": None, "registration_open": False},
+            status_code=403,
+        )
     existing = db.execute(select(models.User).where(models.User.username == username)).scalar_one_or_none()
     if existing:
         return templates.TemplateResponse(
             "auth_register.html",
-            {"request": request, "error": "Użytkownik o takiej nazwie już istnieje"},
+            {"request": request, "error": "Użytkownik o takiej nazwie już istnieje", "registration_open": True},
             status_code=400,
         )
     user = models.User(username=username, password_hash=hash_password(password))

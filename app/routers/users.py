@@ -14,6 +14,7 @@ from ..paths import TEMPLATES_DIR
 from ..security import get_current_user, hash_password
 from ..services import backup as backup_service
 from ..services import db_restore
+from ..services.settings import get_registration_open, set_registration_open
 
 router = APIRouter(prefix="/users", tags=["users"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -32,6 +33,7 @@ def _render_user_list(
     message: str | None = None,
     error: str | None = None,
     error_user_id: int | None = None,
+    create_error: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
     users = (
@@ -48,6 +50,8 @@ def _render_user_list(
             "message": message,
             "error": error,
             "error_user_id": error_user_id,
+            "create_error": create_error,
+            "registration_open": get_registration_open(),
         },
         status_code=status_code,
     )
@@ -74,6 +78,9 @@ def list_users(
     message_map = {
         "password-changed": "Hasło użytkownika zostało zaktualizowane.",
         "deleted": "Użytkownik został usunięty.",
+        "created": "Konto zostało utworzone.",
+        "registration-opened": "Rejestracja publiczna została włączona.",
+        "registration-closed": "Rejestracja publiczna została wyłączona.",
         "restore-ok": detail or "Baza danych została przywrócona.",
     }
     message = message_map.get(status_key)
@@ -167,6 +174,64 @@ def delete_user(
     db.delete(target_user)
     db.commit()
     return RedirectResponse(url="/users?status=deleted", status_code=303)
+
+
+@router.post("/create")
+def create_user(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    is_admin: bool = Form(False),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    _require_admin(current_user)
+
+    username = username.strip()
+    password = password.strip()
+
+    if not username:
+        return _render_user_list(
+            request, db, current_user,
+            create_error="Nazwa użytkownika nie może być pusta.",
+            status_code=400,
+        )
+    if len(password) < 4:
+        return _render_user_list(
+            request, db, current_user,
+            create_error="Hasło musi mieć co najmniej 4 znaki.",
+            status_code=400,
+        )
+
+    existing = db.execute(
+        select(models.User).where(models.User.username == username)
+    ).scalar_one_or_none()
+    if existing:
+        return _render_user_list(
+            request, db, current_user,
+            create_error=f'Użytkownik "{username}" już istnieje.',
+            status_code=400,
+        )
+
+    new_user = models.User(
+        username=username,
+        password_hash=hash_password(password),
+        is_admin=is_admin,
+    )
+    db.add(new_user)
+    db.commit()
+    return RedirectResponse(url="/users?status=created", status_code=303)
+
+
+@router.post("/registration-toggle")
+def toggle_registration(
+    current_user: models.User = Depends(get_current_user()),
+):
+    _require_admin(current_user)
+    new_state = not get_registration_open()
+    set_registration_open(new_state)
+    status = "registration-opened" if new_state else "registration-closed"
+    return RedirectResponse(url=f"/users?status={status}", status_code=303)
 
 
 @router.post("/restore")
