@@ -25,8 +25,8 @@ Kompozycja: każda funkcja jest **pure** (state in → state+events out). Zero D
 
 from __future__ import annotations
 
-from dataclasses import replace
-from typing import Iterable
+from dataclasses import dataclass, replace
+from typing import Iterable, Mapping
 
 from app.services.engine.actions import (
     ChargeAction,
@@ -45,10 +45,15 @@ from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     BattleEvent,
     EffectApplied,
+    MeleeBalanceReset,
     MoraleTestPassed,
     MoveExecuted,
+    ObjectiveControlChanged,
     RoundEnded,
+    StatusAdded,
+    StatusRemoved,
 )
+from app.services.engine.geometry import distance as _distance
 from app.services.engine.state import (
     BattleState,
     Objective,
@@ -57,15 +62,94 @@ from app.services.engine.state import (
     TerrainLine,
     UnitBlob,
     build_initial_state,
+    initial_toughness_for,
 )
-
-STATUS_AKTYWOWANY = "Aktywowany"
-STATUS_WYCZERPANY = "Wyczerpany"
-STATUS_PRZYSZPILONY = "Przyszpilony"
-STATUS_UFORTYFIKOWANY = "Ufortyfikowany"
+from app.services.engine.status import (
+    STATUS_AKTYWOWANY,
+    STATUS_PRZYSZPILONY,
+    STATUS_UFORTYFIKOWANY,
+    STATUS_WYCZERPANY,
+    add_status as _add_status,
+    remove_status as _remove_status,
+)
 
 MAX_ROUND = 4  # pkt 5.f: gra kończy się po 4 rundach
 OBJECTIVE_CONTROL_RANGE = 3.0  # pkt 5.d: 3″ od celu
+
+
+# ---------------------------------------------------------------------------
+# ActivationContext (B3.9.c / ADR-0045) — per-aktywacja delta state
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationContext:
+    """Transient kontekst dla pojedynczej aktywacji (pkt 11.b).
+
+    Rozwiązuje dziurę A z post-B3 code review — rozróżnienie między **trwałym
+    stanem** (cumulative `wounds_received` na `UnitBlob`, persisted) a **deltą
+    tej aktywacji** (pkt 20.a "oddziały które otrzymały rany W TEJ
+    aktywacji"). Przed B3.9.c regroup test używał cumulative `wounds_received`
+    jako proxy — bug #1 (oddział z 1 raną z poprzedniej aktywacji + 0 ran w
+    tej musi NIE wykonywać testu pkt 20.a, ale proxy zwracał True).
+
+    Pola:
+    - `actor_id` — oddział wykonujący aktywację (pkt 11.b.i).
+    - `wounds_received_this_activation` — frozen mapa `unit_id → delta_wounds`.
+      Pokrywa **wszystkie** oddziały które otrzymały rany w tej aktywacji, nie
+      tylko aktora (defender szarży otrzymuje rany w aktywacji chargera per
+      pkt 14.d → musi przejść Przegrupowanie w aktywacji chargera, pkt 20.a —
+      bug #2).
+    - `melee_combatants` — frozenset id-ów uczestników starcia wręcz (actor +
+      defender(s) z ChargeAction). Używany dla reset `melee_balance` na obu
+      stronach po regroup (pkt 20.c — bilans wręcz resetowany dla obu stron,
+      bug #5).
+
+    Reprezentacja `tuple[tuple[int, int], ...]` zamiast `dict` zachowuje
+    frozen-dataclass purity (brak referencji do mutable dict).
+    """
+
+    actor_id: int
+    wounds_received_this_activation: tuple[tuple[int, int], ...]
+    melee_combatants: frozenset[int]
+
+    def delta_for(self, unit_id: int) -> int:
+        """Lookup delta_wounds dla `unit_id`. Zwraca 0 gdy oddział nie otrzymał
+        ran w tej aktywacji."""
+        for uid, delta in self.wounds_received_this_activation:
+            if uid == unit_id:
+                return delta
+        return 0
+
+
+def _build_activation_context(
+    pre_wounds: Mapping[int, int],
+    post_state: BattleState,
+    actor_id: int,
+    melee_combatants: frozenset[int],
+) -> ActivationContext:
+    """Buduje `ActivationContext` z pre/post snapshot `wounds_received` per blob.
+
+    Delta = post - pre. Negatywne delty (np. po pokonaniu modelu, gdzie
+    `wounds_received` jest resetowane) są klampowane do 0 — pkt 20.a mówi
+    o "otrzymanych ranach", więc post-kill obniżka licznika ran nie liczy się
+    jako negatywna "ranność". Tylko dodatnie delty trafiają do kontekstu.
+    """
+    post_wounds = {b.id: b.wounds_received for b in post_state.blobs}
+    deltas: list[tuple[int, int]] = []
+    for uid in pre_wounds.keys() | post_wounds.keys():
+        delta = post_wounds.get(uid, 0) - pre_wounds.get(uid, 0)
+        if delta > 0:
+            deltas.append((uid, delta))
+        # CR-fix I: usunięty dead `elif` dla defender-killed-w-aktywacji.
+        # `_regroup_test` i tak skipuje gdy `models_alive == 0` (early return),
+        # więc synthetic delta byłaby bez efektu. Branch był deklaratywnym
+        # "to do" bez realizacji.
+    return ActivationContext(
+        actor_id=actor_id,
+        wounds_received_this_activation=tuple(sorted(deltas)),
+        melee_combatants=melee_combatants,
+    )
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -94,24 +178,6 @@ def _replace_two_blobs(
         for b in state.blobs
     )
     return replace(state, blobs=new_blobs)
-
-
-def _add_status(blob: UnitBlob, status: str) -> UnitBlob:
-    if status in blob.status_flags:
-        return blob
-    return replace(blob, status_flags=tuple(list(blob.status_flags) + [status]))
-
-
-def _remove_status(blob: UnitBlob, status: str) -> UnitBlob:
-    if status not in blob.status_flags:
-        return blob
-    return replace(
-        blob, status_flags=tuple(s for s in blob.status_flags if s != status)
-    )
-
-
-def _distance(p1: Position, p2: Position) -> float:
-    return ((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2) ** 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -217,18 +283,44 @@ def _apply_defend(
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Pkt 14.b Obrona — oddział zyskuje Ufortyfikowany (pkt 22.c). Przyszpilony
     odrzucany (pkt 22.b.v: Przyszpilony zostaje odrzucony gdy oddział staje się
-    Ufortyfikowany)."""
+    Ufortyfikowany).
+
+    B3.9.d (ADR-0046) — emit `StatusAdded(Ufortyfikowany)` + opcjonalny
+    `StatusRemoved(Przyszpilony)` zamiast silent `replace(status_flags=...)`.
+    `EffectApplied(slug="defend")` zachowany jako annotation/audit log (nie
+    redukuje state — to dwa równolegle eventy: Status* niesie deltę state,
+    EffectApplied niesie semantykę akcji).
+    """
     blob = _find_blob(state, action.unit_id)
+    had_przyszpilony = STATUS_PRZYSZPILONY in blob.status_flags
     blob = _add_status(blob, STATUS_UFORTYFIKOWANY)
     blob = _remove_status(blob, STATUS_PRZYSZPILONY)
-    event = EffectApplied(
-        sequence=sequence,
-        slug="defend",
-        target_unit_id=blob.id,
-        source_unit_id=blob.id,
-        payload={"status_added": STATUS_UFORTYFIKOWANY},
-    )
-    return _replace_blob(state, blob), (event,), sequence + 1
+
+    events: list[BattleEvent] = [
+        EffectApplied(
+            sequence=sequence,
+            slug="defend",
+            target_unit_id=blob.id,
+            source_unit_id=blob.id,
+            payload={"status_added": STATUS_UFORTYFIKOWANY},
+        ),
+        StatusAdded(
+            sequence=sequence + 1,
+            target_id=blob.id,
+            status=STATUS_UFORTYFIKOWANY,
+        ),
+    ]
+    next_seq = sequence + 2
+    if had_przyszpilony:
+        events.append(
+            StatusRemoved(
+                sequence=next_seq,
+                target_id=blob.id,
+                status=STATUS_PRZYSZPILONY,
+            )
+        )
+        next_seq += 1
+    return _replace_blob(state, blob), tuple(events), next_seq
 
 
 def _apply_shoot(
@@ -267,30 +359,32 @@ def _apply_charge(
 def _apply_special(
     state: BattleState, action: SpecialAction, sequence: int
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
-    """Pkt 14.e Akcja specjalna.
+    """Pkt 14.e Akcja specjalna — dispatcher do `_ACTIVE_ABILITY_REGISTRY`
+    (B3.9.e / ADR-0047).
 
-    MVP: `discard_exhausted` (uniwersalny pkt 22.a.ii — odrzuć status Wyczerpany).
-    Inne aktywne zdolności (Łatanie/Mag/Mobilizacja/Presja/etc.) → przyszła
-    iteracja przez integrację z `effects.py` ACTIVE_ABILITY_REGISTRY.
+    Pre-B3.9.e: hardcoded `if slug == "discard_exhausted"` + fallback no-op dla
+    pozostałych. Dziura E z post-B3 code review — nie skalowało się na ~6
+    aktywnych zdolności z B3.0.1 audit (Łatanie/Mag/Mobilizacja/Presja/
+    Przepowiednia/Męczennik) ani na przyszłe.
+
+    Post-B3.9.e: lookup `effects.get_active_ability(slug)` → delegate do
+    zarejestrowanego handlera (`discard_exhausted` + 6 stubów MVP w
+    `effects.py`). Slug nieznany w registry → no-op `EffectApplied` annotation
+    (akcja nadal legalna, ale nic nie robi — zgodne z poprzednią semantyką).
     """
+    from app.services.engine.effects import get_active_ability
+
     blob = _find_blob(state, action.unit_id)
-    if action.ability_slug == "discard_exhausted":
-        new_blob = _remove_status(blob, STATUS_WYCZERPANY)
-        event = EffectApplied(
-            sequence=sequence,
-            slug="discard_exhausted",
-            target_unit_id=blob.id,
-            source_unit_id=blob.id,
-            payload={"status_removed": STATUS_WYCZERPANY},
-        )
-        return _replace_blob(state, new_blob), (event,), sequence + 1
-    # Inne sluggi: noop event (placeholder do impl w B3.5+ effects)
+    handler = get_active_ability(action.ability_slug)
+    if handler is not None:
+        return handler(state, blob, dict(action.payload), sequence)
+    # Slug spoza registry — zachowaj poprzedni no-op fallback.
     event = EffectApplied(
         sequence=sequence,
         slug=action.ability_slug,
         target_unit_id=blob.id,
         source_unit_id=blob.id,
-        payload={"note": "not yet implemented in MVP", **action.payload},
+        payload={"note": "active ability not registered", **action.payload},
     )
     return state, (event,), sequence + 1
 
@@ -303,20 +397,23 @@ def _apply_special(
 def _regroup_test(
     state: BattleState,
     blob_id: int,
-    initial_toughness_total: int,
+    context: ActivationContext,
     dice: DeterministicDice,
     sequence: int,
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
-    """Pkt 20 Przegrupowanie.
+    """Pkt 20 Przegrupowanie (post-B3.9.c — delta-based per ADR-0045).
 
-    Per pkt 20.a: test wykonują oddziały które otrzymały rany w aktywacji
-    (wykrywamy przez `blob.wounds_received > 0` post-akcji; **dla MVP** używamy
-    proxy: oddział musi wykonać test jeśli `wounds_received > 0 OR melee_balance < 0`).
+    Per pkt 20.a: test wykonują oddziały które otrzymały rany **w tej
+    aktywacji** (delta `wounds_received_this_activation`, nie cumulative
+    `blob.wounds_received`). Dodatkowo: oddział z `melee_balance < 0`
+    (przegrał wręcz w tej aktywacji) wykonuje test choćby bez ran (pkt 20.c).
 
     Liczba testów:
     - Baseline: 1 (pkt 20.a)
-    - +1 jeśli wytrzymałość ≤ ½ początkowej (pkt 20.b)
-    - +1/-1 z bilansu wręcz (pkt 20.c) — w MVP: -1 jeśli melee_balance > 0, +1 jeśli melee_balance < 0
+    - +1 jeśli wytrzymałość ≤ ½ początkowej (pkt 20.b — initial z
+      `state.initial_toughness_snapshot`, fallback do current models gdy brak
+      snapshot dla test fixtures)
+    - +1/-1 z bilansu wręcz (pkt 20.c)
     - +modifiers ze statusów (Przyszpilony +1, Ufortyfikowany -1) (pkt 20.d)
     - +morale_modifiers z passive abilities (Nieustraszony -1) (pkt 20.d)
     - Minimum 0
@@ -332,13 +429,23 @@ def _regroup_test(
     from app.services.engine.effects import EffectContext, aggregate_morale_modifier
 
     blob = _find_blob(state, blob_id)
-    if blob.wounds_received == 0 and blob.melee_balance >= 0:
-        return state, (), sequence  # pkt 20.a: nie wykonujemy testów
+    delta_wounds = context.delta_for(blob_id)
+    # Pkt 20.a — test triggered tylko przez rany W TEJ aktywacji LUB przegranie
+    # wręcz w tej aktywacji (`melee_balance < 0`).
+    if delta_wounds == 0 and blob.melee_balance >= 0:
+        return state, (), sequence
 
     n_tests = 1
-    # Pkt 20.b: ≤ 1/2 początkowej wytrzymałości
+    # Pkt 20.b: current toughness ≤ ½ INITIAL toughness (snapshot z setup).
+    # Fallback gdy state nie ma snapshot (test fixtures bypassujące
+    # build_initial_state) — używa cumulative formuły jak przed B3.9.c.
+    initial_tough = initial_toughness_for(state, blob_id)
+    if initial_tough == 0:
+        initial_tough = (
+            blob.models_alive * blob.toughness_per_model + blob.wounds_received
+        )
     current_toughness = blob.models_alive * blob.toughness_per_model - blob.wounds_received
-    if current_toughness <= initial_toughness_total / 2:
+    if current_toughness <= initial_tough / 2:
         n_tests += 1
     # Pkt 20.c: bilans wręcz (jeśli walczył wręcz)
     if blob.melee_balance > 0:
@@ -399,7 +506,7 @@ def activation_phase(
     action,  # Action union
     dice: DeterministicDice,
     sequence: int = 1,
-    initial_toughness_totals: dict[int, int] | None = None,
+    initial_toughness_totals: dict[int, int] | None = None,  # deprecated, B3.9.c
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Pkt 11.b — Zwykła aktywacja: akcja → Przegrupowanie → Odzyskiwanie ran →
     status Aktywowany.
@@ -407,13 +514,23 @@ def activation_phase(
     MVP scope: pojedyncza akcja (pkt 11.b.ii). Pętla 2 akcji (pkt 11.b.iii)
     eksponowana wyżej (B3.7 resolver).
 
+    Post-B3.9.c per ADR-0045:
+    - Snapshot `pre_wounds` per blob PRZED akcją; po akcji budujemy
+      `ActivationContext` z deltą — _regroup_test używa kontekstu (pkt 20.a
+      "w tej aktywacji" — fix bug #1).
+    - Dla `ChargeAction`: defender jest w `melee_combatants` → wykonuje test
+      Przegrupowania w aktywacji chargera (pkt 20.a, fix bug #2).
+    - `melee_balance` resetowany na obu uczestnikach starcia wręcz (pkt 20.c,
+      fix bug #5), nie tylko na actorze.
+
     Args:
         state: aktualny stan.
         action: jeden z `actions.Action` typów.
         dice: DeterministicDice.
         sequence: pierwszy sequence dla eventów.
-        initial_toughness_totals: opcjonalna mapa `{unit_id: initial_tough}` dla
-            testu pkt 20.b. Default: liczone z aktualnych modeli (proxy).
+        initial_toughness_totals: **DEPRECATED** (B3.9.c — używaj
+            `state.initial_toughness_snapshot`). Parametr zachowany dla
+            wstecznej kompatybilności wywołań spoza engine.
 
     Returns:
         (new_state, events).
@@ -421,32 +538,68 @@ def activation_phase(
     events: list[BattleEvent] = []
     seq = sequence
 
+    # B3.9.c: snapshot pre-action wounds_received per blob (do delty)
+    pre_wounds: dict[int, int] = {b.id: b.wounds_received for b in state.blobs}
+
+    actor_id = action.unit_id
+
+    # CR-fix G (pkt 22.c.iv): Ufortyfikowany odrzucany na POCZĄTKU aktywacji
+    # własnego oddziału. Pre-fix: status nigdy nie był usuwany — defender Defendu
+    # z runda 1 niósł Ufortyfikowany przez całą grę (+1 obrona permanentnie).
+    # Emit StatusRemoved + mutacja na live state (idempotentne — guard sprawdza
+    # czy status faktycznie obecny).
+    actor_pre = next((b for b in state.blobs if b.id == actor_id), None)
+    if actor_pre is not None and STATUS_UFORTYFIKOWANY in actor_pre.status_flags:
+        new_actor = _remove_status(actor_pre, STATUS_UFORTYFIKOWANY)
+        state = _replace_blob(state, new_actor)
+        events.append(
+            StatusRemoved(
+                sequence=seq,
+                target_id=actor_id,
+                status=STATUS_UFORTYFIKOWANY,
+            )
+        )
+        seq += 1
+
     # Faza akcji (pkt 14)
     if isinstance(action, ManeuverAction):
         state, action_events, seq = _apply_maneuver(state, action, seq)
+        melee_combatants: frozenset[int] = frozenset()
     elif isinstance(action, DefendAction):
         state, action_events, seq = _apply_defend(state, action, seq)
+        melee_combatants = frozenset()
     elif isinstance(action, ShootAction):
         state, action_events, seq = _apply_shoot(state, action, dice, seq)
+        # Ostrzał (ranged) nie wywołuje starcia wręcz — brak combatants
+        melee_combatants = frozenset()
     elif isinstance(action, ChargeAction):
         state, action_events, seq = _apply_charge(state, action, dice, seq)
+        # Pkt 14.d Szarża → starcie wręcz między actor a target
+        melee_combatants = frozenset({actor_id, action.target_id})
     elif isinstance(action, SpecialAction):
         state, action_events, seq = _apply_special(state, action, seq)
+        melee_combatants = frozenset()
     else:
         raise TypeError(f"Unknown action type: {type(action).__name__}")
     events.extend(action_events)
 
-    # Faza Przegrupowanie (pkt 20)
-    actor_id = action.unit_id
-    actor = _find_blob(state, actor_id) if any(b.id == actor_id for b in state.blobs) else None
-    if actor is not None and actor.models_alive > 0:
-        initial_tough = (
-            initial_toughness_totals.get(actor_id)
-            if initial_toughness_totals
-            else actor.models_alive * actor.toughness_per_model + actor.wounds_received
-        )
+    # Build ActivationContext (B3.9.c / ADR-0045)
+    context = _build_activation_context(
+        pre_wounds, state, actor_id, melee_combatants
+    )
+
+    # Faza Przegrupowanie (pkt 20) — wszystkie oddziały które otrzymały rany
+    # w tej aktywacji LUB są w melee_combatants (pkt 20.a + pkt 20.c).
+    # Deterministyczny porządek po id żeby replay był stabilny.
+    regroup_subjects: set[int] = {actor_id}
+    regroup_subjects |= {uid for uid, _ in context.wounds_received_this_activation}
+    regroup_subjects |= melee_combatants
+    for subject_id in sorted(regroup_subjects):
+        subject = next((b for b in state.blobs if b.id == subject_id), None)
+        if subject is None or subject.models_alive == 0:
+            continue
         state, regroup_events, seq = _regroup_test(
-            state, actor_id, initial_tough, dice, seq
+            state, subject_id, context, dice, seq
         )
         events.extend(regroup_events)
 
@@ -454,16 +607,42 @@ def activation_phase(
     # NOTE: integration point dla Łatania (cel inny oddział) — gdy w event_chain
     # SpecialAction(latanie) pojawi się tu jako side-effect.
 
+    # Reset `melee_balance` na OBU stronach starcia (bug #5 fix — pkt 20.c bilans
+    # wręcz jest właściwością starcia, nie pojedynczego oddziału). B3.9.d emit
+    # `MeleeBalanceReset` event per reset dla replay invariant (ADR-0046).
+    for combatant_id in sorted(melee_combatants):
+        combatant = next((b for b in state.blobs if b.id == combatant_id), None)
+        if combatant is not None and combatant.models_alive > 0 and combatant.melee_balance != 0:
+            state = _replace_blob(state, replace(combatant, melee_balance=0))
+            events.append(MeleeBalanceReset(sequence=seq, target_id=combatant_id))
+            seq += 1
+
     # Aktor otrzymuje status Aktywowany (pkt 11.b.vi). Sprawdzenie czy nadal istnieje.
     actor = _find_blob(state, actor_id) if any(b.id == actor_id for b in state.blobs) else None
     if actor is not None and actor.models_alive > 0:
+        had_aktywowany = STATUS_AKTYWOWANY in actor.status_flags
         actor = _add_status(actor, STATUS_AKTYWOWANY)
+        # B3.9.d (ADR-0046) — emit StatusAdded(Aktywowany) jeśli nie był już.
+        if not had_aktywowany:
+            events.append(
+                StatusAdded(
+                    sequence=seq,
+                    target_id=actor.id,
+                    status=STATUS_AKTYWOWANY,
+                )
+            )
+            seq += 1
         # Pkt 22.c.iv: Ufortyfikowany odrzucany na początku aktywacji oddziału lub
         # gdy oddział staje się Przyszpilony — tu po Aktywowany interpretujemy
         # jako "koniec aktywacji" — Ufortyfikowany NIE jest odrzucany tu (per pkt
         # 22.c.iv: "na początku aktywacji oddziału"). MVP zostawia bez zmian.
-        # Reset melee_balance na koniec aktywacji (per ADR-0014 sekcja 3)
-        actor = replace(actor, melee_balance=0)
+        # Reset melee_balance dla actor (gdy nie był uczestnikiem starcia — np.
+        # Ostrzał z rezultatem 0). Idempotent z resetem powyżej (jeśli był
+        # combatant, melee_balance jest już 0). B3.9.d emit event dla replay.
+        if actor.melee_balance != 0:
+            actor = replace(actor, melee_balance=0)
+            events.append(MeleeBalanceReset(sequence=seq, target_id=actor.id))
+            seq += 1
         state = _replace_blob(state, actor)
 
     return state, tuple(events)
@@ -476,15 +655,23 @@ def activation_phase(
 
 def _check_objective_control(
     state: BattleState,
-) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    sequence: int = 1,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Pkt 5.d sprawdzanie kontroli celów (pkt 8.c.ii).
 
     Pkt 5.d: cel zostaje zajęty gdy w 3″ od niego znajdują się **tylko** oddziały
     danego gracza (i co najmniej jeden). Pozostaje zajęty między rundami, dopóki
     nie zostanie zajęty przez przeciwnika.
 
-    Returns: (new_state z updated objectives + score, events).
+    CR-fix A (post-B3.9.f): emit `ObjectiveControlChanged` per zmiana — replay
+    `apply_events(initial, events)` rekonstruuje `state.objectives[*].controller`
+    bit-perfect. Pre-fix silent `replace()` zostawiał replayed state z initial
+    controllers (None lub deployment values).
+
+    Returns: (new_state, events, next_sequence).
     """
+    events: list[BattleEvent] = []
+    seq = sequence
     new_objectives: list[Objective] = []
     score = [0, 0]
     for obj in state.objectives:
@@ -505,6 +692,16 @@ def _check_objective_control(
             # Pkt 5.d: pozostaje zajęty między rundami dopóki nie zostanie zajęty przez przeciwnika
             new_controller = obj.controller
         new_objectives.append(replace(obj, controller=new_controller))
+        if new_controller != obj.controller:
+            events.append(
+                ObjectiveControlChanged(
+                    sequence=seq,
+                    objective_id=obj.id,
+                    previous_controller=obj.controller,
+                    new_controller=new_controller,
+                )
+            )
+            seq += 1
         if new_controller == 0:
             score[0] += 1
         elif new_controller == 1:
@@ -513,7 +710,7 @@ def _check_objective_control(
     new_state = replace(
         state, objectives=tuple(new_objectives), score=(score[0], score[1])
     )
-    return new_state, ()
+    return new_state, tuple(events), seq
 
 
 def round_end_phase(
@@ -530,17 +727,29 @@ def round_end_phase(
     Emit RoundEnded event.
     """
     events: list[BattleEvent] = []
+    seq = sequence
 
-    # Pkt 8.c.i: reset Aktywowany
+    # Pkt 8.c.i: reset Aktywowany — B3.9.d emit StatusRemoved per blob
+    # przed mutacją live state.
+    for b in state.blobs:
+        if STATUS_AKTYWOWANY in b.status_flags:
+            events.append(
+                StatusRemoved(
+                    sequence=seq,
+                    target_id=b.id,
+                    status=STATUS_AKTYWOWANY,
+                )
+            )
+            seq += 1
     new_blobs = tuple(_remove_status(b, STATUS_AKTYWOWANY) for b in state.blobs)
-    # Pkt 22.c.iv: Ufortyfikowany odrzucany na początku aktywacji — przekładamy
-    # do round_end dla MVP simplification (efektywnie na początku następnej rundy).
-    # Per SZOP pkt 22.c.iv to "na początku aktywacji" więc bardziej poprawnie by było
-    # reset w activation_phase, ale obecny model ma reset tutaj jako proxy.
+    # CR-fix G: Ufortyfikowany NIE jest resetowany tutaj — od post-CR-fix-G
+    # reset wykonuje się w `activation_phase` na actorze, per pkt 22.c.iv
+    # "na początku aktywacji oddziału" (semantycznie poprawnie).
     state = replace(state, blobs=new_blobs)
 
-    # Pkt 8.c.ii: sprawdź kontrolę celów
-    state, obj_events = _check_objective_control(state)
+    # Pkt 8.c.ii: sprawdź kontrolę celów (CR-fix A: emit ObjectiveControlChanged
+    # per zmiana kontroli)
+    state, obj_events, seq = _check_objective_control(state, sequence=seq)
     events.extend(obj_events)
 
     # Pkt 5.f: gra kończy się po 4 rundach
@@ -548,7 +757,7 @@ def round_end_phase(
 
     events.append(
         RoundEnded(
-            sequence=sequence,
+            sequence=seq,
             round_number=state.round,
             objectives_held=state.score,
         )

@@ -1,9 +1,9 @@
 # HANDOFF — faza-b-engine-mvp
 
-> **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + następne podfazy B3 (rule executor) → **B3.9 (architecture hardening)** → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
-> **Status:** In progress — B0 ✅ + B3 ✅ (sub-wątek `faza-b-3-executor` archived 2026-05-30, 8 commitów B3.0-B3.8, pytest 1244/1244, 10 ADR-ów Accepted). **B3.9 architecture hardening planowany** (code-review wykrył 7 bugów + 1 cleanup grupujące się w 5 architektonicznych dziur — stabilizacja PRZED B2/B4). Następne: B3.9 → B2 ORM + B4 API + Strumień D.
+> **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
+> **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-05-30 (post-B3 code review + B3.9 plan added)
+> **Ostatnia aktualizacja:** 2026-06-02 (B3.9 hardening zamknięty — sub-wątek `faza-b-3-hardening` ready for archive)
 
 ## Cel
 

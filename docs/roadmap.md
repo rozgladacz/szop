@@ -189,6 +189,17 @@ Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 wea
 - [x] Smoke replay: `scripts/engine_smoke_replay.py` — minimal 2v2 battle, 21 events, 7 typów eventów reprezentowanych
 - [x] `docs/architecture.md` — sekcja "Game engine" z mapą modułów + event-sourced data flow + typowa orkiestracja
 
+### B3.9. Architecture hardening — **DONE 2026-06-02** (sub-wątek `faza-b-3-hardening`, 6 faz)
+
+7 bug-fixów + 1 dead-code cleanup z post-B3 code review, zorganizowane w 5 dziurach architektonicznych. **PRZED B2 ORM** żeby stabilizować event types schema (zero migration churn). **3 nowe ADR-y Accepted**: 0045/0046/0047. Pytest **1337/1337** (1244 baseline + 93 nowych w B3.9.a-e), parity 156/156, drift CLEAN, smoke replay GATE pass (replay invariant assertion EXIT 0).
+
+- [x] **B3.9.a** — `app/services/engine/status.py` (NEW) — `StatusFlag(str, Enum)` + idempotentne `add_status`/`remove_status`. Konsolidacja 3 kopii STATUS_* z effects/phases/combat. 22 testów (`test_engine_status.py`).
+- [x] **B3.9.b** — `app/services/engine/geometry.py` (NEW) — `distance` (math.hypot), `point_in_circle`, `segment_intersects_circle`, `segments_intersect`, **`circle_edge_distance`** (fix bug #4: charger.radius ignored w min_gap), `UNIT_CIRCLE_16` precomputed. Konsolidacja 4 kopii `_distance`. 27 testów (`test_engine_geometry.py`).
+- [x] **B3.9.c** — `ActivationContext` (`phases.py`) + `BattleState.initial_toughness_snapshot` (`state.py`) — frozen delta state per aktywacja: `wounds_received_this_activation` zamiast cumulative (fix bug #1 pkt 20.a), `melee_combatants` frozenset (fix bug #2: defender szarży regroup-testuje w aktywacji chargera + bug #5: melee_balance reset obu stron). `initial_toughness_for(state, blob_id)` helper (fix bug #3: snapshot zamiast post-action proxy). **ADR-0045 Accepted**. 17 testów (`test_engine_activation_context.py`).
+- [x] **B3.9.d** — `app/services/engine/reducers.py` (NEW) z `@register_reducer` dla wszystkich 11 typów; 3 nowe eventy w `events.py`: `StatusAdded`/`StatusRemoved`/`MeleeBalanceReset`. Emit Status* w combat/phases zamiast silent `replace()` (fix bug #6). Algorytm wound allocation w reducerach mirror `combat._allocate_wounds_to_defender`. **ADR-0046 Accepted** — proof-of-completeness ADR-0010 empirycznie. 8 testów + GATE `test_gate_full_multi_action_replay` (per-blob bit-perfect) + sanity `test_all_event_types_have_reducer` (`test_engine_replay_invariant.py`).
+- [x] **B3.9.e** — `UnitBlob.melee_weapons`/`ranged_weapons: tuple[WeaponProfile, ...]` + `WeaponProfile` migration z combat.py do state.py. `build_initial_state` parsuje `unit["weapons"]` z partycją po `range_inches`. Fix bug #7: `resolve_charge_attack` counter używa `defender.melee_weapons[0]` z fallback. `_ACTIVE_ABILITY_REGISTRY` w `effects.py` + `register_active_ability(slug)` decorator + `get_active_ability(slug)` lookup. `phases._apply_special` redukcja do dispatcher-a. Built-in: pełen `discard_exhausted` + 6 stubów (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik). **ADR-0047 Accepted**. 18 testów (`test_engine_weapons_inventory.py`).
+- [x] **B3.9.f** — Dead code cleanup w combat.py (dead loop linia 378-380 + function-local `_MoveExecuted` import). Update `docs/architecture.md` sekcja "Game engine" z nową strukturą modułów. Refresh ADR-0011 Public API (post-B3.9). Update `scripts/engine_smoke_replay.py` z replay invariant assertion (B3.9.d). `docs/roadmap.md` aktualizacja statusów.
+
 ### B4. API (3 tyg)
 - [ ] `app/routers/battles.py` — endpointy: `POST /battles/invite`, `POST /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `GET /battles/{id}/events`, `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST /battles/{id}/replay`
 - [ ] Auth: tylko gracze bitwy (nie trzecia osoba); agent wymaga scope
@@ -335,6 +346,9 @@ Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 wea
 | 0042 | Facing: wprowadzane z Zwrot | — |
 | 0043 | LoS 3-stanowy (sampling N=16) | ✓ |
 | 0044 | Prediction module (damage PMF + visibility) | ✓ |
+| 0045 | ActivationContext + initial_toughness_snapshot (B3.9.c) | ✓ |
+| 0046 | Event-sourced state mutations (B3.9.d, proof ADR-0010) | ✓ |
+| 0047 | UnitBlob weapons inventory + ACTIVE_ABILITY_REGISTRY (B3.9.e) | ✓ |
 
 ---
 

@@ -30,12 +30,10 @@ from dataclasses import dataclass, replace
 
 from app.services.engine.actions import Action
 from app.services.engine.dice import DeterministicDice
-from app.services.engine.events import BattleEvent
-from app.services.engine.phases import (
-    STATUS_AKTYWOWANY,
-    activation_phase,
-)
+from app.services.engine.events import BattleEvent, InitiativePassed
+from app.services.engine.phases import activation_phase
 from app.services.engine.state import BattleState
+from app.services.engine.status import STATUS_AKTYWOWANY
 
 
 class IllegalActionError(Exception):
@@ -99,13 +97,20 @@ def _validate_action(state: BattleState, action: Action) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _switch_active_player(state: BattleState) -> BattleState:
+def _switch_active_player(
+    state: BattleState, sequence: int
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Pkt 8.a — gracz przekazuje inicjatywę po aktywacji.
 
     "Gracz, który ma inicjatywę, jeżeli może, rozpatruje aktywację jednego ze
     swoich oddziałów, a następnie przekazuje inicjatywę." Implicytnie: jeśli
     drugi gracz nie ma już oddziałów do aktywacji, inicjatywa wraca do
     aktywnego (lub runda się kończy w wyższej warstwie).
+
+    CR-fix B (post-B3.9.f): emit `InitiativePassed` event przy zmianie. Pre-fix
+    silent `replace(active_player=...)` zostawiał replay state na initial
+    active_player. Post-fix: replay z eventów rekonstruuje sekwencję
+    aktywacji.
     """
     other = 1 - state.active_player
     other_has_unactivated = any(
@@ -115,10 +120,15 @@ def _switch_active_player(state: BattleState) -> BattleState:
         for b in state.blobs
     )
     if other_has_unactivated:
-        return replace(state, active_player=other)
+        event = InitiativePassed(
+            sequence=sequence,
+            previous_active_player=state.active_player,
+            new_active_player=other,
+        )
+        return replace(state, active_player=other), (event,)
     # Brak nieaktywowanych u przeciwnika — zostawiamy active_player (current player
-    # kontynuuje aktywacje lub round end w wyższej warstwie)
-    return state
+    # kontynuuje aktywacje lub round end w wyższej warstwie). Brak eventu — no-op.
+    return state, ()
 
 
 # ---------------------------------------------------------------------------
@@ -147,8 +157,12 @@ def apply(
         IllegalActionError: akcja niedozwolona (zob. `_validate_action`).
     """
     _validate_action(state, action)
-    new_state, events = activation_phase(state, action, dice, sequence)
-    new_state = _switch_active_player(new_state)
+    new_state, activation_events = activation_phase(state, action, dice, sequence)
+    # CR-fix B: InitiativePassed event emit (gdy inicjatywa się zmienia)
+    new_state, switch_events = _switch_active_player(
+        new_state, sequence=sequence + len(activation_events)
+    )
+    events = activation_events + switch_events
     return ResolverResult(
         state=new_state,
         events=events,

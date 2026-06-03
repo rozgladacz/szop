@@ -225,7 +225,9 @@ def test_apply_events_empty_returns_initial():
 
 
 def test_apply_events_unknown_event_raises():
-    """Brak reducera → NotImplementedError."""
+    """Brak reducera → NotImplementedError. Post-B3.9.d (ADR-0046): wszystkie
+    10 znanych event types mają reducer w `reducers.py`. Test używa syntetycznego
+    event type spoza rejestru."""
     initial = BattleState(
         round=0,
         active_player=0,
@@ -233,13 +235,15 @@ def test_apply_events_unknown_event_raises():
         blobs=(),
         terrain=(),
     )
-    event = MoveExecuted(
-        sequence=1, unit_id=1, from_pos=(0.0, 0.0), to_pos=(6.0, 0.0)
-    )
-    # Default state: MoveExecuted nie ma reducera (B3.0 zostawia substrate;
-    # reducers są implementowane w B3.4+).
-    with pytest.raises(NotImplementedError):
-        apply_events(initial, [event])
+
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True, slots=True)
+    class UnknownEvent:
+        sequence: int = 1
+
+    with pytest.raises(NotImplementedError, match="UnknownEvent"):
+        apply_events(initial, [UnknownEvent()])
 
 
 def test_register_reducer_duplicate_raises(monkeypatch):

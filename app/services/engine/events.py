@@ -1,4 +1,4 @@
-"""B3.0.3 — Battle events: 8 typów + serializer (ADR-0010).
+"""B3.0.3 — Battle events: 10 typów + serializer (ADR-0010 / ADR-0046).
 
 Każdy event to frozen dataclass z polami zgodnymi z `BattleEvent.payload_json`
 (przyszła ORM, B2). Wszystkie eventy mają:
@@ -9,7 +9,7 @@ Serializer:
 - `event_to_json(event) → dict` — `{"event_type": str, "version": int, **fields}`
 - `json_to_event(data) → BattleEvent` — odwrotna; raise `ValueError` dla nieznanego type lub schema mismatch.
 
-Wszystkie 8 typów:
+Wszystkie 10 typów:
 - `MoveExecuted` — ruch oddziału (Manewr / Związanie / Szarża move)
 - `ShotResolved` — rozliczony Ostrzał (pkt 14.c)
 - `MeleeResolved` — rozliczona Szarża / Kontratak (pkt 14.d)
@@ -18,6 +18,9 @@ Wszystkie 8 typów:
 - `EffectApplied` — efekt zdolności (pasywnej / aktywnej) na oddziale
 - `InterruptTriggered` — wywołanie przerwania (pkt 12)
 - `RoundEnded` — koniec rundy (pkt 8.c)
+- `StatusAdded` (B3.9.d / ADR-0046) — status flag dodany do oddziału (pkt 22)
+- `StatusRemoved` (B3.9.d / ADR-0046) — status flag usunięty z oddziału
+- `MeleeBalanceReset` (B3.9.d / ADR-0046) — reset bilansu wręcz po Przegrupowaniu
 """
 
 from __future__ import annotations
@@ -158,6 +161,102 @@ class RoundEnded:
     version: int = SCHEMA_VERSION
 
 
+@dataclass(frozen=True, slots=True)
+class StatusAdded:
+    """Status flag dodany do oddziału (`SZOP_Rozjemca.md pkt 22`).
+
+    B3.9.d (ADR-0046): zastępuje silent `replace(blob, status_flags=...)` na
+    "live state" — każda mutacja `status_flags` emituje teraz event, dzięki
+    czemu `apply_events(initial, events)` rekonstruuje pełen stan (proof-of-
+    completeness dla ADR-0010 invariant).
+
+    Reducer jest idempotentny — dodanie istniejącego flagu = no-op, zgodny z
+    `status.add_status` helper.
+
+    `status` ∈ {"Aktywowany", "Wyczerpany", "Przyszpilony", "Ufortyfikowany"}
+    (`StatusFlag` enum z `status.py`).
+    """
+
+    sequence: int
+    target_id: int
+    status: str  # StatusFlag (str-equivalent)
+    version: int = SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class StatusRemoved:
+    """Status flag usunięty z oddziału.
+
+    B3.9.d (ADR-0046). Idempotentny — usunięcie nieistniejącego flagu = no-op.
+    Używany przez `round_end_phase` (reset Aktywowany pkt 8.c.i),
+    `_apply_defend` (Przyszpilony→Ufortyfikowany pkt 22.b.v),
+    `_apply_special.discard_exhausted` (Wyczerpany pkt 22.a.ii).
+    """
+
+    sequence: int
+    target_id: int
+    status: str
+    version: int = SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class ObjectiveControlChanged:
+    """Zmiana kontroli celu (pkt 5.d).
+
+    CR-fix A (post-B3.9.f code review): pre-fix `_check_objective_control`
+    mutowal `state.objectives[*].controller` przez `replace()` bez emit eventu
+    — replay state nie odzwierciedlał zmian. ADR-0010 invariant naruszony dla
+    `objectives`. Post-fix: emit per zmianę kontroli + reducer.
+
+    `previous_controller`/`new_controller`: ∈ {None, 0, 1}. None = niezajęty;
+    0/1 = owner_player. Reducer updates `state.objectives[i].controller`.
+    """
+
+    sequence: int
+    objective_id: int
+    previous_controller: int | None
+    new_controller: int | None
+    version: int = SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class InitiativePassed:
+    """Przekazanie inicjatywy (pkt 8.a).
+
+    CR-fix B (post-B3.9.f code review): pre-fix `resolver._switch_active_player`
+    mutowal `state.active_player` przez `replace()` bez emit eventu — replay
+    state pozostawał na `initial.active_player`. Per-aktywacja initiative
+    pass jest teraz event-sourced.
+
+    Reducer ustawia `state.active_player = new_active_player`. Jeśli engine
+    decyduje że inicjatywa NIE zmienia się (drugi gracz nie ma nieaktywowanych),
+    event NIE jest emitowany (no-op).
+    """
+
+    sequence: int
+    previous_active_player: int
+    new_active_player: int
+    version: int = SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class MeleeBalanceReset:
+    """Reset `melee_balance` na oddziale (pkt 20.c — bilans wręcz po regroup).
+
+    B3.9.d (ADR-0046). Emitowany w `activation_phase` po fazie Przegrupowania
+    dla każdego uczestnika starcia wręcz (`melee_combatants`) i dla actora gdy
+    `melee_balance != 0`. Reducer ustawia `blob.melee_balance = 0`.
+
+    Powód osobnego eventu (zamiast pakowania w MoraleTestPassed): reset
+    następuje DLA WSZYSTKICH combatants, nawet gdy nie wykonali testu (np.
+    defender pokonany w aktywacji chargera nie ma morale test).
+    """
+
+    sequence: int
+    target_id: int
+    version: int = SCHEMA_VERSION
+
+
 # Union polimorficzny dla type hints. `BattleEvent` jest aliasem.
 BattleEvent = Union[
     MoveExecuted,
@@ -168,6 +267,11 @@ BattleEvent = Union[
     EffectApplied,
     InterruptTriggered,
     RoundEnded,
+    StatusAdded,
+    StatusRemoved,
+    MeleeBalanceReset,
+    ObjectiveControlChanged,
+    InitiativePassed,
 ]
 
 _EVENT_REGISTRY: dict[str, type] = {
@@ -181,6 +285,11 @@ _EVENT_REGISTRY: dict[str, type] = {
         EffectApplied,
         InterruptTriggered,
         RoundEnded,
+        StatusAdded,
+        StatusRemoved,
+        MeleeBalanceReset,
+        ObjectiveControlChanged,
+        InitiativePassed,
     )
 }
 

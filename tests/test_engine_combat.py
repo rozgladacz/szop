@@ -697,7 +697,14 @@ def test_charge_bastion_prevents_exhaustion_after_counter():
 
 
 def test_charge_charger_position_updates():
-    """Po Związaniu charger.position zmienia się (blisko defendera)."""
+    """Po Związaniu charger.position zmienia się (blisko defendera).
+
+    B3.9.b fix #4: `min_gap` musi uwzględniać OBIE radii — charger zatrzymuje
+    się tak, żeby jego obwód był 1″ od obwodu defendera, czyli
+    `distance(centers) == charger.radius + defender.radius + 1.0`. Przed fixem
+    `min_gap = defender.radius + 1.0` (charger.radius ignorowany) — co
+    pozwalało obwodom kół przenikać o `charger.radius` cali.
+    """
     state = make_state()
     charger = make_blob(1, x=0, y=0, radius=1.0)
     defender = make_blob(2, x=20, y=0, radius=1.0)
@@ -705,9 +712,9 @@ def test_charge_charger_position_updates():
     result = resolve_charge_attack(
         state, charger, defender, weapon, DeterministicDice(42), sequence=1
     )
-    # Charger powinien znaleźć się 1″ od krawędzi defendera
-    # = 1″ + defender.radius od centrum defendera
-    expected_dist = defender.radius_inches + 1.0  # = 2.0
+    # Charger powinien znaleźć się 1″ od **krawędzi** defendera
+    # = charger.radius + defender.radius + 1″ od centrum defendera.
+    expected_dist = charger.radius_inches + defender.radius_inches + 1.0  # = 3.0
     actual_dx = defender.position.x - result.new_charger.position.x
     actual_dy = defender.position.y - result.new_charger.position.y
     actual_dist = (actual_dx**2 + actual_dy**2) ** 0.5

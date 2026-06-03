@@ -66,6 +66,48 @@ class TerrainLine:
 
 
 @dataclass(frozen=True, slots=True)
+class WeaponProfile:
+    """Profil broni używany w combat resolution.
+
+    Przed B3.9.e ten dataclass żył w `combat.py`. Migracja do `state.py` (B3.9.e
+    / ADR-0047) była konieczna żeby `UnitBlob.melee_weapons`/`ranged_weapons`
+    mogły go używać bez import cycle (`combat.py` importuje z `state.py`).
+    `combat.py` re-eksportuje dla wstecznej kompatybilności call sites.
+
+    `slug` ≈ entry w `app/rulesets/v1/abilities.yaml` (type=weapon).
+    `range_inches=0` = melee. `attacks` = liczba ataków per model.
+    `attack_quality_override` = `None` (użyj `attacker.quality`) lub stała
+    wartość (np. Niezawodny id 63 → 2).
+    `ap` = pole główne (AP modifier; weapon_abilities tuple jest dla dalszych).
+    `weapon_abilities` = lista sluggów ze zdolnościami broni (Brutalny,
+    Precyzyjny etc. dla MVP; przyszłe Furia/Impet/Podwójny).
+    """
+
+    slug: str
+    name: str
+    range_inches: int
+    attacks: int
+    ap: int = 0
+    attack_quality_override: int | None = None
+    weapon_abilities: tuple[str, ...] = ()
+
+
+# CR-fix E (post-B3.9.f code review): sentinel weapon dla units bez melee
+# inventory. Pre-fix `combat.resolve_charge_attack` fallowal do broni
+# atakującego — silently reintroducing bug #7. Teraz fallback używa UNARMED
+# (1 atak, AP 0, brak abilities) — explicit "unarmed defender" semantyka
+# zamiast cichego użycia broni przeciwnika.
+UNARMED_WEAPON: "WeaponProfile" = WeaponProfile(
+    slug="unarmed",
+    name="Unarmed",
+    range_inches=0,
+    attacks=1,
+    ap=0,
+    weapon_abilities=(),
+)
+
+
+@dataclass(frozen=True, slots=True)
 class UnitBlob:
     """Oddział = koło (Pareto MVP, ADR-0008).
 
@@ -77,6 +119,13 @@ class UnitBlob:
 
     `passives` zawiera sluggi z `app/rulesets/v1/abilities.yaml`. `status_flags`
     z pkt 22 (Aktywowany, Wyczerpany, Przyszpilony, Ufortyfikowany).
+
+    `melee_weapons` / `ranged_weapons` (B3.9.e / ADR-0047) — inventory broni
+    oddziału. Partycja po `range_inches`: > 0 ranged, == 0 melee. Pre-B3.9.e
+    `resolve_charge_attack` używał broni atakującego do kontrataku defendera —
+    bug #7. Po B3.9.e defender używa `defender.melee_weapons[0]` (z fallback
+    do attacker.weapon gdy inventory pusty — backward compat dla test fixtures
+    konstruujących UnitBlob bez weapons).
     """
 
     id: int
@@ -94,6 +143,8 @@ class UnitBlob:
     wounds_pending: int = 0
     wounds_pending_precise: int = 0
     melee_balance: int = 0
+    melee_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047
+    ranged_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +167,19 @@ class BattleState:
 
     Rekonstrukcja przez `apply_events(initial, events)` per ADR-0010.
     `round=0` to runda rozstawienia (pkt 9), 1-4 to rundy walki (pkt 5.f).
+
+    `initial_toughness_snapshot` (ADR-0045 / B3.9.c) — frozen mapa
+    `unit_id → initial_toughness_total` ustalona w `build_initial_state` raz
+    i NIGDY nie modyfikowana w trakcie rozgrywki. Używana przez `_regroup_test`
+    dla pkt 20.b (test gdy current toughness ≤ ½ INITIAL toughness). Przed
+    B3.9.c regroup używał `models_alive * toughness + wounds_received` jako
+    proxy — bug #3 (proxy traci dokładność przy modelach pokonanych w
+    poprzednich aktywacjach: `wounds_received` jest resetowany przy
+    pokonaniu modelu, więc proxy underestymuje initial).
+
+    Reprezentacja jako `tuple[tuple[int, int], ...]` (a nie `dict`) zachowuje
+    frozen-dataclass purity — żaden kod nie może zmutować dict-a przez
+    referencję. Lookup przez `initial_toughness_for(state, unit_id)` helper.
     """
 
     round: int
@@ -128,6 +192,7 @@ class BattleState:
     pending_interrupts: tuple[str, ...] = ()  # placeholder dla B3.5
     score: tuple[int, int] = (0, 0)  # zajęte cele per player (pkt 5.f)
     is_game_over: bool = False  # True po round_end_phase rundy 4 (pkt 5.f)
+    initial_toughness_snapshot: tuple[tuple[int, int], ...] = ()  # ADR-0045
 
 
 def compute_radius_inches(
@@ -195,6 +260,31 @@ def build_initial_state(
             tou_sum = models * tou / (2 if is_hero else 1)
             radius = compute_radius_inches(tou_sum, config)
             pos_raw = unit["position"]
+
+            # B3.9.e (ADR-0047) — partition `unit["weapons"]` po `range_inches`.
+            # `weapons` może być listą `WeaponProfile` lub listą dict-ów
+            # (`{"slug","name","range_inches","attacks","ap","weapon_abilities"}`).
+            # Backward compat: gdy brak `weapons`, oba tuples zostają puste.
+            melee_weapons: list[WeaponProfile] = []
+            ranged_weapons: list[WeaponProfile] = []
+            for w in unit.get("weapons", ()):
+                if isinstance(w, WeaponProfile):
+                    weapon = w
+                else:
+                    weapon = WeaponProfile(
+                        slug=str(w["slug"]),
+                        name=str(w.get("name", w["slug"])),
+                        range_inches=int(w["range_inches"]),
+                        attacks=int(w.get("attacks", 1)),
+                        ap=int(w.get("ap", 0)),
+                        attack_quality_override=w.get("attack_quality_override"),
+                        weapon_abilities=tuple(w.get("weapon_abilities", ())),
+                    )
+                if weapon.range_inches > 0:
+                    ranged_weapons.append(weapon)
+                else:
+                    melee_weapons.append(weapon)
+
             blobs.append(
                 UnitBlob(
                     id=int(unit["id"]),
@@ -207,8 +297,18 @@ def build_initial_state(
                     defense=int(unit.get("defense", 5)),
                     is_hero_unit=is_hero,
                     passives=unit_slugs,
+                    melee_weapons=tuple(melee_weapons),
+                    ranged_weapons=tuple(ranged_weapons),
                 )
             )
+
+    # B3.9.c (ADR-0045): frozen mapa initial toughness per unit_id. Liczone z
+    # `models_alive * toughness_per_model` (= sum_models * toughness w MVP, bez
+    # halving Bohatera — to dotyczy radius area, nie toughness pool per
+    # `SZOP_Rozjemca.md pkt 17.d–18`).
+    snapshot = tuple(
+        (b.id, b.models_alive * b.toughness_per_model) for b in blobs
+    )
 
     return BattleState(
         round=0,
@@ -219,7 +319,21 @@ def build_initial_state(
         ),
         blobs=tuple(blobs),
         terrain=tuple(terrain),
+        initial_toughness_snapshot=snapshot,
     )
+
+
+def initial_toughness_for(state: BattleState, unit_id: int) -> int:
+    """Zwraca initial_toughness_total dla `unit_id` z `state.initial_toughness_snapshot`.
+
+    Zwraca 0 gdy `unit_id` brak w snapshot (state zbudowany pomijając
+    `build_initial_state` — np. test fixtures). Caller (`_regroup_test`)
+    używa fallback gdy 0.
+    """
+    for uid, tough in state.initial_toughness_snapshot:
+        if uid == unit_id:
+            return tough
+    return 0
 
 
 # ---------------------------------------------------------------------------

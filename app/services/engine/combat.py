@@ -44,16 +44,22 @@ from app.services.engine.events import (
     BattleEvent,
     MeleeResolved,
     ModelKilled,
+    MoveExecuted,
     ShotResolved,
+    StatusAdded,
 )
+from app.services.engine.geometry import circle_edge_distance, distance, point_in_circle
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
     BattleState,
     Position,
     TerrainCircle,
     TerrainLine,
+    UNARMED_WEAPON,
     UnitBlob,
+    WeaponProfile,
 )
+from app.services.engine.status import STATUS_WYCZERPANY, add_status
 
 
 def effective_attack_quality(weapon: WeaponProfile, attacker: UnitBlob) -> int:
@@ -113,26 +119,8 @@ ABILITY_PODWOJNY = "podwojny"  # natural 6 hit → dodatkowe trafienie (id 66)
 FEATURE_OBRONNY = "Obronny"
 
 
-@dataclass(frozen=True, slots=True)
-class WeaponProfile:
-    """Profil broni używany w combat resolution.
-
-    `slug` ≈ entry w `app/rulesets/v1/abilities.yaml` (type=weapon).
-    `range_inches=0` = melee. `attacks` = liczba ataków per model.
-    `attack_quality_override` = `None` (użyj `attacker.quality`) lub stała
-    wartość (np. Niezawodny id 63 → 2).
-    `ap` = pole główne (AP modifier; weapon_abilities tuple jest dla dalszych).
-    `weapon_abilities` = lista sluggów ze zdolnościami broni (Brutalny,
-    Precyzyjny etc. dla MVP; przyszłe Furia/Impet/Podwójny).
-    """
-
-    slug: str
-    name: str
-    range_inches: int
-    attacks: int
-    ap: int = 0
-    attack_quality_override: int | None = None
-    weapon_abilities: tuple[str, ...] = ()
+# `WeaponProfile` przeniesiony do `state.py` (B3.9.e / ADR-0047). Re-eksport
+# z `state` zachowuje wsteczną kompatybilność call sites (testy, scripts).
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,9 +144,7 @@ class CombatResult:
 
 def _blob_inside_circle(blob: UnitBlob, terrain: TerrainCircle) -> bool:
     """Centrum bloba ≤ radius od centrum koła."""
-    dx = blob.position.x - terrain.center.x
-    dy = blob.position.y - terrain.center.y
-    return (dx * dx + dy * dy) ** 0.5 <= terrain.radius_inches
+    return point_in_circle(blob.position, terrain.center, terrain.radius_inches)
 
 
 def compute_cover(
@@ -375,10 +361,9 @@ def resolve_ranged_attack(
         # 17.d.i: pula atakującego gdy naturalna 1 + effective threshold > 2+
         # 17.d.ii: pula obrońcy w pozostałych
         # Precyzyjny (id 68): wszystkie rany do puli atakującego.
-        for r in defense_result.rolls:
-            if r == 1:
-                continue  # naturalna 1 — porażka, ale...
-        # Re-iterate counting failures
+        # B3.9.f cleanup: usunięty dead-loop `for r in defense_result.rolls: if r == 1: continue`
+        # (no-op, TODO marker który nigdy nie dostał logiki — faktyczna logika w
+        # `if failed_count > 0` poniżej, gdzie liczymy natural_ones_count).
         failed_count = hits - defense_result.successes
         if failed_count > 0:
             if is_precyzyjny:
@@ -563,9 +548,6 @@ def resolve_melee_attack(
 # Public — resolve_charge_attack (Szarża pkt 14.d + reactive kontratak pkt 14.d.iv)
 # ---------------------------------------------------------------------------
 
-# Status flag (wartości z effects.STATUS_*)
-STATUS_WYCZERPANY = "Wyczerpany"
-
 # Passive ability sluggi dotyczące reactive kontrataku (Szarża pkt 14.d.iv)
 ABILITY_BASTION = "bastion"  # nie zostajesz Wyczerpany po kontrataku (id 1)
 ABILITY_KONTRA = "kontra"  # kontratak przed atakami szarżującego (id 10)
@@ -628,26 +610,36 @@ def resolve_charge_attack(
     next_seq = sequence
 
     # Faza 1: Związanie (pkt 14.d.ii) — emit MoveExecuted
-    # MVP: binding ruch do 1″ od defendera w kierunku straight line
+    # MVP: binding ruch do 1″ od obwodu defendera w prostej linii.
+    # B3.9.b fix #4: minimalna pozycja końcowa (gap między **obwodami** kół) =
+    # 1″, czyli `distance(centers) >= charger.radius + defender.radius + 1.0`.
+    # Przed fixem: `min_gap = defender.radius + 1.0` ignorował `charger.radius`
+    # i pozwalał obwodom kół przenikać o `charger.radius` cali.
     dx = defender.position.x - charger.position.x
     dy = defender.position.y - charger.position.y
-    dist = (dx * dx + dy * dy) ** 0.5
+    dist = distance(charger.position, defender.position)
     if dist > 0:
-        # Pozycja końcowa: na linii charger→defender, w odległości 1″ od defendera
-        # min_gap = defender.radius + 1″
-        min_gap = defender.radius_inches + 1.0
-        if dist > min_gap:
+        # `min_gap` = minimalna odległość między centrami żeby obwody były
+        # rozdzielone o ≥ 1″ (Pareto MVP — pkt 14.d.ii Związanie do "stykania
+        # się podstawek" interpretowane jako 1″ z marginesem przeciw flicker).
+        min_gap = defender.radius_inches + charger.radius_inches + 1.0
+        edge_gap = circle_edge_distance(
+            charger.position, charger.radius_inches,
+            defender.position, defender.radius_inches,
+        )
+        if edge_gap > 1.0:
+            # Charger przesuwa się tak, żeby zostać `min_gap` od centrum defendera.
             t = (dist - min_gap) / dist
             new_x = charger.position.x + t * dx
             new_y = charger.position.y + t * dy
         else:
-            # Już w zasięgu — bez ruchu
+            # Już w zasięgu Związania — bez ruchu.
             new_x = charger.position.x
             new_y = charger.position.y
-        from app.services.engine.events import MoveExecuted as _MoveExecuted
-
+        # B3.9.f cleanup: function-local `_MoveExecuted` import usunięty — używamy
+        # `MoveExecuted` z module-level imports (linia 46) bez aliasu.
         events.append(
-            _MoveExecuted(
+            MoveExecuted(
                 sequence=next_seq,
                 unit_id=charger.id,
                 from_pos=(charger.position.x, charger.position.y),
@@ -669,25 +661,38 @@ def resolve_charge_attack(
         and defender.models_alive > 0
     )
     if can_counter:
-        # Defender używa SWOJEJ broni — w MVP zakładamy że ma tę samą broń
-        # (weapon argument). Faktyczna lista broni obrońcy → przyszła iteracja
-        # gdy roster→engine ma broń per unit.
+        # B3.9.e fix #7 (ADR-0047) + CR-fix E: defender używa SWOJEJ broni wręcz
+        # z `melee_weapons` inventory. Fallback do `UNARMED_WEAPON` (1 atak,
+        # AP 0) gdy inventory pusty — explicit "unarmed defender" semantyka.
+        # Pre-CR-fix-E fallback wracał do `weapon` argumentu (broń atakującego)
+        # — silently reintroducing bug #7 dla ranged-only units.
+        defender_weapon = (
+            new_defender.melee_weapons[0]
+            if new_defender.melee_weapons
+            else UNARMED_WEAPON
+        )
         counter_result = resolve_melee_attack(
-            state, new_defender, new_charger, weapon, dice, next_seq
+            state, new_defender, new_charger, defender_weapon, dice, next_seq
         )
         events.extend(counter_result.events)
         next_seq += len(counter_result.events)
-        # Po kontrataku: Wyczerpany (chyba że Bastion id 1)
+        # Po kontrataku: Wyczerpany (chyba że Bastion id 1). B3.9.d (ADR-0046)
+        # — emit StatusAdded event + idempotentny `add_status` na live state.
+        # Reducer `_reduce_status_added` rekonstruuje status_flags w replay.
         post_counter_defender = counter_result.new_attacker
-        if ABILITY_BASTION not in post_counter_defender.passives:
-            post_counter_defender = replace(
-                post_counter_defender,
-                status_flags=tuple(
-                    list(post_counter_defender.status_flags) + [STATUS_WYCZERPANY]
+        if (
+            ABILITY_BASTION not in post_counter_defender.passives
+            and STATUS_WYCZERPANY not in post_counter_defender.status_flags
+        ):
+            post_counter_defender = add_status(post_counter_defender, STATUS_WYCZERPANY)
+            events.append(
+                StatusAdded(
+                    sequence=next_seq,
+                    target_id=post_counter_defender.id,
+                    status=STATUS_WYCZERPANY,
                 )
-                if STATUS_WYCZERPANY not in post_counter_defender.status_flags
-                else post_counter_defender.status_flags,
             )
+            next_seq += 1
         new_defender = post_counter_defender
         new_charger = counter_result.new_defender
 

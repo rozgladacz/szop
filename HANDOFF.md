@@ -11,7 +11,8 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3 done; B4 lub D pierwsze) |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3.9 done; B2 ORM lub D pierwsze) |
+| [HANDOFF_faza-b-3-hardening](docs/handoffs/HANDOFF_faza-b-3-hardening.md) | B3.9 architecture hardening — 7 bugów + 1 cleanup + 5 dziur architektonicznych zamkniętych; 3 ADR-y (0045/0046/0047) Accepted. | engine package (status/geometry/state/events/combat/phases/effects/reducers) | Ready for archive |
 
 ## Zasoby zablokowane (reverse lookup)
 

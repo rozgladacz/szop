@@ -42,6 +42,7 @@ from app.services.engine.state import (
     Objective,
     Position,
     TerrainCircle,
+    apply_events,
 )
 
 
@@ -85,12 +86,19 @@ def main() -> None:
     state, events = deployment_round(state, deployment)
     print(f"\nDeployment: {len(events)} events, round = {state.round}")
 
+    # B3.9.d (ADR-0046) — snapshot state PO deployment jako `initial_for_replay`.
+    # Round transition 0→1 nie jest event-sourced (deployment scope), więc replay
+    # startuje stąd. Eventy deployment też nie są re-applied (Move-Executed
+    # reducer wymaga blobu na pozycji startowej — incompatible).
+    initial_for_replay = state
+
     # === Battle ===
     dice = DeterministicDice(seed=2026)
     weapon_rifle = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=1, ap=0)
     weapon_sword = WeaponProfile(slug="sword", name="Sword", range_inches=0, attacks=2, ap=0)
 
-    all_events = list(events)
+    # `all_events` od momentu `initial_for_replay` (deployment events excluded).
+    all_events: list = []
     seq = len(events) + 1
 
     while not is_battle_over(state) and state.round <= 2:
@@ -150,6 +158,59 @@ def main() -> None:
     print(f"\nEvent type distribution:")
     for et, n in sorted(event_types.items(), key=lambda x: -x[1]):
         print(f"  {et:25s} {n}")
+
+    # === Replay invariant GATE (ADR-0010 / ADR-0046) ===
+    print(f"\n{'='*60}")
+    print(f"REPLAY INVARIANT (ADR-0010 / ADR-0046 proof-of-completeness)")
+    print(f"{'='*60}")
+    replayed = apply_events(initial_for_replay, all_events)
+    mismatches: list[str] = []
+    blob_fields = (
+        "position",
+        "models_alive",
+        "wounds_received",
+        "wounds_pending",
+        "wounds_pending_precise",
+        "is_hero_unit",
+        "status_flags",
+        "melee_balance",
+    )
+    live_by_id = {b.id: b for b in state.blobs}
+    rep_by_id = {b.id: b for b in replayed.blobs}
+    for uid in sorted(live_by_id):
+        lb = live_by_id[uid]
+        rb = rep_by_id.get(uid)
+        if rb is None:
+            mismatches.append(f"  blob {uid}: missing in replay")
+            continue
+        for field in blob_fields:
+            if getattr(lb, field) != getattr(rb, field):
+                mismatches.append(
+                    f"  blob {uid}.{field}: live={getattr(lb, field)!r} "
+                    f"replayed={getattr(rb, field)!r}"
+                )
+    # CR-fix A/B: również state-level fields (objectives.controller,
+    # active_player) muszą się zgadzać — przed CR-fix-A/B były silent mutacjami.
+    live_obj_ctrl = tuple((o.id, o.controller) for o in state.objectives)
+    rep_obj_ctrl = tuple((o.id, o.controller) for o in replayed.objectives)
+    if live_obj_ctrl != rep_obj_ctrl:
+        mismatches.append(
+            f"  objectives.controller: live={live_obj_ctrl!r} replayed={rep_obj_ctrl!r}"
+        )
+    if state.active_player != replayed.active_player:
+        mismatches.append(
+            f"  active_player: live={state.active_player} replayed={replayed.active_player}"
+        )
+    if mismatches:
+        print("MISMATCH:")
+        for m in mismatches:
+            print(m)
+        raise SystemExit(1)
+    print(f"OK — apply_events(initial, {len(all_events)} events) == live_state")
+    print(f"     round: live={state.round} replayed={replayed.round}")
+    print(f"     score: live={state.score} replayed={replayed.score}")
+    print(f"     active_player: live={state.active_player} replayed={replayed.active_player}")
+    print(f"     objectives: {live_obj_ctrl}")
 
 
 if __name__ == "__main__":

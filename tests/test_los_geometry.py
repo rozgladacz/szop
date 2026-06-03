@@ -12,16 +12,18 @@ import math
 
 import pytest
 
+from app.services.engine.geometry import (
+    distance as _distance,
+    point_in_circle as _point_in_circle,
+    segment_intersects_circle as _segment_intersects_circle,
+    segments_intersect as _segments_intersect,
+)
 from app.services.engine.los import (
     DEFAULT_N_SAMPLES,
     FEATURE_BLOKUJACY,
     FEATURE_ZASLANIAJACY,
     LoSState,
     _blob_inside_terrain,
-    _distance,
-    _point_in_circle,
-    _segment_intersects_circle,
-    _segments_intersect,
     check_los,
 )
 from app.services.engine.state import (

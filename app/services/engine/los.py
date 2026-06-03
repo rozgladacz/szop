@@ -32,6 +32,13 @@ import math
 from enum import Enum
 from typing import Iterable
 
+from app.services.engine.geometry import (
+    UNIT_CIRCLE_16,
+    distance,
+    point_in_circle,
+    segment_intersects_circle,
+    segments_intersect,
+)
 from app.services.engine.state import (
     Position,
     TerrainCircle,
@@ -56,98 +63,8 @@ FEATURE_ZASLANIAJACY = "Zaslaniajacy"
 
 
 # ---------------------------------------------------------------------------
-# Geometry primitives — pure functions
+# Local helpers (geometry primitives → app.services.engine.geometry)
 # ---------------------------------------------------------------------------
-
-
-def _distance(p1: Position, p2: Position) -> float:
-    """Euclidean distance między dwoma punktami."""
-    dx = p2.x - p1.x
-    dy = p2.y - p1.y
-    return math.sqrt(dx * dx + dy * dy)
-
-
-def _point_in_circle(point: Position, center: Position, radius: float) -> bool:
-    """True jeśli `point` jest wewnątrz koła (≤ radius od center)."""
-    return _distance(point, center) <= radius
-
-
-def _segment_intersects_circle(
-    p1: Position, p2: Position, center: Position, radius: float
-) -> bool:
-    """True jeśli odcinek p1→p2 przecina koło (center, radius).
-
-    Algorithm: project center na linię p1-p2, oblicz najbliższy punkt na
-    odcinku (clamp do [0,1]), sprawdź dystans od center. Endpoints inside koło
-    też się liczą (segment częściowo wewnątrz).
-    """
-    # Jeśli któryś koniec jest wewnątrz koła, segment przecina (lub jest wewnątrz).
-    if _point_in_circle(p1, center, radius):
-        return True
-    if _point_in_circle(p2, center, radius):
-        return True
-
-    # Wektor segmentu
-    dx = p2.x - p1.x
-    dy = p2.y - p1.y
-    seg_len_sq = dx * dx + dy * dy
-
-    if seg_len_sq == 0:
-        # Degenerate: p1 == p2; sprawdzony już wyżej (oba "endpoints").
-        return False
-
-    # Parametr t na linii p1→p2, gdzie najbliższy punkt do center
-    # t = ((center - p1) · (p2 - p1)) / |p2 - p1|^2
-    t = ((center.x - p1.x) * dx + (center.y - p1.y) * dy) / seg_len_sq
-    # Clamp do [0, 1] żeby zostać na odcinku (nie na nieskończonej linii)
-    t = max(0.0, min(1.0, t))
-
-    # Najbliższy punkt na odcinku
-    closest = Position(p1.x + t * dx, p1.y + t * dy)
-    return _distance(closest, center) <= radius
-
-
-def _segments_intersect(
-    p1: Position, p2: Position, p3: Position, p4: Position
-) -> bool:
-    """True jeśli odcinek p1→p2 przecina odcinek p3→p4.
-
-    Standard CCW (Counter Clock-Wise) orientation test. Pokrywa też cases
-    gdy segmenty są kolinearne i nakładają się.
-    """
-
-    def ccw(a: Position, b: Position, c: Position) -> float:
-        """Cross product: dodatni gdy a→b→c jest CCW."""
-        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-
-    d1 = ccw(p3, p4, p1)
-    d2 = ccw(p3, p4, p2)
-    d3 = ccw(p1, p2, p3)
-    d4 = ccw(p1, p2, p4)
-
-    # Strict crossing: orientations różne dla obu par
-    if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and (
-        (d3 > 0 and d4 < 0) or (d3 < 0 and d4 > 0)
-    ):
-        return True
-
-    # Colinear cases (point lies on segment)
-    def on_segment(a: Position, b: Position, c: Position) -> bool:
-        return (
-            min(a.x, b.x) <= c.x <= max(a.x, b.x)
-            and min(a.y, b.y) <= c.y <= max(a.y, b.y)
-        )
-
-    if d1 == 0 and on_segment(p3, p4, p1):
-        return True
-    if d2 == 0 and on_segment(p3, p4, p2):
-        return True
-    if d3 == 0 and on_segment(p1, p2, p3):
-        return True
-    if d4 == 0 and on_segment(p1, p2, p4):
-        return True
-
-    return False
 
 
 def _blob_inside_terrain(
@@ -160,7 +77,7 @@ def _blob_inside_terrain(
     przez centrum blob. Dla `TerrainLine` zwraca False (line nie ma "wnętrza").
     """
     if isinstance(terrain, TerrainCircle):
-        return _point_in_circle(blob.position, terrain.center, terrain.radius_inches)
+        return point_in_circle(blob.position, terrain.center, terrain.radius_inches)
     return False
 
 
@@ -186,7 +103,7 @@ def check_los(
         raise ValueError(f"n_samples must be ≥ 1, got {n_samples}")
 
     # Degenerate: sam blob lub overlap
-    dist_centers = _distance(attacker.position, target.position)
+    dist_centers = distance(attacker.position, target.position)
     if dist_centers == 0:
         return LoSState.WIDZI  # same position; engine higher-level zwykle wyklucza
 
@@ -214,16 +131,26 @@ def check_los(
         attacker.position.y + ny * attacker.radius_inches,
     )
 
-    # Sample N=16 punktów równomiernie na obwodzie celu
+    # Sample N punktów równomiernie na obwodzie celu. N=16 (default) używa
+    # precomputed `UNIT_CIRCLE_16` z `geometry.py` (perf — bez 16× math.cos/sin).
     target_points: list[Position] = []
-    for i in range(n_samples):
-        angle = 2.0 * math.pi * i / n_samples
-        target_points.append(
-            Position(
-                target.position.x + target.radius_inches * math.cos(angle),
-                target.position.y + target.radius_inches * math.sin(angle),
+    if n_samples == DEFAULT_N_SAMPLES:
+        for cos_a, sin_a in UNIT_CIRCLE_16:
+            target_points.append(
+                Position(
+                    target.position.x + target.radius_inches * cos_a,
+                    target.position.y + target.radius_inches * sin_a,
+                )
             )
-        )
+    else:
+        for i in range(n_samples):
+            angle = 2.0 * math.pi * i / n_samples
+            target_points.append(
+                Position(
+                    target.position.x + target.radius_inches * math.cos(angle),
+                    target.position.y + target.radius_inches * math.sin(angle),
+                )
+            )
 
     # Sprawdź każdy target point przeciw blokującemu terenowi
     visible_count = 0
@@ -231,13 +158,13 @@ def check_los(
         blocked = False
         for t in blocking:
             if isinstance(t, TerrainCircle):
-                if _segment_intersects_circle(
+                if segment_intersects_circle(
                     attacker_edge, tp, t.center, t.radius_inches
                 ):
                     blocked = True
                     break
             elif isinstance(t, TerrainLine):
-                if _segments_intersect(attacker_edge, tp, t.start, t.end):
+                if segments_intersect(attacker_edge, tp, t.start, t.end):
                     blocked = True
                     break
         if not blocked:

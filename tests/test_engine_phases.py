@@ -31,6 +31,8 @@ from app.services.engine.phases import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYSZPILONY,
     STATUS_UFORTYFIKOWANY,
+    ActivationContext,
+    _regroup_test,
     activation_phase,
     deployment_round,
     round_end_phase,
@@ -256,32 +258,56 @@ def test_regroup_skipped_when_no_wounds():
 
 
 def test_regroup_after_taking_wounds():
-    """Po Ostrzale (otrzymanych ranach) obrońca robi test Przegrupowania w swojej aktywacji.
+    """Pkt 20.a — oddział który otrzymał rany **w tej aktywacji** robi test.
 
-    MVP: regroup_test triggeruje na aktorze gdy `wounds_received > 0` w state.
-    Demonstrujemy przez ustawienie wounds_received manualnie i wywołanie ManeuverAction.
+    Post-B3.9.c (ADR-0045): trigger jest delta, nie cumulative. Test wywołuje
+    `_regroup_test` bezpośrednio z `ActivationContext` zawierającym deltę,
+    zamiast pre-stage `wounds_received` na blobie (co odpowiadałoby buggy
+    pre-B3.9.c semantyce gdzie cumulative wounds z poprzednich aktywacji
+    triggerowały test).
     """
     state = _basic_state()
     from dataclasses import replace
+    # Symulacja: oddział OTRZYMAŁ 2 rany w tej aktywacji (np. po Ostrzale).
+    # ActivationContext przekazuje deltę.
     blob = next(b for b in state.blobs if b.id == 1)
-    blob = replace(blob, wounds_received=2)
-    state = replace(state, blobs=tuple(blob if b.id == 1 else b for b in state.blobs))
-    action = ManeuverAction(unit_id=1, target_position=Position(5, 0))
-    _, events = activation_phase(state, action, DeterministicDice(42))
+    state = replace(
+        state,
+        blobs=tuple(replace(b, wounds_received=2) if b.id == 1 else b for b in state.blobs),
+    )
+    context = ActivationContext(
+        actor_id=1,
+        wounds_received_this_activation=((1, 2),),
+        melee_combatants=frozenset(),
+    )
+    _, events, _ = _regroup_test(state, 1, context, DeterministicDice(42), sequence=1)
     assert any(isinstance(e, MoraleTestPassed) for e in events)
 
 
+def test_regroup_skipped_for_cumulative_wounds_without_delta():
+    """B3.9.c fix #1 regression: cumulative `wounds_received` z poprzednich
+    aktywacji NIE triggeruje testu pkt 20.a — tylko delta tej aktywacji."""
+    state = _basic_state()
+    from dataclasses import replace
+    state = replace(
+        state,
+        blobs=tuple(replace(b, wounds_received=2) if b.id == 1 else b for b in state.blobs),
+    )
+    # Maneuver — żadnych nowych ran w tej aktywacji.
+    action = ManeuverAction(unit_id=1, target_position=Position(5, 0))
+    _, events = activation_phase(state, action, DeterministicDice(42))
+    assert not any(isinstance(e, MoraleTestPassed) for e in events)
+
+
 def test_regroup_nieustraszony_reduces_test_count():
-    """Nieustraszony (id 16) — -1 test Przegrupowania."""
+    """Nieustraszony (id 16) — -1 test Przegrupowania.
+
+    Post-B3.9.c: test używa `_regroup_test` + `ActivationContext` z deltą
+    zamiast pre-stage cumulative wounds + ManeuverAction (buggy proxy).
+    """
     state_no = _basic_state()
     state_n = _basic_state(extra=("nieustraszony",))
     from dataclasses import replace
-    # Wymuś wounds_received
-    for state in [state_no, state_n]:
-        blob = next(b for b in state.blobs if b.id == 1)
-        blob = replace(blob, wounds_received=2)
-        new_blobs = tuple(blob if b.id == 1 else b for b in state.blobs)
-        state.__init__  # marker (BattleState is frozen, so we use replace)
     state_no = replace(
         state_no,
         blobs=tuple(replace(b, wounds_received=2) if b.id == 1 else b for b in state_no.blobs),
@@ -290,14 +316,16 @@ def test_regroup_nieustraszony_reduces_test_count():
         state_n,
         blobs=tuple(replace(b, wounds_received=2) if b.id == 1 else b for b in state_n.blobs),
     )
-    action = ManeuverAction(unit_id=1, target_position=Position(5, 0))
-    _, events_no = activation_phase(state_no, action, DeterministicDice(42))
-    _, events_n = activation_phase(state_n, action, DeterministicDice(42))
+    context = ActivationContext(
+        actor_id=1,
+        wounds_received_this_activation=((1, 2),),
+        melee_combatants=frozenset(),
+    )
+    _, events_no, _ = _regroup_test(state_no, 1, context, DeterministicDice(42), sequence=1)
+    _, events_n, _ = _regroup_test(state_n, 1, context, DeterministicDice(42), sequence=1)
     morale_no = next(e for e in events_no if isinstance(e, MoraleTestPassed))
-    # Z Nieustraszony może w ogóle nie być testu (jeśli baseline=1 i mod=-1 = 0)
     morale_n_list = [e for e in events_n if isinstance(e, MoraleTestPassed)]
     if morale_n_list:
-        # Mniej rolls
         assert len(morale_n_list[0].rolls) < len(morale_no.rolls)
     else:
         # Zero testów — nieustraszony zmniejszył do 0
