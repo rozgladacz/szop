@@ -14,6 +14,7 @@
 | [HANDOFF_primary-weapon-flag](docs/handoffs/HANDOFF_primary-weapon-flag.md) | Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski + zapis w loadout_json | `loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `rosters.py` | In progress |
 | [HANDOFF_widok-rozpiski-ostrzezenia](docs/handoffs/HANDOFF_widok-rozpiski-ostrzezenia.md) | Wskaźnik ⚠+tooltip ostrzeżeń po liczniku oddziałów/bohaterów + cleanup martwego `warnings:[]` w backendzie | `roster_edit.html`, `roster_warnings.js` (NEW), `roster_editor.js`*, `rosters.py`*, `rules.py` | In progress |
 
+
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
@@ -43,6 +44,11 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-05-28 — strategic-cards (archived)
+- Nowa funkcja: Karty Strategiczne w edytorze rozpiski — checkboxy wyboru 3 Zadań + 3 Wsparć (10+8 kart w pliku `app/data/strategic_cards.py`, zapis w `Roster.strategic_cards_json`), druk macierzy 3×3 na A4 z auto `window.print()`. UI: checkboxy z JS-limitem do 3, 3 przyciski submit (Zapisz / Zapisz i drukuj / Zapisz i wróć). Treści kart zaktualizowane do finalnej wersji (4 kategorie Zadań: Natarcie/Obrona/Dywersja/Zwiad).
+- Pliki: `app/data/strategic_cards.py` (NEW), `app/models.py`, `app/routers/rosters.py`, `app/templates/roster_edit.html`, `app/templates/roster_strategic_cards{,_print}.html` (NEW), `tests/test_strategic_cards.py` (NEW, 27 testów).
+- Weryfikacja: pytest 203/203, smoke przeglądarkowy OK, wydruk PDF zweryfikowany ręcznie. Migracja: `ALTER TABLE rosters ADD COLUMN strategic_cards_json TEXT`.
 
 ### 2026-05-20 — refactor-agents-md (archived)
 - Podział AGENTS.md (267 → 73 linii) na manifest `[CRITICAL]/[REQUIRED]/[RECOMMENDED]` + szczegóły w `docs/`. HANDOFF.md przebudowany na meta-spis (95 → 61 linii). System per-wątek `docs/handoffs/HANDOFF_<slug>.md` + 5 skilli (`/handoff-start`, `/handoff-archive`, `/handoff-status`, `/load-context`, `/handoff-sync`) + obowiązkowy SessionStart hook w `.claude/settings.json`.

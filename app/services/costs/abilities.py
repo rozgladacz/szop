@@ -86,7 +86,9 @@ def passive_cost(
     if slug == "samolot":
         return 3.0 * tou
     if slug == "kontra":
-        return 2.0 * tou
+        return 1.0 * tou
+    if slug == "parowanie":
+        return 1.5 * tou
     if slug == "maskowanie":
         return 2.0 * tou
     if slug == "okopany":
@@ -96,7 +98,7 @@ def passive_cost(
     if slug == "regeneracja":
         return 4.0 * tou
     if slug == "dywersant":
-        return 1.25 * (tou if aura else 1.0)
+        return 3.25 if aura else 0.0
     if slug == "zdobywca":
         return 3.0 * tou
     if slug == "straznik":
@@ -366,7 +368,7 @@ def ability_cost_components_from_name(
     elif slug == "presja":
         base_result = 45.0
     elif slug == "usprawnienie":
-        base_result = 45.0
+        base_result = 60.0
     elif desc.startswith("rozkaz") or desc.startswith("klatwa") or desc.startswith("oznaczenie"):
         ability_ref = value or (desc.split(":", 1)[1].strip() if ":" in desc else "")
         if ability_ref.startswith("mistrzostwo:"):

@@ -368,9 +368,7 @@ def roster_unit_role_totals(
 
         def _transport_multiplier(active_set: set[str]) -> float:
             if "samolot" in active_set:
-                return 3.5
-            if "zasadzka" in active_set or "zwiadowca" in active_set:
-                return 2.5
+                return 4.0
             if "latajacy" in active_set:
                 return 1.5
             if "szybki" in active_set or "zwinny" in active_set:

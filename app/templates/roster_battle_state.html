@@ -135,6 +135,19 @@
   .battle-state .weapon-label-wrap {
     flex: 1 1 100%;
   }
+  .battle-state .spell-line {
+    font-size: 0.85rem;
+    padding: 0.25rem 0;
+    border-bottom: 1px solid #e8e8e8;
+  }
+  .battle-state .spell-line:last-child {
+    border-bottom: none;
+  }
+  .battle-state .spell-cost {
+    font-weight: 700;
+    color: #0d6efd;
+    margin-right: 0.15rem;
+  }
   .battle-state .battle-toolbar {
     position: sticky;
     top: 0;
@@ -319,6 +332,20 @@
       </div>
     </div>
     {% endfor %}
+    {% if spell_entries %}
+    <div class="col" data-battle-spells-tile data-mage-group-ids='{{ mage_group_ids | tojson }}'>
+      <div class="card h-100 shadow-sm border-primary-subtle">
+        <div class="card-body">
+          <h6 class="mb-2 text-primary-emphasis">📜 Lista zaklęć</h6>
+          {% for spell in spell_entries %}
+          <div class="spell-line">
+            <span class="spell-cost">{{ spell.cost }}</span><span class="fw-semibold">{{ spell.label }}</span>{% if spell.description %}<span class="text-muted"> — {{ spell.description }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endif %}
   </div>
 </div>
 

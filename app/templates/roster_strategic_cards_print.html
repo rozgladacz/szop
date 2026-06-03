@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}Karty Strategiczne - {{ roster.name }} (druk){% endblock %}
+{% block content %}
+<style>
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+  .strategic-print-toolbar {
+    margin-bottom: 1rem;
+  }
+  .strategic-card-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
+    gap: 4mm;
+    width: 100%;
+  }
+  .strategic-card {
+    border: 1px solid #333;
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    padding: 3mm;
+    min-height: 85mm;
+    background: #fff;
+    font-size: 9pt;
+    line-height: 1.25;
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .strategic-card-task {
+    flex: 1 1 50%;
+    padding-bottom: 2mm;
+  }
+  .strategic-card-divider {
+    border: 0;
+    border-top: 1px solid #333;
+    margin: 0;
+  }
+  .strategic-card-support {
+    flex: 1 1 50%;
+    padding-top: 2mm;
+  }
+  .strategic-card-placeholder {
+    color: #999;
+    font-style: italic;
+  }
+  .strategic-card-label {
+    font-size: 7pt;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #777;
+    margin-bottom: 1mm;
+  }
+
+  @media print {
+    .strategic-print-toolbar { display: none !important; }
+    nav, .navbar, footer { display: none !important; }
+    body { background: #fff !important; }
+    .container, .container-fluid { padding: 0 !important; margin: 0 !important; max-width: 100% !important; }
+  }
+</style>
+
+<div class="strategic-print-toolbar d-flex align-items-center gap-2">
+  <button class="btn btn-primary" type="button" onclick="window.print()">Drukuj ponownie</button>
+  <a class="btn btn-outline-secondary" href="/rosters/{{ roster.id }}/strategic-cards">Wróć do wyboru</a>
+  <span class="text-muted ms-2">{{ roster.name }}</span>
+</div>
+
+<div class="strategic-card-grid">
+  {% for row in matrix %}
+    {% for cell in row %}
+      <div class="strategic-card">
+        <div class="strategic-card-task">
+          <div class="strategic-card-label">Zadanie</div>
+          {% if cell %}{{ cell.task_text }}{% else %}<span class="strategic-card-placeholder">— brak —</span>{% endif %}
+        </div>
+        <hr class="strategic-card-divider" />
+        <div class="strategic-card-support">
+          <div class="strategic-card-label">Wsparcie</div>
+          {% if cell %}{{ cell.support_text }}{% else %}<span class="strategic-card-placeholder">— brak —</span>{% endif %}
+        </div>
+      </div>
+    {% endfor %}
+  {% endfor %}
+</div>
+
+<script>
+  window.addEventListener('load', function () {
+    setTimeout(function () { window.print(); }, 250);
+  });
+</script>
+{% endblock %}

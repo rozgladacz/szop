@@ -111,7 +111,17 @@
       "PowerShell(node --check \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\static\\\\js\\\\modules\\\\roster_rendering.js\")",
       "PowerShell(if \\($?\\) { \"OK warnings.js\" })",
       "PowerShell(if \\($?\\) { \"OK editor.js\" })",
-      "PowerShell(if \\($?\\) { \"OK rendering.js\" })"
+      "PowerShell(if \\($?\\) { \"OK rendering.js\" })",
+      "Bash(python -m pytest -s -x -q)",
+      "Bash(python -m pytest --co -q tests/)",
+      "Bash(python -m pytest tests/test_quote_endpoint_flow.py -s -x -q --no-header -p no:warnings)",
+      "Bash(ls *.db)",
+      "Bash(ls data *)",
+      "Bash(python -m pytest tests/test_rosters_from_fixtures.py -k \"test_roster\" --collect-only)",
+      "PowerShell(cd \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\"; git show HEAD~1:app/routers/rosters.py | Select-String -Pattern \"def _base_cost_per_model\" -Context 0 | ForEach-Object { $_.LineNumber })",
+      "Bash(.venv/Scripts/python -m py_compile app/data/abilities.py)",
+      "Bash(cd \"/d/OneDrive - KBJ S.A/Dokumenty/GitHub/OPR\" && find . -type f -name \"*.html\" | grep -E \"\\(roster|edit\\)\" | head -20)",
+      "Bash(python -m pytest -x -q)"
     ]
   }
 }

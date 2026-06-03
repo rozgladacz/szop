@@ -454,7 +454,7 @@ def test_bastion_aura_cost() -> None:
 
 
 def test_dywersant_aura_cost() -> None:
-    assert costs.passive_cost("dywersant", 8, True) == pytest.approx(10)
+    assert costs.passive_cost("dywersant", 8, True) == pytest.approx(3.25)
 
 
 def test_regeneracja_has_fixed_toughness_multiplier() -> None:
@@ -617,7 +617,7 @@ def test_roster_totals_apply_open_transport_dynamic_cost_when_payload_cost_is_ze
         {"active": {str(active.id): 1}, "passive": {"otwarty_transport(2)": 0}},
     )
 
-    assert totals_with_transport["wojownik"] - totals_without_transport["wojownik"] == pytest.approx(7.5)
+    assert totals_with_transport["wojownik"] - totals_without_transport["wojownik"] == pytest.approx(8.5)
 
 
 def test_total_mode_binary_passive_okopany_scales_with_unit_model_count() -> None:

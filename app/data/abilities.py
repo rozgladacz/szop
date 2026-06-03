@@ -27,6 +27,7 @@ class AbilityDefinition:
     value_label: str | None = None
     value_type: str | None = None  # "number" or "text"
     value_choices: Sequence[str] | None = None
+    blocked: bool = False
 
     def display_name(self) -> str:
         if self.value_label:
@@ -43,8 +44,11 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Bohater",
         type="passive",
         description=(
-            "Może być dołączony do dowolnego oddziału z którym dzieli pozostałe zdolności pasywne." "Może wykonywać testy przegrupowania za cały oddział, ale musi korzystać z jego obrony, dopóki są w nim inne modele."
-            "Jego rozmiar jest traktowany  jakby miał 2 razy mniejszą wytrzymałość."
+            "Może być dołączony do dowolnego oddziału. "
+            "Jeżeli w wyniku tego część oddziału będzie miała zdolności wpływające na cały oddział, przeciwnik wybiera czy są aktywne. "
+            "Może wykonywać testy przegrupowania za cały oddział, ale oddział korzysta z obrony wybranej przez przeciwnika. "
+            "Nie może zostać przywrócony do gry. "
+            "Jego rozmiar jest traktowany jakby miał 2 razy mniejszą wytrzymałość."
         ),
     ),
     AbilityDefinition(
@@ -70,10 +74,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Zwiadowca",
         type="passive",
         description=(
-            "Rozstawia się po rozstawieniu wszystkich pozostałych jednostek, w odległości do 12” od normalnie dozwolonej pozycji. "
-            "Gracze na zmianę rozmieszczają jednostki zwiadowcy, zaczynając od gracza, który dokonuje aktywacji jako następny. "
-            "Jeżeli nie rozstawiłeś oddziałów bez tej zdolności, możesz później zamiast rozstawiać oddział raz aktywować "
-            "ten oddział w rundzie rozstawienia (nie może w niej atakować)."
+            "Jeżeli nie rozstawiłeś przed tym oddziałem, oddziałów bez zdolności Zwiadowca lub Samolot, możesz raz ruszyć ten oddział o 6” zamiast rozstawić następny."
         ),
     ),
     AbilityDefinition(
@@ -101,7 +102,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="harcownik",
         name="Harcownik",
         type="passive",
-        description="Przed przegrupowaniem możesz się ruszyć o 2”.",
+        description="Przed Leczeniem możesz się ruszyć o 2”.",
     ),
     AbilityDefinition(
         slug="instynkt",
@@ -140,11 +141,11 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Samolot",
         type="passive",
         description=(
-            "Wysoki. Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. "
+            "Nie możesz aktywować oddziału bez tej zdolności, jeżeli masz nieaktywowany oddział z nią."
+            "Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. "
             "Nie może być przyszpilony, kontrolować punktów, szarżować, ani być celem szarży. "
-            "Nie blokuje ruchu ani widzenia innych jednostek, a podczas ruchu ignoruje teren. "
-            "Ma osłonę a jednostki strzelające do niego mają -12” zasięgu. "
-            "Nie może być atakowany bronią Niebezpośrednią."
+            "Nie blokuje ruchu ani widzenia innych jednostek."
+            "Ma osłonę, a jednostki strzelające do niego mają -12” zasięgu. Wysoki, Latający, Zwinny"
         ),
     ),
     AbilityDefinition(
@@ -161,12 +162,13 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
             "Cały oddział reprezentowany jest przez jeden model z wydzielonymi elementami, "
             "który może przyjmować rany ponad maksimum."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="nieustraszony",
         name="Nieustraszony",
         type="passive",
-        description="Wykonuje jeden test przegrupowania mniej.",
+        description="Nie testuje przegrupowania, gdy oddział jest powyżej połowy początkowej wytrzymałości.",
     ),
     AbilityDefinition(
         slug="niestrudzony",
@@ -182,6 +184,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description=(
             "Zanim zaczniesz być przyszpilony lub wyczerpany, możesz wykonać ruch."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="stracency",
@@ -205,7 +208,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="kontra",
         name="Kontra",
         type="passive",
-        description="Może wykonać kontratak przed szarżującym odziałem, a ten ignoruje swoją zdolność Impet.",
+        description="Może wykonać kontratak przed atakami szarżującego oddziału, a ten przestaje być uznawany za szarżującego.",
     ),
     AbilityDefinition(
         slug="regeneracja",
@@ -221,9 +224,8 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Dywersant",
         type="passive",
         description=(
-            "Jeżeli oddział któremu w wyniku ataku zadałeś rany w tej aktywacji wykonuje test przegrupowania podczas "
-            "gdy znajduje się bliżej twojej strefy rozstawienia niż ten oddział lub ten odział znajduje się bliżej jego "
-            "strefy rozstawienia niż on, wykonuje on dodatkowy test przegrupowania."
+            "Jeżeli jesteś bliżej strefy rozstawienia przeciwnika niż atakowany oddział, "
+            "przed wykonaniem ataków przeciwnik wybiera, czy podwaja ich liczbę, czy zostaje Przyszpilony."
         ),
     ),
     AbilityDefinition(
@@ -293,18 +295,18 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description=(
             "Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. "
             "Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. "
-            "Transportowany oddział nie znajduje się na planszy, zawsze pozostaje w zasięgu transportującego oddziału, "
-            "może oddziaływać wyłącznie na siebie i transportujący oddział. "
-            "Jako swoją akcję ruchu może zostać rozstawiony. Wszystkie jego modele muszą zostać ustawione w odległości do 3” "
-            "od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany. "
+            "Transportowany oddział jako swoją akcję może zostać rozstawiony: wszystkie jego modele muszą zostać "
+            "ustawione w odległości do 3” od dowolnych modeli transportującego oddziału. "
+            "Następnie przestaje być transportowany. "
             "Oddział, którego wszystkie modele znajdują się do 3” od transportującego oddziału, "
-            "może jako swoją akcję ruchu zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. "
+            "może jako swoją akcję zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. "
             "Jeżeli część modeli transportującego oddziału zostanie zniszczona, transportowane oddziały mogą tymczasowo "
             "przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie zniszczony, "
-            "wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się przyszpilone. "
+            "nadmiarowe rany przechodzą na najliczniejszy transportowany oddział, "
+            "a następnie wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się Wyczerpane. "
             "Jeżeli transportujący oddział wykona podwójny ruch lub początkowy ruch zdolności Samolot, "
-            "wszystkie transportowane oddziały zostają wyczerpane. "
-            "Transportowane oddziały są rozstawiane razem z transporterem."
+            "wszystkie transportowane oddziały zostają Przyszpilone. "
+            "Transportowane oddziały są rozstawiane razem z transporterem w jednej aktywacji i muszą mieć te same zdolności wpływające na Rozstawienie."
         ),
         value_label="X",
         value_type="number",
@@ -318,6 +320,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         ),
         value_label="X",
         value_type="number",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="otwarty_transport",
@@ -329,12 +332,13 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         ),
         value_label="X",
         value_type="number",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="straznik",
         name="Strażnik",
         type="passive",
-        description="Gdy wrogi odział zakończy ruch, możesz przerwać aby zaatakować. Następnie ten odział zostaje wyczerpany.",
+        description="Możesz przerwać w aktywacji przeciwnika, aby wykonać Ostrzał. Następnie twój oddział zostaje wyczerpany.",
     ),
     AbilityDefinition(
         slug="bastion",
@@ -343,14 +347,18 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Nie zostajesz wyczerpany po kontrataku.",
     ),
     AbilityDefinition(
+        slug="parowanie",
+        name="Parowanie",
+        type="passive",
+        description="Ma osłonę podczas walki wręcz.",
+    ),
+    AbilityDefinition(
         slug="zemsta",
         name="Zemsta",
         type="passive",
         description=(
-            "Gdy przydzielasz rany, nie musisz od razu pokonywać modeli."
-            "Zamiast tego na końcu aktywacji oddziału, przed przegrupowaniem, "
-            "pokonaj tyle modeli, aby liczba ran była niższa od wytrzymałości oddziału. "
-            "Przeciwnik przydzielający rany, nie może używać wcześniej przydzielonych ran do pokonania modelu."
+            "Nie przydzielaj ran od razu, tylko przed Leczeniem w aktywacji tego oddziału. "
+            "Przeciwnik przydziela rany w zwykłym momencie, ale nie może używać wcześniej przydzielonych ran."
         ),
     ),
     AbilityDefinition(
@@ -441,12 +449,14 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Przekaźnik",
         type="active",
         description="Raz na rundę, gdy Mag w zasięgu 12” rzuca czar, może go rzucić z twojej pozycji z +1 do rzutu.",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="koordynacja",
         name="Koordynacja",
         type="active",
         description="Przeciwnik pomija swoją następną aktywację.",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="latanie",
@@ -459,6 +469,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Mobilizacja",
         type="active",
         description="Oddział w zasięgu 12” przestaje być przyszpilony.",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="przepowiednia",
@@ -467,12 +478,14 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description=(
             "Wybierz oddział przeciwnika, który zostanie aktywowany jako następny, jeżeli to możliwe."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="presja",
         name="Presja",
         type="active",
         description="Odział w zasięgu 12” przestaje być wyczerpany.",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="usprawnienie",
@@ -481,6 +494,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description=(
             "Przerwij, aby oddział w zasięgu 12” do końca aktywacji zwiększył AP wszystkich swoich broni o 1."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="rozkaz",
@@ -539,8 +553,11 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
     AbilityDefinition(
         slug="meczennik",
         name="Męczennik",
-        type="aura",
-        description="Jeżeli wróg może cię pokonać, musi to zrobić.",
+        type="active",
+        description=(
+            "W twojej aktywacji możesz zostać pokonany, aby twój oddział odzyskał liczbę ran równą twojej wytrzymałości. "
+            "Nie możesz zostać przywrócony podczas tej aktywacji."
+        ),
     ),
     # Weapon abilities
     AbilityDefinition(
@@ -556,11 +573,9 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="zabojczy",
         name="Zabójczy",
         type="weapon",
-        description= (
-            "Zamiast jednej przydziel X ran, "
-            "ale nie więcej niż wytrzymałość wybranego modelu, który, jeżeli to możliwe, zostaje pokonany."
-            "Jeżeli w wyniku tego, zmieniała się maksymalna wytrzymałość oddziału, "
-            "odrzuć tyle ran, aby nie było ich mniej niż ona."
+        description=(
+            "Zamiast jednej zadaj X ran, ale nie więcej niż najniższa, jeżeli przydziela obrońca, "
+            "lub najwyższa, jeżeli przydziela atakujący, wytrzymałość w oddziale."
         ),
         value_label="X",
         value_type="number",
@@ -570,7 +585,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="niebezposredni",
         name="Niebezpośredni",
         type="weapon",
-        description="Nie wymaga linii wzroku.",
+        description="Nie wymaga linii wzroku. Nie może atakować celów Latających.",
     ),
     AbilityDefinition(
         slug="artyleria",
@@ -692,8 +707,9 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Zguba",
         type="weapon",
         description=(
-            "Zmniejsz liczbę odzyskanych ran w tej aktywacji o liczbę ran otrzymanych tą bronią. "
-            "Modele pokonane tą bronią nie mogą wrócić do gry."
+            "Licz rany otrzymane taką bronią w aktywacji. "
+            "Zmniejsz liczbę ran odzyskanych o nią. "
+            "Modele pokonane przez przydzielenie pierwszych ran do tej liczby zostają zniszczone i nie mogą wrócić do gry."
         ),
     ),
     AbilityDefinition(

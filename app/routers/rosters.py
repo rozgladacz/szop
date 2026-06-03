@@ -20,6 +20,12 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from .. import config, models
+from ..data.strategic_cards import (
+    STRATEGIC_SUPPORTS,
+    STRATEGIC_TASKS,
+    SUPPORTS_BY_SLUG,
+    TASKS_BY_SLUG,
+)
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user
@@ -1780,6 +1786,152 @@ def delete_roster_unit(
 
 
 # ============================================================
+# SECTION: STRATEGIC CARDS (Karty Strategiczne)
+# _parse_strategic_cards, strategic_cards_edit/save/print
+# ============================================================
+def _parse_strategic_cards(raw: str | None) -> dict[str, list[str]]:
+    """Parsuje strategic_cards_json -> {'tasks':[3], 'supports':[3]}.
+
+    Nieznane slugi są pomijane, brakujące sloty padowane pustym stringiem,
+    nadmiarowe ucinane do 3. Odporne na None / niepoprawny JSON / nie-stringi.
+    """
+    empty = {"tasks": ["", "", ""], "supports": ["", "", ""]}
+    if not raw:
+        return empty
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return empty
+    if not isinstance(data, Mapping):
+        return empty
+
+    raw_tasks = data.get("tasks") or []
+    raw_supports = data.get("supports") or []
+    if not isinstance(raw_tasks, (list, tuple)):
+        raw_tasks = []
+    if not isinstance(raw_supports, (list, tuple)):
+        raw_supports = []
+
+    tasks = [s for s in raw_tasks if isinstance(s, str) and s in TASKS_BY_SLUG][:3]
+    supports = [s for s in raw_supports if isinstance(s, str) and s in SUPPORTS_BY_SLUG][:3]
+    return {
+        "tasks": (tasks + ["", "", ""])[:3],
+        "supports": (supports + ["", "", ""])[:3],
+    }
+
+
+def _strategic_card_matrix(selected: dict[str, list[str]]) -> list[list[dict[str, str] | None]]:
+    """Buduje macierz 3x3: matrix[row=support_idx][col=task_idx] = {task_text, support_text} albo None."""
+    tasks_resolved = [TASKS_BY_SLUG.get(slug) for slug in selected["tasks"]]
+    supports_resolved = [SUPPORTS_BY_SLUG.get(slug) for slug in selected["supports"]]
+    matrix: list[list[dict[str, str] | None]] = []
+    for support in supports_resolved:
+        row: list[dict[str, str] | None] = []
+        for task in tasks_resolved:
+            if task is None or support is None:
+                row.append(None)
+            else:
+                row.append({"task_text": task.text, "support_text": support.text})
+        matrix.append(row)
+    return matrix
+
+
+@router.get("/{roster_id}/strategic-cards", response_class=HTMLResponse)
+def strategic_cards_edit(
+    roster_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User | None = Depends(get_current_user(optional=True)),
+):
+    if not current_user:
+        return RedirectResponse(url="/auth/login", status_code=303)
+    roster = db.get(models.Roster, roster_id)
+    if not roster:
+        raise HTTPException(status_code=404)
+    _ensure_roster_view_access(roster, current_user)
+    can_edit = current_user.is_admin or roster.owner_id == current_user.id
+    selected = _parse_strategic_cards(roster.strategic_cards_json)
+    return templates.TemplateResponse(
+        "roster_strategic_cards.html",
+        {
+            "request": request,
+            "user": current_user,
+            "roster": roster,
+            "tasks": STRATEGIC_TASKS,
+            "supports": STRATEGIC_SUPPORTS,
+            "selected": selected,
+            "can_edit": can_edit,
+        },
+    )
+
+
+@router.post("/{roster_id}/strategic-cards")
+def strategic_cards_save(
+    roster_id: int,
+    tasks: list[str] = Form(default_factory=list),
+    supports: list[str] = Form(default_factory=list),
+    redirect_to: str = Form("self"),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    roster = db.get(models.Roster, roster_id)
+    if not roster:
+        raise HTTPException(status_code=404)
+    _ensure_roster_edit_access(roster, current_user)
+
+    def _dedup_first_n(values: list[str], known: dict, limit: int = 3) -> list[str]:
+        """Filtruje znane slugi, deduplikuje (zachowując kolejność), padding do limit pustkami."""
+        seen: set[str] = set()
+        out: list[str] = []
+        for v in values:
+            v = (v or "").strip()
+            if v and v in known and v not in seen:
+                seen.add(v)
+                out.append(v)
+            if len(out) >= limit:
+                break
+        return (out + [""] * limit)[:limit]
+
+    payload = {
+        "tasks": _dedup_first_n(tasks, TASKS_BY_SLUG),
+        "supports": _dedup_first_n(supports, SUPPORTS_BY_SLUG),
+    }
+    roster.strategic_cards_json = json.dumps(payload, ensure_ascii=False)
+    db.commit()
+    if redirect_to == "print":
+        return RedirectResponse(url=f"/rosters/{roster.id}/strategic-cards/print", status_code=303)
+    if redirect_to == "roster":
+        return RedirectResponse(url=f"/rosters/{roster.id}", status_code=303)
+    return RedirectResponse(url=f"/rosters/{roster.id}/strategic-cards", status_code=303)
+
+
+@router.get("/{roster_id}/strategic-cards/print", response_class=HTMLResponse)
+def strategic_cards_print(
+    roster_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User | None = Depends(get_current_user(optional=True)),
+):
+    if not current_user:
+        return RedirectResponse(url="/auth/login", status_code=303)
+    roster = db.get(models.Roster, roster_id)
+    if not roster:
+        raise HTTPException(status_code=404)
+    _ensure_roster_view_access(roster, current_user)
+    selected = _parse_strategic_cards(roster.strategic_cards_json)
+    matrix = _strategic_card_matrix(selected)
+    return templates.TemplateResponse(
+        "roster_strategic_cards_print.html",
+        {
+            "request": request,
+            "user": current_user,
+            "roster": roster,
+            "matrix": matrix,
+        },
+    )
+
+
+# ============================================================
 # SECTION: UNIT DISPLAY HELPERS
 # _default_loadout_summary, _unit_weapon_options, _passive_entries,
 # _base_cost_per_model, _default_loadout_payload, itp.
@@ -2408,11 +2560,15 @@ def _roster_unit_weapon_components_sum(
     unit = getattr(roster_unit, "unit", None)
     if unit is None:
         return (0.0, 0.0)
-    flags = _unit_army_flags(unit)
-    unit_traits = costs.flags_to_ability_list(flags)
-
     if not isinstance(applied_loadout, dict):
         applied_loadout = {}
+    # Use compute_passive_state (like roster_unit_role_totals) to get base
+    # traits without role-classification slugs (wojownik/strzelec).  Using
+    # _unit_army_flags directly would include the unit's own role slug and
+    # halve the wrong weapon type (e.g. strzelec halves melee, but the
+    # classification formula (melee+ranged+max)/2 must receive raw values).
+    passive_state = costs.compute_passive_state(unit, applied_loadout)
+    unit_traits = costs._strip_role_traits(passive_state.traits)
     weapons_section = applied_loadout.get("weapons") or {}
     total_mode = applied_loadout.get("mode") == "total"
     model_count = max(int(getattr(roster_unit, "count", 1) or 1), 1)
@@ -2482,11 +2638,7 @@ def _base_cost_per_model(
     unit: models.Unit, classification: dict[str, Any] | None = None
 ) -> float:
     passive_state = costs.compute_passive_state(unit)
-    base_traits = [
-        trait
-        for trait in passive_state.traits
-        if costs.ability_identifier(trait) not in costs.ROLE_SLUGS
-    ]
+    base_traits = costs._strip_role_traits(passive_state.traits)
     slug: str | None = None
     if isinstance(classification, dict):
         raw_slug = classification.get("slug")

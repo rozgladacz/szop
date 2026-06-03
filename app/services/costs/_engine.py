@@ -70,8 +70,7 @@ OVERCHARGE_MULTIPLIER = 1.05
 BRUTALNY_AP_COST = {-1: 0.0, 0: 0.01, 1: 0.02, 2: 0.1, 3: 0.2, 4: 0.3, 5: 0.4}
 
 TRANSPORT_MULTIPLIERS = [
-    ({"samolot"}, 3.5),
-    ({"zasadzka", "zwiadowca"}, 2.5),
+    ({"samolot"}, 4.0),
     ({"latajacy"}, 1.5),
     ({"szybki", "zwinny"}, 1.25),
 ]
