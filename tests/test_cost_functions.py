@@ -250,6 +250,52 @@ def test_scale_by_tou_aura_scale_overrides_scale_in_aura() -> None:
     ) == pytest.approx(3.75)
 
 
+# ---------------------------------------------------------------------------
+# 10) t_eff — formuła T_eff dla wyceny Aury/Rozkazu (faza-b-rules-resync, R3).
+# Mirror oracle `app/services/costs/abilities.py:_aura_eff_tou`.
+# ---------------------------------------------------------------------------
+
+
+def test_t_eff_no_extra_uses_4_over_3_with_clamp(tables: RulesetTables) -> None:
+    """T_eff = clamp(4/3 * T_carrier, 8, 24). T=6 → 4/3*6=8 (boundary)."""
+    assert cf.t_eff(tables, 6.0) == pytest.approx(8.0)
+    assert cf.t_eff(tables, 10.0) == pytest.approx(40.0 / 3.0)  # ~13.33
+    assert cf.t_eff(tables, 12.0) == pytest.approx(16.0)
+    assert cf.t_eff(tables, 18.0) == pytest.approx(24.0)  # 4/3*18=24 (boundary)
+
+
+def test_t_eff_clamp_min_below_floor(tables: RulesetTables) -> None:
+    """T_carrier < 6 → 4/3*T < 8 → clamped to 8."""
+    assert cf.t_eff(tables, 1.0) == pytest.approx(8.0)
+    assert cf.t_eff(tables, 3.0) == pytest.approx(8.0)
+    assert cf.t_eff(tables, 5.0) == pytest.approx(8.0)
+
+
+def test_t_eff_clamp_max_above_ceiling(tables: RulesetTables) -> None:
+    """T_carrier > 18 → 4/3*T > 24 → clamped to 24."""
+    assert cf.t_eff(tables, 24.0) == pytest.approx(24.0)
+    assert cf.t_eff(tables, 100.0) == pytest.approx(24.0)
+
+
+def test_t_eff_none_uses_default_6(tables: RulesetTables) -> None:
+    """T_carrier=None → default 6 → T_eff = 8 (mirror oracle linia 313)."""
+    assert cf.t_eff(tables, None) == pytest.approx(8.0)
+
+
+def test_t_eff_extra_added_after_clamp(tables: RulesetTables) -> None:
+    """`extra` (aura_range_bonus=8 lub order_bonus=2) dodawane PO clamp."""
+    assert cf.t_eff(tables, 6.0, extra=8.0) == pytest.approx(16.0)  # aura 12"
+    assert cf.t_eff(tables, 6.0, extra=2.0) == pytest.approx(10.0)  # order
+    # Przy max clamp też dodaje:
+    assert cf.t_eff(tables, 30.0, extra=8.0) == pytest.approx(32.0)
+
+
+def test_aura_range_bonus_and_order_bonus_constants(tables: RulesetTables) -> None:
+    """Helpers `aura_range_bonus` / `order_bonus` z tables.aura_order_formula."""
+    assert cf.aura_range_bonus(tables) == pytest.approx(8.0)
+    assert cf.order_bonus(tables) == pytest.approx(2.0)
+
+
 @pytest.mark.parametrize(
     "ability_name,tou,aura",
     [

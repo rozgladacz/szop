@@ -210,6 +210,62 @@ def scale_by_tou(
 
 
 # ---------------------------------------------------------------------------
+# 10. t_eff — efektywna wytrzymałość nosiciela dla wyceny Aury/Rozkazu/Klątwy/
+# Oznaczenia (SZOP_Zdolnosci.md, faza-b-rules-resync 2026-06, ADR-0048).
+#
+# Czyta parametry formuły z `tables.aura_order_formula` (R1). Backward compat:
+# gdy tables nie ma sekcji (legacy YAML), używamy defaultów odpowiadających
+# zachowaniu pre-resync (T_eff = 8 dla aury, 10 dla rozkazu — implementowane
+# w callerach przez `extra=0/2`).
+#
+# Mirror oracle `app/services/costs/abilities.py:_aura_eff_tou`:
+#   _aura_eff_tou(extra) = clamp(4/3 * carrier_tou, 8, 24) + extra
+# T_carrier domyślnie 6.0 (gdy toughness=None) — daje 4/3*6=8 zachowując
+# kompatybilność z legacy "inner_tou=8.0" przed driftcie.
+# ---------------------------------------------------------------------------
+
+
+def t_eff(
+    tables: RulesetTables,
+    carrier_tou: float | None = None,
+    *,
+    extra: float = 0.0,
+) -> float:
+    """Efektywna wytrzymałość nosiciela aury/rozkazu + opcjonalny bonus.
+
+    - `tables.aura_order_formula` (NEW R1) dostarcza factor/clamp; backward
+      compat: gdy None użyj 4/3, 8, 24.
+    - `carrier_tou=None` → 6.0 (default, mirror oracle linia 313).
+    - `extra` to bonus dodawany po clamp: 0 = aura zasięg domyślny,
+      `aura_range_bonus` (=8) = aura zasięg 12", `order_bonus` (=2) = Rozkaz/
+      Klątwa/Oznaczenie.
+
+    Patrz `handlers._aura_cost` / `handlers._order_like_cost`.
+    """
+    f = tables.aura_order_formula
+    factor = f.t_eff_factor if f else (4.0 / 3.0)
+    cmin = f.t_eff_clamp_min if f else 8
+    cmax = f.t_eff_clamp_max if f else 24
+
+    tou = 6.0 if carrier_tou is None else float(carrier_tou)
+    scaled = factor * tou
+    clamped = max(float(cmin), min(float(cmax), scaled))
+    return clamped + float(extra)
+
+
+def aura_range_bonus(tables: RulesetTables) -> float:
+    """`tables.aura_order_formula.aura_range_bonus` lub default 8.0 (legacy)."""
+    f = tables.aura_order_formula
+    return float(f.aura_range_bonus) if f else 8.0
+
+
+def order_bonus(tables: RulesetTables) -> float:
+    """`tables.aura_order_formula.order_bonus` lub default 2.0 (legacy)."""
+    f = tables.aura_order_formula
+    return float(f.order_bonus) if f else 2.0
+
+
+# ---------------------------------------------------------------------------
 # 10. base_model_cost — replikuje `abilities.base_model_cost`.
 # Iteruje abilities, dzieli na (morale-multipliers, defense-modifiers, passive).
 # `passive_cost_fn` to callable wstrzykiwany przez dispatcher: zwraca koszt passive

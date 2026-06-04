@@ -27,8 +27,11 @@ from ..costs.primitives import (
 from .cost_functions import (
     _mistrzostwo_aura_cost,
     _mistrzostwo_weapon_cost,
+    aura_range_bonus,
     base_model_cost,
+    order_bonus,
     parse_aura_value,
+    t_eff,
     transport_multiplier,
     weapon_cost_yaml,
 )
@@ -139,38 +142,40 @@ def _open_transport_cost(ctx: _HandlerCtx, spec: HandlerSpec) -> float:
 
 
 def _aura_cost(ctx: _HandlerCtx, spec: HandlerSpec) -> float:
-    """desc.startswith("aura"): passive_cost(target, inner_tou, aura=True) × range_mult.
+    """desc.startswith("aura"): passive_cost(target, T_eff(carrier, extra), aura=True).
+
+    **faza-b-rules-resync 2026-06** (ADR-0048): zastąpiona stara formuła
+    "× range_12_mult" przez T_eff additive `extra` (mirror oracle
+    `_aura_eff_tou`). T_eff = clamp(4/3 × T_carrier, 8, 24); extra = 0
+    (zasięg domyślny) lub `aura_range_bonus` (=8 dla zasięgu 12").
+    T_carrier pobierane z `ctx.toughness` (legacy fixtures bez toughness
+    używają default 6 → T_eff=8, kompatybilność z pre-resync).
 
     Special-case `value="mistrzostwo:<weapon_slug>"`: użyj `_mistrzostwo_aura_cost`
-    × `aura_mistrzostwo_multiplier` zamiast passive_cost.
+    × T_eff(carrier, extra) zamiast passive_cost.
     """
-    inner_tou = float(getattr(spec, "inner_tou", 8.0))
-    range_12_mult = float(getattr(spec, "range_12_multiplier", 2.0))
-    aura_mistrzostwo_mult = float(getattr(spec, "aura_mistrzostwo_multiplier", 8.0))
+    tables = ctx.manifest.tables
+    carrier = ctx.toughness if ctx.toughness else None
 
     value = ctx.value
     if value and value.startswith("mistrzostwo:"):
         parts = value.split("|", 1)
         w_slug = parts[0][len("mistrzostwo:") :].strip()
         aura_range = extract_number(parts[1]) if len(parts) == 2 else 6.0
-        cost = _mistrzostwo_aura_cost(ctx.manifest.tables, w_slug) * aura_mistrzostwo_mult
-        if abs(aura_range - 12.0) < 1e-6:
-            cost *= range_12_mult
-        return cost
+        extra = aura_range_bonus(tables) if abs(aura_range - 12.0) < 1e-6 else 0.0
+        return _mistrzostwo_aura_cost(tables, w_slug) * t_eff(tables, carrier, extra=extra)
 
     target_slug, aura_range = parse_aura_value(
         ctx.name, value, slug_for_name=ctx.slug_for_name
     )
-    cost = passive_cost_dsl(
-        ctx.manifest.tables,
+    extra = aura_range_bonus(tables) if abs(aura_range - 12.0) < 1e-6 else 0.0
+    return passive_cost_dsl(
+        tables,
         ctx.passive_recipes,
         target_slug,
-        tou=inner_tou,
+        tou=t_eff(tables, carrier, extra=extra),
         aura=True,
     )
-    if abs(aura_range - 12.0) < 1e-6:
-        cost *= range_12_mult
-    return cost
 
 
 def _mag_cost(ctx: _HandlerCtx, spec: HandlerSpec) -> float:
@@ -180,27 +185,32 @@ def _mag_cost(ctx: _HandlerCtx, spec: HandlerSpec) -> float:
 
 
 def _order_like_cost(ctx: _HandlerCtx, spec: HandlerSpec) -> float:
-    """rozkaz/klatwa/oznaczenie: passive_cost(target, inner_tou, aura=True).
+    """rozkaz/klatwa/oznaczenie: passive_cost(target, T_eff(carrier, +order_bonus), aura=True).
 
-    Special-case mistrzostwo: `_mistrzostwo_aura_cost(w_slug) × mistrzostwo_multiplier`.
-    Mirror oracle (abilities.py:370-377): `ability_ref = value or desc.split(":")[1]`.
+    **faza-b-rules-resync 2026-06** (ADR-0048): zastąpiona stała `inner_tou=10.0`
+    przez T_eff additive `order_bonus` (=2). T_eff = clamp(4/3 × T_carrier, 8, 24) + 2.
+    T_carrier z `ctx.toughness` (default 6 dla legacy → T_eff=10, kompatybilność).
+
+    Special-case mistrzostwo: `_mistrzostwo_aura_cost(w_slug) × T_eff(carrier, +2)`.
+    Mirror oracle (abilities.py:375-382): `ability_ref = value or desc.split(":")[1]`.
     """
-    inner_tou = float(getattr(spec, "inner_tou", 10.0))
-    mistrzostwo_mult = float(getattr(spec, "mistrzostwo_multiplier", 10.0))
+    tables = ctx.manifest.tables
+    carrier = ctx.toughness if ctx.toughness else None
+    bonus = order_bonus(tables)
 
     ability_ref = ctx.value or (
         ctx.desc.split(":", 1)[1].strip() if ":" in ctx.desc else ""
     )
     if ability_ref.startswith("mistrzostwo:"):
         w_slug = ability_ref[len("mistrzostwo:") :].strip()
-        return _mistrzostwo_aura_cost(ctx.manifest.tables, w_slug) * mistrzostwo_mult
+        return _mistrzostwo_aura_cost(tables, w_slug) * t_eff(tables, carrier, extra=bonus)
 
     target_slug = ctx.slug_for_name(ability_ref) or ability_identifier(ability_ref)
     return passive_cost_dsl(
-        ctx.manifest.tables,
+        tables,
         ctx.passive_recipes,
         target_slug,
-        tou=inner_tou,
+        tou=t_eff(tables, carrier, extra=bonus),
         aura=True,
     )
 
