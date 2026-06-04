@@ -11,22 +11,14 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_primary-weapon-flag](docs/handoffs/HANDOFF_primary-weapon-flag.md) | Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski + zapis w loadout_json | `loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `rosters.py` | In progress |
-| [HANDOFF_widok-rozpiski-ostrzezenia](docs/handoffs/HANDOFF_widok-rozpiski-ostrzezenia.md) | Wskaźnik ⚠+tooltip ostrzeżeń po liczniku oddziałów/bohaterów + cleanup martwego `warnings:[]` w backendzie | `roster_edit.html`, `roster_warnings.js` (NEW), `roster_editor.js`*, `rosters.py`*, `rules.py` | In progress |
+| _(brak aktywnych wątków)_ | | | |
 
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `app/static/js/modules/loadout_state.js` | primary-weapon-flag | nowe pole primaryWeapon |
-| `app/static/js/modules/editor_renderers.js` | primary-weapon-flag | UI klikalnej nazwy |
-| `app/static/js/modules/roster_editor.js` | primary-weapon-flag | przekazanie primaryWeapon |
-| `app/routers/rosters.py` | primary-weapon-flag | _parse_loadout_json + _loadout_weapon_details |
-| `app/routers/rosters.py` | widok-rozpiski-ostrzezenia | dodanie `weapon_cost` w `roster_items.append` + cleanup `warnings:[]` (sekcje ortogonalne do primary-weapon-flag) |
-| `app/static/js/modules/roster_editor.js` | widok-rozpiski-ostrzezenia | 2 linie hook po updateTotalSummary / refreshRosterCountDisplay (ortogonalne do primary-weapon-flag) |
-| `app/templates/roster_edit.html` | widok-rozpiski-ostrzezenia | nowy znacznik `<span data-roster-warnings>` + atrybut `data-unit-weapon-cost` |
-| `app/services/rules.py` | widok-rozpiski-ostrzezenia | usunięcie martwej `collect_roster_warnings()` |
+| _(brak)_ | | |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
@@ -45,10 +37,26 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
+### 2026-05-22 — widok-rozpiski-ostrzezenia (archived)
+- Nowy moduł `roster_warnings.js` z badge `⚠ N` + tooltip (8 reguł: liczność, bohaterowie, limit punktów, nierównowaga cenowa, broń vs wytrzymałość). Backend: `weapon_cost` w `roster_items`. BUG FIX: `_roster_unit_weapon_components_sum` — zastąpiono `_unit_army_flags` wywołaniem `costs.compute_passive_state` + `_strip_role_traits` (wynik 51.94 → 98.17 dla Widmy, zgodny z oczekiwaniem).
+- Pliki: `roster_warnings.js` (NEW), `roster_edit.html`, `roster_editor.js`, `roster_rendering.js`, `rosters.py`.
+- Weryfikacja: pytest 176/176, smoke roster/3 i roster/13 OK, konsola czysta. Commit `588d27c`.
+
+### 2026-06-04 — primary-weapon-flag (archived)
+- Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski z zapisem override w `loadout_json.primary_weapon` (per typ: melee/ranged). Backend `_loadout_weapon_details` honoruje override przy budowaniu `weapon_details` dla Stanu Bitewnego. Dodatkowe fixy: null-override gubiony w `createLoadoutState` (deserialization), `assignDefaultWeapon` przepinane na `isCurrentPrimary` zamiast `isPrimaryWeapon` (slot-filler podąża za flagą).
+- Pliki: `loadout_state.js`, `editor_renderers.js`, `roster_editor.js`, `rosters.py`.
+- Weryfikacja: pytest 176/176, smoke OK.
+
 ### 2026-05-28 — strategic-cards (archived)
 - Nowa funkcja: Karty Strategiczne w edytorze rozpiski — checkboxy wyboru 3 Zadań + 3 Wsparć (10+8 kart w pliku `app/data/strategic_cards.py`, zapis w `Roster.strategic_cards_json`), druk macierzy 3×3 na A4 z auto `window.print()`. UI: checkboxy z JS-limitem do 3, 3 przyciski submit (Zapisz / Zapisz i drukuj / Zapisz i wróć). Treści kart zaktualizowane do finalnej wersji (4 kategorie Zadań: Natarcie/Obrona/Dywersja/Zwiad).
 - Pliki: `app/data/strategic_cards.py` (NEW), `app/models.py`, `app/routers/rosters.py`, `app/templates/roster_edit.html`, `app/templates/roster_strategic_cards{,_print}.html` (NEW), `tests/test_strategic_cards.py` (NEW, 27 testów).
 - Weryfikacja: pytest 203/203, smoke przeglądarkowy OK, wydruk PDF zweryfikowany ręcznie. Migracja: `ALTER TABLE rosters ADD COLUMN strategic_cards_json TEXT`.
+
+### 2026-05-20 — handoff-template polish (follow-up do refactor-agents-md)
+- Rozszerzono stany kroków HANDOFF z 2 do 4: `[ ]` TODO / `[~]` rozpoczęto / `[x]` sukces / `[!]` błąd-porzucone. Legenda w `docs/handoffs/README.md`, zaktualizowane skille `handoff-archive` (sprawdza stany finalne), `handoff-status` (pokazuje progres `5[x] / 1[~] / 2[ ]`), `handoff-start` (zachowuje Definition of Done w szablonie).
+- Dodano "Definition of Done" w `docs/planning.md`: pytest + `/simplify` (zawsze) + `/review` (warunkowo: diff >50 linii / hot path / SSOT) + `/security-review` (warunkowo: auth, user input → DB). Szablon `HANDOFF_<slug>.md` zawiera te kroki w "Faza N — Weryfikacja end-to-end".
+- AGENTS.md: nowy [REQUIRED] #7 + Workflow oczekiwany krok 3/4 zaktualizowany. Długość 74 linii (cel ~90).
+- Weryfikacja: pytest 221/221 passed.
 
 ### 2026-05-20 — refactor-agents-md (archived)
 - Podział AGENTS.md (267 → 73 linii) na manifest `[CRITICAL]/[REQUIRED]/[RECOMMENDED]` + szczegóły w `docs/`. HANDOFF.md przebudowany na meta-spis (95 → 61 linii). System per-wątek `docs/handoffs/HANDOFF_<slug>.md` + 5 skilli (`/handoff-start`, `/handoff-archive`, `/handoff-status`, `/load-context`, `/handoff-sync`) + obowiązkowy SessionStart hook w `.claude/settings.json`.
