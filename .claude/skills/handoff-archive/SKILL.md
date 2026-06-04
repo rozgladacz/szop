@@ -13,7 +13,14 @@ Kroki:
    - Kluczowe ustalenia (z sekcji "Decyzje" i "Notatki / odkrycia w trakcie")
    - Status weryfikacji (z sekcji "Plan implementacji" — Faza N: Weryfikacja end-to-end)
    - Pliki dotknięte (skrót)
-3. Sprawdź czy wszystkie kroki w "Plan implementacji" są odznaczone `[x]`. Jeśli nie — pokaż listę nieodznaczonych i zapytaj usera czy mimo to archiwizować.
+3. Sprawdź stany kroków w "Plan implementacji":
+   - Stany finalne: `[x]` (sukces) lub `[!]` (błąd/porzucone) — krok zamknięty.
+   - Stany aktywne: `[ ]` (TODO) lub `[~]` (rozpoczęto) — krok niezamknięty.
+   - Jeśli są kroki w stanie aktywnym — pokaż userowi listę z numeracją (faza + treść kroku) i zapytaj czy mimo to archiwizować. Sugerowana akcja: oznacz porzucone jako `[!]` z notą w "Notatki / odkrycia" zamiast cichego pomijania.
+3a. Sprawdź sekcję "Faza N — Weryfikacja end-to-end (Definition of Done)":
+   - Czy odznaczone: `pytest -q`, `/simplify`?
+   - Czy `/review` / `/security-review` wykonane jeśli wymagane (diff >50 linii / hot path / SSOT / auth)?
+   - Jeśli brak któregokolwiek — przypomnij userowi, zapytaj czy archiwizować mimo to. Detale: `docs/planning.md` sekcja "Definition of Done".
 4. Otwórz `HANDOFF.md`:
    a. Usuń wiersz wątku z tabeli "Aktywne wątki".
    b. Usuń odpowiednie wiersze z tabeli "Zasoby zablokowane" (te, gdzie kolumna "Wątek blokujący" = ten slug).

@@ -62,4 +62,23 @@ grep -rn "_classification_map\|roster_unit_role_totals" app/
 - jak zweryfikowano (warstwy, testy),
 - co nadal wymaga decyzji.
 
+## Definition of Done — przed archiwizacją wątku
+
+Zanim wątek pójdzie do `/handoff-archive`, przejdź **w tej kolejności**:
+
+| Krok | Kiedy | Po co |
+|---|---|---|
+| 1. `pytest -q` | Zawsze | Sanity check po implementacji. |
+| 2. Call-site check | Zawsze | Znajdź wszystkie miejsca wywołań zmienionej funkcji, wyjaśnij wpływ. |
+| 3. Smoke test JS | Jeśli zmiana dotyka `app.js` lub `app/static/js/modules/*` | Backend pytest nie pokrywa inicjalizacji JS. Detale: `docs/testing.md`. |
+| 4. **`/simplify`** | **Zawsze** | Przegląd świeżego diffu pod kątem reuse, jakości, dead code, powtórzeń. Tani, łapie błędy zanim staną się długiem. |
+| 5. **`/review`** | Diff >50 linii LUB hot path (`/quote`, `_engine.py`, `app.js`) LUB SSOT | Drugie spojrzenie na zmiany o większym ryzyku. |
+| 6. **`/security-review`** | Zmiany w auth, user input → DB, uprawnieniach, sekretach | Wykrywa SQLi, IDOR, leak sekretów. |
+| 7. Re-run `pytest -q` | Jeśli krok 4/5/6 wprowadził zmiany | Naturalna pętla — simplify mógł coś zepsuć. |
+| 8. Diff review przed commitem | Zawsze | Ostatnie spojrzenie własnym okiem. |
+
+**Reguła:** kroki 4–6 to nie "opcjonalne ulepszenie" — to część "Done". Pomijasz je tylko gdy zmiana jest naprawdę trywialna (literówka w komentarzu, jedna nazwa zmiennej). W razie wątpliwości — uruchom.
+
+**Implementacja w HANDOFF_<slug>.md:** sekcja "Faza N — Weryfikacja end-to-end (Definition of Done)" w szablonie ma już wszystkie 8 kroków jako checklist. Odznaczaj je w trakcie. `/handoff-archive` sprawdza ten stan.
+
 Detale testowania: `docs/testing.md`. Konwencje kodu: `docs/developing.md`.

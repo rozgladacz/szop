@@ -36,6 +36,7 @@
 4. **Smoke test po zmianie `app.js`** — `make dev` + ręcznie: Zbrojownia / Edytor Armii / Rozpiski. Backend testy nie pokrywają inicjalizacji JS. Detale: [docs/testing.md](docs/testing.md).
 5. **Encoding gate przed Edit/Write na `.py`** — zweryfikuj `open(file, encoding='utf-8')` succeeds. Abort jeśli błąd.
 6. **Frontend payload parity** — po zmianie w `rosters.py`, `export.py`, `payload_adapters.js`, lub `costs/*` uruchom `tests/test_frontend_*.py`.
+7. **Definition of Done przed archiwizacją** — po testach uruchom `/simplify` (zawsze) + warunkowo `/review` (diff >50 linii / hot path / SSOT) + warunkowo `/security-review` (auth, user input → DB). Re-run `pytest` jeśli któryś coś zmienił. Detale: [docs/planning.md](docs/planning.md) sekcja "Definition of Done".
 
 ## [RECOMMENDED] — preferencje
 
@@ -66,8 +67,8 @@
 
 1. `/load-context` (lub ręcznie: AGENTS.md → HANDOFF.md → swój HANDOFF_`<slug>`.md).
 2. Wskaż pliki do edycji + Layer Checklist (data model / backend / JS / CSS / tests).
-3. Aktualizuj `HANDOFF_<slug>.md` **przed** podetapem (odznacz checklisty, dopisz odkrycia).
-4. Po zmianie: pytest → call-site check → smoke test jeśli JS → podsumowanie.
+3. Aktualizuj `HANDOFF_<slug>.md` **przed** podetapem. Stany kroków: `[ ]` TODO, `[~]` rozpoczęto (oznacz **na początku** kroku), `[x]` sukces, `[!]` błąd/porzucone (z notą dlaczego). Detale: [docs/handoffs/README.md](docs/handoffs/README.md).
+4. Po zmianie — Definition of Done: pytest → call-site check → smoke jeśli JS → `/simplify` → warunkowo `/review` / `/security-review` → re-run pytest jeśli simplify coś zmienił → diff review.
 5. Zamykasz wątek? `/handoff-archive <slug>`.
 
 Po zmianie podaj userowi: **co zmieniono**, **jak zweryfikowano**, **co wymaga decyzji**.
