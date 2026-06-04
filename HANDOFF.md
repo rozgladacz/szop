@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3.9 done; B2 ORM lub D pierwsze) |
-| [HANDOFF_faza-b-3-hardening](docs/handoffs/HANDOFF_faza-b-3-hardening.md) | B3.9 architecture hardening — 7 bugów + 1 cleanup + 5 dziur architektonicznych zamkniętych; 3 ADR-y (0045/0046/0047) Accepted. | engine package (status/geometry/state/events/combat/phases/effects/reducers) | Ready for archive |
 | [HANDOFF_faza-b-rules-resync](docs/handoffs/HANDOFF_faza-b-rules-resync.md) | Sync YAML+engine z driftem zasad 2026-06-03 (Przegrupowanie per-action, Leczenie EOA, formuła T_eff aur/rozkazów, Lokalizacja enum, 8 abilities przepisanych). | `app/rulesets/v1/*.yaml`, `app/services/engine/{phases,combat,status,state,actions,effects}.py`, `app/services/rulesets/{cost_functions,handlers}.py` | In progress (R0–R7 + RW) |
 
 
@@ -47,6 +46,16 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-02 — faza-b-3-hardening (archived) — B3.9 architecture hardening done
+
+- Sub-wątek `faza-b-engine-mvp` zamykający Strumień B3.9 — 7 bugów + 1 dead-code cleanup w 5 dziurach architektonicznych post-B3 code review (status/geometry/ActivationContext/event-sourced status mutations/weapons inventory/ACTIVE_ABILITY_REGISTRY). Stabilizacja public API engine PRZED B2 ORM (zero migration churn dla `BattleEvent.payload_json`). 6 faz (B3.9.a–f) + B3.9.W weryfikacja + post-B3.9 code review pass (8 fixów).
+- **3 nowe ADR-y Accepted**: 0045 ActivationContext, 0046 Event-sourced state mutations (proof-of-completeness ADR-0010 empirycznie), 0047 Weapons inventory + ACTIVE_ABILITY_REGISTRY.
+- **Bugfixy**: #1 cumulative wounds w pkt 20.a (delta vs cumulative), #2 defender szarży regroup-testuje w aktywacji chargera (melee_combatants), #3 initial_toughness_snapshot zamiast post-action proxy, #4 charger.radius w min_gap szarzy (circle_edge_distance), #5 melee_balance reset obu stron (loop po melee_combatants), #6 silent status mutations (StatusAdded/StatusRemoved events + 13 reducerów), #7 defender kontrataku używa defender.melee_weapons[0]. Plus 8 CR-fixów: ObjectiveControlChanged + InitiativePassed events, StatusRemoved(Ufortyfikowany) emit, UNARMED_WEAPON sentinel, off-by-one w `_reduce_round_ended`, idempotency w discard_exhausted.
+- Pliki NEW: `app/services/engine/{status,geometry,reducers}.py` (~500 LOC łącznie), `tests/test_engine_{status,geometry,activation_context,replay_invariant,weapons_inventory}.py` (90 nowych testów), `docs/adr/{0045,0046,0047}-*.md`. Pliki MOD: state/events/combat/phases/effects/los/resolver + `scripts/engine_smoke_replay.py` z end-to-end replay invariant assertion. Commity na `Faza_A`: `4b7df4c` (B3.9 + 3 ADR + CR-fixów).
+- Weryfikacja: pytest **1340/1340 passed** (1244 baseline + 96 nowych w B3.9.a-e + CR-fix testy); parity gate `both_assert` 156/156 + `yaml` 93/93 (Strumień A niezmieniony); smoke replay GATE: 46 events, 13 event types, EXIT 0 (`apply_events(initial, all_events) == live_state` per-blob + objectives + active_player); `make rules-check` drift gate pominięty na Windows (CI weryfikuje).
+- Doc updates: `docs/architecture.md` sekcja "Game engine" rozszerzona o B3.9 (status/geometry/reducers + ActivationContext + initial_toughness_snapshot + weapons inventory + ACTIVE_ABILITY_REGISTRY + 13 event types + tabela 7 bugów + 5 dziur architektonicznych zmapowanych do faz/ADR), `docs/adr/0011-rule-executor.md` refresh (Status: Accepted refreshed 2026-06-02; tabela modułów + Public API export zaktualizowane), `docs/roadmap.md` nowa sekcja "B3.9. Architecture hardening" po B3.8 + ADR index uzupełniony o 0045/0046/0047 ✓.
+- **GATE ADR-0010 spełniony empirycznie** — `tests/test_engine_replay_invariant.py::test_gate_full_multi_action_replay` pass + `test_all_event_types_have_reducer` sanity (13/13 typów ma reducer). **Strumień B2 ORM odblokowany** (event types stabilne, payload_json schema zero churn). **Strumień D może startować** (engine public API stable).
 
 ### 2026-05-30 — faza-b-3-executor (archived) — B3 Game Engine MVP done
 
