@@ -16,6 +16,7 @@ Kroki:
    - Ostatnia aktualizacja: dzisiejsza data
    - Sekcję "Gałąź git" — uruchom `git branch --show-current` i wypełnij Branch; Base zostaw jako `main` lub zapytaj usera.
    - Pozostałe sekcje (Cel, Plan implementacji, Pliki dotknięte, ...) — szablonowe placeholdery do wypełnienia przez usera/agenta w trakcie pracy.
+   - **Faza N — Weryfikacja end-to-end:** szablon zawiera już Definition of Done (`pytest`, `/simplify`, warunkowo `/review` i `/security-review`). NIE usuwaj tych kroków; ewentualnie zaznacz `[!]` z notą "nie dotyczy — <powód>" gdy dany krok jest na pewno nierelevantny dla tego wątku.
 5. Otwórz `HANDOFF.md`. Dodaj wiersz do tabeli "Aktywne wątki":
    - Link: `[HANDOFF_<slug>](docs/handoffs/HANDOFF_<slug>.md)`
    - Cel: 1 zdanie (jak w pliku)

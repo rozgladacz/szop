@@ -28,6 +28,21 @@ Przykłady **dobre**: `HANDOFF_refactor-agents-md`, `HANDOFF_ssot-phase-5`, `HAN
 
 Przykłady **złe**: `HANDOFF_001`, `HANDOFF_2026-05-20`, `HANDOFF_thing`, `HANDOFF_super-long-description-of-everything-we-want-to-do`.
 
+## Legenda stanów kroków
+
+W sekcji "Plan implementacji" używaj czterech stanów (rozszerzenie GFM task list):
+
+| Symbol | Znaczenie | Kiedy ustawić |
+|---|---|---|
+| `[ ]` | **Do zrobienia** | Stan początkowy. Krok zaplanowany, jeszcze nieruszony. |
+| `[~]` | **Rozpoczęto** | Oznacz **na początku** pracy nad krokiem. Sygnał dla drugiego agenta: ten plik / fragment może być w niespójnym stanie, sprawdź zanim ruszysz dalej. |
+| `[x]` | **Zakończono sukcesem** | Krok zrobiony, zweryfikowany. |
+| `[!]` | **Zakończono błędem / porzucono** | Krok nie powiódł się lub odrzucony. **Zawsze dopisz krótką notę** w sekcji "Notatki / odkrycia" dlaczego (czego nie robić następnym razem). |
+
+GFM renderuje `[ ]` i `[x]` jako checkboxy; `[~]` i `[!]` jako tekst literalny — to akceptowalne, bo nadal jednoznaczne dla agenta i czytelne wzrokowo.
+
+**Reguła do archiwizacji:** wątek może być archiwizowany gdy wszystkie kroki mają stan finalny — `[x]` lub `[!]`. Stany `[ ]` lub `[~]` w aktywnym planie blokują `/handoff-archive` (skill zapyta o potwierdzenie).
+
 ## Szablon
 
 Kopiuj poniższy blok przy ręcznym tworzeniu wątku (skill `/handoff-start` robi to za ciebie):
@@ -56,7 +71,7 @@ Kopiuj poniższy blok przy ręcznym tworzeniu wątku (skill `/handoff-start` rob
 - **Base:** `<nazwa-bazy>` (zwykle `main`)
 
 ## Plan implementacji
-*(Edytowalny w trakcie pracy. Drugi agent czyta to żeby przejąć wątek. Odznaczaj zrobione kroki [x]. Dopisuj odkrycia poniżej fazy.)*
+*(Edytowalny w trakcie pracy. Drugi agent czyta to żeby przejąć wątek. Oznaczaj kroki według legendy stanów: `[ ]` TODO, `[~]` rozpoczęto, `[x]` sukces, `[!]` błąd/porzucone. Dopisuj odkrycia poniżej fazy.)*
 
 ### Faza 1 — <nazwa fazy>
 - [ ] Krok 1.1: <opis>
@@ -65,11 +80,15 @@ Kopiuj poniższy blok przy ręcznym tworzeniu wątku (skill `/handoff-start` rob
 ### Faza 2 — <nazwa fazy>
 - [ ] Krok 2.1: <opis>
 
-### Faza N — Weryfikacja end-to-end
+### Faza N — Weryfikacja end-to-end (Definition of Done)
 - [ ] `pytest -q` (lub konkretne testy)
 - [ ] Smoke test JS (jeśli dotyczy `app.js`)
 - [ ] Call-site check dla zmienionych funkcji
-- [ ] Diff review
+- [ ] `/simplify` — przegląd jakości, reuse, dead code (zawsze)
+- [ ] `/review` — code review (jeśli diff >50 linii LUB hot path LUB SSOT)
+- [ ] `/security-review` — (jeśli zmiana dotyczy auth, user input → DB, uprawnień)
+- [ ] Re-run `pytest -q` jeśli `/simplify` lub `/review` coś zmieniły
+- [ ] Diff review przed commitem
 
 ## Pliki dotknięte
 - `path/...` — <co zrobione>
