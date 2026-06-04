@@ -48,6 +48,53 @@ class BMvpConfig(BaseModel):
     pi_approx: float = Field(gt=0)
 
 
+class LocationKind(BaseModel):
+    """Pojedyncza lokalizacja oddziału/modelu (SZOP_Rozjemca pkt 26).
+
+    Wszystkie pola opcjonalne poza `description` — pozwala na rozszerzenia
+    bez breaking change. Konsumowane przez `app/services/engine/state.py`
+    (enum `Lokalizacja`). Patrz HANDOFF_faza-b-rules-resync.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow", strict=False)
+
+    description: str
+    on_field: bool = False
+    can_activate: bool = False
+    can_return: bool | None = None
+
+
+class StatusFlagSpec(BaseModel):
+    """Stan oddziału po driftcie 2026-06 (SZOP_Rozjemca pkt 22).
+
+    Pola semantyczne — engine używa do reducerów/dispatcher decyzji
+    (np. `mutex_with` dla pkt 22.b.iii+22.c.iv). Patrz ADR-0048.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="allow", strict=False)
+
+    point: str
+    description: str
+    mutex_with: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class AuraOrderFormula(BaseModel):
+    """Formuła wyceny Aury / Rozkazu / Klątwy / Oznaczenia (SZOP_Zdolnosci).
+
+    Wprowadzona w faza-b-rules-resync 2026-06. Zastępuje stałe pola `aura`/
+    `rozkaz` w `cost` per ability. Konsumowane przez `cost_functions.aura_cost`
+    i `cost_functions.order_cost`. Patrz ADR-0048.
+    """
+
+    model_config = _FrozenConfig
+
+    t_eff_factor: float = Field(gt=0)
+    t_eff_clamp_min: int = Field(ge=1)
+    t_eff_clamp_max: int = Field(ge=1)
+    aura_range_bonus: int = Field(ge=0)
+    order_bonus: int = Field(ge=0)
+
+
 class RulesetTables(BaseModel):
     """Wszystkie tabele kosztów z `_engine.py:23-79`.
 
@@ -76,6 +123,9 @@ class RulesetTables(BaseModel):
     overcharge_multiplier: float
     base_cost_factor: float
     b_mvp: BMvpConfig | None = None
+    locations: dict[str, LocationKind] = Field(default_factory=dict)
+    status_flags: dict[str, StatusFlagSpec] = Field(default_factory=dict)
+    aura_order_formula: AuraOrderFormula | None = None
 
 
 AbilityType = Literal["passive", "active", "aura", "weapon"]

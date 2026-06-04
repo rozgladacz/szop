@@ -181,3 +181,73 @@ b_mvp:
   move_inches: 6  # SZOP_Rozjemca pkt 15.a
   base_area_inches_sq_per_toughness: 1
   pi_approx: 3.141592653589793
+
+# B-rules-resync 2026-06: Lokalizacja oddziału/modelu (SZOP_Rozjemca pkt 26).
+# Enum dla `UnitBlob.location` w app/services/engine/state.py.
+# Konsumowane przez engine; nie wpływa na quote (Strumień A).
+locations:
+  zaplecze:
+    description: "Oddział lub model jest poza polem gry; może wykonać aktywację Rozstawienia (pkt 13)."
+    on_field: false
+    can_activate: true
+  front:
+    description: "Oddział lub model jest na polu gry (Rozstawiony); może wykonać standardową aktywację (pkt 11.b)."
+    on_field: true
+    can_activate: true
+  wycofany:
+    description: "Pokonany model/oddział poza polem gry; nie może być aktywowany; może wrócić przez Odzyskiwanie ran (pkt 21.c.ii) lub zdolność."
+    on_field: false
+    can_activate: false
+    can_return: true
+  eliminowany:
+    description: "Pokonany model/oddział poza polem gry; nie może być aktywowany; NIE może wrócić do gry (np. pokonanie bronią Zguba — pkt 27.a)."
+    on_field: false
+    can_activate: false
+    can_return: false
+
+# B-rules-resync 2026-06: Stany oddziału (SZOP_Rozjemca pkt 22).
+# Po driftcie 2026-06: Przyszpilony uproszczony (brak +1 test, brak blokady aktywnych);
+# Ufortyfikowany uproszczony (brak −1 test); oba mutex (oba odrzucane gdy razem).
+status_flags:
+  wyczerpany:
+    point: "22.a"
+    description: "Oddział nie może wykonywać akcji Atak (Ostrzał, Szarża, kontratak); jest odrzucany standardową akcją specjalną discard_exhausted (pkt 22.a.ii)."
+    blocks_actions: [shoot, charge, counter_attack]
+  przyszpilony:
+    point: "22.b"
+    description: "Oddział nie może wykonywać Manewru i nie kontroluje celów; mutex z Ufortyfikowany (oba odrzucane gdy razem)."
+    blocks_actions: [maneuver]
+    blocks_objective_control: true
+    mutex_with: [ufortyfikowany]
+  ufortyfikowany:
+    point: "22.c"
+    description: "Oddział ma +1 do testów obrony; nie blokuje LoS; odrzucany na początku aktywacji oddziału; mutex z Przyszpilony (oba odrzucane gdy razem)."
+    defense_bonus: 1
+    blocks_los: false
+    removed_at_activation_start: true
+    mutex_with: [przyszpilony]
+  aktywowany:
+    point: "22.d"
+    description: "Oddział nie może być wybrany do Aktywacji; odrzucany na końcu rundy (pkt 8.c.i)."
+    blocks_activation_selection: true
+    removed_at_round_end: true
+
+# B-rules-resync 2026-06: Formuła wyceny Aury / Rozkazu / Klątwy / Oznaczenia
+# (SZOP_Zdolnosci.md, sekcja "Wycena Aur i Rozkazów").
+# Zastępuje wcześniejsze stałe kolumny `aura` i `rozkaz` w `cost` per ability.
+#
+# T = wytrzymałość modelu niosącego zdolność.
+# T_eff = clamp(t_eff_factor * T, t_eff_clamp_min, t_eff_clamp_max).
+#
+# cost.aura       = bazowy * T_eff
+# cost.aura_12    = bazowy * (T_eff + aura_range_bonus)   # zasięg 12"
+# cost.order      = bazowy * (T_eff + order_bonus)        # Rozkaz / Klątwa / Oznaczenie
+#
+# Konsumowane przez `app/services/rulesets/cost_functions.py:aura_cost/order_cost`
+# i handlery `aura/order_like` w `handlers.py`. Patrz ADR-0048.
+aura_order_formula:
+  t_eff_factor: 1.333333333333333  # 4/3
+  t_eff_clamp_min: 8
+  t_eff_clamp_max: 24
+  aura_range_bonus: 8   # dla wariantu z zasięgiem 12"
+  order_bonus: 2        # dla Rozkaz/Klątwa/Oznaczenie

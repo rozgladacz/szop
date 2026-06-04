@@ -86,6 +86,9 @@ allowed_yaml_only:
   - slug: presja
     reason: "blocked=True (backward compat). Active ability usunięte z DOCX."
     until_date: 2026-12-31
+  - slug: usprawnienie
+    reason: "YAML-only active ability dodana w main przez 313fb1d (Klaryfikacja zasad) — brak w DOCX/MD 2026-06. TODO faza-b-rules-resync R4: decyzja czy zachować jako blocked vs usunąć z YAML."
+    until_date: 2026-09-30
 
 # Symetria R1: DOCX-only slugi które YAML wyraża pod innym slug (split/rename
 # pairs). Bez tego R1 ERROR by blokował PR za każdą redakcją DOCX wording.

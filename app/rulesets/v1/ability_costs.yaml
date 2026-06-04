@@ -56,8 +56,10 @@ passive_abilities:
   okopany:      { fn: scale_by_tou, args: { base: 1.0 } }
   tarcza:       { fn: scale_by_tou, args: { base: 1.25 } }
   regeneracja:  { fn: scale_by_tou, args: { base: 4.0 } }
-  # Dywersant: 1.25 (stała) gdy aura=False, 1.25*tou gdy aura=True.
-  dywersant:    { fn: scale_by_tou, args: { base: 1.25, scale: false, aura_scale: true } }
+  # Dywersant (po driftcie 2026-06, faza-b-rules-resync): 0 gdy aura=False,
+  # 3.25 stałe gdy aura=True. Nowa semantyka: koszt liczy się tylko w aurze
+  # i jest niezależny od T (mirror app/services/costs/abilities.py:dywersant).
+  dywersant:    { fn: scale_by_tou, args: { base: 0.0, aura_alt_base: 3.25, scale: false, aura_required: true } }
   zdobywca:     { fn: scale_by_tou, args: { base: 3.0 } }
   straznik:     { fn: scale_by_tou, args: { base: 9.0 } }
   cierpliwy:    { fn: scale_by_tou, args: { base: 1.0 } }

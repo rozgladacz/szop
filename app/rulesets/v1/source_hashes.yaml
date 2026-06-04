@@ -5,14 +5,14 @@
 version: 1
 sources:
 - path: app/static/docs/SZOP.docx
-  sha256: bcd983ef4a85e268e6cabf34f8e9a101c168e620c04eb17ac23f91d1a83f8960
+  sha256: 998a393c6f7d7d54ec9385df1be5ae00187b91f26c50d03f52abbb562658acfa
   role: Word document — primary author source
 - path: app/static/docs/SZOP.pdf
-  sha256: e233844fadcd666fef3ae7f2bf02ac3b1a6865fefd718cb4588758c1ce03bebe
+  sha256: d6138619172c82d5cbbb0b034202d5a27d84235329153173c664a210f363fb17
   role: PDF export — should track DOCX changes
 - path: app/static/docs/SZOP_Zdolnosci.md
-  sha256: b1a7785d79a5d7b5342b9d0846f2107284530eaa6f0e75325c5962c14f788396
+  sha256: 8caf30438b39e4d84f5102457b16a585a5259ee36a1a8648fd5b391596d47090
   role: Curated MD version of abilities — 1:1 quotes from SZOP
 - path: app/static/docs/SZOP_Rozjemca.md
-  sha256: 06371a6f253f284469caf9901527ded2d8036119135477f655d2847d7114cdab
+  sha256: b58881bd9a82fad1b4e1db5fde1e18c688535c5f3450b446b8cb22de3e4dc568
   role: Game rules narrative (referee version)

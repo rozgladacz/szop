@@ -13,6 +13,7 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3.9 done; B2 ORM lub D pierwsze) |
 | [HANDOFF_faza-b-3-hardening](docs/handoffs/HANDOFF_faza-b-3-hardening.md) | B3.9 architecture hardening — 7 bugów + 1 cleanup + 5 dziur architektonicznych zamkniętych; 3 ADR-y (0045/0046/0047) Accepted. | engine package (status/geometry/state/events/combat/phases/effects/reducers) | Ready for archive |
+| [HANDOFF_faza-b-rules-resync](docs/handoffs/HANDOFF_faza-b-rules-resync.md) | Sync YAML+engine z driftem zasad 2026-06-03 (Przegrupowanie per-action, Leczenie EOA, formuła T_eff aur/rozkazów, Lokalizacja enum, 8 abilities przepisanych). | `app/rulesets/v1/*.yaml`, `app/services/engine/{phases,combat,status,state,actions,effects}.py`, `app/services/rulesets/{cost_functions,handlers}.py` | In progress (R0–R7 + RW) |
 
 
 ## Zasoby zablokowane (reverse lookup)

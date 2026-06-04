@@ -355,6 +355,8 @@ def _weapon_cost_yaml(
         mult *= 1.7
     if "bastion" in unit_set and melee:
         mult *= 1.2
+    if "dywersant" in unit_set:
+        mult *= 1.2
     if "szpica" in unit_set:
         chance += 0.5
     if "ostrozny" in unit_set:
