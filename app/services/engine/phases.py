@@ -304,20 +304,74 @@ def deployment_round(
 
 
 def _apply_maneuver(
-    state: BattleState, action: ManeuverAction, sequence: int
+    state: BattleState,
+    action: ManeuverAction,
+    dice: DeterministicDice,
+    sequence: int,
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Pkt 14.a Manewr — emit MoveExecuted, update position. Walidacja
-    dist ≤ move_inches deferred do resolver/walidacji wyżej."""
+    dist ≤ move_inches deferred do resolver/walidacji wyżej.
+
+    R5.g (faza-b-rules-resync 2026-06): po move, jeśli aktor jest wewnątrz
+    TerrainCircle z feature `Niebezpieczny` (pkt 4.c.v) → wykonaj test
+    **per-unit**: rzut `models_alive * toughness_per_model` k6, każda 1 = rana.
+    Drift uproszcza pre-drift per-model (każdy model rzucał toughness razy)
+    do jednego wspólnego puli. Rany dopisywane do `wounds_received` (znaczniki
+    pkt 18.c, alokowane standardowo w przyszłej aktywacji).
+    """
     blob = _find_blob(state, action.unit_id)
-    event = MoveExecuted(
-        sequence=sequence,
-        unit_id=blob.id,
-        from_pos=(blob.position.x, blob.position.y),
-        to_pos=(action.target_position.x, action.target_position.y),
-        move_type="manever",
+    events: list[BattleEvent] = []
+    seq = sequence
+    events.append(
+        MoveExecuted(
+            sequence=seq,
+            unit_id=blob.id,
+            from_pos=(blob.position.x, blob.position.y),
+            to_pos=(action.target_position.x, action.target_position.y),
+            move_type="manever",
+        )
     )
+    seq += 1
     moved = replace(blob, position=action.target_position)
-    return _replace_blob(state, moved), (event,), sequence + 1
+
+    # R5.g pkt 4.c.v Niebezpieczny test (per-unit, post-drift 2026-06)
+    in_dangerous = any(
+        isinstance(t, TerrainCircle)
+        and "Niebezpieczny" in t.features
+        and _blob_inside_terrain_circle(moved, t)
+        for t in state.terrain
+    )
+    if in_dangerous and moved.models_alive > 0:
+        dice_count = moved.models_alive * moved.toughness_per_model
+        rolls = dice.roll_d6(count=dice_count)
+        wounds_inflicted = sum(1 for r in rolls if r == 1)
+        if wounds_inflicted > 0:
+            moved = replace(
+                moved, wounds_received=moved.wounds_received + wounds_inflicted
+            )
+            events.append(
+                EffectApplied(
+                    sequence=seq,
+                    slug="niebezpieczny",
+                    target_unit_id=moved.id,
+                    source_unit_id=moved.id,
+                    payload={
+                        "applied": True,
+                        "rolls": list(rolls),
+                        "wounds_inflicted": wounds_inflicted,
+                    },
+                )
+            )
+            seq += 1
+
+    return _replace_blob(state, moved), tuple(events), seq
+
+
+def _blob_inside_terrain_circle(blob: UnitBlob, terrain: TerrainCircle) -> bool:
+    """Helper: True gdy centrum bloba jest w obrębie `terrain` (TerrainCircle).
+    R5.g — sprawdzanie czy oddział znajduje się w niebezpiecznym terenie
+    po Manewrze. Używamy distance(blob.position, terrain.center) ≤ radius."""
+    return _distance(blob.position, terrain.center) <= terrain.radius_inches
 
 
 def _apply_defend(
@@ -609,7 +663,7 @@ def activation_phase(
 
     # Faza akcji (pkt 14)
     if isinstance(action, ManeuverAction):
-        state, action_events, seq = _apply_maneuver(state, action, seq)
+        state, action_events, seq = _apply_maneuver(state, action, dice, seq)
         melee_combatants: frozenset[int] = frozenset()
     elif isinstance(action, DefendAction):
         state, action_events, seq = _apply_defend(state, action, seq)

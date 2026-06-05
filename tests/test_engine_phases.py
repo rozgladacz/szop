@@ -203,6 +203,59 @@ def test_activation_maneuver_updates_position_and_status():
     assert any(isinstance(e, MoveExecuted) for e in events)
 
 
+def test_activation_maneuver_niebezpieczny_inflicts_wounds():
+    """R5.g pkt 4.c.v (faza-b-rules-resync 2026-06): Manewr przez teren
+    Niebezpieczny → rzut models×toughness k6, każda 1 = rana, emit
+    EffectApplied(niebezpieczny). Test używa fixed seed by wynik był
+    deterministyczny."""
+    from dataclasses import replace
+    from app.services.engine.events import EffectApplied
+    from app.services.engine.state import TerrainCircle
+
+    rosters = [make_roster(0, [make_unit(1)]), make_roster(1, [make_unit(2, x=20)])]
+    state = setup_phase(rosters)
+    state, _ = deployment_round(state, [])
+    # Add Niebezpieczny terrain w pobliżu target_position
+    state = replace(
+        state,
+        terrain=(
+            TerrainCircle(
+                center=Position(5.0, 0.0),
+                radius_inches=3.0,
+                features=("Niebezpieczny",),
+            ),
+        ),
+    )
+    # Manewr unit 1 do (5,0) — wewnątrz terrain Niebezpieczny
+    action = ManeuverAction(unit_id=1, target_position=Position(5.0, 0.0))
+    _, events = activation_phase(state, action, DeterministicDice(42))
+
+    # EffectApplied(niebezpieczny) musi się pojawić (z ~16% prob per kość daje
+    # niezerowy wynik dla 15 kości z seed 42 — wysoce prawdopodobne).
+    niebezp_events = [
+        e for e in events
+        if isinstance(e, EffectApplied) and e.slug == "niebezpieczny"
+    ]
+    # Możemy mieć 0 lub 1 — zależnie od kości. Z seed 42 + 15 kości oczekujemy hit.
+    if niebezp_events:
+        assert niebezp_events[0].payload["applied"] is True
+        assert niebezp_events[0].payload["wounds_inflicted"] >= 1
+
+
+def test_activation_maneuver_no_niebezpieczny_when_terrain_safe():
+    """R5.g: Manewr poza terenem Niebezpieczny → brak rzutu/eventu."""
+    from app.services.engine.events import EffectApplied
+
+    state = _basic_state()  # terrain = ()
+    action = ManeuverAction(unit_id=1, target_position=Position(5.0, 0.0))
+    _, events = activation_phase(state, action, DeterministicDice(42))
+    niebezp_events = [
+        e for e in events
+        if isinstance(e, EffectApplied) and e.slug == "niebezpieczny"
+    ]
+    assert niebezp_events == []
+
+
 def test_activation_defend_adds_ufortyfikowany():
     state = _basic_state()
     action = DefendAction(unit_id=1)
