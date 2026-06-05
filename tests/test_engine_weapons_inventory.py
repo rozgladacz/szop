@@ -254,6 +254,21 @@ def test_registry_built_in_six_stubs_present():
         assert get_active_ability(slug) is not None, f"missing stub: {slug}"
 
 
+def test_incomplete_abilities_includes_pending_passive_and_weapon():
+    """R5.x (faza-b-rules-resync 2026-06-05): INCOMPLETE_ABILITIES rozszerzone
+    z aktywnych stubs o passive/weapon abilities pending engine impl. H3 Dywersant
+    (interrupt before_hit_rolls + policy) + H5 Zguba (wounds tracking 5-kategorii)
+    udokumentowane jako odłożone do follow-up ADR."""
+    from app.services.engine.effects import INCOMPLETE_ABILITIES
+
+    # 6 active stubs (B3.9 CR-fix C)
+    assert "latanie" in INCOMPLETE_ABILITIES
+    assert "meczennik" in INCOMPLETE_ABILITIES
+    # 2 passive/weapon deferred (R5.x 2026-06)
+    assert "dywersant" in INCOMPLETE_ABILITIES
+    assert "zguba" in INCOMPLETE_ABILITIES
+
+
 def test_registry_lookup_unknown_returns_none():
     assert get_active_ability("nonexistent_xyz_99") is None
 

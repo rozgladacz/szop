@@ -368,14 +368,30 @@ def _stub_active_ability(
 # kolejnych iteracjach, ale registry pattern pozwala je dodawać przyrostowo
 # bez zmian w `phases._apply_special` dispatcher.
 #
-# CR-fix C: `INCOMPLETE_ABILITIES` to **publiczny discriminator** dla
-# konsumentów (resolver validation, UI feedback, agent decision logging).
-# Stuby emit `EffectApplied(payload={'applied': False, ...})` zamiast
-# pretending success — caller może filtrować po `applied` lub sprawdzać slug
-# przeciw `INCOMPLETE_ABILITIES`. Pełne implementacje (po B3.9.f+) dodadzą
-# `applied: True` i usuną slug z tego setu.
+# CR-fix C + R5.x (faza-b-rules-resync 2026-06-05): `INCOMPLETE_ABILITIES` to
+# **publiczny discriminator** dla konsumentów (resolver validation, UI feedback,
+# agent decision logging).
+#
+# **Aktywne stubs** (type=active w abilities.yaml) — emit `EffectApplied(
+# payload={'applied': False, ...})` przez `_stub_active_ability` factory.
+# Caller filtruje po `applied` lub sprawdza slug przeciw setowi.
+#
+# **Inne pending** (type=passive/weapon bez engine impl) — cost-side już
+# zsynchronizowane (R2/R3), ale engine semantyka odłożona do follow-up ADR
+# (H3 Dywersant policy, H5 Zguba wounds-tracking 5-kategorii). Agenci/UI/test
+# fixtures wykrywają je przez sam set; engine ich nie emit-uje events bo
+# nie ma active stubs.
+#
+# Pełne implementacje (B3.9.f+ / faza-b-rules-resync R5.e+) dodadzą
+# `applied: True` (lub nie-stub handler) i usuną slug z tego setu.
 INCOMPLETE_ABILITIES: frozenset[str] = frozenset(
-    {"latanie", "mag", "mobilizacja", "presja", "przepowiednia", "meczennik"}
+    {
+        # Active stubs (B3.9 — emit EffectApplied annotation)
+        "latanie", "mag", "mobilizacja", "presja", "przepowiednia", "meczennik",
+        # Passive/weapon pending engine impl (R5.x 2026-06-05 — H3/H5 deferred)
+        "dywersant",  # H3 — interrupt before_hit_rolls + policy (×2 ataki vs Przyszpilony)
+        "zguba",      # H5 — wymaga refactor UnitBlob wounds repr na 5 kategorii
+    }
 )
 
 _ACTIVE_ABILITY_REGISTRY["latanie"] = _stub_active_ability(

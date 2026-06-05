@@ -322,9 +322,13 @@ def test_bug3_fallback_when_snapshot_empty():
 
 def test_bug2_charge_defender_regroups_in_charger_activation():
     """Bug #2: ChargeAction defender otrzymuje rany w aktywacji chargera —
-    musi wykonać test pkt 20.a w tej samej aktywacji."""
-    # State: charger (id 1) blisko defendera (id 2), high quality charger,
-    # low defense defender, deterministyczne dice = trafienia gwarantowane.
+    musi wykonać test pkt 20.a w tej samej aktywacji.
+
+    **R5.d 2026-06 update**: pkt 20.a NEW trigger = `received > dealt`. Test
+    używa scenario gdzie charger trafia (Q2), ale defender (strong HP T6, low
+    Q5) NIE zadaje w kontrataku (high threshold). Defender otrzymuje >0 ran,
+    zadaje 0 ran w kontrataku → received > dealt → test fires.
+    """
     units = [
         {
             "owner_player": 0,
@@ -346,29 +350,28 @@ def test_bug2_charge_defender_regroups_in_charger_activation():
                 {
                     "id": 2,
                     "position": (3.0, 0.0),  # blisko, żeby Związanie zadziałało
-                    "models": 4,
-                    "toughness": 3,
-                    "quality": 4,
-                    "defense": 6,  # low — nie obroni
+                    "models": 5,
+                    "toughness": 6,  # high HP — survives charge
+                    "quality": 5,  # low — kontratak nie trafi
+                    "defense": 5,
                     "passives": (),
                 }
             ],
         },
     ]
     state = build_initial_state(units)
-    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=3)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=2)
     action = ChargeAction(unit_id=1, target_id=2, weapon=weapon)
-
-    # Forsujemy active_player=0 (resolver bypass — testujemy phase orchestrację)
     state = replace(state, active_player=0)
 
     _, events = activation_phase(state, action, DeterministicDice(7))
     morale_tests = [e for e in events if isinstance(e, MoraleTestPassed)]
     # Defender (id 2) musi mieć test Przegrupowania w tej aktywacji
+    # (received > dealt po fix R5.d)
     defender_morales = [e for e in morale_tests if e.unit_id == 2]
     assert len(defender_morales) >= 1, (
-        f"Defender powinien zrobić test pkt 20.a. Wszystkie morale events: "
-        f"{[(e.unit_id, e.failures) for e in morale_tests]}"
+        f"Defender powinien zrobić test pkt 20.a (received > dealt). "
+        f"Wszystkie morale events: {[(e.unit_id, e.failures) for e in morale_tests]}"
     )
 
 

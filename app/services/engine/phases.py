@@ -112,13 +112,25 @@ class ActivationContext:
     actor_id: int
     wounds_received_this_activation: tuple[tuple[int, int], ...]
     melee_combatants: frozenset[int]
+    # R5.d 2026-06 — default () dla backward compat (test fixtures konstruujące
+    # ActivationContext bezpośrednio bez `wounds_dealt`). Production path przez
+    # `_build_activation_context` zawsze populuje.
+    wounds_dealt_this_activation: tuple[tuple[int, int], ...] = ()
 
     def delta_for(self, unit_id: int) -> int:
-        """Lookup delta_wounds dla `unit_id`. Zwraca 0 gdy oddział nie otrzymał
-        ran w tej aktywacji."""
+        """Lookup delta_wounds OTRZYMANYCH dla `unit_id`. Zwraca 0 gdy oddział
+        nie otrzymał ran w tej aktywacji."""
         for uid, delta in self.wounds_received_this_activation:
             if uid == unit_id:
                 return delta
+        return 0
+
+    def dealt_for(self, unit_id: int) -> int:
+        """Lookup wounds_dealt dla `unit_id`. Zwraca 0 gdy oddział nie zadał ran
+        w tej aktywacji. (R5.d 2026-06 — pkt 20.a NEW trigger: received > dealt.)"""
+        for uid, dealt in self.wounds_dealt_this_activation:
+            if uid == unit_id:
+                return dealt
         return 0
 
 
@@ -127,27 +139,40 @@ def _build_activation_context(
     post_state: BattleState,
     actor_id: int,
     melee_combatants: frozenset[int],
+    action_events: tuple[BattleEvent, ...] = (),
 ) -> ActivationContext:
     """Buduje `ActivationContext` z pre/post snapshot `wounds_received` per blob.
 
-    Delta = post - pre. Negatywne delty (np. po pokonaniu modelu, gdzie
-    `wounds_received` jest resetowane) są klampowane do 0 — pkt 20.a mówi
-    o "otrzymanych ranach", więc post-kill obniżka licznika ran nie liczy się
-    jako negatywna "ranność". Tylko dodatnie delty trafiają do kontekstu.
+    Delta received = post - pre (klampowane do 0 — kill w aktywacji resetuje
+    `wounds_received` ale to nie ujemna "ranność").
+
+    R5.d (faza-b-rules-resync 2026-06): `wounds_dealt_this_activation` agregowane
+    z `action_events` — ShotResolved/MeleeResolved emit `wounds_dealt + wounds_precise`
+    per attacker_id. Używane przez `_regroup_test` dla pkt 20.a NEW trigger
+    (received > dealt → test).
     """
+    from app.services.engine.events import MeleeResolved, ShotResolved
+
     post_wounds = {b.id: b.wounds_received for b in post_state.blobs}
-    deltas: list[tuple[int, int]] = []
+    received_deltas: list[tuple[int, int]] = []
     for uid in pre_wounds.keys() | post_wounds.keys():
         delta = post_wounds.get(uid, 0) - pre_wounds.get(uid, 0)
         if delta > 0:
-            deltas.append((uid, delta))
-        # CR-fix I: usunięty dead `elif` dla defender-killed-w-aktywacji.
-        # `_regroup_test` i tak skipuje gdy `models_alive == 0` (early return),
-        # więc synthetic delta byłaby bez efektu. Branch był deklaratywnym
-        # "to do" bez realizacji.
+            received_deltas.append((uid, delta))
+
+    # R5.d: agregacja wounds_dealt per attacker_id z combat events.
+    dealt_map: dict[int, int] = {}
+    for event in action_events:
+        if isinstance(event, (ShotResolved, MeleeResolved)):
+            total = event.wounds_dealt + event.wounds_precise
+            if total > 0:
+                dealt_map[event.attacker_id] = dealt_map.get(event.attacker_id, 0) + total
+    dealt_deltas = sorted(dealt_map.items())
+
     return ActivationContext(
         actor_id=actor_id,
-        wounds_received_this_activation=tuple(sorted(deltas)),
+        wounds_received_this_activation=tuple(sorted(received_deltas)),
+        wounds_dealt_this_activation=tuple(dealt_deltas),
         melee_combatants=melee_combatants,
     )
 
@@ -446,16 +471,19 @@ def _regroup_test(
     from app.services.engine.effects import EffectContext, aggregate_morale_modifier
 
     blob = _find_blob(state, blob_id)
-    delta_wounds = context.delta_for(blob_id)
-    # Pkt 20.a — test triggered tylko przez rany W TEJ aktywacji LUB przegranie
-    # wręcz w tej aktywacji (`melee_balance < 0`).
-    if delta_wounds == 0 and blob.melee_balance >= 0:
+    delta_received = context.delta_for(blob_id)
+    delta_dealt = context.dealt_for(blob_id)
+    # R5.d (faza-b-rules-resync 2026-06): pkt 20.a NEW trigger — oddział testuje
+    # gdy ZADAŁ MNIEJ RAN NIŻ OTRZYMAŁ w aktywacji. Pre-drift trigger to było
+    # `delta_received > 0 OR melee_balance < 0` (każdy kto otrzymał ranę).
+    # Post-drift: tylko ten kto "przegrał wymianę" wykonuje test.
+    if delta_received <= delta_dealt:
         return state, (), sequence
 
     n_tests = 1
-    # Pkt 20.b: current toughness ≤ ½ INITIAL toughness (snapshot z setup).
-    # Fallback gdy state nie ma snapshot (test fixtures bypassujące
-    # build_initial_state) — używa cumulative formuły jak przed B3.9.c.
+    # Pkt 20.b: NIE-powyżej-połowy wytrzymałości → +1 test (drift 2026-06 —
+    # semantyka równoważna pre-drift "current ≤ ½ INITIAL"). Snapshot z setup
+    # (initial_toughness_for); fallback gdy snapshot empty (test fixtures).
     initial_tough = initial_toughness_for(state, blob_id)
     if initial_tough == 0:
         initial_tough = (
@@ -464,10 +492,11 @@ def _regroup_test(
     current_toughness = blob.models_alive * blob.toughness_per_model - blob.wounds_received
     if current_toughness <= initial_tough / 2:
         n_tests += 1
-    # Pkt 20.c: bilans wręcz (jeśli walczył wręcz)
-    if blob.melee_balance > 0:
-        n_tests -= 1
-    elif blob.melee_balance < 0:
+    # R5.d pkt 20.c (drift 2026-06): walczył wręcz (był uczestnikiem starcia
+    # w tej aktywacji — szarża jako actor LUB defender) → +1 test. Pre-drift
+    # różnicowało wygranie (-1) vs przegrane (+1) wręcz przez `melee_balance`;
+    # drift uproszcza do "walczył = +1 test" (sam udział w starciu = zamieszanie).
+    if blob_id in context.melee_combatants:
         n_tests += 1
     # R5.c (faza-b-rules-resync 2026-06): pkt 20.d **status modifiers usunięte**
     # per drift — pkt 22.b.iv (Przyszpilony +1 test) i pkt 22.c.ii (Ufortyfikowany
@@ -600,9 +629,10 @@ def activation_phase(
         raise TypeError(f"Unknown action type: {type(action).__name__}")
     events.extend(action_events)
 
-    # Build ActivationContext (B3.9.c / ADR-0045)
+    # Build ActivationContext (B3.9.c / ADR-0045 + R5.d 2026-06 — wounds_dealt)
     context = _build_activation_context(
-        pre_wounds, state, actor_id, melee_combatants
+        pre_wounds, state, actor_id, melee_combatants,
+        action_events=tuple(action_events),
     )
 
     # Faza Przegrupowanie (pkt 20) — wszystkie oddziały które otrzymały rany
