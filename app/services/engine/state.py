@@ -17,6 +17,7 @@ Brak I/O / DB / mutacji. Wszystkie dataclasses są `frozen=True` + `slots=True`.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 
 from app.services.rulesets.loader import load_b_mvp_exclusions, load_ruleset
@@ -24,6 +25,21 @@ from app.services.rulesets.models import BMvpConfig
 
 if TYPE_CHECKING:  # avoid circular import; events.py is "leaf" relative to state.py
     from app.services.engine.events import BattleEvent
+
+
+class Lokalizacja(str, Enum):
+    """Lokalizacja oddziału na planszy (pkt 26 SZOP_Rozjemca.md, R5.a 2026-06).
+
+    ZAPLECZE — rezerwy przed rozstawieniem (Zasadzka/Rezerwa).
+    FRONT    — aktywny oddział na planszy (default po rozstawieniu).
+    WYCOFANY — wszyscy modele pokonani (models_alive == 0); może Odzyskać.
+    ELIMINOWANY — pokonany bronią Zguba; nie może Odzyskać (pkt 27.c).
+    """
+
+    ZAPLECZE = "zaplecze"
+    FRONT = "front"
+    WYCOFANY = "wycofany"
+    ELIMINOWANY = "eliminowany"
 
 
 class UnsupportedAbilityError(Exception):
@@ -145,6 +161,7 @@ class UnitBlob:
     melee_balance: int = 0
     melee_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047
     ranged_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047
+    location: Lokalizacja = Lokalizacja.FRONT  # R5.a 2026-06 (pkt 26)
 
 
 @dataclass(frozen=True, slots=True)
@@ -285,6 +302,12 @@ def build_initial_state(
                 else:
                     melee_weapons.append(weapon)
 
+            # R5.a (2026-06): ZAPLECZE dla Zasadzka/Rezerwa (pkt 26 — off-board reserves).
+            initial_location = (
+                Lokalizacja.ZAPLECZE
+                if ("zasadzka" in unit_slugs or "rezerwa" in unit_slugs)
+                else Lokalizacja.FRONT
+            )
             blobs.append(
                 UnitBlob(
                     id=int(unit["id"]),
@@ -299,6 +322,7 @@ def build_initial_state(
                     passives=unit_slugs,
                     melee_weapons=tuple(melee_weapons),
                     ranged_weapons=tuple(ranged_weapons),
+                    location=initial_location,
                 )
             )
 

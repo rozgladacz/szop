@@ -676,12 +676,15 @@ def resolve_charge_attack(
         )
         events.extend(counter_result.events)
         next_seq += len(counter_result.events)
-        # Po kontrataku: Wyczerpany (chyba że Bastion id 1). B3.9.d (ADR-0046)
-        # — emit StatusAdded event + idempotentny `add_status` na live state.
+        # Po kontrataku: Wyczerpany (chyba że Bastion id 1 lub charger pokonany).
+        # Pkt 14.d.iv R5.c (2026-06): jeśli charger models_alive == 0 → skip.
+        # B3.9.d (ADR-0046) — emit StatusAdded event + idempotentny `add_status`.
         # Reducer `_reduce_status_added` rekonstruuje status_flags w replay.
         post_counter_defender = counter_result.new_attacker
+        charger_after_counter = counter_result.new_defender
         if (
-            ABILITY_BASTION not in post_counter_defender.passives
+            charger_after_counter.models_alive > 0
+            and ABILITY_BASTION not in post_counter_defender.passives
             and STATUS_WYCZERPANY not in post_counter_defender.status_flags
         ):
             post_counter_defender = add_status(post_counter_defender, STATUS_WYCZERPANY)
@@ -694,7 +697,7 @@ def resolve_charge_attack(
             )
             next_seq += 1
         new_defender = post_counter_defender
-        new_charger = counter_result.new_defender
+        new_charger = charger_after_counter
 
     # Faza 3: Główny atak szarżującego pkt 14.d.iii — pominięty jeśli charger pokonany
     if new_charger.models_alive > 0 and new_defender.models_alive > 0:

@@ -15,6 +15,7 @@ import pytest
 from app.services.engine.events import MoveExecuted
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Position,
     TerrainCircle,
     TerrainLine,
@@ -330,3 +331,101 @@ def test_apply_events_deterministic_with_same_events(monkeypatch):
     s2 = apply_events(initial, events)
     assert s1 == s2
     assert s1.round == 3
+
+
+# ---------------------------------------------------------------------------
+# R5.a (2026-06) — Lokalizacja enum + UnitBlob.location
+# ---------------------------------------------------------------------------
+
+
+def test_lokalizacja_enum_values():
+    """Lokalizacja enum ma 4 wartości (pkt 26 SZOP_Rozjemca)."""
+    assert Lokalizacja.ZAPLECZE == "zaplecze"
+    assert Lokalizacja.FRONT == "front"
+    assert Lokalizacja.WYCOFANY == "wycofany"
+    assert Lokalizacja.ELIMINOWANY == "eliminowany"
+
+
+def test_unit_blob_default_location_is_front():
+    """UnitBlob.location domyślnie FRONT (dla normalnych oddziałów)."""
+    blob = UnitBlob(
+        id=1, owner_player=0, position=Position(0.0, 0.0),
+        radius_inches=1.0, models_alive=5, toughness_per_model=3,
+    )
+    assert blob.location == Lokalizacja.FRONT
+
+
+def test_build_initial_state_normal_unit_gets_front():
+    """Normalny oddział (bez Zasadzka/Rezerwa) → FRONT po build_initial_state."""
+    rosters = [
+        {"owner_player": 0, "units": [_minimal_unit(1)]},
+        {"owner_player": 1, "units": [_minimal_unit(2)]},
+    ]
+    state = build_initial_state(rosters)
+    for b in state.blobs:
+        assert b.location == Lokalizacja.FRONT
+
+
+def test_build_initial_state_zasadzka_unit_gets_zaplecze():
+    """Oddział z Zasadzka → ZAPLECZE po build_initial_state (off-board reserve)."""
+    rosters = [
+        {"owner_player": 0, "units": [_minimal_unit(1, passives=("zasadzka",))]},
+        {"owner_player": 1, "units": [_minimal_unit(2)]},
+    ]
+    state = build_initial_state(rosters)
+    blob_by_id = {b.id: b for b in state.blobs}
+    assert blob_by_id[1].location == Lokalizacja.ZAPLECZE
+    assert blob_by_id[2].location == Lokalizacja.FRONT
+
+
+def test_build_initial_state_rezerwa_unit_gets_zaplecze():
+    """Oddział z Rezerwa → ZAPLECZE (analogicznie do Zasadzka)."""
+    rosters = [
+        {"owner_player": 0, "units": [_minimal_unit(1, passives=("rezerwa",))]},
+        {"owner_player": 1, "units": [_minimal_unit(2)]},
+    ]
+    state = build_initial_state(rosters)
+    blob_by_id = {b.id: b for b in state.blobs}
+    assert blob_by_id[1].location == Lokalizacja.ZAPLECZE
+
+
+# ---------------------------------------------------------------------------
+# R4.rozkaz_tak (2026-06) — field in abilities.yaml via RulesetAbility
+# ---------------------------------------------------------------------------
+
+
+def test_rozkaz_tak_cierpliwy_is_true():
+    """Cierpliwy ma rozkaz_tak=True w abilities.yaml (pasywna ze zdolnością
+    przeniesiania via Rozkaz per SZOP_Zdolnosci.md)."""
+    from app.services.rulesets import load_ruleset
+
+    ruleset = load_ruleset("v1")
+    cierpliwy = next(a for a in ruleset.abilities if a.slug == "cierpliwy")
+    assert cierpliwy.rozkaz_tak is True
+
+
+def test_rozkaz_tak_bohater_is_false():
+    """Bohater ma rozkaz_tak=False (model-scope, nie przenosi się via Rozkaz)."""
+    from app.services.rulesets import load_ruleset
+
+    ruleset = load_ruleset("v1")
+    bohater = next(a for a in ruleset.abilities if a.slug == "bohater")
+    assert bohater.rozkaz_tak is False
+
+
+def test_rozkaz_tak_weapon_ability_is_false():
+    """Zdolności broni (typ=weapon) mają rozkaz_tak=False."""
+    from app.services.rulesets import load_ruleset
+
+    ruleset = load_ruleset("v1")
+    zguba = next(a for a in ruleset.abilities if a.slug == "zguba")
+    assert zguba.rozkaz_tak is False
+
+
+def test_rozkaz_tak_klatwa_is_true():
+    """Klątwa(X) ma rozkaz_tak=True (aktywna zdolność zmieniająca stan zdolności)."""
+    from app.services.rulesets import load_ruleset
+
+    ruleset = load_ruleset("v1")
+    klatwa = next(a for a in ruleset.abilities if a.slug == "klatwa")
+    assert klatwa.rozkaz_tak is True

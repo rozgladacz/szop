@@ -1,9 +1,11 @@
 # HANDOFF — faza-b-rules-resync
 
 > **Wątek:** Synchronizacja YAML SSOT + engine z nowymi wersjami zasad (SZOP_Rozjemca.md + SZOP_Zdolnosci.md po 2026-06-03 drift) — Przegrupowanie per-action, Leczenie EOA, formuła T_eff dla aur/rozkazów, Lokalizacja enum, 8 zdolności przepisanych.
-> **Status:** In progress
+> **Status:** In progress (R0–R3 ✅ done; R4 partial; R5.a/c/f w trakcie 2026-06-05)
 > **Utworzony:** 2026-06-03
-> **Ostatnia aktualizacja:** 2026-06-03
+> **Ostatnia aktualizacja:** 2026-06-05
+
+**W TRAKCIE: 2026-06-05 (autonomiczna sesja) — R4.rozkaz_tak + R5.a Lokalizacja + R5.c kontratak conditional + R5.f Ufortyfikowany at deploy**
 
 ## Cel
 
@@ -61,60 +63,58 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 
 *(Edytowalny w trakcie pracy. Drugi agent czyta to żeby przejąć wątek. Odznaczaj zrobione kroki [x]. Dopisuj odkrycia poniżej fazy.)*
 
-### Faza R0 — Drift classification + baseline
+### Faza R0 — Drift classification + baseline — **DONE 2026-06-04** (commit `549476d`)
 
-- [ ] Uruchomić `make rules-check` (lub Windows fallback: `python scripts/rules_sources_check.py && python scripts/rules_extract.py && python scripts/rules_extract_md.py && python scripts/rules_drift.py`). Zebrać raporty R1/R2/R3/R4 w `build/`.
-- [ ] Zaktualizować `app/rulesets/v1/source_hashes.yaml` — SHA256 dla 4 plików źródłowych (DOCX, PDF, 2× MD) po update z main.
-- [ ] Wygenerować klasyfikację: ile abilities ma R1 (nowe yaml-only), R2 (rozbieżność cost), R3 (wording), R4 (krytyczne). Hipoteza: R1=0 (wszystkie usunięcia aura/rozkaz), R2≥77 (każda ma usunięte aura/rozkaz pola w cost = strukturalna rozbieżność), R3=ok 8 (przepisane opisy), R4=0 (brak nowych mechanik geometrycznych).
-- [ ] Decyzja: czy R2 (cost) generuje exit 1 (ERROR) — wtedy chwilowy `drift_allowlist.yaml` z wpisami "TODO faza-b-rules-resync R2/R3" do czasu R3 implementacji.
+- [x] Uruchomić drift pipeline, zebrać R1/R2/R3/R4. Wynik: R1=0, R2=0, R3=34, R4=0 → exit 2 WARN.
+- [x] Zaktualizować `app/rulesets/v1/source_hashes.yaml` — SHA256 dla 4 plików po driftcie 2026-06.
+- [x] `drift_allowlist.yaml` — dodano 'usprawnienie' allowlist (YAML-only z main `313fb1d`).
 
-### Faza R1 — `tables.yaml`: Lokalizacja + pkt 22 + T_eff formula
+### Faza R1 — `tables.yaml`: Lokalizacja + pkt 22 + T_eff formula — **DONE 2026-06-04** (commit `549476d`)
 
-- [ ] `tables.yaml`: nowa sekcja `locations: [zaplecze, front, wycofany, eliminowany]` z opisem semantyki (pkt 26.a-d).
-- [ ] `tables.yaml`: sekcja `status_flags` rozszerzona (pkt 22.a-d): mapping `wyczerpany/przyszpilony/ufortyfikowany/aktywowany` → effect codes. Usunięte: pkt 22.b.iii (blokada aktywnych/aur), pkt 22.b.iv (+1 test), pkt 22.c.ii (−1 test). Dodane: pkt 22.b.iii+22.c.iv mutex (oba odrzucane).
-- [ ] `tables.yaml`: nowa sekcja `aura_order_formula`: `T_eff_factor = 4/3`, `T_eff_clamp = [8, 24]`, formuły `cost.aura = bazowy * T_eff`, `cost.aura_12 = bazowy * (T_eff + 8)`, `cost.order = bazowy * (T_eff + 2)`.
-- [ ] Update `app/services/rulesets/models.py` — Pydantic models dla nowych sekcji (`LocationKind`, `StatusFlag`, `AuraOrderFormula`).
-- [ ] Testy: `tests/test_tables_migration.py` rozszerzony o 3 nowe sekcje (location/status/aura formula).
+- [x] `tables.yaml`: sekcja `locations: [zaplecze, front, wycofany, eliminowany]` per pkt 26.a-d.
+- [x] `tables.yaml`: sekcja `status_flags` uproszczona (pkt 22 nowe) + mutex Przyszpilony↔Ufortyfikowany.
+- [x] `tables.yaml`: sekcja `aura_order_formula` (T_eff = clamp(4/3*T, 8, 24), formuły aura/aura_12/order).
+- [x] `app/services/rulesets/models.py` — `LocationKind`, `StatusFlagSpec`, `AuraOrderFormula` Pydantic (extra='allow').
+- [x] Testy: `tests/test_tables_migration.py` rozszerzony o 3 nowe sekcje.
 
-### Faza R2 — `abilities.yaml`: czyszczenie aura/rozkaz pól (77 abilities)
+### Faza R2 — 5 abilities sync (opis) — **DONE 2026-06-04** (commit `549476d`)
 
-- [ ] Skrypt `scripts/_yaml_strip_aura_rozkaz.py` (helper, internal) — jednorazowy: usuwa `cost.aura` i `cost.rozkaz` z wszystkich entries gdzie obecne (NIE z Klątwa/Rozkaz/Oznaczenie — tam `cost.bazowy` jest sama formuła; ich update w R4).
-- [ ] Update test `tests/test_abilities_migration.py` — assertion że `cost` ma tylko `bazowy` + opcjonalnie `tabela_*` dla weapons. (Procedural oracle w `app/data/abilities.py` — po main update — już zsynchronizowany).
-- [ ] Drift run sanity — R2 powinno spadać do ~8 (tylko abilities z R3 wording).
+- [x] Bohater: opis update (przeciwnik wybiera obronę, nie przywracany).
+- [x] Harcownik: 'Przed Leczeniem' (zamiast 'Przed przegrupowaniem').
+- [x] Nieustraszony: 'Nie testuje gdy >50% wytrzymałości'.
+- [x] Dywersant: PRZEPISANY opis + cost recipe (0 gdy !aura, 3.25 stałe gdy aura) + weapon mult ×1.2 w `cost_functions.py`.
+- [x] Zemsta: 'Nie przydzielaj ran od razu, tylko przed Leczeniem'.
+- [x] `ability_costs.yaml`: dywersant recipe zaktualizowany.
+- **Uwaga:** "strip aura/rozkaz" ze wszystkich 77 abilities nie był potrzebny — `abilities.yaml` nigdy nie miał `cost:` sekcji (koszty są w `ability_costs.yaml`).
 
-### Faza R3 — `ability_costs.yaml` + `cost_functions`: T_eff formula
+### Faza R3 — T_eff formula w `cost_functions` + handlers — **DONE 2026-06-04** (commit `fb0ffa9`)
 
-- [ ] `app/services/rulesets/cost_functions.py`: 3 nowe funkcje:
-    - `aura_cost(bazowy: Decimal, T: int, *, with_range: bool=False) -> Decimal` — używa formuły z `tables.yaml`
-    - `order_cost(bazowy: Decimal, T: int) -> Decimal` — używa T_eff+2
-    - `t_eff(T: int) -> int` — helper `int(clamp(4/3*T, 8, 24))` (półzaokrąglenie do dyskutowania — patrz H1 poniżej)
-- [ ] `app/services/rulesets/dispatcher.py` — register w `_REGISTRY`.
-- [ ] `app/services/rulesets/handlers.py` — handler `aura` przepisany na `aura_cost(recipe.bazowy, T_carrier)`, `order_like` na `order_cost(recipe.bazowy, T_carrier)`.
-- [ ] `ability_costs.yaml` — usunąć stałe wartości aury/rozkazu z 33 entries; dla każdej ability z `aura_tak: true` lub `rozkaz_tak: true` recipe = nowa formuła.
-- [ ] Update `OPR_RULES_BACKEND=both_assert pytest tests/test_ruleset_parity.py` — musi przejść 156/156 po update procedural side (na main już zsynchronizowane).
-- [ ] Update `OPR_RULES_BACKEND=yaml pytest tests/yaml_backend/` — 93/93.
-- [ ] Testy: `tests/test_cost_functions.py` rozszerzony (T_eff edge cases: T=3 → 8 clamp, T=24 → 24 clamp, T=10 → 13).
+- [x] `cost_functions.py`: `t_eff(tables, carrier_tou, *, extra)` → clamp(4/3*T, 8, 24); `aura_range_bonus(tables)`; `order_bonus(tables)`.
+- [x] `handlers.py`: `_aura_cost` używa `t_eff` zamiast stałej `inner_tou=8`; `_order_like_cost` używa `t_eff(+2)` zamiast `inner_tou=10`.
+- [x] Testy: 6 nowych w `tests/test_cost_functions.py` (T_eff boundary, none, extra).
+- [x] Weryfikacja: pytest 1391/1391, parity 156/156, yaml 93/93, smoke GATE EXIT 0.
+- **Uwaga H1 rozwiązana:** `t_eff` zwraca float (clamp bez floor) — backward compat z defaultami 6→8/10.
 
-### Faza R4 — 8 abilities przepisanych
+### Faza R4 — 8 abilities przepisanych (engine-side częściowo defer)
 
-- [ ] **Bohater** (id 2): dodać efekt "stale (gdy oddział z >1 profilem) — przeciwnik wybiera obronę"; dodać "Odzyskiwanie — nie przywracany"; ujednolicić opis z nowym driftem. Engine: flag `cannot_be_revived` w `state.UnitBlob` per-model dla bohatera; `_apply_heal_revive` skip jeśli flag set.
-- [ ] **Dywersant** (id 6): PRZEPISANY. Effect = przy ataku jeśli atakujący bliżej strefy rozstawienia przeciwnika niż cel → przeciwnik wybiera (×2 ataki LUB Przyszpilony cel). YAML cost: `bazowy: 3.25 / pkt wytrzymałości` + `weapon_modifier: x1.2`. Engine: `effects.py` nowy interrupt point `before_hit_rolls`, dispatcher z opcją wyboru (deterministic policy w MVP: przeciwnik wybiera "tańszą" — heurystyka udokumentowana w ADR-0048).
-- [ ] **Harcownik** (id 8): zmiana `kiedy` z "przed Przegrupowaniem (pkt 11.b.iv)" na "przed Leczeniem (pkt 11.b.v, pkt 21)". Engine: hook przeniesiony.
-- [ ] **Nieustraszony** (id 16): nowa logika — `co: oddział nie wykonuje testu z pkt 20.a gdy oddział >50% wytrzymałości`. YAML: nowe efekty + cost `bazowy: 1.5 / pkt wytrzymałości` + tabela mnożnik 0.5. Engine: `_regroup_test` consult `effects.has_nieustraszony(blob) and blob_above_half(blob)` → skip 20.a.
-- [ ] **Zemsta** (id 41): przesunięty trigger "przed Leczeniem" (pkt 11.b.v). Engine: dispatcher już ma faza Leczenia — dodać wound deferred allocation.
-- [ ] **Zguba** (broń, id 76): licznik `wounds_zguba_per_victim: dict[unit_id, int]` w `UnitBlob` lub `BattleState` (decyzja w ADR-0048). Eliminowany dispatch w `state.py` lokalizacja enum. Healing limit redukowany o licznik. Modele pokonane przez pierwsze N ran → Eliminowany.
-- [ ] **Klątwa(X) / Rozkaz(X) / Oznaczenie(X)** (id 45/49/50): walidacja X musi mieć `rozkaz_tak: true` w `abilities.yaml`. Wycena: `bazowy(X) × (T_eff + 2)`. Engine: `effects.py` interrupt handler — wymaga lookup `abilities.get(X).rozkaz_tak` przed apply.
-- [ ] **Przewidywalny** (id 71): koszt `— → broń ×1.2`. Update `weapon_modifier` w `abilities.yaml` + tabela weapons.
-- [ ] Testy: 8 nowych unit testów (po 1 per ability) w `tests/test_passive_costs.py` + `tests/test_engine_effects.py` (dla effect mechanics).
+- [x] **Bohater** (id 2): opis zsynchronizowany (R2).
+- [x] **Dywersant** (id 6): opis + cost recipe zsynchronizowany (R2); weapon mult ×1.2 w cost_functions (R2).
+- [x] **Harcownik** (id 8): opis zsynchronizowany (R2).
+- [x] **Nieustraszony** (id 16): opis zsynchronizowany (R2).
+- [x] **Zemsta** (id 41): opis zsynchronizowany (R2).
+- [~] **rozkaz_tak field** — dodanie pola do `abilities.yaml` (88 abilities) + `RulesetAbility` Pydantic + test (2026-06-05).
+- [ ] **Klątwa(X) / Rozkaz(X) / Oznaczenie(X)** (id 45/49/50): engine interrupt handler + walidacja `rozkaz_tak` w effects.py (po R5).
+- [ ] **Zguba** (broń, id 76): licznik `wounds_zguba_per_victim` w UnitBlob + Eliminowany dispatch (deferred — potrzeba R5.a Lokalizacja).
+- [ ] **Dywersant** engine policy: `before_hit_rolls` interrupt + deterministic Przyszpilony (deferred — wymaga R5 interrupt framework).
+- [ ] **Przewidywalny** (id 71): cost ×1.2 już w cost_functions.py (done); YAML metadata `rozkaz_tak: false` — objęte przez rozkaz_tak field update.
 
 ### Faza R5 — Engine: pkt 11 + 14.d.iv + 20 + 21 + 26 + 27
 
 #### R5.a — Lokalizacja enum
-- [ ] `app/services/engine/state.py`: dodać `class Lokalizacja(str, Enum): ZAPLECZE / FRONT / WYCOFANY / ELIMINOWANY`. `UnitBlob.location: Lokalizacja = Lokalizacja.ZAPLECZE` (default). `build_initial_state`: domyślnie ustawia `FRONT` dla rozstawionych w setup, `ZAPLECZE` dla rezerw (Zasadzka/Rezerwa).
-- [ ] `setup_phase`/`deployment_round` — przejście ZAPLECZE → FRONT po deploy.
-- [ ] `combat._allocate_wounds_to_defender` (lub apply_events ModelKilled reducer) — model `WYCOFANY` (default) lub `ELIMINOWANY` (gdy zabity bronią Zguba). Cały oddział `WYCOFANY` gdy `models_alive == 0`.
-- [ ] `effects._apply_heal_revive` — może przywrócić tylko WYCOFANY, nie ELIMINOWANY (pkt 27.c).
-- [ ] Reducer w `reducers.py` dla `ModelKilled` rozszerzony o `location` discrimination.
+- [~] `app/services/engine/state.py`: dodać `class Lokalizacja(str, Enum): ZAPLECZE / FRONT / WYCOFANY / ELIMINOWANY`. `UnitBlob.location: Lokalizacja = Lokalizacja.FRONT` (default dla rozstawionych). `build_initial_state` ustawia FRONT dla normalnych; ZAPLECZE gdy slug 'zasadzka'/'rezerwa'. (2026-06-05)
+- [ ] `combat._allocate_wounds_to_defender` (lub apply_events ModelKilled reducer) — cały oddział `WYCOFANY` gdy `models_alive == 0`.
+- [ ] `effects._apply_heal_revive` — może przywrócić tylko WYCOFANY, nie ELIMINOWANY (pkt 27.c). (po R4.Zguba)
+- [ ] Reducer w `reducers.py` dla `ModelKilled` rozszerzony o `location`. (po R4.Zguba)
 - [ ] Testy: `tests/test_engine_state.py` Lokalizacja enum + transitions.
 
 #### R5.b — Pkt 11.b: Przegrupowanie per-action + Manewr-free + akcja-różna
@@ -125,8 +125,8 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [ ] Testy: `test_engine_phases.py` — scenariusze 2× Manewr+Szarża+Manewr (legal: Szarża+Manewry); 2× Szarża (illegal — to samo); Niestrudzony 2× Szarża (legal).
 
 #### R5.c — Pkt 14.d.iv: kontratak conditional Wyczerpany
-- [ ] `combat.resolve_charge_attack`: po kontrataku check `charger.models_alive == 0` → defender NIE emituje `StatusAdded(Wyczerpany)`. Pre-fix B3.9.d zawsze emit.
-- [ ] Testy: `test_engine_combat.py` 2 nowe — counter kills charger, defender no Wyczerpany; counter nie kills charger, defender Wyczerpany.
+- [~] `combat.resolve_charge_attack`: po kontrataku check `charger.models_alive == 0` → defender NIE emituje `StatusAdded(Wyczerpany)`. (2026-06-05)
+- [~] Testy: `test_engine_combat.py` 2 nowe — counter kills charger, defender no Wyczerpany; counter nie kills charger, defender Wyczerpany. (2026-06-05)
 
 #### R5.d — Pkt 20.a/b/c/f: Przegrupowanie nowe warunki
 - [ ] `phases._regroup_test`: 20.a trigger = `context.wounds_dealt(actor_id) < context.wounds_received(actor_id)` (zamiast `delta > 0`).
@@ -143,8 +143,8 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [ ] Testy: 4 testy mutex w `tests/test_engine_status.py`.
 
 #### R5.f — Pkt 13.c: Ufortyfikowany przy rozstawieniu
-- [ ] `phases.deployment_round`: emit `StatusAdded(Ufortyfikowany)` + `StatusAdded(Aktywowany)` (poprzednio tylko Aktywowany).
-- [ ] Testy: `test_engine_phases.py` deployment scenario.
+- [~] `phases.deployment_round`: emit `StatusAdded(Ufortyfikowany)` + `StatusAdded(Aktywowany)` (poprzednio tylko Aktywowany). (2026-06-05)
+- [~] Testy: `test_engine_phases.py` deployment scenario. (2026-06-05)
 
 #### R5.g — Pkt 4.c.v: Niebezpieczny per-oddział
 - [ ] `combat.py` (lub `phases.py` po Manewr) — Niebezpieczny test = rzut `models_alive * toughness_per_model` k6, każda 1 → rana (już per-oddział? sprawdzić). Pre-drift: per-model. Decyzja: refactor jeśli per-model.
@@ -229,3 +229,4 @@ python -m pytest tests/test_engine_phases.py tests/test_engine_combat.py tests/t
 - 2026-06-03: HANDOFF utworzony. Baseline: pytest 1375 passed / 10 failed (failures = oczekiwany drift YAML vs procedural po merge `b8481d5`).
 - 2026-06-03: Pliki driftu pomocnicze (nie commitowane, untracked): `_drift_rozjemca.diff` (150 linii), `_drift_zdolnosci.diff` (894 linii) — używać jako wejście do klasyfikacji R0/R4.
 - 2026-06-03: **Drift summary** zachowane w głównym kontekście sesji startowej (przed R0). Najważniejsze zmiany rdzenia (pkt 11/20/21/22/26/27) + 8 abilities przepisanych + formuła T_eff (Aura/Rozkaz/Klątwa/Oznaczenie).
+- 2026-06-04: **R4 cost-side closed bez kodu.** Audyt 3 abilities z planu R4 (Przewidywalny, Klątwa/Rozkaz/Oznaczenie, Zguba) — wszystkie cost-side już zaimplementowane: Przewidywalny `mult *= 1.2` (procedural `weapons.py:188` + YAML mirror `cost_functions.py:511`), Klątwa/Rozkaz/Oznaczenie `_order_like_cost` z T_eff (R3 commit `fb0ffa9` handlers.py:187), Zguba `mult *= 1.05` (oba mirror). Brak entry w `ability_costs.yaml` dla Przewidywalny jest poprawne — to weapon-multiplier, nie samodzielna recipe. Engine-side dla wszystkich 3 (cannot_be_revived flag, rozkaz_tak validation runtime, wounds_zguba per-victim + ELIMINOWANY dispatch) odłożone do R5 — Klątwa/Rozkaz/Oznaczenie nadal w `INCOMPLETE_ABILITIES` stubs (B3.9.e), Zguba wymaga R5.a (Lokalizacja enum) jako prereq. **R4.W weryfikacja:** pytest 1391/1391 + parity both_assert 156/156 + yaml 93/93. **Następne:** R5 (engine semantics) wymaga konsultacji H2 (mutex Przyszpilony↔Ufortyfikowany — producer vs reducer), H3 (Dywersant policy — rekomendacja: zawsze Przyszpilony), H5 (Zguba licznik per-blob vs state-global) PRZED implementacją — to decyzje projektowe wpływające na 5+ modułów engine.

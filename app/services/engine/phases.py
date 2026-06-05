@@ -250,6 +250,23 @@ def deployment_round(
         moved = replace(blob, position=action.position)
         current = _replace_blob(current, moved)
 
+    # R5.f pkt 13.c (faza-b-rules-resync 2026-06): KAŻDY rozstawiony oddział
+    # (niezależnie czy explicit DeploymentAction wykonana) zyskuje Ufortyfikowany
+    # na początek rundy 1. Persists do startu własnej aktywacji (CR-fix G:
+    # pkt 22.c.iv usuwa na początku aktywacji actor-a).
+    for b in current.blobs:
+        if b.models_alive > 0 and STATUS_UFORTYFIKOWANY not in b.status_flags:
+            new_b = _add_status(b, STATUS_UFORTYFIKOWANY)
+            current = _replace_blob(current, new_b)
+            events.append(
+                StatusAdded(
+                    sequence=seq,
+                    target_id=b.id,
+                    status=STATUS_UFORTYFIKOWANY,
+                )
+            )
+            seq += 1
+
     # Po deployment: round = 1, status Aktywowany resetowany przed pierwszą rundą
     reset_blobs = tuple(_remove_status(b, STATUS_AKTYWOWANY) for b in current.blobs)
     current = replace(current, blobs=reset_blobs, round=1)
@@ -452,12 +469,12 @@ def _regroup_test(
         n_tests -= 1
     elif blob.melee_balance < 0:
         n_tests += 1
-    # Pkt 20.d: status modifiers
-    if STATUS_PRZYSZPILONY in blob.status_flags:
-        n_tests += 1
-    if STATUS_UFORTYFIKOWANY in blob.status_flags:
-        n_tests -= 1
-    # Passive morale modifiers (Nieustraszony -1 etc.)
+    # R5.c (faza-b-rules-resync 2026-06): pkt 20.d **status modifiers usunięte**
+    # per drift — pkt 22.b.iv (Przyszpilony +1 test) i pkt 22.c.ii (Ufortyfikowany
+    # -1 test) **usunięte** z zasad. Status flags pozostają (informacja o stanie),
+    # ale nie wpływają na liczbę testów.
+    # Passive morale modifiers (Nieustraszony -1 etc.) — pozostają (pkt 20.d
+    # poprzez pasywne zdolności, nie statusy).
     n_tests += aggregate_morale_modifier(EffectContext(blob=blob))
     n_tests = max(0, n_tests)
 

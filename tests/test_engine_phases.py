@@ -137,6 +137,47 @@ def test_deployment_round_resets_activated_status():
         assert STATUS_AKTYWOWANY not in b.status_flags
 
 
+def test_deployment_round_adds_ufortyfikowany_to_deployed_units():
+    """R5.f pkt 13.c (2026-06): każdy rozstawiony oddział dostaje Ufortyfikowany
+    na start rundy 1. StatusAdded(Ufortyfikowany) musi być w events."""
+    from app.services.engine.events import StatusAdded
+
+    rosters = [make_roster(0, [make_unit(1)]), make_roster(1, [make_unit(2)])]
+    state = setup_phase(rosters)
+    actions = [DeploymentAction(unit_id=1, position=Position(5, 0))]
+    new_state, events = deployment_round(state, actions)
+
+    # Deployed unit (1) ma Ufortyfikowany w final state
+    blob1 = next(b for b in new_state.blobs if b.id == 1)
+    assert STATUS_UFORTYFIKOWANY in blob1.status_flags
+
+    # StatusAdded(Ufortyfikowany) jest w event stream
+    ufort_events = [
+        e for e in events
+        if isinstance(e, StatusAdded) and e.status == STATUS_UFORTYFIKOWANY
+    ]
+    assert any(e.target_id == 1 for e in ufort_events)
+
+
+def test_deployment_round_ufortyfikowany_persists_after_round_start():
+    """R5.f: Ufortyfikowany z deployment nie jest resetowany na początku rundy 1.
+    Zostaje usunięty dopiero gdy oddział się aktywuje (CR-fix G)."""
+    rosters = [make_roster(0, [make_unit(1)]), make_roster(1, [make_unit(2, x=20)])]
+    state = setup_phase(rosters)
+    actions = [DeploymentAction(unit_id=1, position=Position(5, 0))]
+    state, _ = deployment_round(state, actions)
+    blob1_before = next(b for b in state.blobs if b.id == 1)
+    assert STATUS_UFORTYFIKOWANY in blob1_before.status_flags
+
+    # Aktywacja usuwa Ufortyfikowany (CR-fix G: pkt 22.c.iv)
+    from app.services.engine.actions import ManeuverAction
+
+    action = ManeuverAction(unit_id=1, target_position=Position(8, 0))
+    new_state, _ = activation_phase(state, action, DeterministicDice(42))
+    blob1_after = next(b for b in new_state.blobs if b.id == 1)
+    assert STATUS_UFORTYFIKOWANY not in blob1_after.status_flags
+
+
 # ---------------------------------------------------------------------------
 # activation_phase — actions
 # ---------------------------------------------------------------------------

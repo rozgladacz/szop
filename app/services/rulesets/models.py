@@ -136,6 +136,9 @@ class RulesetAbility(BaseModel):
 
     Pola opcjonalne (`value_label`, `value_type`, `value_choices`) zachowują
     None gdy abilities nie wymagają parametru (jak procedural).
+
+    `rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X)/Klątwa(X)/
+    Oznaczenie(X). Tylko passive abilities mają to pole. None = nieznane/false.
     """
 
     model_config = _FrozenConfig
@@ -147,6 +150,7 @@ class RulesetAbility(BaseModel):
     value_label: str | None = None
     value_type: Literal["number", "text"] | None = None
     value_choices: tuple[str, ...] | None = None
+    rozkaz_tak: bool | None = None
 
 
 class CostRecipeSpec(BaseModel):

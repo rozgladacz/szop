@@ -850,3 +850,51 @@ def test_podwojny_no_natural_6_no_extra_hits():
 
     shot = next(e for e in result.events if isinstance(e, ShotResolved))
     assert shot.hits == 0
+
+
+# ---------------------------------------------------------------------------
+# R5.c (2026-06) — kontratak conditional Wyczerpany (pkt 14.d.iv)
+# ---------------------------------------------------------------------------
+
+
+def test_charge_counter_kills_charger_defender_not_exhausted():
+    """Pkt 14.d.iv R5.c: jeśli kontratak pokonuje szarżującego → obrońca NIE
+    staje się Wyczerpany.
+
+    Setup: charger 1 model defense=6, defender weapon z Brutalny (5 ataków
+    Q3) → natural_6_auto_success=False na obronie → charger nie może się
+    obronić → models_alive=0 po kontrataku.
+    """
+    state = make_state()
+    charger = make_blob(1, x=0, models=1, defense=6, toughness=1)
+    brutalny_weapon = WeaponProfile(
+        slug="bw", name="BW", range_inches=0, attacks=5,
+        weapon_abilities=(ABILITY_BRUTALNY,),
+    )
+    from dataclasses import replace as _replace
+
+    defender_with_weapon = _replace(
+        make_blob(2, x=10, models=3, quality=3),
+        melee_weapons=(brutalny_weapon,),
+    )
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender_with_weapon, weapon, DeterministicDice(42), sequence=1
+    )
+    assert result.new_charger.models_alive == 0, "charger powinien być pokonany"
+    assert STATUS_WYCZERPANY not in result.new_defender.status_flags
+
+
+def test_charge_counter_does_not_kill_charger_defender_becomes_exhausted():
+    """Pkt 14.d.iv R5.c (kontrast): kontratak NIE pokonuje szarżującego →
+    obrońca dostaje Wyczerpany (standard B3.9.d).
+    """
+    state = make_state()
+    charger = make_blob(1, x=0, models=10, quality=3)
+    defender = make_blob(2, x=10, models=10, defense=4)
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
+    result = resolve_charge_attack(
+        state, charger, defender, weapon, DeterministicDice(42), sequence=1
+    )
+    assert result.new_charger.models_alive > 0, "charger nie powinien być pokonany"
+    assert STATUS_WYCZERPANY in result.new_defender.status_flags
