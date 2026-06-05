@@ -1,9 +1,9 @@
 # HANDOFF — faza-b-rules-resync
 
 > **Wątek:** Synchronizacja YAML SSOT + engine z nowymi wersjami zasad (SZOP_Rozjemca.md + SZOP_Zdolnosci.md po 2026-06-03 drift) — Przegrupowanie per-action, Leczenie EOA, formuła T_eff dla aur/rozkazów, Lokalizacja enum, 8 zdolności przepisanych.
-> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + R5.a ✅ + R5.c ✅ + R5.f ✅; R4.Zguba/Dywersant + R5.b/d/e/g + R6/R7 pozostałe)
+> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + R5.a/c/d/e/f/g ✅; R4.Zguba+Dywersant → INCOMPLETE_ABILITIES defer; **R5.b** + R6/R7/RW pozostałe)
 > **Utworzony:** 2026-06-03
-> **Ostatnia aktualizacja:** 2026-06-05 (commit `41d2a8a`)
+> **Ostatnia aktualizacja:** 2026-06-05 (R5.e MutexCollision — autopilot Opus 4.8)
 
 ## Cel
 
@@ -102,8 +102,8 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [x] **Zemsta** (id 41): opis zsynchronizowany (R2).
 - [x] **rozkaz_tak field** — dodane do `abilities.yaml` (88 abilities: 30 true, 58 false per SZOP_Zdolnosci.md) + `RulesetAbility Pydantic` + 4 testy w `test_engine_state.py` (commit `41d2a8a`).
 - [ ] **Klątwa(X) / Rozkaz(X) / Oznaczenie(X)** (id 45/49/50): engine interrupt handler + walidacja `rozkaz_tak` w effects.py (po R5).
-- [ ] **Zguba** (broń, id 76): licznik `wounds_zguba_per_victim` w UnitBlob + Eliminowany dispatch (deferred — potrzeba R5.a Lokalizacja).
-- [ ] **Dywersant** engine policy: `before_hit_rolls` interrupt + deterministic Przyszpilony (deferred — wymaga R5 interrupt framework).
+- [ ] **Zguba** (broń, id 76): licznik `wounds_zguba_per_victim` w UnitBlob + Eliminowany dispatch (wymaga R5.a Lokalizacja + ADR-y dla 5-kategorii wounds repr).
+- [!] **Dywersant** engine policy: `before_hit_rolls` interrupt + deterministic Przyszpilony (deferred do post-MVP backlog — wymaga R5 interrupt framework + policy decision).
 - [ ] **Przewidywalny** (id 71): cost ×1.2 już w cost_functions.py (done); YAML metadata `rozkaz_tak: false` — objęte przez rozkaz_tak field update.
 
 ### Faza R5 — Engine: pkt 11 + 14.d.iv + 20 + 21 + 26 + 27
@@ -125,27 +125,26 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [x] `combat.resolve_charge_attack`: `charger_after_counter.models_alive > 0` guard przed Wyczerpany emit dla defendera. 2 testy (commit `41d2a8a`).
 - [x] Testy: `test_engine_combat.py` — `test_charge_counter_kills_charger_defender_not_exhausted` + `test_charge_counter_does_not_kill_charger_defender_becomes_exhausted`.
 
-#### R5.d — Pkt 20.a/b/c/f: Przegrupowanie nowe warunki
-- [ ] `phases._regroup_test`: 20.a trigger = `context.wounds_dealt(actor_id) < context.wounds_received(actor_id)` (zamiast `delta > 0`).
-- [ ] 20.b: NIE-powyżej-połowy → +1 test. `initial_toughness_for(state, actor_id)` dzielić przez 2.
-- [ ] 20.c: walczył wręcz (szarża LUB kontratak w tej akcji) → +1 test. Wykryć via `melee_combatants` i typ akcji.
-- [ ] 20.f.i: jedna porażka → tylko `Wyczerpany` (poprzednio: Wyczerpany LUB Przyszpilony). Drop branch.
-- [ ] Brak modyfikatorów ze stanów (pkt 20.d uproszczony) — tylko ze zdolności pasywnych (Nieustraszony już w R4).
-- [ ] Testy: `test_engine_activation_context.py` — przepisać tests z buggy expected (legacy 22.b.iv +1 test, 22.c.ii −1 test, 20.a "otrzymał rany").
+#### R5.d — Pkt 20.a/b/c/f: Przegrupowanie nowe warunki — **DONE 2026-06-05** (commit `ee8975f`)
+- [x] `phases._regroup_test`: 20.a trigger = `delta_received > delta_dealt` (via `ActivationContext.dealt_for`/`delta_for`, agregacja z ShotResolved/MeleeResolved).
+- [x] 20.b: NIE-powyżej-połowy → +1 test (`initial_toughness_for` ÷2, fallback dla fixtures).
+- [x] 20.c: walczył wręcz → +1 test (`blob_id in melee_combatants`, drop melee_balance differentiation).
+- [x] 20.f/20.d: modyfikatory ze statusów usunięte (R5.c); tylko passive (Nieustraszony).
+- [x] Testy: `test_engine_activation_context.py` przepisane + `test_bug2_charge_defender_regroups_in_charger_activation` pod nowy trigger.
 
-#### R5.e — Pkt 22.b/c: status simplification + mutex
-- [ ] `status.py`: helper `apply_pinning_fortified_mutex(blob)` — jeśli oba flag → remove oba.
-- [ ] Usunięte semantyki pkt 22.b.iii (blokada aktywnych/aur), 22.b.iv (+1 test), 22.c.ii (−1 test) — z effects.py (jeśli były); szukać `if STATUS_PRZYSZPILONY in flags` w effects/dispatch.
-- [ ] Reducer `StatusAdded(Przyszpilony)` consults blob — jeśli ma `Ufortyfikowany` → emit dodatkowo `StatusRemoved(Przyszpilony)+StatusRemoved(Ufortyfikowany)` w resolver pipeline. Decyzja: czy mutex w reducer (deterministic) czy w producer (combat/phases). Patrz H2.
-- [ ] Testy: 4 testy mutex w `tests/test_engine_status.py`.
+#### R5.e — Pkt 22.b/c: status simplification + mutex — **DONE 2026-06-05** (autopilot Opus 4.8)
+- [x] **Implementacja wg H2 opcja (c)** (nie pierwotny szkic `status.py` helper): NOWY event `MutexCollision(target_id, dropped_statuses)` (14ty unikalny typ w `_EVENT_REGISTRY`) + reducer `_reduce_mutex_collision` + producer `phases._apply_mutex_collisions(state, candidate_ids, seq)`.
+- [x] Pipeline: producer w `activation_phase` PO pętli Przegrupowania skanuje `regroup_subjects` (jedyne miejsce dodania Przyszpilony) → gdy blob ma Przyszpilony+Ufortyfikowany emit `MutexCollision` + mutacja live state; reducer aplikuje removal obu na replay. Generyczny `dropped_statuses: tuple[str,...]` (zawsze `(Przyszpilony, Ufortyfikowany)` w MVP).
+- [x] Usunięte semantyki pkt 22.b.iv (+1 test)/22.c.ii (−1 test) — już usunięte w R5.c (`_regroup_test` komentarz). 22.b.iii brak w effects.py (sprawdzone: linia 202-203 to legalny semantyk Tarczy id 34, nie blokada).
+- [x] Testy: 7 testów mutex w `tests/test_engine_status.py` (producer both-flags/preserve-other/noop×4/reducer/idempotent/producer-reducer-parity), 1 round-trip w `test_engine_events.py`, 2 integracyjne property-based w `test_engine_phases.py` (charge defender invariant ∀ seed + branch-fires + replay invariant). +12 testów.
 
 #### R5.f — Pkt 13.c: Ufortyfikowany przy rozstawieniu
 - [x] `phases.deployment_round`: emit `StatusAdded(Ufortyfikowany)` dla każdego DeploymentAction. 3 testy (commit `41d2a8a`).
 - [x] Testy: `test_engine_phases.py` — adds_ufortyfikowany, StatusAdded in events, aktywacja usuwa (CR-fix G weryfikacja).
 
-#### R5.g — Pkt 4.c.v: Niebezpieczny per-oddział
-- [ ] `combat.py` (lub `phases.py` po Manewr) — Niebezpieczny test = rzut `models_alive * toughness_per_model` k6, każda 1 → rana (już per-oddział? sprawdzić). Pre-drift: per-model. Decyzja: refactor jeśli per-model.
-- [ ] Testy: jeśli pre-fix per-model — przepisać.
+#### R5.g — Pkt 4.c.v: Niebezpieczny per-oddział — **DONE 2026-06-05** (commit `203daac`)
+- [x] `phases._apply_maneuver`: Niebezpieczny test per-unit = rzut `models_alive * toughness_per_model` k6, każda 1 → rana → `wounds_received`. Helper `_blob_inside_terrain_circle`. EffectApplied(niebezpieczny).
+- [x] Testy: 2 w `test_engine_phases.py` (inflicts_wounds w terenie, no-event poza terenem).
 
 ### Faza R6 — Drift gate + parity gate + smoke replay verify
 
@@ -225,8 +224,13 @@ python -m pytest tests/test_engine_phases.py tests/test_engine_combat.py tests/t
 - 2026-06-05 **H3 (Dywersant policy) DEFERRED** (user decision): Dywersant (id 6) engine-side **odsunięty do późniejszej implementacji**. Cost-side już done (R2 commit `549476d`); engine-side stub w `effects.INCOMPLETE_ABILITIES`. Polityka deterministyczna wyboru (×2 ataki vs Przyszpilony) zostaje otwarta dla przyszłego ADR — to nie blocker dla MVP.
 - 2026-06-05 **H5 (Zguba counter location) DEFERRED** (user decision): Zguba (id 76) engine-side **odsunięte do późniejszej implementacji**. Cost-side już done; engine-side TODO. Docelowo Zguba wymaga **refactor `UnitBlob` wounds repr na 5 kategorii**: precyzyjne / zwykłe / permanentne / bilans wręcz / stare. Obecny 4-kategoriowy ADR-0014 (`wounds_received`/`wounds_pending`/`wounds_pending_precise`/`melee_balance`) jest niewystarczający. **Follow-up ADR** wymagany przed implementacją Zguby + healing limit + ELIMINOWANY dispatch. Add slug do `effects.INCOMPLETE_ABILITIES`.
 - 2026-06-05 **R5 workflow** (user decision): sub-fazy R5.a–g osobnymi commitami (~5-7 commitów). Powód: bezpieczniejsze dla replay invariant GATE — łatwo localize regresję jeśli któraś faza zerwie. Inny commit per logical group: state-fields / flow-control / abilities.
+- 2026-06-05 (tej sesji) **Zguba prioritization** (user decision): Zguba (id 76) **realizujemy w bieżącej fazie R5** (po R5.a Lokalizacja enum). Engine-side wymaga `wounds_zguba_per_victim` field + Eliminowany dispatch + healing limit. H5 → active (była deferred).
+- 2026-06-05 (tej sesji) **Dywersant deferral** (user decision): Dywersant (id 6) engine-side **odsunięty do post-MVP backlog**. Cost-side już done (R2); engine-side stub w `effects.INCOMPLETE_ABILITIES`. Polityka deterministyczna (×2 ataki vs Przyszpilony) czeka na ADR w przyszłości.
 
 ## Notatki / odkrycia w trakcie
+
+- 2026-06-05 (autopilot Opus 4.8): **R5.e DONE** — mutex Przyszpilony↔Ufortyfikowany (pkt 22.b/c) wg decyzji H2 opcja (c). NOWY event `MutexCollision(target_id, dropped_statuses)` (14ty unikalny typ w `_EVENT_REGISTRY`) + reducer `_reduce_mutex_collision` (reducers.py) + producer `_apply_mutex_collisions` w `phases.activation_phase` (skanuje `regroup_subjects` po Przegrupowaniu — jedyne miejsce dodania Przyszpilony). Pliki: `events.py`, `reducers.py`, `phases.py`, `tests/test_engine_{status,events,phases}.py`. **Weryfikacja:** pytest **1419/1419** (+12); parity both_assert 156/156 + yaml 93/93; smoke replay 48 events EXIT 0 (replay invariant OK). Jedyne miejsce kolizji: defender szarży rozstawiony z Ufortyfikowany (R5.f) który zyskuje Przyszpilony przy 2 porażkach Przegrupowania w aktywacji chargera — testy integracyjne property-based ∀ seed (invariant: żaden blob nie ma obu) + branch-fires. `/simplify`: 1 cleanup (redundant `sorted()` w call-site, helper i tak sortuje). **Pozostaje:** R5.b (Manewr-free + akcja-różna + limit 2 akcji — najbardziej złożone), R6 (drift+parity verify), R7 (ADR-0048 + docs), RW final.
+- **UWAGA (korekta 2026-06-05):** dopisek z poprzedniej sesji "Zguba prioritization → realizujemy w R5" jest **nieaktualny** — commit `ee8975f` (R5.x) ostatecznie odłożył ZARÓWNO Zgubę JAK I Dywersanta do `effects.INCOMPLETE_ABILITIES` (8 stubów). Patrz decyzja H5 DEFERRED powyżej. Zguba wymaga refactor `UnitBlob` wounds repr na 5 kategorii (follow-up ADR) przed implementacją.
 
 - 2026-06-03: HANDOFF utworzony. Baseline: pytest 1375 passed / 10 failed (failures = oczekiwany drift YAML vs procedural po merge `b8481d5`).
 - 2026-06-03: Pliki driftu pomocnicze (nie commitowane, untracked): `_drift_rozjemca.diff` (150 linii), `_drift_zdolnosci.diff` (894 linii) — używać jako wejście do klasyfikacji R0/R4.

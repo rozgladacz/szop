@@ -213,3 +213,126 @@ def test_combat_module_reexports_status_wyczerpany():
     from app.services.engine import combat
 
     assert combat.STATUS_WYCZERPANY is STATUS_WYCZERPANY
+
+
+# ---------------------------------------------------------------------------
+# R5.e (resync 2026-06) — mutex Przyszpilony↔Ufortyfikowany (pkt 22.b/c)
+# ---------------------------------------------------------------------------
+
+
+def _state_with(blob: UnitBlob) -> "BattleState":
+    from app.services.engine.state import BattleState
+
+    return BattleState(
+        round=1,
+        active_player=0,
+        activations_remaining=(1, 1),
+        blobs=(blob,),
+        terrain=(),
+    )
+
+
+def test_mutex_drops_both_when_blob_has_both_flags():
+    """Oddział z Przyszpilony + Ufortyfikowany → oba odrzucone + MutexCollision."""
+    from app.services.engine.events import MutexCollision
+    from app.services.engine.phases import _apply_mutex_collisions
+
+    blob = _make_blob(status_flags=("Przyszpilony", "Ufortyfikowany"))
+    state = _state_with(blob)
+    new_state, events, next_seq = _apply_mutex_collisions(state, [1], sequence=5)
+
+    new_blob = next(b for b in new_state.blobs if b.id == 1)
+    assert STATUS_PRZYSZPILONY not in new_blob.status_flags
+    assert STATUS_UFORTYFIKOWANY not in new_blob.status_flags
+    assert len(events) == 1
+    assert isinstance(events[0], MutexCollision)
+    assert events[0].target_id == 1
+    assert events[0].sequence == 5
+    assert set(events[0].dropped_statuses) == {
+        STATUS_PRZYSZPILONY,
+        STATUS_UFORTYFIKOWANY,
+    }
+    assert next_seq == 6
+
+
+def test_mutex_preserves_other_flags():
+    """Mutex odrzuca tylko parę Przyszpilony/Ufortyfikowany — Aktywowany zostaje."""
+    from app.services.engine.phases import _apply_mutex_collisions
+
+    blob = _make_blob(
+        status_flags=("Aktywowany", "Przyszpilony", "Ufortyfikowany")
+    )
+    new_state, _events, _seq = _apply_mutex_collisions(_state_with(blob), [1], 1)
+    new_blob = next(b for b in new_state.blobs if b.id == 1)
+    assert STATUS_AKTYWOWANY in new_blob.status_flags
+    assert STATUS_PRZYSZPILONY not in new_blob.status_flags
+    assert STATUS_UFORTYFIKOWANY not in new_blob.status_flags
+
+
+@pytest.mark.parametrize(
+    "flags",
+    [
+        (),
+        ("Przyszpilony",),
+        ("Ufortyfikowany",),
+        ("Aktywowany", "Wyczerpany"),
+    ],
+)
+def test_mutex_noop_when_no_collision(flags: tuple[str, ...]):
+    """Brak współistnienia obu statusów → no-op (zero eventów, identyczny stan)."""
+    from app.services.engine.phases import _apply_mutex_collisions
+
+    blob = _make_blob(status_flags=flags)
+    new_state, events, next_seq = _apply_mutex_collisions(_state_with(blob), [1], 7)
+    new_blob = next(b for b in new_state.blobs if b.id == 1)
+    assert events == ()
+    assert next_seq == 7
+    assert new_blob.status_flags == flags
+
+
+def test_mutex_reducer_removes_both_via_apply_events():
+    """Reducer `MutexCollision` w `apply_events` odrzuca oba statusy (replay)."""
+    from app.services.engine.events import MutexCollision
+    from app.services.engine.state import apply_events
+
+    blob = _make_blob(status_flags=("Przyszpilony", "Ufortyfikowany"))
+    initial = _state_with(blob)
+    event = MutexCollision(
+        sequence=1,
+        target_id=1,
+        dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY),
+    )
+    replayed = apply_events(initial, [event])
+    new_blob = next(b for b in replayed.blobs if b.id == 1)
+    assert STATUS_PRZYSZPILONY not in new_blob.status_flags
+    assert STATUS_UFORTYFIKOWANY not in new_blob.status_flags
+
+
+def test_mutex_reducer_idempotent():
+    """Powtórna aplikacja MutexCollision daje ten sam stan (idempotencja)."""
+    from app.services.engine.events import MutexCollision
+    from app.services.engine.state import apply_events
+
+    blob = _make_blob(status_flags=("Aktywowany", "Przyszpilony", "Ufortyfikowany"))
+    initial = _state_with(blob)
+    event = MutexCollision(
+        sequence=1,
+        target_id=1,
+        dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY),
+    )
+    once = apply_events(initial, [event])
+    twice = apply_events(initial, [event, event])
+    assert once.blobs[0].status_flags == twice.blobs[0].status_flags
+
+
+def test_mutex_producer_reducer_parity():
+    """Producer (`_apply_mutex_collisions`) i reducer (`apply_events`) dają
+    identyczny stan dla tej samej kolizji — proof-of-completeness ADR-0046."""
+    from app.services.engine.phases import _apply_mutex_collisions
+    from app.services.engine.state import apply_events
+
+    blob = _make_blob(status_flags=("Przyszpilony", "Ufortyfikowany"))
+    initial = _state_with(blob)
+    live_state, events, _seq = _apply_mutex_collisions(initial, [1], 1)
+    replayed = apply_events(initial, list(events))
+    assert live_state.blobs[0].status_flags == replayed.blobs[0].status_flags

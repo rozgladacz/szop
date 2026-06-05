@@ -188,6 +188,25 @@ def test_objectives_held_tuple_preserved():
     assert restored.objectives_held == (2, 3)
 
 
+def test_mutex_collision_round_trip():
+    """R5.e (resync 2026-06): MutexCollision round-trip — `dropped_statuses`
+    tuple[str] przez JSON (tuple → list → tuple)."""
+    from app.services.engine.events import MutexCollision
+
+    e = MutexCollision(
+        sequence=9,
+        target_id=3,
+        dropped_statuses=("Przyszpilony", "Ufortyfikowany"),
+    )
+    payload = event_to_json(e)
+    assert payload["event_type"] == "MutexCollision"
+    json_str = json.dumps(payload)
+    restored = json_to_event(json.loads(json_str))
+    assert restored == e
+    assert isinstance(restored.dropped_statuses, tuple)
+    assert restored.dropped_statuses == ("Przyszpilony", "Ufortyfikowany")
+
+
 def test_event_default_version_is_schema_version():
     """Default `version` field = SCHEMA_VERSION (kompatybilność wsteczna)."""
     e = MoveExecuted(sequence=1, unit_id=1, from_pos=(0.0, 0.0), to_pos=(1.0, 0.0))

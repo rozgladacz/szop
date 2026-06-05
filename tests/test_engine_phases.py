@@ -328,6 +328,94 @@ def test_activation_special_discard_exhausted():
     assert any(isinstance(e, EffectApplied) for e in events)
 
 
+def test_charge_defender_mutex_drops_both_statuses():
+    """R5.e (resync 2026-06) pkt 22.b/c: defender szarży rozstawiony z
+    Ufortyfikowany (R5.f) który po Przegrupowaniu zyskuje Przyszpilony (2
+    porażki) traci OBA statusy — emit MutexCollision.
+
+    Dwa twierdzenia:
+    1. **Inwariant bezpieczeństwa** (niezależny od kości): dla każdego seeda
+       żaden blob nie kończy aktywacji z OBOMA Przyszpilony + Ufortyfikowany.
+    2. **Branch fires**: dla co najmniej jednego seeda kolizja faktycznie
+       zachodzi (MutexCollision emitowany) — test nie jest pusty.
+    """
+    from dataclasses import replace
+
+    from app.services.engine.events import MutexCollision
+
+    # Tanky defender (toughness 40, 1 model) przeżywa szarżę małego (2 modele)
+    # szarżującego i przyjmuje rany netto → testuje Przegrupowanie (pkt 20.a);
+    # pre-wound 18 stawia go blisko ½ wytrzymałości (+1 test). Część seedów daje
+    # 2 porażki → Przyszpilony → kolizja z Ufortyfikowany (R5.f deployment).
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=2)
+    fired = False
+    for seed in range(0, 60):
+        rosters = [
+            make_roster(0, [make_unit(1, x=0, y=0, models=2, quality=4)]),
+            make_roster(1, [make_unit(2, x=20, y=0, models=1, toughness=40)]),
+        ]
+        state = setup_phase(rosters)
+        state, _ = deployment_round(state, [])
+        # Po deployment defender ma Ufortyfikowany (R5.f) — sprawdzamy że tak jest.
+        defender = next(b for b in state.blobs if b.id == 2)
+        assert STATUS_UFORTYFIKOWANY in defender.status_flags
+        defender = replace(defender, wounds_received=18)
+        state = replace(
+            state, blobs=tuple(defender if b.id == 2 else b for b in state.blobs)
+        )
+
+        action = ChargeAction(unit_id=1, target_id=2, weapon=weapon)
+        new_state, events = activation_phase(state, action, DeterministicDice(seed))
+
+        # Inwariant: żaden blob nie ma obu statusów po aktywacji.
+        for b in new_state.blobs:
+            assert not (
+                STATUS_PRZYSZPILONY in b.status_flags
+                and STATUS_UFORTYFIKOWANY in b.status_flags
+            ), f"seed={seed} blob={b.id} ma oba statusy (mutex naruszony)"
+
+        if any(isinstance(e, MutexCollision) for e in events):
+            fired = True
+            # W tym seedzie kolizja zaszła — defender stracił oba statusy.
+            d = next(b for b in new_state.blobs if b.id == 2)
+            assert STATUS_PRZYSZPILONY not in d.status_flags
+            assert STATUS_UFORTYFIKOWANY not in d.status_flags
+
+    assert fired, "Żaden seed nie wywołał MutexCollision — scenariusz pusty"
+
+
+def test_charge_defender_mutex_replay_invariant():
+    """R5.e: live state po MutexCollision == apply_events(initial, events)."""
+    from dataclasses import replace
+
+    from app.services.engine.events import MutexCollision
+    from app.services.engine.state import apply_events
+
+    weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=2)
+    for seed in range(0, 60):
+        rosters = [
+            make_roster(0, [make_unit(1, x=0, y=0, models=2, quality=4)]),
+            make_roster(1, [make_unit(2, x=20, y=0, models=1, toughness=40)]),
+        ]
+        state = setup_phase(rosters)
+        state, _ = deployment_round(state, [])
+        defender = next(b for b in state.blobs if b.id == 2)
+        defender = replace(defender, wounds_received=18)
+        initial = replace(
+            state, blobs=tuple(defender if b.id == 2 else b for b in state.blobs)
+        )
+        action = ChargeAction(unit_id=1, target_id=2, weapon=weapon)
+        live, events = activation_phase(initial, action, DeterministicDice(seed))
+        if not any(isinstance(e, MutexCollision) for e in events):
+            continue
+        replayed = apply_events(initial, list(events))
+        live_d = next(b for b in live.blobs if b.id == 2)
+        rep_d = next(b for b in replayed.blobs if b.id == 2)
+        assert live_d.status_flags == rep_d.status_flags
+        return  # jeden firing seed wystarczy dla replay invariant
+    raise AssertionError("Żaden seed nie wywołał MutexCollision")
+
+
 def test_activation_unknown_action_raises():
     state = _basic_state()
 

@@ -21,6 +21,7 @@ Wszystkie 10 typów:
 - `StatusAdded` (B3.9.d / ADR-0046) — status flag dodany do oddziału (pkt 22)
 - `StatusRemoved` (B3.9.d / ADR-0046) — status flag usunięty z oddziału
 - `MeleeBalanceReset` (B3.9.d / ADR-0046) — reset bilansu wręcz po Przegrupowaniu
+- `MutexCollision` (R5.e / resync 2026-06) — Przyszpilony↔Ufortyfikowany mutex, oba odrzucone (pkt 22.b/c)
 """
 
 from __future__ import annotations
@@ -257,6 +258,31 @@ class MeleeBalanceReset:
     version: int = SCHEMA_VERSION
 
 
+@dataclass(frozen=True, slots=True)
+class MutexCollision:
+    """Wzajemne wykluczenie statusów odrzuca oba (`SZOP_Rozjemca.md pkt 22.b/c`).
+
+    R5.e (faza-b-rules-resync 2026-06 / decyzja H2 opcja (c)): Przyszpilony
+    (pkt 22.b) i Ufortyfikowany (pkt 22.c) nie mogą współistnieć na jednym
+    oddziale. Gdy producer (`phases.activation_phase` po fazie Przegrupowania)
+    wykryje że oddział ma OBA statusy — emituje `MutexCollision`, a reducer
+    odrzuca oba.
+
+    Pipeline event-sourced (zamiast producer-only silent removal): explicit
+    collision marker w replay log daje debug/analytics widoczność "tu doszło
+    do mutex collision". `dropped_statuses` to lista statusów odrzuconych
+    (zawsze `("Przyszpilony", "Ufortyfikowany")` w MVP — pole generyczne na
+    wypadek przyszłych par mutex).
+
+    Idempotentny — reducer usuwa statusy z `remove_status` (no-op gdy brak).
+    """
+
+    sequence: int
+    target_id: int
+    dropped_statuses: tuple[str, ...] = ()
+    version: int = SCHEMA_VERSION
+
+
 # Union polimorficzny dla type hints. `BattleEvent` jest aliasem.
 BattleEvent = Union[
     MoveExecuted,
@@ -270,6 +296,7 @@ BattleEvent = Union[
     StatusAdded,
     StatusRemoved,
     MeleeBalanceReset,
+    MutexCollision,
     ObjectiveControlChanged,
     InitiativePassed,
 ]
@@ -288,6 +315,7 @@ _EVENT_REGISTRY: dict[str, type] = {
         StatusAdded,
         StatusRemoved,
         MeleeBalanceReset,
+        MutexCollision,
         ObjectiveControlChanged,
         InitiativePassed,
     )

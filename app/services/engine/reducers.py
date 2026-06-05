@@ -31,6 +31,7 @@ from app.services.engine.events import (
     ModelKilled,
     MoraleTestPassed,
     MoveExecuted,
+    MutexCollision,
     ObjectiveControlChanged,
     RoundEnded,
     ShotResolved,
@@ -192,6 +193,26 @@ def _reduce_melee_balance_reset(
     return _find_and_replace_blob(
         state, event.target_id, replace(blob, melee_balance=0)
     )
+
+
+@register_reducer("MutexCollision")
+def _reduce_mutex_collision(
+    state: BattleState, event: MutexCollision
+) -> BattleState:
+    """R5.e (resync 2026-06): odrzuca wszystkie `dropped_statuses` z oddziału.
+
+    Mirror producer-a `phases._apply_mutex_collisions` — Przyszpilony i
+    Ufortyfikowany (pkt 22.b/c) odrzucone gdy współistnieją. Idempotentny:
+    `remove_status` to no-op gdy flag nieobecny, więc powtórna aplikacja
+    eventu daje ten sam state.
+    """
+    blob = _find_blob_or_none(state, event.target_id)
+    if blob is None:
+        return state
+    new_blob = blob
+    for status in event.dropped_statuses:
+        new_blob = remove_status(new_blob, status)
+    return _find_and_replace_blob(state, event.target_id, new_blob)
 
 
 # ---------------------------------------------------------------------------

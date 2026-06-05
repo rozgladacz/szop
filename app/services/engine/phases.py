@@ -48,6 +48,7 @@ from app.services.engine.events import (
     MeleeBalanceReset,
     MoraleTestPassed,
     MoveExecuted,
+    MutexCollision,
     ObjectiveControlChanged,
     RoundEnded,
     StatusAdded,
@@ -597,6 +598,57 @@ def _regroup_test(
 
 
 # ---------------------------------------------------------------------------
+# Mutex Przyszpilony↔Ufortyfikowany (pkt 22.b/c) — R5.e (resync 2026-06)
+# ---------------------------------------------------------------------------
+
+
+def _apply_mutex_collisions(
+    state: BattleState,
+    candidate_ids: Iterable[int],
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    """Pkt 22.b/c — Przyszpilony i Ufortyfikowany wzajemnie się wykluczają.
+
+    R5.e (faza-b-rules-resync 2026-06 / decyzja H2 opcja (c)): gdy oddział po
+    fazie akcji+Przegrupowania ma OBA statusy, oba zostają odrzucone. Jedyne
+    miejsce powstania kolizji w MVP: `_regroup_test` dodaje Przyszpilony (2
+    porażki) do oddziału który był Ufortyfikowany (np. defender szarży
+    rozstawiony z Ufortyfikowany w rundzie 1, testujący Przegrupowanie w
+    aktywacji chargera). Deployment (pkt 13.c) i Obrona (pkt 14.b) same w
+    sobie nie kolidują — deployment startuje bez statusów, `_apply_defend`
+    explicite usuwa Przyszpilony.
+
+    Pipeline event-sourced: emit `MutexCollision(target_id, dropped_statuses)`
+    + mutacja live state. Reducer (`reducers._reduce_mutex_collision`) aplikuje
+    removal obu na replay. Deterministyczny porządek po id (stabilny replay).
+
+    Returns: (new_state, events, next_sequence).
+    """
+    events: list[BattleEvent] = []
+    seq = sequence
+    for uid in sorted(set(candidate_ids)):
+        blob = next((b for b in state.blobs if b.id == uid), None)
+        if blob is None:
+            continue
+        if (
+            STATUS_PRZYSZPILONY in blob.status_flags
+            and STATUS_UFORTYFIKOWANY in blob.status_flags
+        ):
+            new_blob = _remove_status(blob, STATUS_PRZYSZPILONY)
+            new_blob = _remove_status(new_blob, STATUS_UFORTYFIKOWANY)
+            state = _replace_blob(state, new_blob)
+            events.append(
+                MutexCollision(
+                    sequence=seq,
+                    target_id=uid,
+                    dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY),
+                )
+            )
+            seq += 1
+    return state, tuple(events), seq
+
+
+# ---------------------------------------------------------------------------
 # activation_phase
 # ---------------------------------------------------------------------------
 
@@ -703,6 +755,15 @@ def activation_phase(
             state, subject_id, context, dice, seq
         )
         events.extend(regroup_events)
+
+    # R5.e (resync 2026-06) pkt 22.b/c: mutex Przyszpilony↔Ufortyfikowany —
+    # po Przegrupowaniu oddział który zyskał Przyszpilony (2 porażki) mając już
+    # Ufortyfikowany traci oba. Kandydaci = subjects Przegrupowania (jedyne
+    # miejsce dodania Przyszpilony w tej aktywacji).
+    state, mutex_events, seq = _apply_mutex_collisions(
+        state, regroup_subjects, seq
+    )
+    events.extend(mutex_events)
 
     # Faza Odzyskiwanie ran (pkt 21) — MVP placeholder (Regeneracja/Odrodzenie B3.5+)
     # NOTE: integration point dla Łatania (cel inny oddział) — gdy w event_chain
