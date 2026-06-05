@@ -1,11 +1,9 @@
 # HANDOFF — faza-b-rules-resync
 
 > **Wątek:** Synchronizacja YAML SSOT + engine z nowymi wersjami zasad (SZOP_Rozjemca.md + SZOP_Zdolnosci.md po 2026-06-03 drift) — Przegrupowanie per-action, Leczenie EOA, formuła T_eff dla aur/rozkazów, Lokalizacja enum, 8 zdolności przepisanych.
-> **Status:** In progress (R0–R3 ✅ done; R4 partial; R5.a/c/f w trakcie 2026-06-05)
+> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + R5.a ✅ + R5.c ✅ + R5.f ✅; R4.Zguba/Dywersant + R5.b/d/e/g + R6/R7 pozostałe)
 > **Utworzony:** 2026-06-03
-> **Ostatnia aktualizacja:** 2026-06-05
-
-**W TRAKCIE: 2026-06-05 (autonomiczna sesja) — R4.rozkaz_tak + R5.a Lokalizacja + R5.c kontratak conditional + R5.f Ufortyfikowany at deploy**
+> **Ostatnia aktualizacja:** 2026-06-05 (commit `41d2a8a`)
 
 ## Cel
 
@@ -102,7 +100,7 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [x] **Harcownik** (id 8): opis zsynchronizowany (R2).
 - [x] **Nieustraszony** (id 16): opis zsynchronizowany (R2).
 - [x] **Zemsta** (id 41): opis zsynchronizowany (R2).
-- [~] **rozkaz_tak field** — dodanie pola do `abilities.yaml` (88 abilities) + `RulesetAbility` Pydantic + test (2026-06-05).
+- [x] **rozkaz_tak field** — dodane do `abilities.yaml` (88 abilities: 30 true, 58 false per SZOP_Zdolnosci.md) + `RulesetAbility Pydantic` + 4 testy w `test_engine_state.py` (commit `41d2a8a`).
 - [ ] **Klątwa(X) / Rozkaz(X) / Oznaczenie(X)** (id 45/49/50): engine interrupt handler + walidacja `rozkaz_tak` w effects.py (po R5).
 - [ ] **Zguba** (broń, id 76): licznik `wounds_zguba_per_victim` w UnitBlob + Eliminowany dispatch (deferred — potrzeba R5.a Lokalizacja).
 - [ ] **Dywersant** engine policy: `before_hit_rolls` interrupt + deterministic Przyszpilony (deferred — wymaga R5 interrupt framework).
@@ -111,11 +109,10 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 ### Faza R5 — Engine: pkt 11 + 14.d.iv + 20 + 21 + 26 + 27
 
 #### R5.a — Lokalizacja enum
-- [~] `app/services/engine/state.py`: dodać `class Lokalizacja(str, Enum): ZAPLECZE / FRONT / WYCOFANY / ELIMINOWANY`. `UnitBlob.location: Lokalizacja = Lokalizacja.FRONT` (default dla rozstawionych). `build_initial_state` ustawia FRONT dla normalnych; ZAPLECZE gdy slug 'zasadzka'/'rezerwa'. (2026-06-05)
+- [x] `app/services/engine/state.py`: `class Lokalizacja(str, Enum)` z ZAPLECZE/FRONT/WYCOFANY/ELIMINOWANY. `UnitBlob.location: Lokalizacja = Lokalizacja.FRONT`. `build_initial_state`: ZAPLECZE dla zasadzka/rezerwa, FRONT dla normalnych. 4 testy (commit `41d2a8a`).
 - [ ] `combat._allocate_wounds_to_defender` (lub apply_events ModelKilled reducer) — cały oddział `WYCOFANY` gdy `models_alive == 0`.
 - [ ] `effects._apply_heal_revive` — może przywrócić tylko WYCOFANY, nie ELIMINOWANY (pkt 27.c). (po R4.Zguba)
 - [ ] Reducer w `reducers.py` dla `ModelKilled` rozszerzony o `location`. (po R4.Zguba)
-- [ ] Testy: `tests/test_engine_state.py` Lokalizacja enum + transitions.
 
 #### R5.b — Pkt 11.b: Przegrupowanie per-action + Manewr-free + akcja-różna
 - [ ] `app/services/engine/phases.py::activation_phase`: Przegrupowanie pkt 11.b.iii już per-action (B3.9.c) — doprecyzować trigger pkt 20.a NOWY: "zadał MNIEJ ran niż otrzymał" (poprzednio: "otrzymał rany"). Helper `_wounds_dealt_minus_received_in_action(actor_id, context) -> int`.
@@ -125,8 +122,8 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [ ] Testy: `test_engine_phases.py` — scenariusze 2× Manewr+Szarża+Manewr (legal: Szarża+Manewry); 2× Szarża (illegal — to samo); Niestrudzony 2× Szarża (legal).
 
 #### R5.c — Pkt 14.d.iv: kontratak conditional Wyczerpany
-- [~] `combat.resolve_charge_attack`: po kontrataku check `charger.models_alive == 0` → defender NIE emituje `StatusAdded(Wyczerpany)`. (2026-06-05)
-- [~] Testy: `test_engine_combat.py` 2 nowe — counter kills charger, defender no Wyczerpany; counter nie kills charger, defender Wyczerpany. (2026-06-05)
+- [x] `combat.resolve_charge_attack`: `charger_after_counter.models_alive > 0` guard przed Wyczerpany emit dla defendera. 2 testy (commit `41d2a8a`).
+- [x] Testy: `test_engine_combat.py` — `test_charge_counter_kills_charger_defender_not_exhausted` + `test_charge_counter_does_not_kill_charger_defender_becomes_exhausted`.
 
 #### R5.d — Pkt 20.a/b/c/f: Przegrupowanie nowe warunki
 - [ ] `phases._regroup_test`: 20.a trigger = `context.wounds_dealt(actor_id) < context.wounds_received(actor_id)` (zamiast `delta > 0`).
@@ -143,8 +140,8 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [ ] Testy: 4 testy mutex w `tests/test_engine_status.py`.
 
 #### R5.f — Pkt 13.c: Ufortyfikowany przy rozstawieniu
-- [~] `phases.deployment_round`: emit `StatusAdded(Ufortyfikowany)` + `StatusAdded(Aktywowany)` (poprzednio tylko Aktywowany). (2026-06-05)
-- [~] Testy: `test_engine_phases.py` deployment scenario. (2026-06-05)
+- [x] `phases.deployment_round`: emit `StatusAdded(Ufortyfikowany)` dla każdego DeploymentAction. 3 testy (commit `41d2a8a`).
+- [x] Testy: `test_engine_phases.py` — adds_ufortyfikowany, StatusAdded in events, aktywacja usuwa (CR-fix G weryfikacja).
 
 #### R5.g — Pkt 4.c.v: Niebezpieczny per-oddział
 - [ ] `combat.py` (lub `phases.py` po Manewr) — Niebezpieczny test = rzut `models_alive * toughness_per_model` k6, każda 1 → rana (już per-oddział? sprawdzić). Pre-drift: per-model. Decyzja: refactor jeśli per-model.
@@ -229,4 +226,5 @@ python -m pytest tests/test_engine_phases.py tests/test_engine_combat.py tests/t
 - 2026-06-03: HANDOFF utworzony. Baseline: pytest 1375 passed / 10 failed (failures = oczekiwany drift YAML vs procedural po merge `b8481d5`).
 - 2026-06-03: Pliki driftu pomocnicze (nie commitowane, untracked): `_drift_rozjemca.diff` (150 linii), `_drift_zdolnosci.diff` (894 linii) — używać jako wejście do klasyfikacji R0/R4.
 - 2026-06-03: **Drift summary** zachowane w głównym kontekście sesji startowej (przed R0). Najważniejsze zmiany rdzenia (pkt 11/20/21/22/26/27) + 8 abilities przepisanych + formuła T_eff (Aura/Rozkaz/Klątwa/Oznaczenie).
-- 2026-06-04: **R4 cost-side closed bez kodu.** Audyt 3 abilities z planu R4 (Przewidywalny, Klątwa/Rozkaz/Oznaczenie, Zguba) — wszystkie cost-side już zaimplementowane: Przewidywalny `mult *= 1.2` (procedural `weapons.py:188` + YAML mirror `cost_functions.py:511`), Klątwa/Rozkaz/Oznaczenie `_order_like_cost` z T_eff (R3 commit `fb0ffa9` handlers.py:187), Zguba `mult *= 1.05` (oba mirror). Brak entry w `ability_costs.yaml` dla Przewidywalny jest poprawne — to weapon-multiplier, nie samodzielna recipe. Engine-side dla wszystkich 3 (cannot_be_revived flag, rozkaz_tak validation runtime, wounds_zguba per-victim + ELIMINOWANY dispatch) odłożone do R5 — Klątwa/Rozkaz/Oznaczenie nadal w `INCOMPLETE_ABILITIES` stubs (B3.9.e), Zguba wymaga R5.a (Lokalizacja enum) jako prereq. **R4.W weryfikacja:** pytest 1391/1391 + parity both_assert 156/156 + yaml 93/93. **Następne:** R5 (engine semantics) wymaga konsultacji H2 (mutex Przyszpilony↔Ufortyfikowany — producer vs reducer), H3 (Dywersant policy — rekomendacja: zawsze Przyszpilony), H5 (Zguba licznik per-blob vs state-global) PRZED implementacją — to decyzje projektowe wpływające na 5+ modułów engine.
+- 2026-06-04: **R4 cost-side closed bez kodu.** Audyt 3 abilities — wszystkie cost-side już zaimplementowane. Brak entry w `ability_costs.yaml` dla Przewidywalny jest poprawne — to weapon-multiplier. Engine-side odłożone: Klątwa/Rozkaz/Oznaczenie nadal w `INCOMPLETE_ABILITIES` stubs; Zguba wymaga Lokalizacja enum prereq. **Następne: R5 engine semantics.**
+- 2026-06-05: **Autonomiczna sesja (Claude Sonnet 4.6)**. `rozkaz_tak` field (88 abilities, 30 true), Lokalizacja enum (ZAPLECZE/FRONT/WYCOFANY/ELIMINOWANY) + UnitBlob.location, kontratak conditional Wyczerpany (R5.c), Ufortyfikowany przy rozstawieniu (R5.f). Commit `41d2a8a`, pytest 1404/1404 (+13 testów). Smoke replay: 50 events (46+4 StatusAdded Ufortyfikowany w deployment). **Otwarte:** R4.Zguba (wounds_zguba_per_victim + ELIMINOWANY dispatch + heal-limit), R4.Dywersant engine policy (before_hit_rolls interrupt), R5.b (Przegrupowanie per-action + Manewr free + akcja-różna — najbardziej złożone), R5.d (Przegrupowanie warunki 20.a/b/c/f), R5.e (status mutex Przyszpilony↔Ufortyfikowany), R5.g (Niebezpieczny per-unit), R6 (drift+parity verify), R7 (ADR-0048 + docs).
