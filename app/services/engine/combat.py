@@ -52,6 +52,7 @@ from app.services.engine.geometry import circle_edge_distance, distance, point_i
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Position,
     TerrainCircle,
     TerrainLine,
@@ -284,6 +285,10 @@ def _allocate_wounds_to_defender(
         models_alive=new_models,
         wounds_received=new_received if new_models > 0 else 0,
         is_hero_unit=new_hero,
+        # Pkt 27.b: gdy ostatni model oddziału zostaje pokonany, cały oddział
+        # staje się Wycofany. ELIMINOWANY (pkt 27.a, broń Zguba) odłożone do
+        # R4.Zguba — domyślnym przypadkiem pokonania jest WYCOFANY (pkt 26.c).
+        location=Lokalizacja.WYCOFANY if new_models == 0 else defender.location,
     )
     return new_defender, tuple(killed_events), seq
 

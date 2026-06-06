@@ -40,6 +40,7 @@ from app.services.engine.events import (
 )
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Position,
     UnitBlob,
     register_reducer,
@@ -158,6 +159,9 @@ def _reduce_model_killed(state: BattleState, event: ModelKilled) -> BattleState:
         models_alive=new_models,
         wounds_received=max(0, new_received),
         is_hero_unit=new_hero,
+        # Pkt 27.b (mirror producer `combat._allocate_wounds_to_defender`):
+        # pokonanie ostatniego modelu → WYCOFANY. Replay bit-perfect.
+        location=Lokalizacja.WYCOFANY if new_models == 0 else defender.location,
     )
     return _find_and_replace_blob(state, event.unit_id, new_def)
 

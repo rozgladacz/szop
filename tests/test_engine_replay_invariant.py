@@ -73,6 +73,7 @@ _BLOB_REPLAY_FIELDS = (
     "wounds_pending",
     "wounds_pending_precise",
     "melee_balance",
+    "location",  # R5.a (pkt 27.b): event-derived przez ModelKilled reducer
 )
 
 
@@ -276,6 +277,50 @@ def test_replay_maneuver_into_dangerous_terrain():
     # GATE: replay rekonstruuje stan bit-perfect mimo self-inflicted ran
     replayed = apply_events(initial, list(result.events))
     assert_blobs_match(result.state, replayed)
+
+
+def test_replay_last_model_killed_becomes_wycofany():
+    """R5.a (pkt 27.b): gdy ostatni model oddziału zostaje pokonany, oddział
+    staje się WYCOFANY. Producer (`combat`) i reducer (`ModelKilled`) muszą
+    ustawić `location` identycznie — replay bit-perfect (`location` w
+    `_BLOB_REPLAY_FIELDS`).
+
+    Setup: kruchy obrońca (1 model, toughness=1) ostrzelany bronią o wielu
+    atakach z seedem, który gwarantuje pokonanie ostatniego modelu."""
+    from app.services.engine.state import Lokalizacja
+
+    rosters = [
+        {"owner_player": 0, "units": [make_unit(1, 0, 0, models=5, toughness=3)]},
+        {
+            "owner_player": 1,
+            "units": [make_unit(3, 36, 0, models=1, toughness=1, defense=6)],
+        },
+    ]
+    state = setup_phase(rosters, terrain=(), objectives=(), initiative_player=0)
+    state, _ = deployment_round(
+        state,
+        [
+            DeploymentAction(unit_id=1, position=Position(6, 0)),
+            DeploymentAction(unit_id=3, position=Position(10, 0)),
+        ],
+    )
+    initial = state
+
+    weapon = WeaponProfile(
+        slug="cannon", name="Cannon", range_inches=24, attacks=12, ap=3
+    )
+    action = ShootAction(unit_id=1, target_id=3, weapon=weapon)
+    result = apply(initial, action, DeterministicDice(7))
+
+    defender_live = next(b for b in result.state.blobs if b.id == 3)
+    assert defender_live.models_alive == 0, "fixture: obrońca powinien zginąć"
+    assert defender_live.location is Lokalizacja.WYCOFANY
+
+    # GATE: replay rekonstruuje location (event-derived przez ModelKilled)
+    replayed = apply_events(initial, list(result.events))
+    assert_blobs_match(result.state, replayed)
+    defender_rep = next(b for b in replayed.blobs if b.id == 3)
+    assert defender_rep.location is Lokalizacja.WYCOFANY
 
 
 # ---------------------------------------------------------------------------

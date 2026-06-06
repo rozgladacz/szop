@@ -43,6 +43,7 @@ from app.services.engine.events import MeleeResolved, ModelKilled, ShotResolved
 from app.services.engine.los import FEATURE_BLOKUJACY
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Position,
     TerrainCircle,
     TerrainLine,
@@ -284,6 +285,28 @@ def test_allocate_unit_defeated():
     assert new_def.models_alive == 0
     assert new_def.wounds_received == 0
     assert len(killed) == 2  # 6 ran użytych na 2 modele; reszta przepada
+
+
+def test_allocate_last_model_killed_becomes_wycofany():
+    """Pkt 27.b: pokonanie ostatniego modelu → location=WYCOFANY."""
+    defender = make_blob(2, models=2, toughness=3)
+    assert defender.location is Lokalizacja.FRONT
+    new_def, _, _ = _allocate_wounds_to_defender(
+        defender, wounds_to_alloc=10, attacker_id=1, start_sequence=10, prefer_hero=False
+    )
+    assert new_def.models_alive == 0
+    assert new_def.location is Lokalizacja.WYCOFANY
+
+
+def test_allocate_survivors_stay_front():
+    """Pkt 27.b: dopóki >0 modeli żyje, location nie zmienia się (FRONT)."""
+    defender = make_blob(2, models=3, toughness=3)
+    new_def, killed, _ = _allocate_wounds_to_defender(
+        defender, wounds_to_alloc=4, attacker_id=1, start_sequence=10, prefer_hero=False
+    )
+    assert new_def.models_alive == 2
+    assert len(killed) == 1
+    assert new_def.location is Lokalizacja.FRONT
 
 
 def test_allocate_prefer_hero_kills_hero_first():
