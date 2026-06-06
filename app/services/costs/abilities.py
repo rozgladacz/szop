@@ -386,6 +386,8 @@ def ability_cost_components_from_name(
         base_result = 20.0
     elif desc == "spaczenie":
         base_result = 30.0
+    elif slug == "ratownik":
+        base_result = 15.0
     elif slug == "meczennik":
         base_result = 5.0
     elif slug == "mistrzostwo":

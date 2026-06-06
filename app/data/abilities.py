@@ -218,6 +218,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
             "Przed przegrupowaniem odzyskujesz K3 rany, "
             "ale nie więcej, niż liczba straconych w tej aktywacji."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="dywersant",
@@ -551,13 +552,16 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Teren w zasięgu 12” jest uznawany za niebezpieczny dla wrogich oddziałów.",
     ),
     AbilityDefinition(
+        slug="ratownik",
+        name="Ratownik",
+        type="aura",
+        description="W aktywacji w której twój oddział otrzymał rany, leczy jedną ranę.",
+    ),
+    AbilityDefinition(
         slug="meczennik",
         name="Męczennik",
         type="active",
-        description=(
-            "W twojej aktywacji możesz zostać pokonany, aby twój oddział odzyskał liczbę ran równą twojej wytrzymałości. "
-            "Nie możesz zostać przywrócony podczas tej aktywacji."
-        ),
+        description="W twojej aktywacji możesz zostać eliminowany, aby twój oddział odzyskał liczbę ran równą twojej wytrzymałości.",
     ),
     # Weapon abilities
     AbilityDefinition(
@@ -707,9 +711,8 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Zguba",
         type="weapon",
         description=(
-            "Licz rany otrzymane taką bronią w aktywacji. "
-            "Zmniejsz liczbę ran odzyskanych o nią. "
-            "Modele pokonane przez przydzielenie pierwszych ran do tej liczby zostają zniszczone i nie mogą wrócić do gry."
+            "Licz rany otrzymane taką bronią. "
+            "Modele pokonane przez przydzielenie pierwszych ran do tej liczby nie mogą wrócić do gry."
         ),
     ),
     AbilityDefinition(
