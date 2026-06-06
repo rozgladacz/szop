@@ -253,12 +253,21 @@ def _reduce_morale_test(state: BattleState, event: MoraleTestPassed) -> BattleSt
 # Identycznie dla `_apply_special.discard_exhausted`.
 # Inne sluggi (Mag/Łatanie/Klątwa/...) → no-op MVP, integracja w przyszłych
 # iteracjach przez ACTIVE_ABILITY_REGISTRY (B3.9.e).
+#
+# WYJĄTEK — `niebezpieczny` (R5.g, finding #1 2026-06-06): rana z Niebezpiecznego
+# terenu (pkt 4.c.v) NIE przechodzi przez ShotResolved/MeleeResolved (to nie
+# walka), więc EffectApplied(niebezpieczny) musi sam wnieść deltę `wounds_received`
+# na replay. Pushuje `wounds_inflicted` (surowa pula PRZED alokacją) na cel;
+# następujące w sekwencji `ModelKilled` absorbują pełne komplety toughness.
+# Mirror producer-a `phases._apply_maneuver`.
 
 
 @register_reducer("EffectApplied")
 def _reduce_effect_applied(state: BattleState, event: EffectApplied) -> BattleState:
-    del event  # annotation-only w MVP B3.9.d scope
-    return state
+    if event.slug == "niebezpieczny":
+        wounds = event.payload.get("wounds_inflicted", 0)
+        return _push_wounds(state, event.target_unit_id, wounds)
+    return state  # annotation-only dla pozostałych slugów (MVP B3.9.d scope)
 
 
 # ---------------------------------------------------------------------------

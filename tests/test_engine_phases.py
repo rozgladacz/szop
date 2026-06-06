@@ -178,6 +178,28 @@ def test_deployment_round_ufortyfikowany_persists_after_round_start():
     assert STATUS_UFORTYFIKOWANY not in blob1_after.status_flags
 
 
+def test_deployment_round_skips_ufortyfikowany_for_reserves():
+    """Finding #3 (2026-06-06): rezerwy off-board (ZAPLECZE: Zasadzka/Rezerwa)
+    NIE dostają Ufortyfikowany w deployment_round. Pkt 13.c dotyczy tylko
+    *rozstawionych* oddziałów; pkt 26 ZAPLECZE = poza planszą."""
+    from app.services.engine.state import Lokalizacja
+
+    rosters = [
+        make_roster(0, [make_unit(1), make_unit(2, passives=("zasadzka",))]),
+        make_roster(1, [make_unit(3, x=20)]),
+    ]
+    state = setup_phase(rosters)
+    state, _ = deployment_round(state, [])
+
+    reserve = next(b for b in state.blobs if b.id == 2)
+    front = next(b for b in state.blobs if b.id == 1)
+    # Rezerwa jest w ZAPLECZE i NIE jest fortyfikowana
+    assert reserve.location == Lokalizacja.ZAPLECZE
+    assert STATUS_UFORTYFIKOWANY not in reserve.status_flags
+    # Oddział na froncie nadal dostaje Ufortyfikowany
+    assert STATUS_UFORTYFIKOWANY in front.status_flags
+
+
 # ---------------------------------------------------------------------------
 # activation_phase — actions
 # ---------------------------------------------------------------------------
@@ -203,20 +225,19 @@ def test_activation_maneuver_updates_position_and_status():
     assert any(isinstance(e, MoveExecuted) for e in events)
 
 
-def test_activation_maneuver_niebezpieczny_inflicts_wounds():
-    """R5.g pkt 4.c.v (faza-b-rules-resync 2026-06): Manewr przez teren
-    Niebezpieczny → rzut models×toughness k6, każda 1 = rana, emit
-    EffectApplied(niebezpieczny). Test używa fixed seed by wynik był
-    deterministyczny."""
+def _state_with_dangerous_terrain(models: int, toughness: int) -> BattleState:
+    """Helper: oddział `models×toughness` rozstawiony, z TerrainCircle
+    Niebezpieczny w (5,0)."""
     from dataclasses import replace
-    from app.services.engine.events import EffectApplied
     from app.services.engine.state import TerrainCircle
 
-    rosters = [make_roster(0, [make_unit(1)]), make_roster(1, [make_unit(2, x=20)])]
+    rosters = [
+        make_roster(0, [make_unit(1, models=models, toughness=toughness)]),
+        make_roster(1, [make_unit(2, x=20)]),
+    ]
     state = setup_phase(rosters)
     state, _ = deployment_round(state, [])
-    # Add Niebezpieczny terrain w pobliżu target_position
-    state = replace(
+    return replace(
         state,
         terrain=(
             TerrainCircle(
@@ -226,20 +247,86 @@ def test_activation_maneuver_niebezpieczny_inflicts_wounds():
             ),
         ),
     )
-    # Manewr unit 1 do (5,0) — wewnątrz terrain Niebezpieczny
-    action = ManeuverAction(unit_id=1, target_position=Position(5.0, 0.0))
-    _, events = activation_phase(state, action, DeterministicDice(42))
 
-    # EffectApplied(niebezpieczny) musi się pojawić (z ~16% prob per kość daje
-    # niezerowy wynik dla 15 kości z seed 42 — wysoce prawdopodobne).
+
+def test_activation_maneuver_niebezpieczny_inflicts_wounds():
+    """R5.g pkt 4.c.v (faza-b-rules-resync 2026-06): Manewr przez teren
+    Niebezpieczny → rzut models×toughness k6, każda 1 = rana, emit
+    EffectApplied(niebezpieczny). Seed=1 daje deterministycznie 2 trafienia
+    na 6 kości (toughness=1 → 6 kości)."""
+    from app.services.engine.events import EffectApplied
+
+    state = _state_with_dangerous_terrain(models=6, toughness=1)
+    action = ManeuverAction(unit_id=1, target_position=Position(5.0, 0.0))
+    _, events = activation_phase(state, action, DeterministicDice(1))
+
     niebezp_events = [
         e for e in events
         if isinstance(e, EffectApplied) and e.slug == "niebezpieczny"
     ]
-    # Możemy mieć 0 lub 1 — zależnie od kości. Z seed 42 + 15 kości oczekujemy hit.
-    if niebezp_events:
-        assert niebezp_events[0].payload["applied"] is True
-        assert niebezp_events[0].payload["wounds_inflicted"] >= 1
+    assert len(niebezp_events) == 1
+    assert niebezp_events[0].payload["applied"] is True
+    assert niebezp_events[0].payload["wounds_inflicted"] == 2
+
+
+def test_activation_maneuver_niebezpieczny_kills_models():
+    """Finding #1 (2026-06-06): rany z terenu przechodzą przez standardową
+    alokację — pełne komplety `toughness` pokonują modele (emit ModelKilled),
+    `models_alive` maleje. Przed fixem rany dopisywane były surowo do
+    wounds_received i modele NIGDY nie ginęły od terenu.
+
+    toughness=1 → każda rana = 1 zabity model; deterministyczny związek
+    inflicted == liczba ModelKilled == models_lost; brak nadwyżki markerów."""
+    from app.services.engine.events import EffectApplied, ModelKilled
+
+    state = _state_with_dangerous_terrain(models=6, toughness=1)
+    pre = next(b for b in state.blobs if b.id == 1)
+    action = ManeuverAction(unit_id=1, target_position=Position(5.0, 0.0))
+    new_state, events = activation_phase(state, action, DeterministicDice(1))
+
+    inflicted = next(
+        e.payload["wounds_inflicted"]
+        for e in events
+        if isinstance(e, EffectApplied) and e.slug == "niebezpieczny"
+    )
+    killed = [e for e in events if isinstance(e, ModelKilled) and e.unit_id == 1]
+    post = next(b for b in new_state.blobs if b.id == 1)
+
+    expected_kills = min(inflicted, pre.models_alive)
+    assert len(killed) == expected_kills
+    assert post.models_alive == pre.models_alive - expected_kills
+    # toughness=1 → brak nadwyżkowych markerów
+    assert post.wounds_received == 0
+    # ModelKilled od terenu jest self-inflicted (brak atakującego)
+    assert all(e.by_attacker_id is None for e in killed)
+
+
+def test_activation_maneuver_niebezpieczny_leftover_markers():
+    """Finding #1: gdy `wounds_inflicted` < toughness, model nie ginie, a rany
+    zostają jako znaczniki (pkt 18.c). toughness=3, seed=1 → 2 rany na 18 kości
+    pól... używamy toughness=5 by 2 rany nie wystarczyły na zabicie."""
+    from app.services.engine.events import EffectApplied, ModelKilled
+
+    # models=6, toughness=5 → 30 kości; sprawdzamy że nadwyżka < toughness
+    # zostaje jako markery a nie ginie model.
+    state = _state_with_dangerous_terrain(models=2, toughness=5)
+    pre = next(b for b in state.blobs if b.id == 1)
+    action = ManeuverAction(unit_id=1, target_position=Position(5.0, 0.0))
+    new_state, events = activation_phase(state, action, DeterministicDice(1))
+
+    niebezp = [
+        e for e in events if isinstance(e, EffectApplied) and e.slug == "niebezpieczny"
+    ]
+    killed = [e for e in events if isinstance(e, ModelKilled) and e.unit_id == 1]
+    post = next(b for b in new_state.blobs if b.id == 1)
+    if niebezp:
+        inflicted = niebezp[0].payload["wounds_inflicted"]
+        # konserwacja: inflicted == kills*toughness + leftover_markers
+        assert inflicted == len(killed) * pre.toughness_per_model + post.wounds_received
+        assert post.models_alive == pre.models_alive - len(killed)
+    else:
+        assert post.models_alive == pre.models_alive
+        assert post.wounds_received == 0
 
 
 def test_activation_maneuver_no_niebezpieczny_when_terrain_safe():

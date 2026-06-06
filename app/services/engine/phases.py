@@ -37,6 +37,7 @@ from app.services.engine.actions import (
     SpecialAction,
 )
 from app.services.engine.combat import (
+    _allocate_wounds_to_defender,
     resolve_charge_attack,
     resolve_melee_attack,
     resolve_ranged_attack,
@@ -57,6 +58,7 @@ from app.services.engine.events import (
 from app.services.engine.geometry import distance as _distance
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Objective,
     Position,
     TerrainCircle,
@@ -280,8 +282,16 @@ def deployment_round(
     # (niezależnie czy explicit DeploymentAction wykonana) zyskuje Ufortyfikowany
     # na początek rundy 1. Persists do startu własnej aktywacji (CR-fix G:
     # pkt 22.c.iv usuwa na początku aktywacji actor-a).
+    # Finding #3 (2026-06-06): tylko oddziały ROZSTAWIONE na planszy (pkt 13.c
+    # "każdy rozstawiony oddział"). Rezerwy off-board (ZAPLECZE: Zasadzka/
+    # Rezerwa, pkt 26) rozstawiają się dopiero później — nie fortyfikujemy ich
+    # w rundzie 1.
     for b in current.blobs:
-        if b.models_alive > 0 and STATUS_UFORTYFIKOWANY not in b.status_flags:
+        if (
+            b.models_alive > 0
+            and b.location != Lokalizacja.ZAPLECZE
+            and STATUS_UFORTYFIKOWANY not in b.status_flags
+        ):
             new_b = _add_status(b, STATUS_UFORTYFIKOWANY)
             current = _replace_blob(current, new_b)
             events.append(
@@ -317,8 +327,17 @@ def _apply_maneuver(
     TerrainCircle z feature `Niebezpieczny` (pkt 4.c.v) → wykonaj test
     **per-unit**: rzut `models_alive * toughness_per_model` k6, każda 1 = rana.
     Drift uproszcza pre-drift per-model (każdy model rzucał toughness razy)
-    do jednego wspólnego puli. Rany dopisywane do `wounds_received` (znaczniki
-    pkt 18.c, alokowane standardowo w przyszłej aktywacji).
+    do jednego wspólnego puli. Rany przechodzą przez standardową alokację
+    (`_allocate_wounds_to_defender`, self-inflicted: attacker_id=None) — pula
+    nadwyżkowa zostaje jako znaczniki (pkt 18.c), a każdy pełny komplet
+    `toughness_per_model` ran pokonuje model (emit `ModelKilled`). Bez tego
+    modele nigdy nie ginęły od terenu (code-review finding #1, 2026-06-06).
+
+    Event sourcing (ADR-0046): `EffectApplied(niebezpieczny)` niesie surowe
+    `wounds_inflicted` (reducer `_reduce_effect_applied` pushuje je na
+    `wounds_received` przy replay) PRZED `ModelKilled`, które absorbują pulę —
+    dzięki temu `apply_events` rekonstruuje stan bit-perfect (zamiast cichej
+    mutacji `wounds_received` poza eventami).
     """
     blob = _find_blob(state, action.unit_id)
     events: list[BattleEvent] = []
@@ -347,9 +366,6 @@ def _apply_maneuver(
         rolls = dice.roll_d6(count=dice_count)
         wounds_inflicted = sum(1 for r in rolls if r == 1)
         if wounds_inflicted > 0:
-            moved = replace(
-                moved, wounds_received=moved.wounds_received + wounds_inflicted
-            )
             events.append(
                 EffectApplied(
                     sequence=seq,
@@ -364,6 +380,17 @@ def _apply_maneuver(
                 )
             )
             seq += 1
+            # Finding #1 (2026-06-06): standardowa alokacja zamiast surowego
+            # dopisania — self-inflicted (attacker_id=None, prefer_hero=False),
+            # emit ModelKilled per pokonany model. SSOT z combat.
+            moved, killed_events, seq = _allocate_wounds_to_defender(
+                moved,
+                wounds_inflicted,
+                attacker_id=None,
+                start_sequence=seq,
+                prefer_hero=False,
+            )
+            events.extend(killed_events)
 
     return _replace_blob(state, moved), tuple(events), seq
 

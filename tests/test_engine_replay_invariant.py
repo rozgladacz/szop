@@ -230,6 +230,54 @@ def test_replay_special_discard_exhausted():
     assert "Wyczerpany" not in blob.status_flags
 
 
+def test_replay_maneuver_into_dangerous_terrain():
+    """R5.g finding #1 (2026-06-06): Manewr w Niebezpieczny teren zadaje rany
+    (EffectApplied(niebezpieczny)) i pokonuje modele (ModelKilled). Replay musi
+    odtworzyć `models_alive` + `wounds_received`: reducer EffectApplied(
+    niebezpieczny) pushuje surową pulę ran, następujące ModelKilled ją absorbują.
+
+    Przed fixem rana była CICHĄ mutacją `wounds_received` poza event-sourcingiem
+    (EffectApplied no-op reducer) → `apply_events` nie odtwarzał stanu (mismatch),
+    a modele nigdy nie ginęły od terenu (brak pętli kill / ModelKilled)."""
+    from app.services.engine.events import EffectApplied, ModelKilled
+    from app.services.engine.state import TerrainCircle
+
+    rosters = [
+        {"owner_player": 0, "units": [make_unit(1, 0, 0, models=6, toughness=1)]},
+        {"owner_player": 1, "units": [make_unit(3, 36, 0)]},
+    ]
+    terrain = (
+        TerrainCircle(
+            center=Position(12, 0), radius_inches=3.0, features=("Niebezpieczny",)
+        ),
+    )
+    state = setup_phase(rosters, terrain=terrain, objectives=(), initiative_player=0)
+    deployment = [
+        DeploymentAction(unit_id=1, position=Position(6, 0)),
+        DeploymentAction(unit_id=3, position=Position(30, 0)),
+    ]
+    state, _ = deployment_round(state, deployment)
+    initial = state
+
+    action = ManeuverAction(unit_id=1, target_position=Position(11, 0))
+    result = apply(initial, action, DeterministicDice(1))
+
+    # Teren faktycznie zadał rany i pokonał modele (finding #1 — kill loop)
+    assert any(
+        isinstance(e, EffectApplied) and e.slug == "niebezpieczny"
+        for e in result.events
+    )
+    assert any(
+        isinstance(e, ModelKilled) and e.unit_id == 1 for e in result.events
+    )
+    blob1 = next(b for b in result.state.blobs if b.id == 1)
+    assert blob1.models_alive < 6  # modele zginęły od terenu
+
+    # GATE: replay rekonstruuje stan bit-perfect mimo self-inflicted ran
+    replayed = apply_events(initial, list(result.events))
+    assert_blobs_match(result.state, replayed)
+
+
 # ---------------------------------------------------------------------------
 # Round-end replay
 # ---------------------------------------------------------------------------

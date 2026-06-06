@@ -1,9 +1,9 @@
 # HANDOFF — faza-b-rules-resync
 
 > **Wątek:** Synchronizacja YAML SSOT + engine z nowymi wersjami zasad (SZOP_Rozjemca.md + SZOP_Zdolnosci.md po 2026-06-03 drift) — Przegrupowanie per-action, Leczenie EOA, formuła T_eff dla aur/rozkazów, Lokalizacja enum, 8 zdolności przepisanych.
-> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + R5.a/c/d/e/f/g ✅; R4.Zguba+Dywersant → INCOMPLETE_ABILITIES defer; **R5.b** + R6/R7/RW pozostałe)
+> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + R5.a/c/d/e/f/g ✅ + R5.g code-review findings #1/#3 ✅; R4.Zguba+Dywersant → INCOMPLETE_ABILITIES defer; finding #2 → H6 open; **R5.b** + R6/R7/RW pozostałe)
 > **Utworzony:** 2026-06-03
-> **Ostatnia aktualizacja:** 2026-06-05 (R5.e MutexCollision — autopilot Opus 4.8)
+> **Ostatnia aktualizacja:** 2026-06-06 (R5.g findings #1/#3 domknięte — autopilot Opus 4.8)
 
 ## Cel
 
@@ -142,9 +142,12 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [x] `phases.deployment_round`: emit `StatusAdded(Ufortyfikowany)` dla każdego DeploymentAction. 3 testy (commit `41d2a8a`).
 - [x] Testy: `test_engine_phases.py` — adds_ufortyfikowany, StatusAdded in events, aktywacja usuwa (CR-fix G weryfikacja).
 
-#### R5.g — Pkt 4.c.v: Niebezpieczny per-oddział — **DONE 2026-06-05** (commit `203daac`)
+#### R5.g — Pkt 4.c.v: Niebezpieczny per-oddział — **DONE 2026-06-05** (commit `203daac`) + **findings #1/#3 DONE 2026-06-06**
 - [x] `phases._apply_maneuver`: Niebezpieczny test per-unit = rzut `models_alive * toughness_per_model` k6, każda 1 → rana → `wounds_received`. Helper `_blob_inside_terrain_circle`. EffectApplied(niebezpieczny).
 - [x] Testy: 2 w `test_engine_phases.py` (inflicts_wounds w terenie, no-event poza terenem).
+- [x] **Finding #1 (2026-06-06):** rany z terenu → `_allocate_wounds_to_defender` (kill-loop + ModelKilled + replay reducer dla `niebezpieczny`). Modele giną od terenu; replay bit-perfect. +3 testy (kills/leftover/replay-invariant).
+- [x] **Finding #3 (2026-06-06):** ZAPLECZE guard w `deployment_round` (rezerwy off-board bez Ufortyfikowany). +1 test.
+- [ ] **Finding #2 (2026-06-06):** czy teren wyzwala Przegrupowanie → **H6 open** (decyzja autora reguł, semantyka niezmieniona).
 
 ### Faza R6 — Drift gate + parity gate + smoke replay verify
 
@@ -186,6 +189,7 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - **H2:** Mutex Przyszpilony↔Ufortyfikowany — implementacja w reducer (deterministic, ale każdy StatusAdded musi consult state) czy w producer (combat/phases — wymaga visibility na current flags)? Rekomendacja: **producer** (consistent z B3.9 fix-G Ufortyfikowany removal na start aktywacji), reducer tylko aplikuje events bez logiki.
 - **H3:** Dywersant — przeciwnik wybiera ×2 ataki LUB Przyszpilony. W MVP brak interaktywnego promptu — potrzeba deterministic policy. Opcje: (a) "tańsza dla przeciwnika" — porównać oczekiwane straty, (b) "fixed: zawsze Przyszpilony" (predictable, prosta), (c) random z fixed seed. **Rekomendacja: (b)** dla MVP + flag konfiguracji w b_mvp + ADR-0048 wpis.
 - **H4:** Czy Niestrudzony (już istniejący w `effects.py`) ma logikę "drop wymóg akcji różnej"? Czy trzeba rozszerzyć semantykę? Sprawdzić w R5.b.
+- **H6 (NOWE 2026-06-06, code-review finding #2 — DECYZJA AUTORA REGUŁ):** Czy samozranienie od Niebezpiecznego terenu (pkt 4.c.v) ma wyzwalać test Przegrupowania (pkt 20.a `received > dealt`)? Obecny stan: rany z terenu trafiają do `wounds_received`, więc `delta_received > 0` przy `delta_dealt = 0` (Manewr nie zadaje ran) → test się odpala. Oddział może zostać Wyczerpany/Przyszpilony (a przy 3 porażkach pokonany) wyłącznie za przejście przez teren, bez wymiany ognia/wręcz. **Po fixie #1** trigger zależy od nadwyżki markerów (`wounds_inflicted % toughness`) — przy toughness=1 trigger nigdy nie odpala (każda rana = kill, leftover=0), przy wyższym toughness odpala dla niepełnego kompletu. To niespójne/arbitralne. Opcje: (a) **status quo** — teren liczy się do bilansu received (semantyka pre-drift); (b) wykluczyć teren z `received` (osobna pula nie-bojowa `wounds_received_terrain`, NIE wchodzi do `ActivationContext.delta_for`). **Rekomendacja: (b)** dla spójności (Przegrupowanie to morale z walki, nie z terenu), ale wymaga decyzji + ewentualnie nowego pola na UnitBlob. Semantyka NIE zmieniona w tej sesji (zostaje (a)). Powiązane: finding #2 w `docs/handoffs/code-review/REVIEW_2026-06-06.md`.
 - **H5:** Zguba licznik per ofiara — gdzie żyje? `UnitBlob.wounds_zguba_received: int` (per ofiara, immutable update via reducer) vs `BattleState.zguba_counters: dict[unit_id, int]`. Rekomendacja: **UnitBlob field** (per-blob purity, łatwiejszy replay).
 
 ## Jak zweryfikować
@@ -228,6 +232,18 @@ python -m pytest tests/test_engine_phases.py tests/test_engine_combat.py tests/t
 - 2026-06-05 (tej sesji) **Dywersant deferral** (user decision): Dywersant (id 6) engine-side **odsunięty do post-MVP backlog**. Cost-side już done (R2); engine-side stub w `effects.INCOMPLETE_ABILITIES`. Polityka deterministyczna (×2 ataki vs Przyszpilony) czeka na ADR w przyszłości.
 
 ## Notatki / odkrycia w trakcie
+
+- **2026-06-06 (autopilot Opus 4.8) — R5.g findings DOMKNIĘTE (#1 + #3):** finding #1 (rany z Niebezpiecznego terenu) i #3 (ZAPLECZE guard) naprawione; finding #2 → otwarta kwestia **H6** (decyzja autora reguł, semantyka niezmieniona).
+  - **Finding #1 (poprawność + replay-invariant):** `phases._apply_maneuver` — rany z terenu przechodzą teraz przez `_allocate_wounds_to_defender` (SSOT z combat, self-inflicted `attacker_id=None`, `prefer_hero=False`) zamiast surowego dopisania do `wounds_received`. Pełne komplety `toughness_per_model` pokonują modele (emit `ModelKilled`), nadwyżka zostaje jako znaczniki (pkt 18.c). **Modele giną teraz od terenu** (wcześniej `models_alive` zostawał błędnie wysoki). Dodatkowo była to CICHA mutacja stanu poza event-sourcingiem (EffectApplied no-op reducer → `apply_events` nie odtwarzał ran, analog bug #6 z B3.9): `reducers._reduce_effect_applied` dla slug `niebezpieczny` pushuje teraz `wounds_inflicted` na replay (mirror producer-a), ModelKilled absorbują pulę → bit-perfect replay.
+  - **Finding #3 (higiena):** `phases.deployment_round` — guard `b.location != Lokalizacja.ZAPLECZE` przy nadawaniu Ufortyfikowany (pkt 13.c "rozstawiony oddział"; rezerwy off-board Zasadzka/Rezerwa nie są fortyfikowane w rundzie 1).
+  - **Testy (+4):** `test_engine_phases.py` — `test_activation_maneuver_niebezpieczny_kills_models` (seed=1 deterministyczny, 2 zabite modele), `..._leftover_markers` (konserwacja inflicted == kills×tou + markery), `test_deployment_round_skips_ufortyfikowany_for_reserves`; istniejący `..._inflicts_wounds` przepisany na deterministyczny seed=1. `test_engine_replay_invariant.py` — `test_replay_maneuver_into_dangerous_terrain` (GATE: apply→replay bit-perfect mimo self-inflicted ran). Helper `_state_with_dangerous_terrain`.
+  - **Weryfikacja:** pytest **1423/1423** (+4); parity both_assert 156/156 + yaml 93/93; smoke replay 48 events EXIT 0 (replay invariant OK). `/simplify` inline: usunięty martwy guard `target_unit_id is not None` (pole to wymagane int).
+  - **Uwaga interakcja z finding #2:** po fixie #1 rany z terenu są częściowo absorbowane przez kille, więc `delta_received` z terenu = tylko nadwyżkowe markery (`wounds_inflicted % toughness`), nie pełna pula. Zmienia to magnitudę triggera Przegrupowania z terenu — patrz H6.
+
+- 2026-06-06 (code-review autonomiczny Opus 4.8): **3 findings semantyczne** (pełny raport: `docs/handoffs/code-review/REVIEW_2026-06-06.md`). pytest 1419/1419, brak crashy — to decyzje driftu do domknięcia, nie regresje:
+  1. **[R5.g — poprawność]** `phases._apply_maneuver:349`: rany z Niebezpiecznego terenu dopisywane surowo do `wounds_received` BEZ emisji `ModelKilled` i bez pętli kill (`_allocate_wounds`). **Modele nigdy nie giną od terenu** — markery rosną, `models_alive` zostaje błędnie wysoki (liczba ataków/kości liczy się z pełnych modeli). Komentarz zakłada "alokację w przyszłej aktywacji", ale taka faza drenująca markery NIE istnieje (kill pochodzi tylko z ModelKilled przy walce). **TODO R5.g:** albo uruchomić pętlę kill + emit ModelKilled, albo udokumentować konkretną fazę alokacji markerów.
+  2. **[R5.d/R5.g — semantyka do potwierdzenia]** `phases._apply_maneuver:351`: ruch przez Niebezpieczny teren wyzwala test Przegrupowania (received>0 od terenu, dealt=0 → `received>dealt`). Potwierdzić z autorem reguł czy samozranienie terenu ma liczyć się w pkt 20.a; jeśli nie — wykluczyć teren z bilansu received.
+  3. **[R5.f — higiena]** `phases.deployment_round:284`: Ufortyfikowany nadawany WSZYSTKIM blobom `models_alive>0`, w tym rezerwom off-board (`location==ZAPLECZE`: Zasadzka/Rezerwa). Dodać guard `and b.location != Lokalizacja.ZAPLECZE`. Nisko-szkodliwe, ale niespójne z pkt 26.
 
 - 2026-06-05 (autopilot Opus 4.8): **R5.e DONE** — mutex Przyszpilony↔Ufortyfikowany (pkt 22.b/c) wg decyzji H2 opcja (c). NOWY event `MutexCollision(target_id, dropped_statuses)` (14ty unikalny typ w `_EVENT_REGISTRY`) + reducer `_reduce_mutex_collision` (reducers.py) + producer `_apply_mutex_collisions` w `phases.activation_phase` (skanuje `regroup_subjects` po Przegrupowaniu — jedyne miejsce dodania Przyszpilony). Pliki: `events.py`, `reducers.py`, `phases.py`, `tests/test_engine_{status,events,phases}.py`. **Weryfikacja:** pytest **1419/1419** (+12); parity both_assert 156/156 + yaml 93/93; smoke replay 48 events EXIT 0 (replay invariant OK). Jedyne miejsce kolizji: defender szarży rozstawiony z Ufortyfikowany (R5.f) który zyskuje Przyszpilony przy 2 porażkach Przegrupowania w aktywacji chargera — testy integracyjne property-based ∀ seed (invariant: żaden blob nie ma obu) + branch-fires. `/simplify`: 1 cleanup (redundant `sorted()` w call-site, helper i tak sortuje). **Pozostaje:** R5.b (Manewr-free + akcja-różna + limit 2 akcji — najbardziej złożone), R6 (drift+parity verify), R7 (ADR-0048 + docs), RW final.
 - **UWAGA (korekta 2026-06-05):** dopisek z poprzedniej sesji "Zguba prioritization → realizujemy w R5" jest **nieaktualny** — commit `ee8975f` (R5.x) ostatecznie odłożył ZARÓWNO Zgubę JAK I Dywersanta do `effects.INCOMPLETE_ABILITIES` (8 stubów). Patrz decyzja H5 DEFERRED powyżej. Zguba wymaga refactor `UnitBlob` wounds repr na 5 kategorii (follow-up ADR) przed implementacją.
