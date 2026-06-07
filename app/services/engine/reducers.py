@@ -237,8 +237,14 @@ def _reduce_morale_test(state: BattleState, event: MoraleTestPassed) -> BattleSt
     if event.result_status == "pass":
         return state
     if event.result_status == "broken":
-        # Pkt 20.e: oddział pokonany (models_alive=0, wounds_received=0)
-        new_blob = replace(blob, models_alive=0, wounds_received=0)
+        # Pkt 20.f.iii: oddział pokonany. Pkt 27.b/26.c → WYCOFANY (mirror
+        # producer `phases._regroup_test`). Replay bit-perfect.
+        new_blob = replace(
+            blob,
+            models_alive=0,
+            wounds_received=0,
+            location=Lokalizacja.WYCOFANY,
+        )
         return _find_and_replace_blob(state, event.unit_id, new_blob)
     new_blob = blob
     if event.result_status in ("exhausted", "exhausted_pinned"):

@@ -608,8 +608,16 @@ def _regroup_test(
         new_blob = _add_status(new_blob, STATUS_PRZYSZPILONY)
         result_status = "exhausted_pinned"
     elif failures >= 3:
-        # Oddział pokonany
-        new_blob = replace(new_blob, models_alive=0, wounds_received=0)
+        # Oddział pokonany (pkt 20.f.iii). Pkt 27.b: pokonany oddział staje się
+        # Wycofany (pkt 26.c domyślny przypadek; ELIMINOWANY tylko przy Zgubie,
+        # pkt 26.d → R4.Zguba). Lustrzane do ścieżki ran
+        # (combat._allocate_wounds_to_defender) — niezmiennik "pokonany → WYCOFANY".
+        new_blob = replace(
+            new_blob,
+            models_alive=0,
+            wounds_received=0,
+            location=Lokalizacja.WYCOFANY,
+        )
         result_status = "broken"
     else:
         result_status = "pass"

@@ -40,9 +40,11 @@ from app.services.engine.phases import (
 )
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Objective,
     Position,
     UnitBlob,
+    apply_events,
 )
 
 
@@ -599,6 +601,58 @@ def test_regroup_nieustraszony_reduces_test_count():
     else:
         # Zero testów — nieustraszony zmniejszył do 0
         assert True
+
+
+def test_regroup_broken_sets_location_wycofany():
+    """Pkt 20.f.iii + 27.b/26.c (follow-up R5.a, review 2026-06-07): oddział
+    pokonany 3 porażkami Przegrupowania (result_status='broken') staje się
+    WYCOFANY — lustrzanie do ścieżki pokonania przez rany.
+
+    Seed 2 → roll_with_threshold(count=3, threshold=4) = rolls [1,1,1] → 0
+    sukcesów → 3 porażki → broken. n_tests=3 = baza (20.a) + poniżej połowy
+    (20.b) + wręcz (20.c).
+    """
+    state = _basic_state()
+    from dataclasses import replace
+    # Poniżej połowy: blob 1 ma 5×3=15 wytrzymałości; wounds_received=10 →
+    # current=5 ≤ 7.5 → +1 test (20.b).
+    state = replace(
+        state,
+        blobs=tuple(
+            replace(b, wounds_received=10) if b.id == 1 else b for b in state.blobs
+        ),
+    )
+    context = ActivationContext(
+        actor_id=1,
+        wounds_received_this_activation=((1, 5),),  # delta_received=5 > dealt=0
+        melee_combatants=frozenset({1}),  # walczył wręcz → +1 test (20.c)
+    )
+    new_state, events, _ = _regroup_test(
+        state, 1, context, DeterministicDice(2), sequence=1
+    )
+    morale = next(e for e in events if isinstance(e, MoraleTestPassed))
+    assert morale.result_status == "broken"
+    blob = next(b for b in new_state.blobs if b.id == 1)
+    assert blob.models_alive == 0
+    assert blob.location == Lokalizacja.WYCOFANY
+
+
+def test_morale_broken_reducer_mirrors_location_wycofany():
+    """Reducer `_reduce_morale_test` dla result_status='broken' odtwarza
+    location=WYCOFANY (mirror producer `_regroup_test`) — replay bit-perfect.
+    """
+    state = _basic_state()
+    event = MoraleTestPassed(
+        sequence=1,
+        unit_id=1,
+        rolls=(1, 1, 1),
+        failures=3,
+        result_status="broken",
+    )
+    replayed = apply_events(state, [event])
+    blob = next(b for b in replayed.blobs if b.id == 1)
+    assert blob.models_alive == 0
+    assert blob.location == Lokalizacja.WYCOFANY
 
 
 # ---------------------------------------------------------------------------
