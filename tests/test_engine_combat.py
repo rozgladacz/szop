@@ -14,7 +14,7 @@ Pokrywa:
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -25,6 +25,7 @@ from app.services.engine.combat import (
     ABILITY_NIEZAWODNY,
     ABILITY_PODWOJNY,
     ABILITY_PRECYZYJNY,
+    ABILITY_ZGUBA,
     STATUS_WYCZERPANY,
     ChargeResult,
     CombatResult,
@@ -328,6 +329,107 @@ def test_allocate_no_prefer_hero_keeps_hero():
     )
     assert new_def.is_hero_unit is True
     assert killed[0].is_hero is False
+
+
+# ---------------------------------------------------------------------------
+# R4.Zguba — `wounds_eliminating` licznik + ELIMINOWANY dispatch (pkt 26.d/27.a)
+# ---------------------------------------------------------------------------
+
+
+def test_allocate_eliminating_wipe_sets_eliminowany():
+    """Pkt 26.d: pokonanie ostatniego modelu raną Zguby → ELIMINOWANY."""
+    defender = replace(make_blob(2, models=1, toughness=3), wounds_eliminating=3)
+    new_def, killed, _ = _allocate_wounds_to_defender(
+        defender, wounds_to_alloc=3, attacker_id=1, start_sequence=10, prefer_hero=False
+    )
+    assert new_def.models_alive == 0
+    assert new_def.location is Lokalizacja.ELIMINOWANY
+    assert new_def.wounds_eliminating == 0  # wipe zeruje licznik
+    assert killed[0].eliminated is True
+
+
+def test_allocate_no_eliminating_wipe_stays_wycofany():
+    """Bez licznika Zguby pokonanie ostatniego modelu → WYCOFANY (pkt 26.c)."""
+    defender = make_blob(2, models=1, toughness=3)
+    new_def, killed, _ = _allocate_wounds_to_defender(
+        defender, wounds_to_alloc=3, attacker_id=1, start_sequence=10, prefer_hero=False
+    )
+    assert new_def.models_alive == 0
+    assert new_def.location is Lokalizacja.WYCOFANY
+    assert killed[0].eliminated is False
+
+
+def test_allocate_eliminating_partial_kill_decrements_counter():
+    """Licznik Zguby maleje o toughness per pokonany model (floor 0).
+
+    eliminating=4, tou=3, alloc=4 → 1 kill (eliminated), zostaje 1 znacznik
+    i 1 w liczniku (4-3=1).
+    """
+    defender = replace(make_blob(2, models=2, toughness=3), wounds_eliminating=4)
+    new_def, killed, _ = _allocate_wounds_to_defender(
+        defender, wounds_to_alloc=4, attacker_id=1, start_sequence=10, prefer_hero=False
+    )
+    assert new_def.models_alive == 1
+    assert new_def.wounds_received == 1
+    assert new_def.wounds_eliminating == 1
+    assert len(killed) == 1
+    assert killed[0].eliminated is True
+
+
+def test_allocate_eliminating_exhausted_last_kill_wycofany():
+    """Gdy budżet Zguby wyczerpie się przed ostatnim modelem → WYCOFANY.
+
+    eliminating=3, tou=3, models=2, alloc=6 → kill1 eliminated (budżet 3→0),
+    kill2 NIE eliminated (budżet 0). Pokonujący cios nie był raną Zguby →
+    cały oddział WYCOFANY (pkt 26.c).
+    """
+    defender = replace(make_blob(2, models=2, toughness=3), wounds_eliminating=3)
+    new_def, killed, _ = _allocate_wounds_to_defender(
+        defender, wounds_to_alloc=6, attacker_id=1, start_sequence=10, prefer_hero=False
+    )
+    assert new_def.models_alive == 0
+    assert new_def.location is Lokalizacja.WYCOFANY
+    assert [k.eliminated for k in killed] == [True, False]
+
+
+def test_zguba_weapon_sets_eliminating_on_event_and_counter():
+    """resolve_ranged_attack z bronią Zguba: event.wounds_eliminating == suma ran
+    zadanych, a licznik defendera rośnie zanim modele padną. Invariant niezależny
+    od kości."""
+    attacker = make_blob(1, models=10, quality=2)
+    defender = make_blob(2, x=5.0, models=4, toughness=2, defense=6)
+    weapon = WeaponProfile(
+        slug="zguba_gun",
+        name="Zguba Gun",
+        range_inches=24,
+        attacks=1,
+        weapon_abilities=(ABILITY_ZGUBA,),
+    )
+    result = resolve_ranged_attack(
+        make_state(), attacker, defender, weapon, DeterministicDice(7), sequence=0
+    )
+    shot = result.events[0]
+    assert isinstance(shot, ShotResolved)
+    # Event niesie pełną pulę eliminującą (= wszystkie zadane rany).
+    assert shot.wounds_eliminating == shot.wounds_dealt + shot.wounds_precise
+    # Jeśli oddział pokonany pełną pulą Zguby → ELIMINOWANY (nigdy WYCOFANY).
+    if result.new_defender.models_alive == 0:
+        assert result.new_defender.location is Lokalizacja.ELIMINOWANY
+
+
+def test_non_zguba_weapon_no_eliminating():
+    """Broń bez Zguby: event.wounds_eliminating == 0, licznik niezmieniony."""
+    attacker = make_blob(1, models=10, quality=2)
+    defender = make_blob(2, x=5.0, models=4, toughness=2, defense=6)
+    result = resolve_ranged_attack(
+        make_state(), attacker, defender, _DEFAULT_WEAPON, DeterministicDice(7), sequence=0
+    )
+    shot = result.events[0]
+    assert isinstance(shot, ShotResolved)
+    assert shot.wounds_eliminating == 0
+    assert result.new_defender.wounds_eliminating == 0
+    if result.new_defender.models_alive == 0:
+        assert result.new_defender.location is Lokalizacja.WYCOFANY
 
 
 # ---------------------------------------------------------------------------

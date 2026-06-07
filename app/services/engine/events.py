@@ -55,6 +55,7 @@ class ShotResolved:
     hits: int
     wounds_dealt: int  # do `wounds_pending` defendera
     wounds_precise: int = 0  # do `wounds_pending_precise` defendera
+    wounds_eliminating: int = 0  # R4.Zguba — do `wounds_eliminating` defendera (pkt 26.d)
     version: int = SCHEMA_VERSION
 
 
@@ -74,6 +75,7 @@ class MeleeResolved:
     hits: int
     wounds_dealt: int
     wounds_precise: int = 0
+    wounds_eliminating: int = 0  # R4.Zguba — do `wounds_eliminating` defendera (pkt 26.d)
     charger_id: int = 0  # 0 = nieustalone / kontratak; >0 = jednoznacznie szarżujący
     version: int = SCHEMA_VERSION
 
@@ -85,12 +87,18 @@ class ModelKilled:
     `unit_id` = oddział tracący model. `model_index` = pozycja w oddziale (per
     deterministyczna kolejność, dla Precyzyjny atakujący wybiera). `is_hero`
     = czy pokonany model to Bohater (id 2).
+
+    `eliminated` (R4.Zguba / pkt 26.d) — model pokonany ranami broni Zguba
+    (licznik `wounds_eliminating > 0` w momencie pokonania). Gdy pokonano
+    ostatni model oddziału z `eliminated=True` → `location=ELIMINOWANY`
+    (nie wraca przez Leczenie); w przeciwnym razie WYCOFANY (pkt 26.c).
     """
 
     sequence: int
     unit_id: int
     model_index: int
     is_hero: bool = False
+    eliminated: bool = False  # R4.Zguba (pkt 26.d) — pokonany ranami Zguby
     by_attacker_id: int | None = None  # source oddział (atakujący)
     version: int = SCHEMA_VERSION
 

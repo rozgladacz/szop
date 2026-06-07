@@ -133,6 +133,15 @@ class UnitBlob:
     - `wounds_pending_precise` — pula od `Precyzyjny`, atakujący alokuje (pkt 17.d.i + 68)
     - `melee_balance` — bilans wręcz (zadane − otrzymane, pkt 20.c)
 
+    `wounds_eliminating` (R4.Zguba / H5 RESOLVED 2026-06-07) — DODATKOWY licznik
+    (NIE trzecia pula alokacji per pkt 17.d). Broń ze zdolnością `Zguba` (pkt 26.d/
+    27.a) zadaje rany normalnie do precise/regular ORAZ zwiększa ten licznik o tę
+    samą liczbę. Alokacja precise/regular zmniejsza licznik (o `toughness` per
+    pokonany model, floor 0). Model pokonany gdy licznik wciąż dodatni →
+    ELIMINOWANY (`location`, nie wraca przez Leczenie); inaczej WYCOFANY.
+    Invariant: `0 <= wounds_eliminating <= wounds_received` w stabilnym stanie;
+    wipe (`models_alive == 0`) zeruje oba.
+
     `passives` zawiera sluggi z `app/rulesets/v1/abilities.yaml`. `status_flags`
     z pkt 22 (Aktywowany, Wyczerpany, Przyszpilony, Ufortyfikowany).
 
@@ -158,6 +167,7 @@ class UnitBlob:
     wounds_received: int = 0
     wounds_pending: int = 0
     wounds_pending_precise: int = 0
+    wounds_eliminating: int = 0  # R4.Zguba (pkt 26.d/27.a): licznik ran broni Zguba
     melee_balance: int = 0
     melee_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047
     ranged_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047

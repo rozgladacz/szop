@@ -116,6 +116,7 @@ ABILITY_BRUTALNY = "brutalny"
 ABILITY_PRECYZYJNY = "precyzyjny"
 ABILITY_NIEZAWODNY = "niezawodny"  # weapon Q=2+ (id 63)
 ABILITY_PODWOJNY = "podwojny"  # natural 6 hit → dodatkowe trafienie (id 66)
+ABILITY_ZGUBA = "zguba"  # pokonane modele → ELIMINOWANY, nie wracają (id 76, pkt 26.d/27.a)
 
 FEATURE_OBRONNY = "Obronny"
 
@@ -253,17 +254,33 @@ def _allocate_wounds_to_defender(
     `is_hero_unit`, atakujący "wybiera" hero do pokonania (model index 0 jako hero
     domyślnie). Faktyczne pokonanie redukuje `models_alive` o 1 (Bohater liczy się
     jako 1 model w models_alive).
+
+    R4.Zguba (H5 RESOLVED 2026-06-07): `defender.wounds_eliminating` (licznik
+    dorzucany przez broń Zguba PRZED alokacją) jest konsumowany równolegle z
+    alokacją. Model pokonany gdy licznik wciąż dodatni (`> 0` w momencie
+    pokonania, per decyzja H5) → `ModelKilled(eliminated=True)`; licznik maleje
+    o `toughness_per_model` per pokonany model (floor 0). Gdy pokonano ostatni
+    model z `eliminated=True` → `location=ELIMINOWANY` (pkt 26.d, nie wraca),
+    inaczej WYCOFANY (pkt 26.c). Wipe zeruje `wounds_eliminating` (spójnie z
+    `wounds_received`).
     """
     new_received = defender.wounds_received + wounds_to_alloc
     new_models = defender.models_alive
     new_hero = defender.is_hero_unit
+    new_eliminating = defender.wounds_eliminating  # R4.Zguba — budżet ran Zguby
     killed_events: list[ModelKilled] = []
     seq = start_sequence
 
     tou = defender.toughness_per_model
+    last_kill_eliminated = False
     while new_received >= tou and new_models > 0:
         new_received -= tou
         new_models -= 1
+        # R4.Zguba: model pokonany gdy budżet Zguby wciąż dodatni → ELIMINOWANY.
+        # Ocena PRZED dekrementem (licznik > 0 w momencie pokonania, decyzja H5).
+        eliminated = new_eliminating > 0
+        last_kill_eliminated = eliminated
+        new_eliminating = max(0, new_eliminating - tou)
         # Pierwsza ofiara w puli atakującego z prefer_hero → hero (jeśli jest).
         hero_killed = False
         if prefer_hero and new_hero:
@@ -275,20 +292,34 @@ def _allocate_wounds_to_defender(
                 unit_id=defender.id,
                 model_index=new_models,  # index = remaining count (jako proxy)
                 is_hero=hero_killed,
+                eliminated=eliminated,
                 by_attacker_id=attacker_id,
             )
         )
         seq += 1
 
+    wiped = new_models == 0
+    # `location` zmieniamy TYLKO gdy to wywołanie faktycznie pokonało ostatni
+    # model (`killed_events` niepuste) — inaczej druga pula alokacji (pending po
+    # precise) wywołana na już-pokonanym oddziale (models_alive==0) nadpisałaby
+    # ELIMINOWANY z pierwszej puli na WYCOFANY. Mirror reducer-a, który pomija
+    # ModelKilled gdy `models_alive == 0`. Zerowanie znaczników/licznika zależy
+    # tylko od `wiped` (martwy oddział nie nosi ran).
+    wiped_this_call = wiped and bool(killed_events)
     new_defender = replace(
         defender,
         models_alive=new_models,
-        wounds_received=new_received if new_models > 0 else 0,
+        wounds_received=new_received if not wiped else 0,
+        wounds_eliminating=new_eliminating if not wiped else 0,
         is_hero_unit=new_hero,
         # Pkt 27.b: gdy ostatni model oddziału zostaje pokonany, cały oddział
-        # staje się Wycofany. ELIMINOWANY (pkt 27.a, broń Zguba) odłożone do
-        # R4.Zguba — domyślnym przypadkiem pokonania jest WYCOFANY (pkt 26.c).
-        location=Lokalizacja.WYCOFANY if new_models == 0 else defender.location,
+        # staje się Wycofany (pkt 26.c, domyślnie) lub ELIMINOWANY (pkt 26.d,
+        # gdy pokonujący cios był raną Zguby — last_kill_eliminated).
+        location=(
+            (Lokalizacja.ELIMINOWANY if last_kill_eliminated else Lokalizacja.WYCOFANY)
+            if wiped_this_call
+            else defender.location
+        ),
     )
     return new_defender, tuple(killed_events), seq
 
@@ -385,6 +416,11 @@ def resolve_ranged_attack(
                 else:
                     wounds_pending = failed_count
 
+    # R4.Zguba (pkt 26.d): broń Zguba dorzuca licznik `wounds_eliminating` o
+    # wszystkie zadane rany PRZED alokacją — pokonane nimi modele będą ELIMINOWANE.
+    is_zguba = ABILITY_ZGUBA in weapon.weapon_abilities
+    wounds_eliminating = (wounds_pending + wounds_pending_precise) if is_zguba else 0
+
     # Emit ShotResolved event
     events: list[BattleEvent] = [
         ShotResolved(
@@ -395,12 +431,18 @@ def resolve_ranged_attack(
             hits=hits,
             wounds_dealt=wounds_pending,
             wounds_precise=wounds_pending_precise,
+            wounds_eliminating=wounds_eliminating,
         )
     ]
     next_sequence = sequence + 1
 
     # Faza 3 — Wound allocation (pkt 17.e + 18)
     new_defender = defender
+    if wounds_eliminating > 0:
+        new_defender = replace(
+            new_defender,
+            wounds_eliminating=new_defender.wounds_eliminating + wounds_eliminating,
+        )
     # Pula atakującego najpierw (pkt 17.e: "najpierw w całości pulę atakującego")
     if wounds_pending_precise > 0:
         new_defender, killed_a, next_sequence = _allocate_wounds_to_defender(
@@ -502,6 +544,10 @@ def resolve_melee_attack(
 
     total_wounds = wounds_pending + wounds_pending_precise
 
+    # R4.Zguba (pkt 26.d): broń Zguba dorzuca licznik `wounds_eliminating`.
+    is_zguba = ABILITY_ZGUBA in weapon.weapon_abilities
+    wounds_eliminating = total_wounds if is_zguba else 0
+
     events: list[BattleEvent] = [
         MeleeResolved(
             sequence=sequence,
@@ -511,12 +557,18 @@ def resolve_melee_attack(
             hits=hits,
             wounds_dealt=wounds_pending,
             wounds_precise=wounds_pending_precise,
+            wounds_eliminating=wounds_eliminating,
         )
     ]
     next_sequence = sequence + 1
 
     # Faza 3 — Wound allocation
     new_defender = defender
+    if wounds_eliminating > 0:
+        new_defender = replace(
+            new_defender,
+            wounds_eliminating=new_defender.wounds_eliminating + wounds_eliminating,
+        )
     if wounds_pending_precise > 0:
         new_defender, killed_a, next_sequence = _allocate_wounds_to_defender(
             new_defender,

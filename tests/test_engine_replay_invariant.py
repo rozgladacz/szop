@@ -72,6 +72,7 @@ _BLOB_REPLAY_FIELDS = (
     "wounds_received",
     "wounds_pending",
     "wounds_pending_precise",
+    "wounds_eliminating",  # R4.Zguba (pkt 26.d): event-derived (Shot/MeleeResolved + ModelKilled)
     "melee_balance",
     "location",  # R5.a (pkt 27.b): event-derived przez ModelKilled reducer
 )
@@ -321,6 +322,56 @@ def test_replay_last_model_killed_becomes_wycofany():
     assert_blobs_match(result.state, replayed)
     defender_rep = next(b for b in replayed.blobs if b.id == 3)
     assert defender_rep.location is Lokalizacja.WYCOFANY
+
+
+def test_replay_zguba_wipe_becomes_eliminowany():
+    """R4.Zguba (pkt 26.d): broń Zguba pokonująca ostatni model → ELIMINOWANY.
+
+    Licznik `wounds_eliminating` (Shot/MeleeResolved push) + `eliminated` flag
+    (ModelKilled) muszą rekonstruować location+licznik bit-perfect — oba pola
+    w `_BLOB_REPLAY_FIELDS`. Setup lustrzany do
+    `test_replay_last_model_killed_becomes_wycofany`, ale broń ma `zguba`."""
+    from app.services.engine.combat import ABILITY_ZGUBA
+    from app.services.engine.state import Lokalizacja
+
+    rosters = [
+        {"owner_player": 0, "units": [make_unit(1, 0, 0, models=5, toughness=3)]},
+        {
+            "owner_player": 1,
+            "units": [make_unit(3, 36, 0, models=1, toughness=1, defense=6)],
+        },
+    ]
+    state = setup_phase(rosters, terrain=(), objectives=(), initiative_player=0)
+    state, _ = deployment_round(
+        state,
+        [
+            DeploymentAction(unit_id=1, position=Position(6, 0)),
+            DeploymentAction(unit_id=3, position=Position(10, 0)),
+        ],
+    )
+    initial = state
+
+    weapon = WeaponProfile(
+        slug="plague_cannon",
+        name="Plague Cannon",
+        range_inches=24,
+        attacks=12,
+        ap=3,
+        weapon_abilities=(ABILITY_ZGUBA,),
+    )
+    action = ShootAction(unit_id=1, target_id=3, weapon=weapon)
+    result = apply(initial, action, DeterministicDice(7))
+
+    defender_live = next(b for b in result.state.blobs if b.id == 3)
+    assert defender_live.models_alive == 0, "fixture: obrońca powinien zginąć"
+    assert defender_live.location is Lokalizacja.ELIMINOWANY
+    assert defender_live.wounds_eliminating == 0  # wipe zeruje licznik
+
+    # GATE: replay rekonstruuje location + licznik (event-derived)
+    replayed = apply_events(initial, list(result.events))
+    assert_blobs_match(result.state, replayed)
+    defender_rep = next(b for b in replayed.blobs if b.id == 3)
+    assert defender_rep.location is Lokalizacja.ELIMINOWANY
 
 
 # ---------------------------------------------------------------------------

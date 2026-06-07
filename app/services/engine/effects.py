@@ -378,7 +378,7 @@ def _stub_active_ability(
 #
 # **Inne pending** (type=passive/weapon bez engine impl) — cost-side już
 # zsynchronizowane (R2/R3), ale engine semantyka odłożona do follow-up ADR
-# (H3 Dywersant policy, H5 Zguba wounds-tracking 5-kategorii). Agenci/UI/test
+# (H3 Dywersant policy). Zguba (H5) ma już impl — R4.Zguba 2026-06-07. Agenci/UI/test
 # fixtures wykrywają je przez sam set; engine ich nie emit-uje events bo
 # nie ma active stubs.
 #
@@ -388,9 +388,10 @@ INCOMPLETE_ABILITIES: frozenset[str] = frozenset(
     {
         # Active stubs (B3.9 — emit EffectApplied annotation)
         "latanie", "mag", "mobilizacja", "presja", "przepowiednia", "meczennik",
-        # Passive/weapon pending engine impl (R5.x 2026-06-05 — H3/H5 deferred)
+        # Passive/weapon pending engine impl (R5.x 2026-06-05 — H3 deferred)
         "dywersant",  # H3 — interrupt before_hit_rolls + policy (×2 ataki vs Przyszpilony)
-        "zguba",      # H5 — wymaga refactor UnitBlob wounds repr na 5 kategorii
+        # "zguba" — R4.Zguba DONE 2026-06-07: licznik `wounds_eliminating` +
+        # ELIMINOWANY dispatch w combat.py/reducers.py (H5 RESOLVED).
     }
 )
 

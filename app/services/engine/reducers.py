@@ -102,26 +102,44 @@ def _reduce_move_executed(state: BattleState, event: MoveExecuted) -> BattleStat
 
 
 def _push_wounds(
-    state: BattleState, defender_id: int, total_wounds: int
+    state: BattleState,
+    defender_id: int,
+    total_wounds: int,
+    eliminating: int = 0,
 ) -> BattleState:
-    if total_wounds == 0:
+    """Push `total_wounds` na `wounds_received` (+ `eliminating` na licznik Zguby).
+
+    R4.Zguba: `eliminating` (rany broni Zguba) dorzucane do `wounds_eliminating`
+    PRZED kolejnymi `ModelKilled` (mirror `combat.resolve_*`). Następujące
+    `ModelKilled` konsumują licznik (`_reduce_model_killed`).
+    """
+    if total_wounds == 0 and eliminating == 0:
         return state
     defender = _find_blob_or_none(state, defender_id)
     if defender is None or defender.models_alive == 0:
         return state
-    new_def = replace(defender, wounds_received=defender.wounds_received + total_wounds)
+    new_def = replace(
+        defender,
+        wounds_received=defender.wounds_received + total_wounds,
+        wounds_eliminating=defender.wounds_eliminating + eliminating,
+    )
     return _find_and_replace_blob(state, defender_id, new_def)
 
 
 @register_reducer("ShotResolved")
 def _reduce_shot_resolved(state: BattleState, event: ShotResolved) -> BattleState:
-    return _push_wounds(state, event.defender_id, event.wounds_dealt + event.wounds_precise)
+    return _push_wounds(
+        state,
+        event.defender_id,
+        event.wounds_dealt + event.wounds_precise,
+        event.wounds_eliminating,
+    )
 
 
 @register_reducer("MeleeResolved")
 def _reduce_melee_resolved(state: BattleState, event: MeleeResolved) -> BattleState:
     total = event.wounds_dealt + event.wounds_precise
-    state = _push_wounds(state, event.defender_id, total)
+    state = _push_wounds(state, event.defender_id, total, event.wounds_eliminating)
     # Pkt 20.c bilans wręcz
     attacker = _find_blob_or_none(state, event.attacker_id)
     defender = _find_blob_or_none(state, event.defender_id)
@@ -148,20 +166,31 @@ def _reduce_model_killed(state: BattleState, event: ModelKilled) -> BattleState:
     defender = _find_blob_or_none(state, event.unit_id)
     if defender is None or defender.models_alive == 0:
         return state
+    tou = defender.toughness_per_model
     new_models = defender.models_alive - 1
-    new_received = defender.wounds_received - defender.toughness_per_model
+    wiped = new_models == 0
     # Klampowanie: gdy pokonany model był ostatni, wounds_received reset do 0
-    # (consistent z combat.py linia 299 `new_received if new_models > 0 else 0`).
-    new_received = new_received if new_models > 0 else 0
+    # (consistent z combat.py `new_received if not wiped else 0`).
+    new_received = max(0, defender.wounds_received - tou) if not wiped else 0
+    # R4.Zguba (mirror producer): licznik Zguby maleje o `tou` per pokonany
+    # model (floor 0); wipe zeruje.
+    new_eliminating = max(0, defender.wounds_eliminating - tou) if not wiped else 0
     new_hero = defender.is_hero_unit and not event.is_hero
     new_def = replace(
         defender,
         models_alive=new_models,
-        wounds_received=max(0, new_received),
+        wounds_received=new_received,
+        wounds_eliminating=new_eliminating,
         is_hero_unit=new_hero,
         # Pkt 27.b (mirror producer `combat._allocate_wounds_to_defender`):
-        # pokonanie ostatniego modelu → WYCOFANY. Replay bit-perfect.
-        location=Lokalizacja.WYCOFANY if new_models == 0 else defender.location,
+        # pokonanie ostatniego modelu → ELIMINOWANY gdy raną Zguby
+        # (`event.eliminated`, pkt 26.d), inaczej WYCOFANY (pkt 26.c). Replay
+        # bit-perfect.
+        location=(
+            (Lokalizacja.ELIMINOWANY if event.eliminated else Lokalizacja.WYCOFANY)
+            if wiped
+            else defender.location
+        ),
     )
     return _find_and_replace_blob(state, event.unit_id, new_def)
 
