@@ -1,9 +1,9 @@
 # HANDOFF — faza-b-rules-resync
 
 > **Wątek:** Synchronizacja YAML SSOT + engine z nowymi wersjami zasad (SZOP_Rozjemca.md + SZOP_Zdolnosci.md po 2026-06-03 drift) — Przegrupowanie per-action, Leczenie EOA, formuła T_eff dla aur/rozkazów, Lokalizacja enum, 8 zdolności przepisanych.
-> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + R5.a[WYCOFANY pkt 27.b: rany+morale ✅]/c/d/e/f/g ✅ + R5.g findings #1/#3 ✅; R5.b skip[H4]; R4.Zguba+Dywersant+ELIMINOWANY → blokada H5/Q-H5a-c [decyzja usera]; **R6/R7/RW pozostałe**)
+> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + R5.a[WYCOFANY pkt 27.b: rany+morale ✅]/c/d/e/f/g ✅ + R5.g findings #1/#3 ✅; R5.b skip[H4]; **H5 RESOLVED 2026-06-07** → R4.Zguba+ELIMINOWANY ODBLOKOWANE [`wounds_eliminating` licznik, do implementacji]; Dywersant defer[H3]; **R4.Zguba + Klątwa/Rozkaz/Oznaczenie + R6/R7/RW pozostałe**)
 > **Utworzony:** 2026-06-03
-> **Ostatnia aktualizacja:** 2026-06-07 (R5.a follow-up DOMKNIĘTY: morale-broken → WYCOFANY, +2 testy, pytest 1428/1428 — autopilot Opus 4.8)
+> **Ostatnia aktualizacja:** 2026-06-07 (H5 RESOLVED — Zguba/eliminating = dodatkowy licznik, nie 3-pula; zapis decyzji usera — autopilot Opus 4.8)
 
 ## Cel
 
@@ -102,7 +102,11 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [x] **Zemsta** (id 41): opis zsynchronizowany (R2).
 - [x] **rozkaz_tak field** — dodane do `abilities.yaml` (88 abilities: 30 true, 58 false per SZOP_Zdolnosci.md) + `RulesetAbility Pydantic` + 4 testy w `test_engine_state.py` (commit `41d2a8a`).
 - [ ] **Klątwa(X) / Rozkaz(X) / Oznaczenie(X)** (id 45/49/50): engine interrupt handler + walidacja `rozkaz_tak` w effects.py (po R5).
-- [ ] **Zguba** (broń, id 76): licznik `wounds_zguba_per_victim` w UnitBlob + Eliminowany dispatch (wymaga R5.a Lokalizacja + ADR-y dla 5-kategorii wounds repr).
+- [ ] **Zguba** (broń, id 76): **ODBLOKOWANE — H5 RESOLVED 2026-06-07.** Dodać `UnitBlob.wounds_eliminating: int = 0` (dodatkowy licznik, NIE pula alokacji). Implementacja:
+    - Broń Zguba (`ABILITY_ZGUBA` w `weapon.weapon_abilities`): w `combat.resolve_*` po obliczeniu zadanych ran zadaj je normalnie do precise/regular ORAZ `defender.wounds_eliminating += wounds_dealt + wounds_precise`.
+    - `_allocate_wounds_to_defender`: przy każdym `ModelKilled`, jeśli `wounds_eliminating` pokrywa rany pokonujące model (licznik > 0 w momencie pokonania) → `ModelKilled(eliminated=True)` + `location=ELIMINOWANY` zamiast WYCOFANY przy ostatnim modelu; dekrementuj `wounds_eliminating` o liczbę faktycznie zaalokowanych ran (nigdy poniżej 0).
+    - Mirror w `reducers._reduce_model_killed` + nowe pole w `ModelKilled` event (`eliminated: bool`) → replay bit-perfect. `wounds_eliminating` dodać do `_BLOB_REPLAY_FIELDS`.
+    - `effects._apply_heal_revive` (niżej): tylko WYCOFANY wraca, ELIMINOWANY nie (pkt 26.d).
 - [!] **Dywersant** engine policy: `before_hit_rolls` interrupt + deterministic Przyszpilony (deferred do post-MVP backlog — wymaga R5 interrupt framework + policy decision).
 - [ ] **Przewidywalny** (id 71): cost ×1.2 już w cost_functions.py (done); YAML metadata `rozkaz_tak: false` — objęte przez rozkaz_tak field update.
 
@@ -112,8 +116,8 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [x] `app/services/engine/state.py`: `class Lokalizacja(str, Enum)` z ZAPLECZE/FRONT/WYCOFANY/ELIMINOWANY. `UnitBlob.location: Lokalizacja = Lokalizacja.FRONT`. `build_initial_state`: ZAPLECZE dla zasadzka/rezerwa, FRONT dla normalnych. 4 testy (commit `41d2a8a`).
 - [x] **(2026-06-06)** `combat._allocate_wounds_to_defender` + `reducers._reduce_model_killed` — cały oddział `WYCOFANY` gdy `models_alive == 0` (pkt 27.b, domyślny przypadek; ELIMINOWANY/Zguba odłożone do R4.Zguba). `location` dodane do `_BLOB_REPLAY_FIELDS` → replay invariant teraz weryfikuje propagację. +3 testy (2 combat producer + 1 replay integration). Ścieżka terenu (phases→`_allocate_wounds_to_defender`) pokryta automatycznie.
 - [x] **(2026-06-07)** Ścieżka pokonania przez morale (pkt 20.f.iii 'broken') → `WYCOFANY` w `phases._regroup_test` + mirror `reducers._reduce_morale_test` (follow-up z review 2026-06-07). +2 testy. Niezmiennik "pokonany → WYCOFANY" pokrywa teraz rany + morale (ELIMINOWANY/Zguba nadal R4.Zguba).
-- [ ] `effects._apply_heal_revive` — może przywrócić tylko WYCOFANY, nie ELIMINOWANY (pkt 27.c). (po R4.Zguba)
-- [ ] Reducer w `reducers.py` dla `ModelKilled` rozszerzony o `location`. (po R4.Zguba)
+- [ ] `effects._apply_heal_revive` — może przywrócić tylko WYCOFANY, nie ELIMINOWANY (pkt 26.d/27). (po R4.Zguba)
+- [x] **(2026-06-06)** Reducer w `reducers.py` dla `ModelKilled` rozszerzony o `location` (WYCOFANY przy `models_alive==0`). ELIMINOWANY dispatch dojdzie z R4.Zguba (pole `eliminated` w evencie).
 
 #### R5.b — Pkt 11.b: Przegrupowanie per-action + Manewr-free + akcja-różna
 - [ ] `app/services/engine/phases.py::activation_phase`: Przegrupowanie pkt 11.b.iii już per-action (B3.9.c) — doprecyzować trigger pkt 20.a NOWY: "zadał MNIEJ ran niż otrzymał" (poprzednio: "otrzymał rany"). Helper `_wounds_dealt_minus_received_in_action(actor_id, context) -> int`.
@@ -191,7 +195,7 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - **H3 (RESOLVED 2026-06-06, USER DECISION — DEFER):** Dywersant — w pierwszym etapie (MVP) **pomijamy tę zdolność** (engine-side stub w `INCOMPLETE_ABILITIES`). Cost-side już done (R2). Policy (×2 ataki vs Przyszpilony) czeka na follow-up ADR.
 - **H4:** Czy Niestrudzony (już istniejący w `effects.py`) ma logikę "drop wymóg akcji różnej"? Czy trzeba rozszerzyć semantykę? **RESOLVED 2026-06-06 (USER DECISION):** Szarża i Ostrzał mają wprost punkt limit raz na aktywacje (nie trzeba complex per-action-different tracking). R5.b jest **nie aktualne** — nie implementujemy.
 - **H6 (RESOLVED 2026-06-06, USER DECISION):** Czy samozranienie od Niebezpiecznego terenu (pkt 4.c.v) ma wyzwalać test Przegrupowania (pkt 20.a)? **TAK.** Rany z terenu to zwykłe rany przychodzące, rozpatrywane bezpośrednio po ruchu (przy szarży — przed atakami). Mogą spowodować test przegrupowania po akcji. Semantyka: teren = część bilansu received (`delta_received > delta_dealt`). **Implementacja:** wszystkie rany (bojowe + terenowe) przepływają przez `_allocate_wounds_to_defender`, unifikując kill-loop i EffectApplied reducer w replay.
-- **H5 (RESOLVED 2026-06-06, USER DECISION — 3-POOL WOUNDS):** Rany przychodzące mają **3 pule**: `precise`, `regular`, `eliminating`. Kiedy alokuje się precise/regular, `eliminating` counter **też maleje**. Jeśli model pokonany gdy `eliminating > 0` → model eliminowany (nie może wrócić). Rany od Zguba trafiają do precise/regular per normal rules + do `eliminating` pool. **Implementacja:** `UnitBlob.wounds_received` split na 3 pola (`wounds_precise`, `wounds_regular`, `wounds_eliminating`), reducery do wszystkich event types, test-helper w ActivationContext liczy wszystkie 3 pule do `delta_received`.
+- **H5 (RESOLVED 2026-06-07, USER DECISION — KOREKTA, NIE 3-pula):** Q-H5a/b/c rozstrzygnięte. **2 pule alokacji bez zmian** (pkt 17.d) + **dodatkowy licznik `UnitBlob.wounds_eliminating: int`**. Broń Zguba zadaje rany normalnie do precise/regular ORAZ zwiększa `wounds_eliminating` o tę samą liczbę; alokacja precise/regular zmniejsza licznik; model pokonany gdy licznik wciąż dodatni → ELIMINOWANY (pkt 26.d), inaczej WYCOFANY (pkt 26.c). Reguła docelowa: „Zguba: Licz rany otrzymane tą bronią. Modele pokonane przez przydzielenie pierwszych ran do tej liczby nie mogą wrócić do gry." Pełny zapis w sekcji **Decyzje** (2026-06-07). **Wcześniejsze sformułowanie „3-pula" (2026-06-06) PORZUCONE** — sprzeczne z pkt 17.d (tylko 2 pule alokacji).
 
 ## Jak zweryfikować
 
@@ -229,7 +233,14 @@ python -m pytest tests/test_engine_phases.py tests/test_engine_combat.py tests/t
 - 2026-06-06 **H3 (Dywersant policy) DEFERRED** (user decision): Dywersant (id 6) engine-side **pomijamy w MVP** (cost-side już done R2). Engine-side stub w `effects.INCOMPLETE_ABILITIES`.
 - 2026-06-06 **H4 (akcja-różna / R5.b) NOT APPLICABLE** (user decision): Szarża i Ostrzał mają wprost punkt limit raz na aktywacje. R5.b (complex per-action-different tracking) **nie implementujemy** — reguły są już jasne.
 - 2026-06-06 **H6 (terrain wounds + regroup trigger) RESOLVED** (user decision): Rany z terenu (pkt 4.c.v) to zwykłe rany przychodzące, rozpatrywane po ruchu (przed atakami w szarży). **TAK, mogą wyzwolić Przegrupowanie** (pkt 20.a `received > dealt`). Semantyka: teren = część bilansu received. Implementacja: wszystkie rany (bojowe + terenowe) przez `_allocate_wounds_to_defender`.
-- 2026-06-06 **H5 (wounds representation) RESOLVED** (user decision): **3-pula system** — `precise`, `regular`, `eliminating`. Kiedy alokuje się precise/regular → `eliminating` counter **maleje**. Model pokonany przy `eliminating > 0` → eliminowany (nie wraca). Rany od Zguba trafiają do precise/regular + do `eliminating`. **Implementacja:** `UnitBlob.wounds_received` split na `wounds_precise`, `wounds_regular`, `wounds_eliminating`; wszystkie reducery aktualizują 3 pola; ActivationContext liczy sumę do `delta_received`.
+- 2026-06-06 **H5 (wounds representation) — wstępna decyzja „3-pula"**, SKORYGOWANA 2026-06-07 (patrz niżej). Pierwotne sformułowanie („`wounds_received` split na 3 pola") było niejednoznaczne (Q-H5a/b/c) — sprzeczne z pkt 17.d który definiuje tylko 2 pule alokacji. Zastąpione decyzją z 2026-06-07.
+- 2026-06-07 **H5 (wounds representation / Zguba) RESOLVED — KORekta** (user decision, rozstrzyga Q-H5a/b/c): **2 pule alokacji BEZ zmian** (pkt 17.d: pula atakującego/precyzyjna = `wounds_pending_precise`, pula obrońcy = `wounds_pending`) + **osobny DODATKOWY licznik `wounds_eliminating: int`** na `UnitBlob` (NIE trzecia pula alokacji). Semantyka:
+    1. Broń ze **Zguba** zadaje rany **normalnie** do puli precise/regular (per pkt 17.d) **ORAZ** dodatkowo zwiększa licznik `wounds_eliminating` o tę samą liczbę.
+    2. `eliminating` **nigdy nie jest przydzielany samodzielnie** — gdy przydzielane są rany precise/regular, licznik `eliminating` **też maleje** (o liczbę faktycznie przydzielonych/zaalokowanych ran).
+    3. Jeśli model zostaje **pokonany zanim licznik `eliminating` się wyczerpie** (tj. pokonany przez przydzielenie ran mieszczących się w pierwszych `N` = wartość licznika) → model jest **ELIMINOWANY** (pkt 26.d, nie może wrócić). W przeciwnym razie → WYCOFANY (pkt 26.c, może wrócić przez Leczenie pkt 21.c.ii).
+    - **Zwięzła reguła docelowa:** „Zguba: Licz rany otrzymane tą bronią. Modele pokonane przez przydzielenie **pierwszych ran do tej liczby** nie mogą wrócić do gry."
+    - **Q-H5a RESOLVED:** NIE splitujemy `wounds_received`/4 pól ran — dodajemy jedno pole `wounds_eliminating`. **Q-H5b RESOLVED:** `eliminating` jest ortogonalny do `wounds_pending_precise` (precyzyjny=pula alokacji; eliminating=znacznik „pierwsze N ran są eliminujące"). **Q-H5c RESOLVED:** `eliminating` to **liczba ran**, malejąca wraz z alokacją; pokonanie modelu gdy licznik wciąż dodatni → ELIMINOWANY.
+    - **Implikacja na wcześniejszą „3-pula":** porzucona — żaden split `wounds_received`. Impact ADR-0014: dodanie pojedynczego pola-licznika, nie restrukturyzacja. B2 ORM `BattleEvent.payload_json`: +1 pole `wounds_eliminating` per unit (nie 3).
 
 ## Notatki / odkrycia w trakcie
 
