@@ -12,7 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3.9 done; B2 ORM lub D pierwsze) |
-| [HANDOFF_faza-b-rules-resync](docs/handoffs/HANDOFF_faza-b-rules-resync.md) | Sync YAML+engine z driftem zasad 2026-06-03 (Przegrupowanie per-action, Leczenie EOA, formuła T_eff aur/rozkazów, Lokalizacja enum, 8 abilities przepisanych). | `app/rulesets/v1/*.yaml`, `app/services/engine/{phases,combat,status,state,actions,effects}.py`, `app/services/rulesets/{cost_functions,handlers}.py` | In progress (R0–R7 + RW) |
+| [HANDOFF_faza-b-rules-resync](docs/handoffs/HANDOFF_faza-b-rules-resync.md) | Sync YAML+engine z driftem zasad 2026-06-03 (Przegrupowanie per-action, Leczenie EOA, formuła T_eff aur/rozkazów, Lokalizacja enum, 8 abilities przepisanych). | `app/rulesets/v1/*.yaml`, `app/services/engine/{phases,combat,status,state,actions,effects}.py`, `app/services/rulesets/{cost_functions,handlers}.py` | In progress (R0–R6 ✅; R4.Zguba + Klątwa/Rozkaz/Oznaczenie + R7/RW pozostałe) |
 
 
 ## Zasoby zablokowane (reverse lookup)
