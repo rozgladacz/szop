@@ -14,3 +14,7 @@ openpyxl==3.1.2       # opcjonalne: eksport XLSX
 
 # Konfiguracja
 python-dotenv==1.0.1
+
+# Deklaratywne reguły (Strumień A — feature toggle OPR_RULES_BACKEND)
+pydantic>=2.0,<3.0
+PyYAML>=6.0,<7.0

@@ -1,0 +1,119 @@
+# Świadomie dozwolone rozjazdy YAML vs DOCX (A4.2, ADR-0006).
+#
+# Wpisy poniżej są raportowane przez `scripts/rules_drift.py` jako WHITELISTED
+# (INFO) i NIE kontrybuują do exit code. Każdy wpis musi mieć `reason` —
+# `until_date` opcjonalny (`~` = null = permanent).
+#
+# Review cadence: kwartalnie (sprawdź czy reason nadal aktualny, until_date
+# nie minął, czy DOCX nie zaczął zawierać wpisu).
+#
+# Schema:
+#   allowed_yaml_only:
+#     - slug: <ascii_underscore_slug>
+#       reason: "<krótkie uzasadnienie>"
+#       until_date: <YYYY-MM-DD | ~>
+#   allowed_docx_only:
+#     - slug: <ascii_underscore_slug>
+#       reason: "<krótkie uzasadnienie>"
+#       until_date: <YYYY-MM-DD | ~>
+#
+# `allowed_yaml_only` filtruje R2 (slug w YAML, brak w DOCX) — wpisy są
+#   raportowane jako WHITELISTED (INFO) i nie kontrybuują do exit code.
+# `allowed_docx_only` filtruje R1 (slug w DOCX, brak w YAML) — symetria.
+#   Używane dla DOCX-side split/rename pairs które YAML wyraża pod innym slug.
+
+allowed_yaml_only:
+  # Abstract concepts (DOCX nie nazywa, YAML używa per-ability lub w cost DSL).
+  - slug: aura
+    reason: "Abstract concept dla cost DSL (handlers w ability_costs.yaml) — DOCX go nie nazywa, używa per-ability."
+    until_date: ~
+
+  # Split z DOCX compound names (jeden DOCX → wiele YAML).
+  - slug: szybki
+    reason: "Split z DOCX 'Szybki/Wolny' (DOCX trzyma jako 1 ability z +/- 2\" wariantem)."
+    until_date: ~
+  - slug: wolny
+    reason: "Split z DOCX 'Szybki/Wolny' — wariant negatywny."
+    until_date: ~
+  - slug: dobrze_strzela
+    reason: "Split z DOCX 'Dobrze/źle strzela' (DOCX trzyma jako 1 ability z 4/5 wariantem)."
+    until_date: ~
+  - slug: zle_strzela
+    reason: "Split z DOCX 'Dobrze/źle strzela' — wariant negatywny."
+    until_date: ~
+
+  # YAML używa innych slugów (po polskim nazewnictwie wg konceptu) niż DOCX
+  # (po polskim nazewnictwie wg efektu). YAML jest pre-istniejące, DOCX będzie
+  # alignowany w przyszłej rewizji DOCX — patrz ADR-0006 sekcja "Do rewizji".
+  - slug: burzaca
+    reason: "YAML slug dla 'Przełamanie' (DOCX). Różne nazwy konceptu — YAML wybrał 'burząca' (niszczycielska), DOCX 'przełamanie'."
+    until_date: 2026-12-31
+  - slug: masywny
+    reason: "YAML slug dla 'Sekcje' (DOCX). YAML opisuje stan, DOCX strukturę modelu."
+    until_date: 2026-12-31
+  - slug: rozrywajacy
+    reason: "YAML slug dla 'Podwójny' (DOCX). YAML opisuje efekt (rozrywający trafienia), DOCX mechanikę (podwójne 6)."
+    until_date: 2026-12-31
+  - slug: unik
+    reason: "YAML slug dla 'Przewidywalny' (DOCX). YAML opisuje obronę celu, DOCX cechę celu."
+    until_date: 2026-12-31
+
+  # Świadomie blocked w abilities.py (`blocked=True`) — backward compat dla
+  # istniejących rosterów; nie eksponowane w UI ani w nowych rozpiskach.
+  # DOCX/MD zostały zaktualizowane (usuwając te zdolności), ale procedural
+  # mirror je zachowuje. Patrz `app/data/abilities.py` + `armies.py:_base_passive_definitions`.
+  - slug: ucieczka
+    reason: "blocked=True (backward compat). DOCX usunął, YAML mirror zachowuje."
+    until_date: 2026-12-31
+  - slug: platforma_strzelecka
+    reason: "blocked=True (backward compat). Transport variant."
+    until_date: 2026-12-31
+  - slug: otwarty_transport
+    reason: "blocked=True (backward compat). Transport variant."
+    until_date: 2026-12-31
+  - slug: przekaznik
+    reason: "blocked=True (backward compat). Active ability usunięte z DOCX po klaryfikacji zasad (313fb1d)."
+    until_date: 2026-12-31
+  - slug: koordynacja
+    reason: "blocked=True (backward compat). Active ability usunięte z DOCX."
+    until_date: 2026-12-31
+  - slug: mobilizacja
+    reason: "blocked=True (backward compat). Active ability usunięte z DOCX."
+    until_date: 2026-12-31
+  - slug: przepowiednia
+    reason: "blocked=True (backward compat). Active ability usunięte z DOCX."
+    until_date: 2026-12-31
+  - slug: presja
+    reason: "blocked=True (backward compat). Active ability usunięte z DOCX."
+    until_date: 2026-12-31
+  - slug: usprawnienie
+    reason: "YAML-only active ability dodana w main przez 313fb1d (Klaryfikacja zasad) — brak w DOCX/MD 2026-06. TODO faza-b-rules-resync R4: decyzja czy zachować jako blocked vs usunąć z YAML."
+    until_date: 2026-09-30
+
+# Symetria R1: DOCX-only slugi które YAML wyraża pod innym slug (split/rename
+# pairs). Bez tego R1 ERROR by blokował PR za każdą redakcją DOCX wording.
+allowed_docx_only:
+  # Split DOCX->YAML: DOCX trzyma jako 1, YAML splituje na 2.
+  - slug: szybki_wolny
+    reason: "DOCX-side of split. YAML ma 'szybki' + 'wolny' jako osobne."
+    until_date: ~
+  - slug: dobrze_zle_strzela
+    reason: "DOCX-side of split. YAML ma 'dobrze_strzela' + 'zle_strzela' jako osobne."
+    until_date: ~
+
+  # Rename DOCX↔YAML: ten sam koncept, różne slugi (DOCX po mechanice, YAML po efekcie).
+  - slug: przelamanie
+    reason: "DOCX-side of rename. YAML wyraża jako 'burzaca'."
+    until_date: 2026-12-31
+  - slug: podwojny
+    reason: "DOCX-side of rename. YAML wyraża jako 'rozrywajacy'."
+    until_date: 2026-12-31
+  - slug: przewidywalny
+    reason: "DOCX-side of rename. YAML wyraża jako 'unik'."
+    until_date: 2026-12-31
+
+  # AP(X) jest weapon trait w DOCX, ale w YAML jest zaszyte jako tabela kosztu
+  # (ap_base/ap_lance/etc. w tables.yaml), nie jako osobna ability definition.
+  - slug: ap
+    reason: "DOCX traktuje AP(X) jako ability, YAML traktuje jako tabelę kosztu w tables.yaml (ap_base, ap_lance, penetrating_multiplier, brutalny_ap_cost)."
+    until_date: ~

@@ -29,53 +29,62 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ---
 
-## Strumień A — Deklaratywne reguły (YAML + SSOT)
+## Strumień A — Deklaratywne reguły (YAML + SSOT) ✅
 
-> Zamiana hardcoded tabel i `if/elif` na YAML + Pydantic. Feature toggle `OPR_RULES_BACKEND ∈ {procedural, yaml, both_assert}`.
+> Zamiana hardcoded tabel i `if/elif` na YAML + Pydantic. Feature toggle `OPR_RULES_BACKEND ∈ {procedural, yaml, both_assert}`. **Faza A done (2026-05-24); A4 świadomie poza scope — osobny wątek gdy wymagane.** Pełny przebieg: `HANDOFF.md → LOG SESJI → 2026-05-24 — faza-a (archived)`.
 
-### A0. Feature toggle (prereq)
-- [ ] ENV `OPR_RULES_BACKEND` z defaultem `procedural`
-- [ ] Dispatcher w `app/services/costs/quote.py` (procedural | yaml | both_assert)
-- [ ] Tryb `both_assert`: wywołuje oba, loguje `RulesetParityError` jeśli delta > 1e-3, zwraca wynik procedurala
-- [ ] CI uruchamia `OPR_RULES_BACKEND=both_assert pytest` na każdym PR
-- [ ] ADR-0005: Feature toggle — procedural i YAML koexistują do dojrzałości
+### A0. Feature toggle (prereq) ✅
+- [x] ENV `OPR_RULES_BACKEND` z defaultem `procedural`
+- [x] Dispatcher w `app/services/costs/quote.py` (procedural | yaml | both_assert)
+- [x] Tryb `both_assert`: wywołuje oba, raise `RulesetParityError` jeśli delta > 1e-3, zwraca wynik procedurala
+- [x] CI gate: `make test-parity` — uruchamia `both_assert` na `test_ruleset_parity.py` i `yaml` na `tests/yaml_backend/`
+- [x] ADR-0005: Feature toggle — procedural i YAML koexistują do dojrzałości
 
-### A1. Schema + słowniki (3 tyg)
-- [ ] `app/rulesets/v1/` — katalog plików YAML
-- [ ] `app/services/rulesets/models.py` — Pydantic v2 schema (TableDefinition, AbilityDefinition, AbilityCost, RulesetManifest)
-- [ ] `make generate-schema` → `docs/schemas/ruleset_v1.schema.json` (dla VS Code YAML extension)
-- [ ] `app/rulesets/v1/tables.yaml` — migracja tabel z `app/services/costs/_engine.py` (DEFENSE_BASE_VALUES, RANGE_TABLE, AP_BASE, BLAST_MULTIPLIER, …)
-- [ ] `app/rulesets/v1/abilities.yaml` — migracja 98 ability defs z `app/data/abilities.py`
-- [ ] `app/services/rulesets/loader.py` — LRU cache keyed na `(version, sha256(content))`, file mtime check w dev, zero alokacji w hot path
-- [ ] Testy: `tests/test_tables_migration.py`, `tests/test_abilities_migration.py` — exact match vs oryginał
-- [ ] ADR-0003: YAML + Pydantic v2 jako format reguł
+### A1. Schema + słowniki ✅
+- [x] `app/rulesets/v1/` — katalog plików YAML
+- [x] `app/services/rulesets/models.py` — Pydantic v2 schema (`RulesetTables`, `RulesetAbility`, `RulesetManifest`, `TransportMultiplier`)
+- [ ] `make generate-schema` → `docs/schemas/ruleset_v1.schema.json` (deferred — VS Code YAML extension nice-to-have)
+- [x] `app/rulesets/v1/tables.yaml` — migracja 18 tabel z `app/services/costs/_engine.py`
+- [x] `app/rulesets/v1/abilities.yaml` — **87** definicji z `app/data/abilities.py` (nie 98 jak myślano w pre-A1 estymacie)
+- [x] `app/services/rulesets/loader.py` — `@lru_cache(maxsize=4)` na public entrypoincie + SHA256 discriminators dla dev reload
+- [x] Testy: `tests/test_tables_migration.py` (22), `tests/test_abilities_migration.py` (89) — exact match vs oryginał
+- [x] ADR-0003: YAML + Pydantic v2 jako format reguł
 
-### A2. Cost DSL (4–5 tyg)
-- [ ] `app/services/rulesets/cost_functions.py` — ~12–15 czystych funkcji (`scale_by_tou`, `scale_by_quality`, `apply_ap_modifier`, `blast_cost`, …)
-- [ ] `app/rulesets/v1/ability_costs.yaml` — DSL: `{fn: "scale_by_tou", args: {factor: 1.25}}`
-- [ ] `_yaml_quote()` w `app/services/costs/quote.py` — loader → lookup → dispatch → QuoteResult
-- [ ] Testy: `tests/test_cost_functions.py`, `tests/test_quote_yaml_backend.py`
-- [ ] ADR-0004: Cost DSL — function dispatcher zamiast eval
+### A2. Cost DSL ✅
+- [x] `app/services/rulesets/cost_functions.py` — 13 czystych funkcji DSL + wrappery weapon_cost
+- [x] `app/services/rulesets/dispatcher.py` — `_REGISTRY` (9 fn) + `call_recipe()` + `passive_cost_dsl()`
+- [x] `app/services/rulesets/handlers.py` — 6 handlerów (transport/open_transport/aura/mag/order_like/mistrzostwo) + `ability_cost_components_yaml()`
+- [x] `app/services/rulesets/quote_yaml.py` — `roster_unit_role_totals_yaml`, 1:1 port `role_totals.py` z YAML substytucjami
+- [x] `app/rulesets/v1/ability_costs.yaml` — 33 passive recipes + 7 fixed_by_slug + 4 fixed_by_desc + 6 handlers + `skip_in_default`
+- [x] `_yaml_quote()` w `app/services/costs/quote.py` — dispatcher + body mirror `_procedural_quote`
+- [x] Testy: `tests/test_cost_functions.py` (232), `tests/test_quote_yaml_backend.py` (35)
+- [x] ADR-0004: Cost DSL — hardcoded function dispatcher zamiast eval, callable injection (`passive_cost_fn`, `slug_for_name`), inwariant czystości "no-oracle-import" w `rulesets/*`
 
-### A3. Testy (cross-cutting)
-- [ ] Golden tests procedurala (istniejące) — **nie ruszać semantyki**; stają się wzorcem
-- [ ] `tests/yaml/test_*_yaml.py` — te same scenariusze pod `OPR_RULES_BACKEND=yaml`
-- [ ] `tests/test_ruleset_parity.py` — 100 cartesian + 50 ręcznych przypadków; `proc == yaml ± 1e-3`
-- [ ] CI: wszystkie 3 warstwy na każdym PR
+### A3. Testy (cross-cutting) ✅
+- [x] Golden tests procedurala (istniejące) — semantyka nieruszona; baseline dla `both_assert`
+- [x] `tests/yaml_backend/test_*_yaml.py` — te same scenariusze pod `OPR_RULES_BACKEND=yaml` (93 testy w 4 plikach: passive/active/weapon/mistrzostwo)
+- [x] `tests/test_ruleset_parity.py` — 100 cartesian + 55 manual + None-unit = 156 testów pod `both_assert`; delta ≤ 1e-3
+- [x] CI gate: `make test-parity` (cel w Makefile)
 
-### A4. Pipeline DOCX → PDF → YAML (3–4 tyg)
-- [ ] `scripts/rules_extract.py` — DOCX → `build/rules_extracted.yaml` (slug, name, type, description; cost_fn ręcznie)
-- [ ] `scripts/rules_drift.py` — diff extracted vs `abilities.yaml`; 4 rodzaje raportów; exit code 0/1/2; `build/drift_report.md`
-- [ ] `scripts/rules_classify_geometry.py` — klasyfikacja zdolności wg keywords (flanka, tył, obrót, …); `build/geometry_classification.md` → lista exclusions z B MVP
-- [ ] `scripts/rules_pdf_check.py` — DOCX vs PDF integrality; SHA256 w `app/static/docs/SZOP.pdf.sha256`
-- [ ] `make rules-check` — uruchamia cały pipeline
-- [ ] `.github/workflows/rules_drift.yml` — trigger: PR touching `app/static/docs/`, `app/rulesets/`, `app/data/abilities.py`
-- [ ] ADR-0006: Pipeline drift — nie auto-gen, only drift detection
+### A4. Pipeline DOCX → PDF → YAML (in progress — wątek `faza-a-4-drift` od 2026-05-26)
+- [x] A4.0: ADR-0006 (Proposed) + HANDOFF bootstrap (`faza-a-4-drift` parent + `faza-a-4-extract` sub-thread). Plan 7 faz, decyzja: drift-only (nie auto-gen YAML); 4 typy raportów R1/R4 ERROR + R2/R3 WARN.
+- [x] A4.1: `scripts/rules_extract.py` — DOCX → `build/rules_extracted.yaml`. Parser content-based state machine (brak Headingów w DOCX), `python-docx>=1.1.0` w `requirements-dev.txt`, 29 testów.
+- [x] A4.1+: `scripts/rules_extract_md.py` — formalna MD (SZOP_Zdolnosci.md) → `build/rules_md.yaml`. Schema reuse `RulesetAbility`. 15 testów.
+- [x] A4.2: `scripts/rules_drift.py` — diff 4 raporty + allowlist (R1+R2 symetria) + exit 0/1/2 + 28 testów. Pierwszy real run: R1=0 R2=0 R3=31 R4=0 → exit 2 WARN.
+- [x] A4.2+: YAML sync z `Rozwoj` (cherry-pick a051bb4+313fb1d) — abilities.py 88 entries +blocked field, cost path (kontra=1.0 +parowanie=1.5, transport_multipliers), abilities.yaml/tables.yaml/ability_costs.yaml mirror sync. both_assert parity 156/156.
+- [x] A4.3: `scripts/rules_classify_geometry.py` — `build/geometry_classification.md` z 3 excluded (zwrot/precyzyjny/dywersant), 7 kategorii, 28 testów. **Strumień B0 odblokowany.**
+- [x] A4.4: `scripts/rules_sources_check.py` — SHA256 dla 4 source files (extended scope vs PDF-only). `app/rulesets/v1/source_hashes.yaml` centralizacja, 21 testów.
+- [x] A4.5: `Makefile` cel `rules-check` (orchestracja 5 skryptów; drift LAST żeby exit 2 WARN nie zatrzymał wcześniejszych artefaktów). + AGENTS.md/docs/testing.md udokumentowane.
+- [x] A4.6: `.github/workflows/rules_drift.yml` — CI gate path-filtered (PR+push), exit code semantics (0=pass, 1=fail, 2=warn-pass), artifact upload + step summary z raportów.
+- [x] A4.7: ADR-0006 promocja `Proposed → Accepted` — 8 punktów rewizji rozstrzygnięte empirycznie po A4.1–A4.6. **Faza A4 done. Strumień B0 odblokowany.**
+- [ ] A4.7: ADR-0006 promocja `Proposed → Accepted` (8 punktów rewizji w sekcji "Do rewizji")
 
-### A5. Wydajność
-- [ ] `tests/test_quote_performance_regression.py` — YAML ≤ +20% baseline procedural (fail jeśli > 30%)
-- [ ] Profiling hot path `ability_identifier` (~18 700 callów/quote)
-- [ ] ADR-0007: Cache rulesetów — frozen dataclass + hash LRU
+### A5. Wydajność ✅
+- [x] `tests/test_quote_performance_regression.py` — `min(yaml_time/proc_time)` ≤ 1.30 (3 attempts × min, headroom 0.10 na Windows noise; bare-metal Linux median ~1.10×)
+- [x] **A5 optymalizacje wymuszone przez test:** `@lru_cache(maxsize=4)` na `load_ruleset()` (skip SHA recheck na hot path); `CostRecipe = CostRecipeSpec` alias (eliminacja per-quote rebuild loopa po post-review cleanup). Ratio 3.57× → 1.158×.
+- [x] `scripts/profile_quote.py --backend procedural|yaml|both_assert` (argparse) + `Makefile:profile BACKEND=...`
+- [x] `docs/PERFORMANCE.md` — baseline obu backendów (sekcja "Baseline YAML backend (Faza A5)")
+- [x] ADR-0007: Cache rulesetów — single LRU level (id-keyed cache usunięty w post-review)
 
 ---
 
@@ -83,12 +92,14 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 > Symulator pełnej bitwy 1v1. Uproszczony model: oddział = koło, tereny = koła/linie, brak orientacji/per-model loadout. Pełne zasady przebiegu rundy.
 
-### B0. Pareto MVP — założenia (prereq)
-- [ ] Zdefiniuj w `tables.yaml`: wzór na radius_inches = f(models_count, toughness, base_size_mm)
-- [ ] Globalna stała ruchu: 6" w `tables.yaml` (nie per-unit)
-- [ ] Lista exclusions z `build/geometry_classification.md` (A4) — engine raise `UnsupportedAbilityError` dla tych zdolności
-- [ ] ADR-0008: Pareto MVP specification
-- [ ] ADR-0010a: Decision freeze — "rules text dojrzały do implementacji B3 actions" (GATE)
+### B0. Pareto MVP — założenia (prereq) ✅ (2026-05-30, wątek `faza-b-engine-mvp`)
+- [x] `tables.yaml > b_mvp`: `move_inches=6`, `base_area_inches_sq_per_toughness=1` (podstawka modelu = 1 in²/punkt wytrzymałości), `pi_approx`. Wzór: `radius_inches = sqrt(sum(toughness)/pi)`; Bohater (id 2) liczy się jako `toughness/2`.
+- [x] `b_mvp_exclusions.yaml` (NEW): hand-curated 6 entries (samolot/wrak/wysoki/zwrot/sterowany/zuzywalny). Rozbieżność z A4.3 (3 entries: dywersant/precyzyjny/zwrot) udokumentowana w ADR-0008 — A4.3 jest heurystyką keyword match, B0 list to user decision.
+- [x] `app/services/rulesets/{models.py BMvpConfig/Exclusion/Exclusions, loader.py load_b_mvp_exclusions}` — Pydantic + lru_cache; engine raise `UnsupportedAbilityError` przy budowie BattleState
+- [x] ADR-0008: Pareto MVP specification (Accepted)
+- [x] ADR-0010: Event-sourced battle log (Accepted; sub-decyzja 0010b scalona)
+- [x] ADR-0010a: Decision freeze GATE — 5 warunków (Accepted)
+- [x] ADR-0014: Per-unit wounds — 4 kategorie ran (Accepted; Zguba/Zemsta wykluczone)
 
 ### B2. Modele danych (4 tyg)
 
@@ -117,50 +128,77 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [ ] `load_events(session, battle_id, since=0)` — odczyt z db
 - [ ] `create_snapshot()` — optionally save snapshot (MVP: nie wywoływane)
 
-- [ ] ADR-0010: Event-sourced battle log
-- [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence
-- [ ] ADR-0014: Obrażenia per-oddział (zgodne z „Stan bitewny")
+- [ ] ADR-0010: Event-sourced battle log ✓
+- [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence ✓ (scalone z 0010)
+- [ ] ADR-0014: Obrażenia per-oddział (zgodne z „Stan bitewny") ✓
 
-### B3. Rule Executor + dice (5–7 tyg, gate: ADR-0010a)
+### B3. Rule Executor + dice — **DONE 2026-05-30** (sub-wątek `faza-b-3-executor`, 8 commitów)
 
-**Dice (`app/services/engine/dice.py`, ~80 linii):**
-- [ ] `DeterministicDice(seed)` — `roll_d6(count, modifiers)`, `roll_with_threshold(pool, threshold)`
-- [ ] Testy: reproducibility, distribution, threshold
-- [ ] ADR-0012: Własna biblioteka dice, deterministic seed
+Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 weapon + Bohater + 6 wykluczeń + Strażnik stub + reactive Bastion). Pure functions + event sourcing. **1244/1244 testów** (282 nowych vs 962 pre-B3 baseline). **10 ADR-ów Accepted**: 0008/0010/0010a/0011/0012/0014/0015/0015a/0043/0044.
+
+**Dice (`app/services/engine/dice.py`):**
+- [x] `DeterministicDice(seed)` na `random.Random` (stdlib), `roll_d6(count)`, `roll_with_threshold(count, threshold, modifier, natural_6/1 flags)` per pkt 1 a-d. `RollResult` frozen z natural rolls.
+- [x] 24 testy (reproducibility, distribution chi-square, threshold semantics, Brutalny/Delikatny, modifier clamp).
+- [x] ADR-0012 Accepted: `random.Random` z stdlib, brak biblioteki zewnętrznej, 4 inwarianty replay.
 
 **LoS (`app/services/engine/los.py`):**
-- [ ] 3-state: `WIDZI` / `NIE_WIDZI` / `OSŁONA` — via N=16 deterministycznych punktów na okręgu celu
-- [ ] `check_los(attacker, target, terrain, N=16) → LoSState`
-- [ ] Testy: `tests/test_los_geometry.py` — 30 hand-crafted scenarios
-- [ ] ADR-0043: LoS 3-stanowy — sampling N=16, plan B: N=32 lub analytic tangent
+- [x] 3-state `LoSState ∈ {WIDZI, NIE_WIDZI, OSŁONA}` z sampling N=16 punktów na obwodzie celu, Zasłaniający exception pkt 4.c.iii.
+- [x] Geometry primitives: `_segment_intersects_circle` (closest point projection), `_segments_intersect` (CCW orientation).
+- [x] 43 testy (geometry 12, Blokujący 4, Zasłaniający 5, multi-terrain 2, non-blocking 3, edge cases 4, enum 2, realistic 2).
+- [x] ADR-0043 Accepted: N=16 Pareto sweet spot, plan B N=32/analytic.
 
 **Prediction (`app/services/engine/prediction.py`):**
-- [ ] `expected_damage(attacker, defender, weapon_slug, terrain, ruleset) → DamageDistribution` — analitycznie, binomial CDF, bez RNG
-- [ ] `DamageDistribution(mean, pmf, p_at_least(), p_kill())`
-- [ ] `would_see(pos, target, terrain) → LoSState`
-- [ ] Testy: `tests/test_prediction_vs_simulation.py` — 100 scenariuszy × 1000 Monte Carlo; mean ±3σ; Chi-square dla pmf
-- [ ] ADR-0044: Prediction module dla agentów (bez symulacji)
+- [x] `expected_damage(attacker, defender, weapon, terrain)` analityczny binomial bez RNG. `DamageDistribution(pmf, mean, p_at_least, p_kill, p_full_kill, expected_models_killed)`. `would_see` hipotetyczny LoS.
+- [x] REUSES `compute_cover/compute_attack_modifiers/compute_defense_modifier` z combat.py (consistency invariant).
+- [x] 38 testów + **Monte Carlo parity 8 scenariuszy × 500 sym + cover** — ±3σ tolerance.
+- [x] ADR-0044 Accepted: analytic dla agents/MCP, 5 planowanych konsumentów.
 
 **Combat (`app/services/engine/combat.py`):**
-- [ ] `resolve_ranged_attack(attacker, defender, weapon, dice, terrain, ruleset) → CombatResult`
-- [ ] Faza 1: Declare + attacker modifiers; REACTIVE WINDOW dla broniącego (jednorazowe, atomowe); Faza 2: Dice resolution; Faza 3: Wound allocation
-- [ ] `resolve_melee_attack(…)` — analogicznie
-- [ ] ADR-0015a: Reactive window — jednorazowa, atomowa, nie generuje nowych okien
+- [x] `WeaponProfile` + `CombatResult` + `ChargeResult` frozen.
+- [x] `resolve_ranged_attack` (pkt 17 + 19): osłona, AP, Brutalny, Precyzyjny, hit/defense rolls, wound allocation pkt 17.d-e + pkt 18 z prefer_hero.
+- [x] `resolve_melee_attack`: + bilans wręcz pkt 20.c.
+- [x] `resolve_charge_attack`: pełna Szarża pkt 14.d.i-vi z reactive kontratakiem pkt 14.d.iv (ADR-0015a) + Bastion id 1.
+- [x] Helpers: `effective_attack_quality` (Niezawodny id 63 → Q=2), `_apply_podwojny_extra_hits` (Podwójny id 66).
+- [x] Lazy import z effects.py — Cierpliwy/Tarcza/Nieustraszony faktycznie modyfikują rolls.
+- [x] 56 testów (combat base 37 + extension 19).
+- [x] ADR-0015a Accepted: reactive jednorazowy/atomowy/no nested.
 
-**Effects + Interrupts (`app/services/engine/effects.py`, `interrupts.py`):**
-- [ ] `EFFECT_REGISTRY` — `{slug: apply_fn}`; każda funkcja czysta: `(unit, context) → unit`
-- [ ] `InterruptManager` — 4 zamknięte punkty: `activation_start`, `after_action`, `before_regroup`, `after_regroup`; constraint: interrupt nie generuje nowego punktu
-- [ ] ADR-0015: 4 zamknięte interrupt points
+**Effects + Interrupts (`app/services/engine/{effects,interrupts}.py`):**
+- [x] `EffectContext` frozen + 4 per-hook registries (defense/attack/morale/weapon modifiers). `aggregate_*_modifier` aggregators. MVP passive: Cierpliwy/Tarcza/Nieustraszony.
+- [x] `InterruptPoint` enum (4 punkty per ADR-0015), `register_interrupt_handler(point, slug)`, `get_eligible_interrupts`, `trigger_interrupt`. Strażnik (id 31) MVP stub.
+- [x] 38 testów (21 effects + 17 interrupts).
+- [x] ADR-0015 Accepted: 4 zamknięte punkty per pkt 12, no nested.
 
 **Phases (`app/services/engine/phases.py`):**
-- [ ] `setup_phase(roster_p0, roster_p1, scenario, ruleset) → BattleState`
-- [ ] `deployment_round(state, actions) → (BattleState, events)`
-- [ ] `activation_phase(state, action) → (BattleState, events)`
-- [ ] `round_end_phase(state) → (BattleState, events)`
+- [x] `setup_phase(rosters, terrain, objectives, initiative)` — pkt 7+9.
+- [x] `deployment_round(state, actions)` — pkt 13, emit MoveExecuted move_type="deploy".
+- [x] `activation_phase(state, action, dice)` — dispatch per Action type → akcja → Przegrupowanie pkt 20 (uwzględnia pkt 20.b/c/d + passive morale modifiers) → Aktywowany.
+- [x] `round_end_phase(state)` — pkt 8.c reset Aktywowany + `_check_objective_control` pkt 5.d (Przyszpilony nie kontroluje pkt 22.b.ii) + RoundEnded + is_game_over po round 4 pkt 5.f.
+- [x] 25 testów.
 
-**Resolver (`app/services/engine/resolver.py`):**
-- [ ] `apply(state, action, dice, ruleset, terrain) → (BattleState, list[BattleEvent])` — czysta funkcja, zero DB access
-- [ ] ADR-0011: Rule executor — hardcoded klasy na MVP
+**Resolver (`app/services/engine/resolver.py`) — PUBLIC API:**
+- [x] `apply(state, action, dice, sequence) → ResolverResult(state, events, next_sequence)` — pure function dispatcher.
+- [x] Walidacja `IllegalActionError` (5 powodów). Switch active_player pkt 8.a + fallback. Helpers `should_end_round` / `is_battle_over`.
+- [x] 22 testów (per Action type, walidacja, switch, determinism, smoke 2v2 + game over after round 4).
+- [x] ADR-0011 Accepted: hardcoded klasy/funkcje, isinstance dispatch dla 5 Action types, lazy import dla combat↔effects cycle. Public API engine zdefiniowane.
+
+**B3.8 weryfikacja end-to-end:**
+- [x] Pytest **1244/1244** (962 baseline + 282 nowych w B3)
+- [x] Parity gate Strumień A: `both_assert` 156/156, `yaml` 93/93 — niezmieniony
+- [x] Drift gate: 4/4 sources SHA256 CLEAN, R1=0/R2=0/R3=31 (acceptable warn per ADR-0006)
+- [x] Smoke replay: `scripts/engine_smoke_replay.py` — minimal 2v2 battle, 21 events, 7 typów eventów reprezentowanych
+- [x] `docs/architecture.md` — sekcja "Game engine" z mapą modułów + event-sourced data flow + typowa orkiestracja
+
+### B3.9. Architecture hardening — **DONE 2026-06-02** (sub-wątek `faza-b-3-hardening`, 6 faz)
+
+7 bug-fixów + 1 dead-code cleanup z post-B3 code review, zorganizowane w 5 dziurach architektonicznych. **PRZED B2 ORM** żeby stabilizować event types schema (zero migration churn). **3 nowe ADR-y Accepted**: 0045/0046/0047. Pytest **1337/1337** (1244 baseline + 93 nowych w B3.9.a-e), parity 156/156, drift CLEAN, smoke replay GATE pass (replay invariant assertion EXIT 0).
+
+- [x] **B3.9.a** — `app/services/engine/status.py` (NEW) — `StatusFlag(str, Enum)` + idempotentne `add_status`/`remove_status`. Konsolidacja 3 kopii STATUS_* z effects/phases/combat. 22 testów (`test_engine_status.py`).
+- [x] **B3.9.b** — `app/services/engine/geometry.py` (NEW) — `distance` (math.hypot), `point_in_circle`, `segment_intersects_circle`, `segments_intersect`, **`circle_edge_distance`** (fix bug #4: charger.radius ignored w min_gap), `UNIT_CIRCLE_16` precomputed. Konsolidacja 4 kopii `_distance`. 27 testów (`test_engine_geometry.py`).
+- [x] **B3.9.c** — `ActivationContext` (`phases.py`) + `BattleState.initial_toughness_snapshot` (`state.py`) — frozen delta state per aktywacja: `wounds_received_this_activation` zamiast cumulative (fix bug #1 pkt 20.a), `melee_combatants` frozenset (fix bug #2: defender szarży regroup-testuje w aktywacji chargera + bug #5: melee_balance reset obu stron). `initial_toughness_for(state, blob_id)` helper (fix bug #3: snapshot zamiast post-action proxy). **ADR-0045 Accepted**. 17 testów (`test_engine_activation_context.py`).
+- [x] **B3.9.d** — `app/services/engine/reducers.py` (NEW) z `@register_reducer` dla wszystkich 11 typów; 3 nowe eventy w `events.py`: `StatusAdded`/`StatusRemoved`/`MeleeBalanceReset`. Emit Status* w combat/phases zamiast silent `replace()` (fix bug #6). Algorytm wound allocation w reducerach mirror `combat._allocate_wounds_to_defender`. **ADR-0046 Accepted** — proof-of-completeness ADR-0010 empirycznie. 8 testów + GATE `test_gate_full_multi_action_replay` (per-blob bit-perfect) + sanity `test_all_event_types_have_reducer` (`test_engine_replay_invariant.py`).
+- [x] **B3.9.e** — `UnitBlob.melee_weapons`/`ranged_weapons: tuple[WeaponProfile, ...]` + `WeaponProfile` migration z combat.py do state.py. `build_initial_state` parsuje `unit["weapons"]` z partycją po `range_inches`. Fix bug #7: `resolve_charge_attack` counter używa `defender.melee_weapons[0]` z fallback. `_ACTIVE_ABILITY_REGISTRY` w `effects.py` + `register_active_ability(slug)` decorator + `get_active_ability(slug)` lookup. `phases._apply_special` redukcja do dispatcher-a. Built-in: pełen `discard_exhausted` + 6 stubów (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik). **ADR-0047 Accepted**. 18 testów (`test_engine_weapons_inventory.py`).
+- [x] **B3.9.f** — Dead code cleanup w combat.py (dead loop linia 378-380 + function-local `_MoveExecuted` import). Update `docs/architecture.md` sekcja "Game engine" z nową strukturą modułów. Refresh ADR-0011 Public API (post-B3.9). Update `scripts/engine_smoke_replay.py` z replay invariant assertion (B3.9.d). `docs/roadmap.md` aktualizacja statusów.
 
 ### B4. API (3 tyg)
 - [ ] `app/routers/battles.py` — endpointy: `POST /battles/invite`, `POST /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `GET /battles/{id}/events`, `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST /battles/{id}/replay`
@@ -279,21 +317,21 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 |---|-------|--------|
 | 0001 | Refaktor app.js — IIFE bez bundlera | ✓ |
 | 0002 | SSOT kosztów: calculate_roster_unit_quote | ✓ |
-| 0003 | Format reguł: YAML + Pydantic v2 | — |
-| 0004 | Cost DSL: function dispatcher | — |
-| 0005 | Feature toggle: procedural + YAML | — |
-| 0006 | Pipeline docx↔yaml: drift-only | — |
-| 0007 | Cache rulesetów: frozen dataclass + LRU | — |
-| 0008 | Pareto MVP: oddział = koło, pełne zasady | — |
-| 0010 | Event-sourced battle log | — |
-| 0010a | Decision freeze (GATE dla B3 actions) | — |
-| 0010b | Eventy + immutable state; ORM tylko persistence | — |
-| 0011 | Rule executor: hardcoded → YAML handlers | — |
-| 0012 | Dice: własna biblioteka, deterministyczny seed | — |
+| 0003 | Format reguł: YAML + Pydantic v2 | ✓ |
+| 0004 | Cost DSL: function dispatcher | ✓ |
+| 0005 | Feature toggle: procedural + YAML | ✓ |
+| 0006 | Pipeline docx↔yaml: drift-only | ✓ |
+| 0007 | Cache rulesetów: LRU na load_ruleset | ✓ |
+| 0008 | Pareto MVP: oddział = koło, pełne zasady | ✓ |
+| 0010 | Event-sourced battle log | ✓ |
+| 0010a | Decision freeze (GATE dla B3 actions) | ✓ |
+| 0010b | Eventy + immutable state; ORM tylko persistence | ✓ (scalone w ADR-0010) |
+| 0011 | Rule executor: hardcoded klasy/funkcje na MVP | ✓ |
+| 0012 | Dice: własna biblioteka, deterministyczny seed | ✓ |
 | 0013 | Engine headless-first | — |
-| 0014 | Obrażenia per-oddział (= Stan bitewny) | — |
-| 0015 | 4 zamknięte interrupt points | — |
-| 0015a | Reactive window w akcji ataku (atomowe) | — |
+| 0014 | Obrażenia per-oddział (= Stan bitewny) — 4 kategorie ran | ✓ |
+| 0015 | 4 zamknięte interrupt points | ✓ |
+| 0015a | Reactive window w akcji ataku (atomowe) | ✓ |
 | 0016 | szop_client jako wydzielony moduł | — |
 | 0017 | Telemetria od dnia 1 | — |
 | 0020 | MCP runtime: Python SDK | — |
@@ -306,8 +344,11 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 | 0040 | Migration blob → per-model | — |
 | 0041 | Terrain shapes beyond circle/line | — |
 | 0042 | Facing: wprowadzane z Zwrot | — |
-| 0043 | LoS 3-stanowy (sampling N=16) | — |
-| 0044 | Prediction module (damage PMF + visibility) | — |
+| 0043 | LoS 3-stanowy (sampling N=16) | ✓ |
+| 0044 | Prediction module (damage PMF + visibility) | ✓ |
+| 0045 | ActivationContext + initial_toughness_snapshot (B3.9.c) | ✓ |
+| 0046 | Event-sourced state mutations (B3.9.d, proof ADR-0010) | ✓ |
+| 0047 | UnitBlob weapons inventory + ACTIVE_ABILITY_REGISTRY (B3.9.e) | ✓ |
 
 ---
 
@@ -318,6 +359,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - **Hierarchia oddziałów = dziedziczenie z różnicami.** Wariant trzyma tylko delta.
 - **Monolityczne pliki dzielimy stopniowo.** Komentarze sekcji w `app.js`, `_engine.py` — patrz `docs/developing.md`.
 - **Reguły gry (`app/static/docs/`) = source of truth.** Niedopuszczalna dywergencja kod ↔ DOCX.
+- **SSOT split (od 2026-05-30, B0):** `SZOP_Rozjemca.md` + `SZOP_Zdolnosci.md` = SSOT dla **engine** (mechaniki, drift target). `SZOP.docx`/`SZOP.pdf` = SSOT dla **rules-as-prose** (oficjalny tekst reguł). A4 drift gate weryfikuje synchronizację 4 plików źródłowych.
 - **Procedural ↔ YAML parity = CI gate.** `both_assert` wykrywa każdą rozbieżność > 1e-3.
 - **Game engine = czyste funkcje + event sourcing.** ORM tylko do persistence, brak logiki gry w ORM.
 - **MCP agent = klient HTTP, nie direct DB.** Jeden mechanizm uprawnień, jeden audit trail.

@@ -1,0 +1,253 @@
+# Ruleset v1 — tabele kosztów (mirror app/services/costs/_engine.py:23-79).
+#
+# Procedural engine pozostaje SSOT przez cały Strumień A (patrz
+# docs/adr/0005-feature-toggle.md). Ten plik jest źródłem dla YAML backend
+# uruchamianego pod `OPR_RULES_BACKEND=yaml`. Test `tests/test_tables_migration.py`
+# wymusza exact match z oryginalnymi stałymi Pythonowymi.
+
+version: 1
+
+# Mnożniki kosztu testów przegrupowania (passive: nieustraszony, ucieczka, stracency).
+morale_ability_multipliers:
+  nieustraszony: 0.5
+  ucieczka: 0.5
+  stracency: 0.5
+
+# Bazowe wartości kosztu obrony per stat 2..6.
+defense_base_values:
+  2: 2.3
+  3: 1.65
+  4: 1.25
+  5: 1.0
+  6: 0.9
+
+# Delty kosztu obrony per ability per stat 2..6.
+defense_ability_modifiers:
+  delikatny:
+    2: -0.05
+    3: -0.05
+    4: -0.05
+    5: -0.05
+    6: -0.1
+  niewrazliwy:
+    2: 0.05
+    3: 0.1
+    4: 0.2
+    5: 0.3
+    6: 0.25
+  szpica:
+    2: 0.15
+    3: 0.12
+    4: 0.1
+    5: 0.08
+    6: 0.06
+  waagh:
+    2: -0.03
+    3: -0.03
+    4: -0.03
+    5: -0.02
+    6: -0.01
+  odrodzenie:
+    2: 0.9
+    3: 0.65
+    4: 0.5
+    5: 0.4
+    6: 0.35
+
+# Specjalne mnożniki wytrzymałości (TOUGHNESS_SPECIAL).
+toughness_special:
+  1: 1.0
+  2: 2.15
+  3: 3.5
+  4: 5
+
+# Mnożnik zasięgu broni (RANGE_TABLE). 0 = melee.
+range_table:
+  0: 0.6
+  12: 0.65
+  18: 1.0
+  24: 1.25
+  30: 1.45
+  36: 1.55
+
+# Bonus zasięgu artylerii (ARTILLERY_RANGE_BONUS).
+artillery_range_bonus:
+  0: 0.0
+  12: 0.85
+  18: 0.55
+  24: 0.35
+  30: 0.2
+  36: 0.15
+
+# Kara zasięgu nieporęcznych (UNWIELDY_RANGE_PENALTY).
+unwieldy_range_penalty:
+  0: 0.0
+  12: 0.6
+  18: 0.4
+  24: 0.4
+  30: 0.3
+  36: 0.15
+
+# Bonus trafienia ostrożnego (CAUTIOUS_HIT_BONUS).
+cautious_hit_bonus:
+  0: 0.0
+  12: 0.0
+  18: 0.6
+  24: 0.7
+  30: 0.8
+  36: 0.9
+
+# Bazowy mnożnik AP -1..5 (AP_BASE).
+ap_base:
+  -1: 0.75
+  0: 1.0
+  1: 1.4
+  2: 1.8
+  3: 2.1
+  4: 2.3
+  5: 2.4
+
+# Modyfikator AP dla lance (AP_LANCE).
+ap_lance:
+  -1: 0.15
+  0: 0.35
+  1: 0.3
+  2: 0.25
+  3: 0.15
+  4: 0.1
+  5: 0.05
+
+# Mnożnik penetracji per AP (PENETRATING_MULTIPLIER).
+penetrating_multiplier:
+  -1: 1.5
+  0: 2.0
+  1: 2.5
+  2: 2.7
+  3: 2.8
+  4: 2.9
+  5: 3.0
+
+# Modyfikator AP dla waagh (WAAGH_AP_MODIFIER).
+waagh_ap_modifier:
+  -1: 0.01
+  0: 0.02
+  1: 0.05
+  2: 0.04
+  3: 0.04
+  4: 0.03
+  5: 0.02
+
+# Mnożnik blastu per defense (BLAST_MULTIPLIER).
+blast_multiplier:
+  2: 1.9
+  3: 2.7
+  6: 4.3
+
+# Mnożnik deadly per defense (DEADLY_MULTIPLIER).
+deadly_multiplier:
+  2: 1.8
+  3: 2.5
+  6: 3.8
+
+# Koszt brutalnego per AP (BRUTALNY_AP_COST).
+brutalny_ap_cost:
+  -1: 0.0
+  0: 0.01
+  1: 0.02
+  2: 0.1
+  3: 0.2
+  4: 0.3
+  5: 0.4
+
+# Lista par (trait-set, mnożnik) dla TRANSPORT_MULTIPLIERS.
+# Kolejność istotna: pierwsze dopasowanie wygrywa (jak w procedural).
+transport_multipliers:
+  - traits: [samolot]
+    multiplier: 4.0
+  - traits: [latajacy]
+    multiplier: 1.5
+  - traits: [szybki, zwinny]
+    multiplier: 1.25
+
+# Skalary globalne.
+overcharge_multiplier: 1.05
+base_cost_factor: 5.0
+
+# B0 — Pareto MVP konstantne dla game engine (ADR-0008).
+# Nie używane w Strumieniu A (koszty); konsumowane przez app/services/engine/.
+# Podstawka modelu = 1 in² na punkt wytrzymałości.
+# radius_inches = sqrt(sum(toughness_modelu) / pi); Bohater (id 2) liczy się jako toughness/2.
+b_mvp:
+  move_inches: 6  # SZOP_Rozjemca pkt 15.a
+  base_area_inches_sq_per_toughness: 1
+  pi_approx: 3.141592653589793
+
+# B-rules-resync 2026-06: Lokalizacja oddziału/modelu (SZOP_Rozjemca pkt 26).
+# Enum dla `UnitBlob.location` w app/services/engine/state.py.
+# Konsumowane przez engine; nie wpływa na quote (Strumień A).
+locations:
+  zaplecze:
+    description: "Oddział lub model jest poza polem gry; może wykonać aktywację Rozstawienia (pkt 13)."
+    on_field: false
+    can_activate: true
+  front:
+    description: "Oddział lub model jest na polu gry (Rozstawiony); może wykonać standardową aktywację (pkt 11.b)."
+    on_field: true
+    can_activate: true
+  wycofany:
+    description: "Pokonany model/oddział poza polem gry; nie może być aktywowany; może wrócić przez Odzyskiwanie ran (pkt 21.c.ii) lub zdolność."
+    on_field: false
+    can_activate: false
+    can_return: true
+  eliminowany:
+    description: "Pokonany model/oddział poza polem gry; nie może być aktywowany; NIE może wrócić do gry (np. pokonanie bronią Zguba — pkt 27.a)."
+    on_field: false
+    can_activate: false
+    can_return: false
+
+# B-rules-resync 2026-06: Stany oddziału (SZOP_Rozjemca pkt 22).
+# Po driftcie 2026-06: Przyszpilony uproszczony (brak +1 test, brak blokady aktywnych);
+# Ufortyfikowany uproszczony (brak −1 test); oba mutex (oba odrzucane gdy razem).
+status_flags:
+  wyczerpany:
+    point: "22.a"
+    description: "Oddział nie może wykonywać akcji Atak (Ostrzał, Szarża, kontratak); jest odrzucany standardową akcją specjalną discard_exhausted (pkt 22.a.ii)."
+    blocks_actions: [shoot, charge, counter_attack]
+  przyszpilony:
+    point: "22.b"
+    description: "Oddział nie może wykonywać Manewru i nie kontroluje celów; mutex z Ufortyfikowany (oba odrzucane gdy razem)."
+    blocks_actions: [maneuver]
+    blocks_objective_control: true
+    mutex_with: [ufortyfikowany]
+  ufortyfikowany:
+    point: "22.c"
+    description: "Oddział ma +1 do testów obrony; nie blokuje LoS; odrzucany na początku aktywacji oddziału; mutex z Przyszpilony (oba odrzucane gdy razem)."
+    defense_bonus: 1
+    blocks_los: false
+    removed_at_activation_start: true
+    mutex_with: [przyszpilony]
+  aktywowany:
+    point: "22.d"
+    description: "Oddział nie może być wybrany do Aktywacji; odrzucany na końcu rundy (pkt 8.c.i)."
+    blocks_activation_selection: true
+    removed_at_round_end: true
+
+# B-rules-resync 2026-06: Formuła wyceny Aury / Rozkazu / Klątwy / Oznaczenia
+# (SZOP_Zdolnosci.md, sekcja "Wycena Aur i Rozkazów").
+# Zastępuje wcześniejsze stałe kolumny `aura` i `rozkaz` w `cost` per ability.
+#
+# T = wytrzymałość modelu niosącego zdolność.
+# T_eff = clamp(t_eff_factor * T, t_eff_clamp_min, t_eff_clamp_max).
+#
+# cost.aura       = bazowy * T_eff
+# cost.aura_12    = bazowy * (T_eff + aura_range_bonus)   # zasięg 12"
+# cost.order      = bazowy * (T_eff + order_bonus)        # Rozkaz / Klątwa / Oznaczenie
+#
+# Konsumowane przez `app/services/rulesets/cost_functions.py:aura_cost/order_cost`
+# i handlery `aura/order_like` w `handlers.py`. Patrz ADR-0048.
+aura_order_formula:
+  t_eff_factor: 1.333333333333333  # 4/3
+  t_eff_clamp_min: 8
+  t_eff_clamp_max: 24
+  aura_range_bonus: 8   # dla wariantu z zasięgiem 12"
+  order_bonus: 2        # dla Rozkaz/Klątwa/Oznaczenie

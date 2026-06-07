@@ -92,3 +92,33 @@ Przed analizą backendu **ustal pełną ścieżkę wywołania:** JS event → fe
 - Test (szybki, stop na pierwszym błędzie): `make test-fast`
 - Lint: `make lint`
 - Windows fallback: `python -m pytest -x --tb=short -q`
+
+## A4 drift pipeline — `make rules-check`
+
+Orchestrator pipeline'u drift detection (ADR-0006). Uruchamia 5 skryptów sekwencyjnie z fail-fast:
+
+```bash
+make rules-check                # full pipeline
+make rules-sources-check        # SHA256 dla SZOP.docx/pdf/md×2
+make rules-extract              # DOCX → build/rules_extracted.yaml
+make rules-extract-md           # MD → build/rules_md.yaml
+make rules-classify             # abilities.yaml → build/geometry_classification.md
+make rules-drift                # DOCX vs YAML → build/drift_report.md
+```
+
+**Kolejność `rules-check`:** sources-check → extract → extract-md → classify → drift (drift LAST bo może wyjść z exit 2 WARN i zatrzymać chain — wszystkie inne artefakty wcześniej już zapisane).
+
+**Exit codes:**
+- `0` — clean (wszystko match, brak drift)
+- `1` — ERROR (R1/R4 w drift, mismatch w sources, parse error w extract/classify)
+- `2` — WARN-only (R2/R3 w drift, missing source files)
+
+**Kiedy uruchamiać:**
+- Po edycji `app/static/docs/SZOP.*` (DOCX, PDF, MD) — wykryje silent edits.
+- Po edycji `app/rulesets/v1/*.yaml` — wykryje drift od source-of-truth.
+- Po edycji `app/data/abilities.py` — pośrednio sprawdza spójność YAML mirror.
+- W CI (planowane A4.6 GHA workflow `rules_drift.yml`).
+
+Po świadomej edycji source files: `python scripts/rules_sources_check.py --update` regeneruje `app/rulesets/v1/source_hashes.yaml`.
+
+Detale: [scripts/README.md](../scripts/README.md), [docs/adr/0006-pipeline-drift.md](adr/0006-pipeline-drift.md).

@@ -1,0 +1,486 @@
+version: 1
+abilities:
+- slug: bohater
+  name: Bohater
+  type: passive
+  description: Może być dołączony do dowolnego oddziału. Jeżeli w wyniku tego część oddziału będzie miała zdolności wpływające na cały oddział, przeciwnik wybiera czy są aktywne. Może wykonywać testy przegrupowania
+    za cały oddział, ale oddział korzysta z obrony wybranej przez przeciwnika. Nie może zostać przywrócony do gry. Jego rozmiar jest traktowany jakby miał 2 razy mniejszą wytrzymałość.
+  rozkaz_tak: false
+- slug: ochroniarz
+  name: Ochroniarz
+  type: passive
+  description: Bohater. Oddział może korzystać z twojej obrony. Kontrolujący nie może pokonywać innych modeli w oddziale.
+  rozkaz_tak: false
+- slug: zasadzka
+  name: Zasadzka
+  type: passive
+  description: Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej aktywacji rozstaw w dowolnym dozwolonym miejscu.Nie kontroluje celów w pierwszej rundzie.
+  rozkaz_tak: false
+- slug: zwiadowca
+  name: Zwiadowca
+  type: passive
+  description: Jeżeli nie rozstawiłeś przed tym oddziałem, oddziałów bez zdolności Zwiadowca lub Samolot, możesz raz ruszyć ten oddział o 6” zamiast rozstawić następny.
+  rozkaz_tak: false
+- slug: odwody
+  name: Odwody
+  type: passive
+  description: Przed rozstawieniem podziel oddziały z tą zdolnością bez zdolności Zwiadowca, Zasadzka lub Rezerwa na dwie grupy.Przeciwnik wybiera jedną z nich, a oddziały w niej zyskują zdolność Rezerwa.
+  rozkaz_tak: false
+- slug: szybki
+  name: Szybki
+  type: passive
+  description: Porusza się o +2”.
+  rozkaz_tak: true
+- slug: wolny
+  name: Wolny
+  type: passive
+  description: Porusza się o -2”.
+  rozkaz_tak: true
+- slug: harcownik
+  name: Harcownik
+  type: passive
+  description: Przed Leczeniem możesz się ruszyć o 2”.
+  rozkaz_tak: true
+- slug: instynkt
+  name: Instynkt
+  type: passive
+  description: Rusza się zawsze w stronę najbliższego wroga i zawsze atakuje najbliższego wroga.
+  rozkaz_tak: true
+- slug: nieruchomy
+  name: Nieruchomy
+  type: passive
+  description: Po rozstawieniu nie może się przemieszczać i nie może zostać przyszpilony. Podczas szarży może atakować odziały w zasięgu 3”.
+  rozkaz_tak: true
+- slug: zwinny
+  name: Zwinny
+  type: passive
+  description: Ignoruje trudny i niebezpieczny teren.
+  rozkaz_tak: true
+- slug: niezgrabny
+  name: Niezgrabny
+  type: passive
+  description: Na trudnym i niebezpiecznym terenie wykonuje dodatkowy test trudnego terenu.
+  rozkaz_tak: true
+- slug: latajacy
+  name: Latający
+  type: passive
+  description: Ignoruje teren i jednostki podczas ruchu. Wciąż jest uznawany za przechodzący przez punkt końcowy.
+  rozkaz_tak: true
+- slug: samolot
+  name: Samolot
+  type: passive
+  description: Nie możesz aktywować oddziału bez tej zdolności, jeżeli masz nieaktywowany oddział z nią.Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. Nie może być przyszpilony,
+    kontrolować punktów, szarżować, ani być celem szarży. Nie blokuje ruchu ani widzenia innych jednostek.Ma osłonę, a jednostki strzelające do niego mają -12” zasięgu. Wysoki, Latający, Zwinny
+  rozkaz_tak: false
+- slug: wysoki
+  name: Wysoki
+  type: passive
+  description: Sprawdza linię wzroku jakby był na podwyższeniu.
+  rozkaz_tak: false
+- slug: masywny
+  name: Sekcje
+  type: passive
+  description: Cały oddział reprezentowany jest przez jeden model z wydzielonymi elementami, który może przyjmować rany ponad maksimum.
+  rozkaz_tak: false
+- slug: nieustraszony
+  name: Nieustraszony
+  type: passive
+  description: Nie testuje przegrupowania, gdy oddział jest powyżej połowy początkowej wytrzymałości.
+  rozkaz_tak: true
+- slug: niestrudzony
+  name: Niestrudzony
+  type: passive
+  description: Może wykonywać tę samą akcję wielokrotnie w rundzie.
+  rozkaz_tak: true
+- slug: ucieczka
+  name: Ucieczka
+  type: passive
+  description: Zanim zaczniesz być przyszpilony lub wyczerpany, możesz wykonać ruch.
+  rozkaz_tak: false
+- slug: stracency
+  name: Straceńcy
+  type: passive
+  description: Po nieudanym teście przegrupowania wykonaj test trudnego terenu zamiast normalnych konsekwencji.
+  rozkaz_tak: true
+- slug: furia
+  name: Furia
+  type: passive
+  description: Podczas szarży naturalne 6 dają dodatkowe zwykłe trafienie.
+  rozkaz_tak: true
+- slug: przygotowanie
+  name: Przygotowanie
+  type: passive
+  description: Jeżeli jest Ufortyfikowany, +1 do rzutów na trafienie.
+  rozkaz_tak: true
+- slug: kontra
+  name: Kontra
+  type: passive
+  description: Może wykonać kontratak przed atakami szarżującego oddziału, a ten przestaje być uznawany za szarżującego.
+  rozkaz_tak: true
+- slug: regeneracja
+  name: Regeneracja
+  type: passive
+  description: Przed przegrupowaniem odzyskujesz K3 rany, ale nie więcej, niż liczba straconych w tej aktywacji.
+  rozkaz_tak: true
+- slug: dywersant
+  name: Dywersant
+  type: passive
+  description: Jeżeli jesteś bliżej strefy rozstawienia przeciwnika niż atakowany oddział, przed wykonaniem ataków przeciwnik wybiera, czy podwaja ich liczbę, czy zostaje Przyszpilony.
+  rozkaz_tak: true
+- slug: szpica
+  name: Szpica
+  type: passive
+  description: Podczas ataku przeciwko oddziałom które nie rozpoczęły swojej aktywacji w tej turze, naturalne 6 dają dodatkowe zwykłe trafienie.
+  rozkaz_tak: false
+- slug: delikatny
+  name: Delikatny
+  type: passive
+  description: Podczas testów obrony naturalna 6 nie oznacza automatycznego sukcesu.
+  rozkaz_tak: true
+- slug: niewrazliwy
+  name: Niewrażliwy
+  type: passive
+  description: Podczas testów obrony naturalna 5 daje automatyczny sukces.
+  rozkaz_tak: true
+- slug: maskowanie
+  name: Maskowanie
+  type: passive
+  description: Ma osłonę, gdy jest dalej niż 3" od wrogów.
+  rozkaz_tak: true
+- slug: waagh
+  name: Waagh!
+  type: passive
+  description: Jeżeli twój oddział ma poniżej połowy początkowej wytrzymałości i nie ma innego przyjaznego oddziału z tą zdolnością w zasięgu 12”, twoje ataki mają -1AP, a ataki w ciebie +1AP.
+  rozkaz_tak: false
+- slug: ostrozny
+  name: Ostrożny
+  type: passive
+  description: Jeżeli nie ma wrogów w zasięgu 12” od oddziału modelu, +1 do rzutów na trafienie.
+  rozkaz_tak: true
+- slug: tarcza
+  name: Tarcza
+  type: passive
+  description: +1 do testów obrony, gdy nie jest przyszpilony.
+  rozkaz_tak: true
+- slug: okopany
+  name: Okopany
+  type: passive
+  description: +1 do testów obrony, gdy ma osłonę z terenu.
+  rozkaz_tak: true
+- slug: zdobywca
+  name: Zdobywca
+  type: passive
+  description: Możesz ignorować wrogie oddziały bez tej zdolności podczas sprawdzania celów misji.
+  rozkaz_tak: false
+- slug: transport
+  name: Transport
+  type: passive
+  description: 'Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. Transportowany
+    oddział jako swoją akcję może zostać rozstawiony: wszystkie jego modele muszą zostać ustawione w odległości do 3” od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany.
+    Oddział, którego wszystkie modele znajdują się do 3” od transportującego oddziału, może jako swoją akcję zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. Jeżeli
+    część modeli transportującego oddziału zostanie zniszczona, transportowane oddziały mogą tymczasowo przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie zniszczony, nadmiarowe
+    rany przechodzą na najliczniejszy transportowany oddział, a następnie wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się Wyczerpane. Jeżeli transportujący oddział
+    wykona podwójny ruch lub początkowy ruch zdolności Samolot, wszystkie transportowane oddziały zostają Przyszpilone. Transportowane oddziały są rozstawiane razem z transporterem w jednej aktywacji i
+    muszą mieć te same zdolności wpływające na Rozstawienie.'
+  value_label: X
+  value_type: number
+  rozkaz_tak: false
+- slug: platforma_strzelecka
+  name: Platforma strzelecka
+  type: passive
+  description: Jak Transport(X)t, ale odziały mogą strzelać tak jakby znajdowały się w miejscu transportera.
+  value_label: X
+  value_type: number
+  rozkaz_tak: false
+- slug: otwarty_transport
+  name: Otwarty transport
+  type: passive
+  description: Jak Platforma strzelecka(X), ale odziały mogą zostać Wyczerpana, aby zaatakować wręcz razem z Transporterem. Mogą również być atakowane jakby były w miejscu transportera i w osłonie.
+  value_label: X
+  value_type: number
+  rozkaz_tak: false
+- slug: straznik
+  name: Strażnik
+  type: passive
+  description: Możesz przerwać w aktywacji przeciwnika, aby wykonać Ostrzał. Następnie twój oddział zostaje wyczerpany.
+  rozkaz_tak: true
+- slug: bastion
+  name: Bastion
+  type: passive
+  description: Nie zostajesz wyczerpany po kontrataku.
+  rozkaz_tak: true
+- slug: parowanie
+  name: Parowanie
+  type: passive
+  description: Ma osłonę podczas walki wręcz.
+  rozkaz_tak: true
+- slug: zemsta
+  name: Zemsta
+  type: passive
+  description: Nie przydzielaj ran od razu, tylko przed Leczeniem w aktywacji tego oddziału. Przeciwnik przydziela rany w zwykłym momencie, ale nie może używać wcześniej przydzielonych ran.
+  rozkaz_tak: false
+- slug: dobrze_strzela
+  name: Dobrze strzela
+  type: passive
+  description: Atakuje na dystans z jakością 4.
+  rozkaz_tak: false
+- slug: zle_strzela
+  name: Źle strzela
+  type: passive
+  description: Atakuje na dystans z jakością 5.
+  rozkaz_tak: false
+- slug: cierpliwy
+  name: Cierpliwy
+  type: passive
+  description: Masz +1 do rzutów obrony, jeżeli nie rozpocząłeś swojej aktywacji w tej rundzie.
+  rozkaz_tak: true
+- slug: odrodzenie
+  name: Odrodzenie
+  type: passive
+  description: Na koniec swojej aktywacji odzyskujesz połowę, zaokrąglając w górę, utraconych punktów wytrzymałości oddziału.Możesz je wykorzystać, aby przywrócić do gry pokonane model z tego oddziału,
+    jeżeli możesz jej poprawnie rozstawić.
+  rozkaz_tak: false
+- slug: rezerwa
+  name: Rezerwa
+  type: passive
+  description: Jak zasadzka, ale 12” od Twojej krawędzi stołu (jeżeli nie określają jej zasady rozstawienia wybiera przeciwnik na początku pierwszej rundy)
+  rozkaz_tak: false
+- slug: wrak
+  name: Wrak
+  type: passive
+  description: Gdy zostaniesz pokonany teren który zajmujesz do końca bitwy uznawany jest niebezpieczny i trudny oraz osłonę.
+  rozkaz_tak: false
+- slug: roj
+  name: Rój
+  type: passive
+  description: Gdy ten odział jest celem, ignoruj zdolność Zabójczy na broni,ale bronie z Rozprysk(X), działają zawsze z pełną efektywnością.
+  rozkaz_tak: false
+- slug: zwrot
+  name: Zwrot
+  type: passive
+  description: 'Na końcu ruchu w swojej aktywacji wybiera w która stronę jest zwrócony (nie może tego zmienić poza swoją aktywacją). Jego usytuowanie wyznacza 4 nakładające się strefy, każda o kącie 180’:
+    przód, tył, lewo, prawo.Jeżeli oddział który go atakuje jest cały w tylnej strefie, otrzymuje -1 do obrony.Co najmniej połowa jego broni musi być przypisana do strefy i może atakować tylko cele które
+    w pełni się w niej znajdują. Pozostałe muszą atakować jeden oddział.'
+  rozkaz_tak: false
+- slug: mistrzostwo
+  name: Mistrzostwo
+  type: passive
+  description: Każda twoja broń ma zdolność X.
+  value_label: X
+  value_type: text
+  rozkaz_tak: true
+- slug: mag
+  name: Mag
+  type: active
+  description: 'Otrzymuje X żetonów mocy na początku każdej rundy, do maksymalnie 2X. Magowie w oddziale współdzielą żetony. Wydaj tyle żetonów, ile wynosi koszt czaru i rzuć kością. Przy wyniku 4+ rozstrzygnij
+    jego efekt. Jedna próba na czar na aktywację. '
+  value_label: X
+  value_type: number
+  rozkaz_tak: false
+- slug: przekaznik
+  name: Przekaźnik
+  type: active
+  description: Raz na rundę, gdy Mag w zasięgu 12” rzuca czar, może go rzucić z twojej pozycji z +1 do rzutu.
+  rozkaz_tak: false
+- slug: koordynacja
+  name: Koordynacja
+  type: active
+  description: Przeciwnik pomija swoją następną aktywację.
+  rozkaz_tak: false
+- slug: latanie
+  name: Łatanie
+  type: active
+  description: Na końcu towjej aktywacji oddział w zasięgu 3” odzyskuje k3 rany.
+  rozkaz_tak: false
+- slug: mobilizacja
+  name: Mobilizacja
+  type: active
+  description: Oddział w zasięgu 12” przestaje być przyszpilony.
+  rozkaz_tak: false
+- slug: przepowiednia
+  name: Przepowiednia
+  type: active
+  description: Wybierz oddział przeciwnika, który zostanie aktywowany jako następny, jeżeli to możliwe.
+  rozkaz_tak: false
+- slug: presja
+  name: Presja
+  type: active
+  description: Odział w zasięgu 12” przestaje być wyczerpany.
+  rozkaz_tak: false
+- slug: usprawnienie
+  name: Usprawnienie
+  type: active
+  description: Przerwij, aby oddział w zasięgu 12” do końca aktywacji zwiększył AP wszystkich swoich broni o 1.
+  rozkaz_tak: false
+- slug: rozkaz
+  name: Rozkaz
+  type: active
+  description: Raz na rundę możesz przerwać, aby odział w zasięgu 12” od teraz do końca aktywacji (nie)miał zdolność X.
+  value_label: Zdolność
+  value_type: text
+  rozkaz_tak: true
+- slug: klatwa
+  name: Klątwa
+  type: active
+  description: Raz na rundę możesz przerwać, aby wrogi oddział w zasięgu 12” od teraz do końca aktywacji (nie)miał zdolność X.
+  value_label: Zdolność
+  value_type: text
+  rozkaz_tak: true
+- slug: oznaczenie
+  name: Oznaczenie
+  type: active
+  description: Raz na rundę możesz przerwać, aby sojuszniczy oddział który atakuje oddział w zasięgu 12” od teraz do końca aktywacji (nie)miał zdolność X.
+  value_label: Zdolność
+  value_type: text
+  rozkaz_tak: true
+- slug: aura
+  name: Aura
+  type: aura
+  description: Przydziel oddziałom w zasięgu wybraną zdolność. Wariant o zasięgu 12” jest dwukrotnie silniejszy.
+  value_label: Zdolność
+  value_type: text
+  rozkaz_tak: false
+- slug: radio
+  name: Radio
+  type: aura
+  description: Jeżeli model w twoim oddziale wydaje rozkaz, może wybrać oddział odległy o 24” który też ma radio.
+  rozkaz_tak: false
+- slug: ociezalosc
+  name: Ociężałość
+  type: aura
+  description: Teren w zasięgu 12” jest uznawany za trudny dla wrogich oddziałów.
+  rozkaz_tak: false
+- slug: spaczenie
+  name: Spaczenie
+  type: aura
+  description: Teren w zasięgu 12” jest uznawany za niebezpieczny dla wrogich oddziałów.
+  rozkaz_tak: false
+- slug: meczennik
+  name: Męczennik
+  type: active
+  description: W twojej aktywacji możesz zostać pokonany, aby twój oddział odzyskał liczbę ran równą twojej wytrzymałości. Nie możesz zostać przywrócony podczas tej aktywacji.
+  rozkaz_tak: false
+- slug: rozprysk
+  name: Rozprysk
+  type: weapon
+  description: Przed wykonaniem testów obrony liczba trafień jest mnożona przez X, ale nie więcej, niż jest modeli w atakowanym oddziale.
+  value_label: X
+  value_type: number
+  value_choices:
+  - '2'
+  - '3'
+  - '6'
+  rozkaz_tak: false
+- slug: zabojczy
+  name: Zabójczy
+  type: weapon
+  description: Zamiast jednej zadaj X ran, ale nie więcej niż najniższa, jeżeli przydziela obrońca, lub najwyższa, jeżeli przydziela atakujący, wytrzymałość w oddziale.
+  value_label: X
+  value_type: number
+  value_choices:
+  - '2'
+  - '3'
+  - '6'
+  rozkaz_tak: false
+- slug: niebezposredni
+  name: Niebezpośredni
+  type: weapon
+  description: Nie wymaga linii wzroku. Nie może atakować celów Latających.
+  rozkaz_tak: false
+- slug: artyleria
+  name: Artyleria
+  type: weapon
+  description: Każdy oddział w zasięgu 12” od sojuszniczego oddziału jest w zasięgu tej broni.
+  rozkaz_tak: false
+- slug: impet
+  name: Impet
+  type: weapon
+  description: +1 do trafienia i +1 do AP podczas szarży.
+  rozkaz_tak: false
+- slug: namierzanie
+  name: Namierzanie
+  type: weapon
+  description: Ignoruje osłonę i negatywne modyfikatory do rzutów na trafienie i do zasięgu.
+  rozkaz_tak: false
+- slug: zuzywalny
+  name: Zużywalny
+  type: weapon
+  description: Można użyć tylko raz na grę. Limit jeden rodzaj broni z tą zdolnością na oddział.
+  rozkaz_tak: false
+- slug: niezawodny
+  name: Niezawodny
+  type: weapon
+  description: Atakuje z jakością 2+.
+  rozkaz_tak: false
+- slug: nieporeczny
+  name: Nieporęczny
+  type: weapon
+  description: Nie może atakować oddziałów w zasięgu 12”.
+  rozkaz_tak: false
+- slug: rozrywajacy
+  name: Podwójny
+  type: weapon
+  description: Naturalne 6 na trafienie dają dodatkowe normalne trafienie.
+  rozkaz_tak: false
+- slug: precyzyjny
+  name: Precyzyjny
+  type: weapon
+  description: Atakujący rozdziela rany.
+  rozkaz_tak: false
+- slug: przebijajaca
+  name: Przebijająca
+  type: weapon
+  description: Każde trafienie zadaje liczbę ran równą wynikowi kostki obrony.
+  rozkaz_tak: false
+- slug: szturmowa
+  name: Szturmowa
+  type: weapon
+  description: Można nią wykonywać ataki wręcz.
+  rozkaz_tak: false
+- slug: finezja
+  name: Finezja
+  type: weapon
+  description: Wynik udanego rzutu na trafienie możesz traktować jak wynik rzutu na obronę.
+  rozkaz_tak: false
+- slug: brutalny
+  name: Brutalny
+  type: weapon
+  description: W teście obrony nie ma automatycznych sukcesów.
+  rozkaz_tak: false
+- slug: podkrecenie
+  name: Podkręcenie
+  type: weapon
+  description: W ostatniej rundzie wykonuje podwójną liczbę ataków.
+  rozkaz_tak: false
+- slug: burzaca
+  name: Przełamanie
+  type: weapon
+  description: Jeżeli cel jest w zasięgu celu misji, wykonuje podwójną liczbę ataków.
+  rozkaz_tak: false
+- slug: unik
+  name: Przewidywalny
+  type: weapon
+  description: Jeżeli cel jest Przyszpilony, wykonuje podwójną liczbę ataków.
+  rozkaz_tak: false
+- slug: sterowany
+  name: Sterowany
+  type: weapon
+  description: Zanim wykonasz atak tą bronią, dla każdego powiązanego znacznika ustaw go w zasięgu broni od jego obecnej pozycji albo wykonaj atak z jego pozycji i go odrzuć. Następnie wykonaj zwykły atak
+    albo ustaw nowy znacznik w zasięgu. Możesz mieć dwa znaczniki na planszy, są wspólne dla całego oddziału. Po wystawianiu rozstaw jeden znacznik.
+  rozkaz_tak: false
+- slug: porazenie
+  name: Porażenie
+  type: weapon
+  description: Podczas sprawdzania kto wygrał walkę wręcz, rany zadane tą bronią liczą się podwójnie.
+  rozkaz_tak: false
+- slug: zguba
+  name: Zguba
+  type: weapon
+  description: Licz rany otrzymane taką bronią w aktywacji. Zmniejsz liczbę ran odzyskanych o nią. Modele pokonane przez przydzielenie pierwszych ran do tej liczby zostają zniszczone i nie mogą wrócić do
+    gry.
+  rozkaz_tak: false
+- slug: dezintegracja
+  name: Dezintegracja
+  type: weapon
+  description: Naturalne 6 na trafienie ranią bez rzutu na obronę.
+  rozkaz_tak: false

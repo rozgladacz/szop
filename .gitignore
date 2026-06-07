@@ -17,5 +17,8 @@ app/routers/__pycache__/
 # Local tooling/bootstrap artifacts
 .tools/
 
+# A4 pipeline output (rules_extract / rules_drift / rules_classify_geometry)
+build/
+
 # Documentation
 app/static/docs/

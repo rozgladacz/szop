@@ -1,12 +1,18 @@
 """Profile calculate_roster_unit_quote across every unit in a roster.
 
 Usage:
-    python scripts/profile_quote.py [ROSTER_ID]
+    python scripts/profile_quote.py [ROSTER_ID] [--backend procedural|yaml|both_assert]
     make profile ROSTER=10
+    make profile ROSTER=10 BACKEND=yaml
 
 Prints per-unit timings (include_item_costs=True/False) plus a cProfile
 top-25 dump for the slowest unit.  Used to verify performance changes in
-``app/services/costs.py`` against the baseline in ``docs/PERFORMANCE.md``.
+``app/services/costs.py`` (procedural backend) or ``app/services/rulesets/*``
+(yaml backend) against the baseline in ``docs/PERFORMANCE.md``.
+
+The ``--backend`` flag (A5) wymusza wybrany backend przez `OPR_RULES_BACKEND`
+dla całego runa skryptu. `both_assert` jest dla diagnozy parity-drift,
+`yaml` dla profile yaml hotspots, `procedural` (default) dla baseline.
 
 The script forces UTF-8 stdout because it prints ASCII-art arrows and
 project unit names contain Polish characters; on Windows the default
@@ -156,14 +162,33 @@ def profile_roster(roster_id: int, *, runs: int = 3, profile_runs: int = 1) -> N
         session.close()
 
 
+def _parse_args(argv: list[str]) -> tuple[int, str]:
+    """Returns (roster_id, backend). Default: 10, 'procedural'."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Profile calculate_roster_unit_quote.")
+    parser.add_argument(
+        "roster_id", type=int, nargs="?", default=10, help="Roster ID to profile (default: 10)"
+    )
+    parser.add_argument(
+        "--backend",
+        choices=("procedural", "yaml", "both_assert"),
+        default="procedural",
+        help="OPR_RULES_BACKEND to use for this run (default: procedural).",
+    )
+    ns = parser.parse_args(argv)
+    return ns.roster_id, ns.backend
+
+
 def main() -> None:
-    roster_id = 10
-    if len(sys.argv) >= 2:
-        try:
-            roster_id = int(sys.argv[1])
-        except ValueError:
-            print(f"Invalid roster id: {sys.argv[1]!r}")
-            sys.exit(2)
+    roster_id, backend = _parse_args(sys.argv[1:])
+    # Wymuszamy backend przez `config.OPR_RULES_BACKEND` zanim cokolwiek
+    # zaalokuje silnik kosztów. `from app import config` wcześniej w pliku
+    # (przez app.main) → modyfikujemy atrybut runtime.
+    from app import config as _cfg
+
+    _cfg.OPR_RULES_BACKEND = backend
+    print(f"Backend: {backend}")
     profile_roster(roster_id)
 
 

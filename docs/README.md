@@ -22,6 +22,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | Katalog | Zawartość |
 |---------|-----------|
 | [handoffs/](handoffs/) | Per-wątek pliki `HANDOFF_<slug>.md` + szablon i konwencje (README.md) |
+| [adr/](adr/) | Architecture Decision Records (immutable). Index w `adr/README.md`; status w `roadmap.md → "ADR index"`. |
 
 ## Najwyższy poziom
 
@@ -34,6 +35,7 @@ Pozostała dokumentacja na poziomie głównym repo:
 - [RELEASE.md](../RELEASE.md) — procedura wydania
 - [README_INTEGRATION.md](../README_INTEGRATION.md) — integracje
 - [FRICTION_REPORT.md](../FRICTION_REPORT.md) — raport friction (auto-generated z `scripts/reflect_and_improve.py`)
+- [scripts/README.md](../scripts/README.md) — skrypty CLI (drift pipeline A4, profile_quote, reflect_and_improve, …)
 
 ## Zasada
 

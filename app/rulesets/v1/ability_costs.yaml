@@ -1,0 +1,174 @@
+# Ruleset v1 — Cost DSL recipes.
+#
+# Plik konsumowany przez `_yaml_quote()` (A2.4) jako źródło receptur kosztów
+# zdolności. Procedural engine (`app/services/costs/abilities.py`) pozostaje
+# SSOT przez cały Strumień A — ten plik jest deklaratywną repliką, której
+# parytet jest weryfikowany w `tests/test_quote_yaml_backend.py` (A2.5) i
+# `tests/test_ruleset_parity.py` (A3.1).
+#
+# Format DSL: każdy entry to receptura `scale_by_tou` (lub stała). Dispatcher
+# (`app/services/rulesets/dispatcher.py:call_recipe`) wstrzykuje `tou` i `aura`
+# jako runtime args; pozostałe pola są przekazywane jako keyword args do funkcji.
+#
+# Mapowanie sekcji ↔ oracle:
+# - passive_abilities    → `abilities.passive_cost` (switch slug → koszt)
+# - fixed_by_slug        → `ability_cost_components_from_name` (gałąź `slug == X`)
+# - fixed_by_desc        → `ability_cost_components_from_name` (gałąź `desc == X`)
+# - handlers             → `ability_cost_components_from_name` (gałęzie `desc.startswith` / slug == "mistrzostwo")
+
+version: 1
+
+
+# ============================================================================
+# PASSIVE ABILITIES — recipes for scale_by_tou
+# ============================================================================
+# Mirror całego switcha `passive_cost(slug, tou, aura, abilities)` z oracle.
+# 33 slugi: 23 universal (zwracają niezależnie od aura) + 10 aura-only.
+# Brak entry dla slugu ⇒ DSL zwraca 0.0 (oracle też fall-through na 0.0).
+#
+# Argumenty scale_by_tou (poza tou/aura wstrzykiwanymi runtime):
+#   base               — wartość bazowa
+#   scale (true)       — czy mnożyć przez tou
+#   aura_required      — zwróć 0 gdy aura=False
+#   aura_alt_base      — gdy aura=True użyj tej wartości zamiast base
+#   aura_scale         — gdy aura=True nadpisz `scale` (None = inherit)
+
+passive_abilities:
+
+  # ---- Universal (oracle: non-aura switch) ----------------------------------
+
+  zasadzka:     { fn: scale_by_tou, args: { base: 4.0 } }
+  zwiadowca:    { fn: scale_by_tou, args: { base: 2.0 } }
+  odwody:       { fn: scale_by_tou, args: { base: 0.0, scale: false } }
+  szybki:       { fn: scale_by_tou, args: { base: 1.0 } }
+  wolny:        { fn: scale_by_tou, args: { base: -1.0 } }
+  harcownik:    { fn: scale_by_tou, args: { base: 1.5 } }
+  # Instynkt: -tou w trybie passive, +tou w aurze (sign-flip via aura_alt_base).
+  instynkt:     { fn: scale_by_tou, args: { base: -1.0, aura_alt_base: 1.0 } }
+  nieruchomy:   { fn: scale_by_tou, args: { base: -2.5 } }
+  zwinny:       { fn: scale_by_tou, args: { base: 0.5 } }
+  niezgrabny:   { fn: scale_by_tou, args: { base: -0.5 } }
+  latajacy:     { fn: scale_by_tou, args: { base: 1.0 } }
+  samolot:      { fn: scale_by_tou, args: { base: 3.0 } }
+  kontra:       { fn: scale_by_tou, args: { base: 1.0 } }
+  parowanie:    { fn: scale_by_tou, args: { base: 1.5 } }
+  maskowanie:   { fn: scale_by_tou, args: { base: 2.0 } }
+  okopany:      { fn: scale_by_tou, args: { base: 1.0 } }
+  tarcza:       { fn: scale_by_tou, args: { base: 1.25 } }
+  regeneracja:  { fn: scale_by_tou, args: { base: 4.0 } }
+  # Dywersant (po driftcie 2026-06, faza-b-rules-resync): 0 gdy aura=False,
+  # 3.25 stałe gdy aura=True. Nowa semantyka: koszt liczy się tylko w aurze
+  # i jest niezależny od T (mirror app/services/costs/abilities.py:dywersant).
+  dywersant:    { fn: scale_by_tou, args: { base: 0.0, aura_alt_base: 3.25, scale: false, aura_required: true } }
+  zdobywca:     { fn: scale_by_tou, args: { base: 3.0 } }
+  straznik:     { fn: scale_by_tou, args: { base: 9.0 } }
+  cierpliwy:    { fn: scale_by_tou, args: { base: 1.0 } }
+  roj:          { fn: scale_by_tou, args: { base: 0.25 } }
+  zwrot:        { fn: scale_by_tou, args: { base: -1.0 } }
+
+  # ---- Aura-only (oracle: if aura: switch) ----------------------------------
+
+  bastion:       { fn: scale_by_tou, args: { base: 3.0, scale: false, aura_required: true } }
+  niestrudzony:  { fn: scale_by_tou, args: { base: 8.0, scale: false, aura_required: true } }
+  nieustraszony: { fn: scale_by_tou, args: { base: 1.5, aura_required: true } }
+  ucieczka:      { fn: scale_by_tou, args: { base: 1.5, aura_required: true } }
+  stracency:     { fn: scale_by_tou, args: { base: 1.5, aura_required: true } }
+  # Delikatny/niewrazliwy są w DEFENSE_ABILITY_SLUGS — `base_model_cost`
+  # bypassuje passive_cost dla nich (kieruje do defense_modifier). passive_cost
+  # jest wywoływane tylko gdy ktoś robi "Aura(X): delikatny" → tou=8, aura=True.
+  delikatny:     { fn: scale_by_tou, args: { base: 0.5, aura_required: true } }
+  niewrazliwy:   { fn: scale_by_tou, args: { base: 1.5, aura_required: true } }
+  furia:         { fn: scale_by_tou, args: { base: 3.0, aura_required: true } }
+  przygotowanie: { fn: scale_by_tou, args: { base: 3.5, aura_required: true } }
+  ostrozny:      { fn: scale_by_tou, args: { base: 4.25, aura_required: true } }
+
+
+# ============================================================================
+# FIXED COSTS — stała wartość bez parametrów
+# ============================================================================
+# Oracle: gałęzie `slug == X: base_result = N` (po dopasowaniu po sluga)
+# oraz `desc == X: base_result = N` (po dopasowaniu po normalize_name(name)).
+
+fixed_by_slug:
+  latanie: 20.0
+  mobilizacja: 30.0
+  przepowiednia: 45.0
+  presja: 45.0
+  usprawnienie: 45.0
+  ociezalosc: 20.0
+  meczennik: 5.0
+
+fixed_by_desc:
+  przekaznik: 4.0
+  koordynacja: 45.0
+  radio: 3.0
+  spaczenie: 30.0
+
+
+# ============================================================================
+# HANDLERS — gałęzie z `ability_cost_components_from_name` które potrzebują
+# orkiestracji (parsowanie value, mnożniki, wywołanie innych funkcji).
+# ============================================================================
+# A2.4 (`_yaml_quote`) iteruje po `handlers` w kolejności wpisów i match-uje
+# pierwszą pasującą regułę. Format pól:
+#   match: { prefix: X }            — desc.startswith(X)
+#   match: { prefix_any: [X, Y] }   — desc.startswith(X) OR desc.startswith(Y)
+#   match: { slug: X }              — slug == X
+#
+# `fn_name` to nazwa funkcji handlera (zaimplementowana w A2.4); parametry to
+# stałe gry (mnożniki, "wewnętrzny tou" dla rekurencyjnego passive_cost).
+
+handlers:
+  # NOTE: "transport" prefix is INTENTIONALLY ABSENT here. Oracle's first
+  # `if desc.startswith("transport"):` (abilities.py:325) is dead code —
+  # `transport` slug ma `type=passive` w katalogu, więc fallback `else` branch
+  # nadpisuje base_result przez `passive_cost("transport", tou, aura=False) = 0`.
+  # Faktyczny dynamic transport cost jest liczony w `role_totals._effective_passive_cost`
+  # (na podstawie active_set jednostki). Dla parytetu A2.4b nie dodajemy handlera
+  # `transport_cost`; dynamic computation pojawi się w `quote_yaml.py` (A2.4c).
+
+  - id: open_transport
+    match: { prefix_any: [otwarty transport, platforma strzelecka] }
+    fn_name: open_transport_cost
+    # base_cost = capacity * (transport_multiplier(active_set) + open_bonus)
+    open_bonus: 0.25
+
+  - id: aura
+    match: { prefix: aura }
+    fn_name: aura_cost
+    # base_cost = passive_cost(target_slug, inner_tou, aura=True) * (range_12_multiplier if range==12 else 1)
+    # Gdy value zaczyna się od "mistrzostwo:" → _mistrzostwo_aura_cost(weapon_slug) * aura_mistrzostwo_multiplier.
+    inner_tou: 8.0
+    range_12_multiplier: 2.0
+    aura_mistrzostwo_multiplier: 8.0
+
+  - id: mag
+    match: { prefix: mag }
+    fn_name: mag_cost
+    # base_cost = base_multiplier * extract_number(value or name)
+    base_multiplier: 8.0
+
+  - id: order_like
+    match: { prefix_any: [rozkaz, klatwa, oznaczenie] }
+    fn_name: order_like_cost
+    # base_cost = passive_cost(slug_for_name(ability_ref), inner_tou, aura=True)
+    # Gdy ability_ref zaczyna się od "mistrzostwo:" → _mistrzostwo_aura_cost(weapon_slug) * mistrzostwo_multiplier.
+    inner_tou: 10.0
+    mistrzostwo_multiplier: 10.0
+
+  - id: mistrzostwo
+    match: { slug: mistrzostwo }
+    fn_name: mistrzostwo_cost
+    # base_cost = _mistrzostwo_weapon_cost(weapon_slug, weapons, quality, unit_abilities)
+
+
+# ============================================================================
+# SPECIAL SKIPS — sluggy które oracle hardcoduje na 0.0
+# ============================================================================
+# Oracle (abilities.py:397): `if slug == "przygotowanie": base_result = 0.0`
+# w fallback-branch. Bez tego skipa, slug=przygotowanie z aura=False zwróciłby
+# tak czy inaczej 0 (passive_cost fall-through), ale defensywnie zachowujemy
+# regułę dla parytetu bit-do-bita.
+
+skip_in_default:
+  - przygotowanie

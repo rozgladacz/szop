@@ -53,6 +53,23 @@ LOCAL_COST_ENGINE_ENABLED = os.getenv("LOCAL_COST_ENGINE_ENABLED", "false").lowe
     "true",
     "yes",
 }
+
+# --- Strumień A: feature toggle silnika reguł ---
+# procedural  -> aktualny kod w app/services/costs/ (SSOT, oracle)
+# yaml        -> deklaratywny silnik z app/rulesets/v1/ (Strumień A, A2+)
+# both_assert -> wywołuje oba, porównuje delty (CI gate, dev only)
+RULES_BACKEND_PROCEDURAL = "procedural"
+RULES_BACKEND_YAML = "yaml"
+RULES_BACKEND_BOTH_ASSERT = "both_assert"
+RULES_BACKEND_CHOICES = frozenset(
+    {RULES_BACKEND_PROCEDURAL, RULES_BACKEND_YAML, RULES_BACKEND_BOTH_ASSERT}
+)
+_raw_rules_backend = os.getenv("OPR_RULES_BACKEND", RULES_BACKEND_PROCEDURAL).strip().lower()
+if _raw_rules_backend not in RULES_BACKEND_CHOICES:
+    raise ValueError(
+        f"OPR_RULES_BACKEND='{_raw_rules_backend}' is not one of {sorted(RULES_BACKEND_CHOICES)}"
+    )
+OPR_RULES_BACKEND = _raw_rules_backend
 UPDATE_REPO_URL = os.getenv("UPDATE_REPO_URL", "https://github.com/rozgladacz/szop")
 UPDATE_BRANCH = os.getenv("UPDATE_BRANCH", "main")
 UPDATE_REPO_PATH = os.getenv("UPDATE_REPO_PATH", ".")
