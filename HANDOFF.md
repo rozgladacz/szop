@@ -38,6 +38,7 @@
 
 *(Krótkie alerty istotne dla wielu wątków. Coś, co nie pasuje jeszcze do `docs/`, ale dotyczy więcej niż jednego wątku. Sprzątaj regularnie — przenoś do `docs/*` jeśli reguła stała się trwała.)*
 
+- **2026-06-07:** **Faza_A → main MERGED** (PR #455, commit `418b0ff`). 83 commity: B0+B3+B3.9+rules-resync R0-R6. **B2/B4/B5 ODBLOKOWANE** — engine schema stabilna (`BattleEvent.payload_json` event types 1-13 locked per ADR-0046+0047). Sub-wątki startują na bazie `main`. Faza_B branch otwieramy gdy B2/B4/B5 startują. Rules-resync kontynuuje na `Faza_A` (R4.Zguba + Klątwa/Rozkaz/Oznaczenie + R7 + RW).
 - **2026-05-20:** Lokalny runtime na Windows — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
 - **2026-05-12:** Merge conflicts gałęzi Klasyfikacja nadal nierozwiązane — blokują SSOT Phase 5. Patrz [docs/roadmap.md](docs/roadmap.md).
 

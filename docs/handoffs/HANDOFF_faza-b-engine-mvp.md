@@ -48,7 +48,7 @@ Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odb
 
 ## Gałąź git
 
-- **Branch:** `Faza_A` (kontynuujemy, bo Faza_A jeszcze nie scalona z main). Nowy branch `Faza_B` otworzymy gdy `Faza_A` zostanie zmergowany.
+- **Branch:** **`Faza_A` → main MERGED 2026-06-07** (PR #455, commit `418b0ff`). B2/B4/B5 sub-wątki startują na bazie `main`. Nowy branch `Faza_B` otwieramy przy starcie B2.
 - **Base:** `main`
 
 ## Plan implementacji
