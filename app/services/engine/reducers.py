@@ -272,6 +272,7 @@ def _reduce_morale_test(state: BattleState, event: MoraleTestPassed) -> BattleSt
             blob,
             models_alive=0,
             wounds_received=0,
+            wounds_eliminating=0,  # R4.Zguba: wipe zeruje oba liczniki (mirror producer)
             location=Lokalizacja.WYCOFANY,
         )
         return _find_and_replace_blob(state, event.unit_id, new_blob)

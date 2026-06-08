@@ -616,6 +616,7 @@ def _regroup_test(
             new_blob,
             models_alive=0,
             wounds_received=0,
+            wounds_eliminating=0,  # R4.Zguba: wipe zeruje oba liczniki (state.py invariant)
             location=Lokalizacja.WYCOFANY,
         )
         result_status = "broken"
