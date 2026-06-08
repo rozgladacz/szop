@@ -1,7 +1,7 @@
 # ADR-0011 — Rule executor: hardcoded klasy/funkcje na MVP
 
-- **Status:** Accepted (refreshed 2026-06-02 po B3.9 hardening)
-- **Data:** 2026-05-30 (Proposed) → 2026-05-30 (Accepted, po B3.7) → 2026-06-02 (refresh po B3.9.a-f — dodane moduły status/geometry/reducers + ActivationContext + weapons inventory + ACTIVE_ABILITY_REGISTRY)
+- **Status:** Accepted (refreshed 2026-06-08 po rules-resync 2026-06)
+- **Data:** 2026-05-30 (Proposed) → 2026-05-30 (Accepted, po B3.7) → 2026-06-02 (refresh po B3.9.a-f — dodane moduły status/geometry/reducers + ActivationContext + weapons inventory + ACTIVE_ABILITY_REGISTRY) → 2026-06-08 (refresh po rules-resync 2026-06 — `Lokalizacja` enum + `UnitBlob.location`/`wounds_eliminating` + event `MutexCollision`; cost-side `t_eff`/`aura_range_bonus`/`order_bonus` w `rulesets/cost_functions.py`, zob. ADR-0048)
 - **Kontekst:** Strumień B, Faza B3 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`) + Faza B3.9 (`docs/handoffs/HANDOFF_faza-b-3-hardening.md`). Rule executor (`app/services/engine/{status,geometry,dice,los,prediction,combat,effects,interrupts,phases,resolver,reducers}.py`) implementuje mechaniki SZOP. Pytanie projektowe: czy zasady są **hardcoded w Pythonie** (klasy / funkcje per akcja / efekt), czy **deklaratywne w YAML** z generic executor (jak `app/services/rulesets/` dla kosztów)?
 
 ## Decyzja
@@ -15,8 +15,8 @@
 | `status.py` (B3.9.a) | `StatusFlag(str, Enum)` (4 statusy pkt 22) + idempotentne `add_status/remove_status` | (immutable enum + pure helpers) |
 | `geometry.py` (B3.9.b) | `distance` (math.hypot), `point_in_circle`, `segment_intersects_circle`, `segments_intersect`, `circle_edge_distance`, `UNIT_CIRCLE_16` | (pure geometry primitives) |
 | `state.py` | Substrate: `UnitBlob` (`melee_weapons`/`ranged_weapons` inventory B3.9.e), `BattleState` (`initial_toughness_snapshot` B3.9.c), `Position`, terrain, `WeaponProfile` (B3.9.e migration), `apply_events`, `register_reducer`, `initial_toughness_for`, `UnsupportedAbilityError`, `compute_radius_inches`, `build_initial_state` | (immutable types + pure builders) |
-| `events.py` | **11 event types** (B3.0: 8 + B3.9.d: `StatusAdded`/`StatusRemoved`/`MeleeBalanceReset`) + serializer `event_to_json` / `json_to_event` | (immutable types) |
-| `reducers.py` (B3.9.d) | `@register_reducer` dla wszystkich 11 typów; auto-rejestracja przez `__init__.py` side-effect import | (state, event) → state |
+| `events.py` | **14 event types** (B3.0: 8 + B3.9: `StatusAdded`/`StatusRemoved`/`MeleeBalanceReset`/`ObjectiveControlChanged`/`InitiativePassed` + rules-resync 2026-06: `MutexCollision`) + serializer `event_to_json` / `json_to_event` | (immutable types) |
+| `reducers.py` (B3.9.d) | `@register_reducer` dla wszystkich 14 typów; auto-rejestracja przez `__init__.py` side-effect import | (state, event) → state |
 | `dice.py` (B3.1) | `DeterministicDice(seed)`, `roll_d6`, `roll_with_threshold` | seed → kości |
 | `los.py` (B3.2) | `check_los(attacker, target, terrain, N=16) → LoSState` | sampling N=16 |
 | `prediction.py` (B3.3) | `expected_damage(...) → DamageDistribution` | analityczny binomial CDF (bez RNG) |
@@ -84,9 +84,9 @@
 **`app/services/engine/`** module exports (post-B3.9 refresh):
 - `status.{StatusFlag, STATUS_AKTYWOWANY, STATUS_WYCZERPANY, STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY, add_status, remove_status}` **(B3.9.a)**
 - `geometry.{distance, point_in_circle, segment_intersects_circle, segments_intersect, circle_edge_distance, UNIT_CIRCLE_16}` **(B3.9.b)**
-- `state.{UnitBlob, BattleState, TerrainCircle, TerrainLine, Position, Objective, WeaponProfile, build_initial_state, apply_events, register_reducer, initial_toughness_for, compute_radius_inches, UnsupportedAbilityError}` (B3.9.c: `BattleState.initial_toughness_snapshot` + helper; B3.9.e: `WeaponProfile` migrated z combat + `UnitBlob.melee_weapons`/`ranged_weapons`)
-- `events.{MoveExecuted, ShotResolved, MeleeResolved, ModelKilled, MoraleTestPassed, EffectApplied, InterruptTriggered, RoundEnded, StatusAdded, StatusRemoved, MeleeBalanceReset, event_to_json, json_to_event}` (B3.9.d: 3 nowe types)
-- `reducers` — side-effect import auto-rejestrujący `@register_reducer` dla wszystkich 11 typów **(B3.9.d / ADR-0046)**
+- `state.{UnitBlob, BattleState, Lokalizacja, TerrainCircle, TerrainLine, Position, Objective, WeaponProfile, build_initial_state, apply_events, register_reducer, initial_toughness_for, compute_radius_inches, UnsupportedAbilityError}` (B3.9.c: `BattleState.initial_toughness_snapshot` + helper; B3.9.e: `WeaponProfile` migrated z combat + `UnitBlob.melee_weapons`/`ranged_weapons`; **rules-resync 2026-06**: `Lokalizacja` enum ZAPLECZE/FRONT/WYCOFANY/ELIMINOWANY + `UnitBlob.location`/`wounds_eliminating`, ADR-0048)
+- `events.{MoveExecuted, ShotResolved, MeleeResolved, ModelKilled, MoraleTestPassed, EffectApplied, InterruptTriggered, RoundEnded, StatusAdded, StatusRemoved, MeleeBalanceReset, ObjectiveControlChanged, InitiativePassed, MutexCollision, event_to_json, json_to_event}` (B3.9: StatusAdded/StatusRemoved/MeleeBalanceReset/ObjectiveControlChanged/InitiativePassed; **rules-resync 2026-06**: `MutexCollision` 14ty typ + `ModelKilled.eliminated` + `Shot/MeleeResolved.wounds_eliminating`, ADR-0048)
+- `reducers` — side-effect import auto-rejestrujący `@register_reducer` dla wszystkich **14 typów** (B3.0: 8; B3.9: +StatusAdded/StatusRemoved/MeleeBalanceReset/ObjectiveControlChanged/InitiativePassed = 13; rules-resync 2026-06: +`MutexCollision` = 14) **(ADR-0046 / ADR-0048)**
 - `dice.{DeterministicDice, RollResult}`
 - `los.{LoSState, check_los}`
 - `prediction.{DamageDistribution, expected_damage, would_see}`
@@ -115,6 +115,6 @@ while not is_battle_over(state):
 - ✅ **B3.8 weryfikacja end-to-end** (zamknięte 2026-05-30) — smoke battle 2v2, 21 events; drift gate CLEAN.
 - ✅ **B3.9 architecture hardening** (zamknięte 2026-06-02) — 7 bugów + 1 cleanup + 5 dziur architektonicznych zamkniętych. 3 nowe ADR-y (0045/0046/0047). Replay invariant ADR-0010 osiągnięty empirycznie (per-blob + round + score). Pytest 1337/1337 + parity 156/156 + smoke replay GATE pass.
 - **Strumień D** może startować — `app/services/agents/` (random_player, greedy_player z prediction).
-- **Strumień B2 ORM** może startować — `BattleEvent.payload_json` schema stabilna (11 event types z reducerami, zero migration churn).
+- **Strumień B2 ORM** może startować — `BattleEvent.payload_json` schema stabilna (14 event types z reducerami po rules-resync 2026-06, zero migration churn; per unit `location`/`wounds_eliminating`, zob. ADR-0048).
 - **Strumień C** może startować — `mcp_server/tools/simulate_engagement` używa LocalClient z B5 (wymaga B2 + B4 API).
 - **Pozostałe passive/weapon abilities** (Furia/Impet/Maskowanie/Niewrazliwy/Przebijająca/etc.) + **pełne implementacje 6 stubów aktywnych zdolności z B3.9.e** (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik) — przyrostowe rozszerzenia per PR + test, **bez** zmiany ADR-0011/0045/0046/0047 (architecture stable, registry patterns).

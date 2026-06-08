@@ -200,6 +200,21 @@ Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 wea
 - [x] **B3.9.e** — `UnitBlob.melee_weapons`/`ranged_weapons: tuple[WeaponProfile, ...]` + `WeaponProfile` migration z combat.py do state.py. `build_initial_state` parsuje `unit["weapons"]` z partycją po `range_inches`. Fix bug #7: `resolve_charge_attack` counter używa `defender.melee_weapons[0]` z fallback. `_ACTIVE_ABILITY_REGISTRY` w `effects.py` + `register_active_ability(slug)` decorator + `get_active_ability(slug)` lookup. `phases._apply_special` redukcja do dispatcher-a. Built-in: pełen `discard_exhausted` + 6 stubów (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik). **ADR-0047 Accepted**. 18 testów (`test_engine_weapons_inventory.py`).
 - [x] **B3.9.f** — Dead code cleanup w combat.py (dead loop linia 378-380 + function-local `_MoveExecuted` import). Update `docs/architecture.md` sekcja "Game engine" z nową strukturą modułów. Refresh ADR-0011 Public API (post-B3.9). Update `scripts/engine_smoke_replay.py` z replay invariant assertion (B3.9.d). `docs/roadmap.md` aktualizacja statusów.
 
+### Rules resync 2026-06 — **in progress** (wątek `faza-b-rules-resync`, ADR-0048)
+
+Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po driftcie `SZOP_Rozjemca.md`/`SZOP_Zdolnosci.md` (2026-06-03). Drift: Lokalizacja enum (pkt 26), formuła kosztu aur/rozkazów `T_eff = clamp(4/3×T, 8, 24)`, mutex statusów (pkt 22.b/c), broń Zguba = licznik `wounds_eliminating` (pkt 26.d/27.a), trigger Przegrupowania (pkt 20.a), Niebezpieczny teren per-oddział (pkt 4.c.v), 8 zdolności przepisanych. Pełny rekord: [ADR-0048](adr/0048-rules-resync-2026-06.md).
+
+- [x] **R0–R3** — drift baseline + `tables.yaml` (locations/status_flags/aura_order_formula) + 5 abilities (opis) + `cost_functions.t_eff`/`aura_range_bonus`/`order_bonus` + handlers. Parity 156/156.
+- [x] **R4.Zguba** — `UnitBlob.wounds_eliminating` + ELIMINOWANY dispatch (`ModelKilled.eliminated`, `Shot/MeleeResolved.wounds_eliminating`). `rozkaz_tak` field (88 abilities, 30 true).
+- [x] **R5.a/c/d/e/f/g** — Lokalizacja enum + pokonanie→WYCOFANY (rany+morale), kontratak conditional Wyczerpany (pkt 14.d.iv), Przegrupowanie warunki (pkt 20.a/b/c via ActivationContext), `MutexCollision` event (pkt 22.b/c), Ufortyfikowany rozstawienie (pkt 13.c), Niebezpieczny teren (pkt 4.c.v). R5.b skip (H4).
+- [x] **R6** — drift gate WARN + parity both_assert 156/156 + yaml 93/93 + smoke replay EXIT 0 + procedural oracle sync.
+- [x] **R7** — ADR-0048 (NEW Accepted) + refresh ADR-0011 (Lokalizacja/MutexCollision w Public API) + roadmap + architecture.
+- [ ] **R4.Klątwa/Rozkaz/Oznaczenie** (id 45/49/50) — engine interrupt handler. Deferred (wymaga interrupt orchestracji + decyzji policy). Cost-side + `rozkaz_tak` done.
+- [ ] **Dywersant engine policy** (id 6) — ×2 ataki vs Przyszpilony. Deferred post-MVP (`INCOMPLETE_ABILITIES` stub). Cost-side done.
+- [ ] **H7 (open)** — heal-revive limit dla ELIMINOWANY/Zguby; czeka na fazę Leczenia (pkt 21), nie blokuje B2/B4.
+
+> **B2 ORM schema impact:** `BattleEvent.payload_json` per unit +`location: Lokalizacja` +`wounds_eliminating: int`; `ModelKilled` +`eliminated: bool`; `Shot/MeleeResolved` +`wounds_eliminating: int`; nowy event `MutexCollision`. Zamrożone — zero migration churn.
+
 ### B4. API (3 tyg)
 - [ ] `app/routers/battles.py` — endpointy: `POST /battles/invite`, `POST /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `GET /battles/{id}/events`, `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST /battles/{id}/replay`
 - [ ] Auth: tylko gracze bitwy (nie trzecia osoba); agent wymaga scope
@@ -349,6 +364,7 @@ Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 wea
 | 0045 | ActivationContext + initial_toughness_snapshot (B3.9.c) | ✓ |
 | 0046 | Event-sourced state mutations (B3.9.d, proof ADR-0010) | ✓ |
 | 0047 | UnitBlob weapons inventory + ACTIVE_ABILITY_REGISTRY (B3.9.e) | ✓ |
+| 0048 | Rules resync 2026-06: Lokalizacja enum + T_eff + status mutex + Zguba eliminating | ✓ |
 
 ---
 

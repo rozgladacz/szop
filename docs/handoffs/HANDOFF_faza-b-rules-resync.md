@@ -1,9 +1,9 @@
 # HANDOFF — faza-b-rules-resync
 
 > **Wątek:** Synchronizacja YAML SSOT + engine z nowymi wersjami zasad (SZOP_Rozjemca.md + SZOP_Zdolnosci.md po 2026-06-03 drift) — Przegrupowanie per-action, Leczenie EOA, formuła T_eff dla aur/rozkazów, Lokalizacja enum, 8 zdolności przepisanych.
-> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + **R4.Zguba ✅ 2026-06-07** [`wounds_eliminating` + ELIMINOWANY dispatch] + R5.a[WYCOFANY pkt 27.b: rany+morale ✅]/c/d/e/f/g ✅ + R5.g findings #1/#3 ✅; R5.b skip[H4]; Dywersant defer[H3]; **R6 ✅ 2026-06-07**; **Klątwa/Rozkaz/Oznaczenie + R7/RW pozostałe**)
+> **Status:** In progress (R0–R3 ✅ + R4.rozkaz_tak ✅ + **R4.Zguba ✅ 2026-06-07** [`wounds_eliminating` + ELIMINOWANY dispatch] + R5.a[WYCOFANY pkt 27.b: rany+morale ✅]/c/d/e/f/g ✅ + R5.g findings #1/#3 ✅; R5.b skip[H4]; Dywersant defer[H3]; **R6 ✅ 2026-06-07**; **R7 ✅ 2026-06-08** [ADR-0048 + docs sync]; **pozostałe: Klątwa/Rozkaz/Oznaczenie engine interrupt + RW final**)
 > **Utworzony:** 2026-06-03
-> **Ostatnia aktualizacja:** 2026-06-07 (R4.Zguba done — `wounds_eliminating` licznik + ELIMINOWANY dispatch; pytest 1435/1435, 156/156 both_assert, 93/93 yaml, smoke EXIT 0)
+> **Ostatnia aktualizacja:** 2026-06-08 (R7 done — ADR-0048 Accepted + refresh ADR-0011/roadmap/architecture; morale-broken `wounds_eliminating` fix zacommitowany `9a3ac96`; pytest 1435/1435, 156/156 both_assert, 93/93 yaml, smoke EXIT 0)
 
 ## Cel
 
@@ -165,13 +165,13 @@ Po synchronizacji: drift gate `make rules-check` musi przejść CLEAN/WARN, pari
 - [ ] `python scripts/engine_smoke_replay.py` — replay invariant assertion EXIT 0, sprawdza Lokalizacja propagation i nowe event types (jeśli dodane).
 - [ ] Pełny pytest — 0 failures.
 
-### Faza R7 — HANDOFF_faza-b-engine-mvp update + ADR
+### Faza R7 — HANDOFF_faza-b-engine-mvp update + ADR — **DONE 2026-06-08**
 
-- [ ] `docs/adr/0048-rules-resync-2026-06.md` (NEW, Accepted) — rekord driftu (51 zmian w SZOP_Rozjemca, 23 zmiany w SZOP_Zdolnosci), 8 decyzji projektowych (T_eff formula, Lokalizacja enum, mutex Przyszpilony/Ufortyfikowany, Manewr free, akcja-różna, kontratak conditional, Niebezpieczny per-unit, Dywersant policy), 4 alternatywy odrzucone, mapping pkt zasad ↔ moduły engine.
-- [ ] `docs/adr/0011-rule-executor.md` — refresh Public API o `Lokalizacja` enum, `aura_cost/order_cost` w cost_functions.
-- [ ] `docs/handoffs/HANDOFF_faza-b-engine-mvp.md` — aktualizacja: B2 ORM model `BattleEvent.payload_json` zawiera Lokalizacja; B4 API schemas exportują enum; B5 szop_client musi czytać nowe pola.
-- [ ] `docs/roadmap.md` — dodać sekcję "Rules resync 2026-06" w Strumień B obok B3.9.
-- [ ] `docs/architecture.md` — sekcja "Game engine" dodać Lokalizacja enum, T_eff formula.
+- [x] `docs/adr/0048-rules-resync-2026-06.md` (NEW, Accepted) — rekord driftu (tabela 9 obszarów), 8 decyzji projektowych (D1 Lokalizacja enum, D2 T_eff bez round, D3 Zguba=licznik, D4 MutexCollision event, D5 Przegrupowanie via ActivationContext, D6 wszystkie rany przez `_allocate_wounds_to_defender`, D7 location producer+reducer, D8 Dywersant/R5.b/Klątwa deferred), 5 alternatyw odrzuconych, mapping 11 pkt zasad ↔ moduły engine.
+- [x] `docs/adr/0011-rule-executor.md` — refresh Public API o `Lokalizacja` enum + `MutexCollision` (14 event types), nota o `t_eff`/`aura_range_bonus`/`order_bonus` w cost_functions (cross-ref ADR-0048).
+- [x] `docs/handoffs/HANDOFF_faza-b-engine-mvp.md` — już zaktualizowany (nota 2026-06-06/07: B2 ORM `BattleEvent.payload_json` +Lokalizacja +wounds_eliminating; ModelKilled +eliminated). Bez dodatkowej zmiany w R7.
+- [x] `docs/roadmap.md` — sekcja "Rules resync 2026-06" w Strumień B (R0-R7 + deferred) + ADR-0048 w indeksie.
+- [x] `docs/architecture.md` — Game engine: akapit rules-resync (Lokalizacja/wounds_eliminating/MutexCollision/T_eff) + tabela modułów state/events/reducers zaktualizowana (14 event types).
 
 ### Faza RW — Weryfikacja end-to-end
 
@@ -247,6 +247,8 @@ python -m pytest tests/test_engine_phases.py tests/test_engine_combat.py tests/t
     - **Implikacja na wcześniejszą „3-pula":** porzucona — żaden split `wounds_received`. Impact ADR-0014: dodanie pojedynczego pola-licznika, nie restrukturyzacja. B2 ORM `BattleEvent.payload_json`: +1 pole `wounds_eliminating` per unit (nie 3).
 
 ## Notatki / odkrycia w trakcie
+
+- **2026-06-08 (sesja codzienna autonomiczna Opus 4.8) — R7 DONE: ADR-0048 + synchronizacja dokumentacji.** Utworzony `docs/adr/0048-rules-resync-2026-06.md` (Accepted) — rekord driftu (tabela 9 obszarów zmian), 8 decyzji projektowych (D1 Lokalizacja enum, D2 T_eff bez round, D3 Zguba=licznik nie 3-pula, D4 MutexCollision event, D5 Przegrupowanie via ActivationContext, D6 wszystkie rany przez `_allocate_wounds_to_defender`, D7 location producer+reducer, D8 Dywersant/R5.b/Klątwa deferred), 5 alternatyw odrzuconych, mapping 11 pkt zasad↔moduły engine, B2 ORM schema impact. Refresh `ADR-0011` (Public API: `Lokalizacja`+`MutexCollision`, 14 event types — skorygowana arytmetyka B3.0:8→B3.9:13→resync:14, dodane brakujące `ObjectiveControlChanged`/`InitiativePassed` do listy). `docs/roadmap.md` (nowa sekcja "Rules resync 2026-06" w Strumień B z R0-R7 + deferred + ADR-0048 w indeksie). `docs/architecture.md` (akapit rules-resync + tabela modułów state/events/reducers zaktualizowana: Lokalizacja/wounds_eliminating/14 typów). **Weryfikacja:** pytest **1435/1435**; both_assert 156/156 + yaml 93/93; smoke replay 48 events EXIT 0. Zmiany docs-only (zero kodu engine). **Pozostaje do domknięcia wątku:** R4.Klątwa/Rozkaz/Oznaczenie (engine interrupt — wymaga decyzji policy), Dywersant engine policy (deferred post-MVP), H7 (heal-revive — czeka na fazę Leczenia pkt 21). **RW final** częściowo pokryta (gate'y zielone); pełne zamknięcie wątku po Klątwa/Rozkaz/Oznaczenie lub świadomej decyzji o ich deferze.
 
 - **2026-06-08 (code-review autonomiczny Opus 4.8) — FOLLOW-UP R4.Zguba: morale-broken nie zerował `wounds_eliminating` (DOMKNIĘTY).** Code-review zakresu `origin/Faza_A..HEAD` (commit `5967193` R4.Zguba; raport: `docs/handoffs/code-review/REVIEW_2026-06-08.md`). **1 finding (poprawność, utajony):** ścieżka pokonania przez morale (`phases._regroup_test` `failures>=3` + mirror `reducers._reduce_morale_test`) ustawiała `models_alive=0, wounds_received=0` ale **NIE zerowała nowego `wounds_eliminating`** — wbrew niezmiennikowi udokumentowanemu w tym samym commicie (`state.py`: „wipe `models_alive==0` zeruje oba"; `0 <= wounds_eliminating <= wounds_received`). Symetryczna luka do findingu #1 z 2026-06-07 (morale defeat path pomijany). Skutek: oddział pokonany 3 porażkami Przegrupowania **gdy nosił rezydualny licznik Zguby** kończył z `models_alive=0, wounds_received=0, wounds_eliminating>0` — stan łamiący niezmiennik. Replay pozostawał bit-perfect (oba lustrzane miejsca pomijały reset identycznie), więc dziś utajone, ale przyszli konsumenci (`wounds_eliminating` / heal-revive H7) odczytaliby zły stan. **AUTO-NAPRAWIONE** (prosty bezpieczny fix, lustrzany do istniejącego `wounds_received=0`): dodano `wounds_eliminating=0` w `phases.py` (`_regroup_test` broken-branch) + `reducers.py` (`_reduce_morale_test` broken-branch). **Weryfikacja:** pytest **1435/1435** (0 regresji). **Zacommitowane 2026-06-08** (sesja codzienna autonomiczna). **Uwaga dla R4 follow-up:** rozważyć przy domknięciu, czy `wounds_eliminating` nie powinno być resetowane także w ewentualnych innych przyszłych ścieżkach „wipe poza walką" (np. efekty instant-kill) — wzorzec: każdy `replace(..., models_alive=0, ...)` musi zerować oba liczniki ran.
 
