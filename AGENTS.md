@@ -38,6 +38,7 @@
 5. **Encoding gate przed Edit/Write na `.py`** — zweryfikuj `open(file, encoding='utf-8')` succeeds. Abort jeśli błąd.
 6. **Frontend payload parity** — po zmianie w `rosters.py`, `export.py`, `payload_adapters.js`, lub `costs/*` uruchom `tests/test_frontend_*.py`.
 7. **Definition of Done przed archiwizacją** — po testach uruchom `/simplify` (zawsze) + warunkowo `/review` (diff >50 linii / hot path / SSOT) + warunkowo `/security-review` (auth, user input → DB). Re-run `pytest` jeśli któryś coś zmienił. Detale: [docs/planning.md](docs/planning.md) sekcja "Definition of Done".
+8. **Rules-claims z źródła, nie z pamięci/ADR.** Każde stwierdzenie o regułach gry (punkty przerwań, numery `pkt X`, formuły, enumy mechanik) cytuje konkretny `pkt` i jest odczytane z `app/static/docs/SZOP_*.md` **w tej sesji**. Nigdy z ADR ani pamięci — ADR bywa nieaktualny po driftcie reguł (np. ADR-0015 modelował 4 punkty przerwań vs 2 przed-akcyjne w aktualnym pkt 11.b). Jeśli ADR ≠ źródło → flaguj drift, nie powielaj ADR.
 
 ## [RECOMMENDED] — preferencje
 

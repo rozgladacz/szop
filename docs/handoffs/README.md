@@ -43,6 +43,17 @@ GFM renderuje `[ ]` i `[x]` jako checkboxy; `[~]` i `[!]` jako tekst literalny �
 
 **Reguła do archiwizacji:** wątek może być archiwizowany gdy wszystkie kroki mają stan finalny — `[x]` lub `[!]`. Stany `[ ]` lub `[~]` w aktywnym planie blokują `/handoff-archive` (skill zapyta o potwierdzenie).
 
+## Słownik statusów otwartych pozycji
+
+Stany kroków (`[ ]/[~]/[x]/[!]`) opisują **postęp**. Dla pozycji w "Hipotezy / pytania otwarte" i backlogu używaj dodatkowo jawnego **tagu statusu** — żeby kolejna sesja nie myliła "niezrobione" z "zablokowane" ani nie eskalowała ponownie rzeczy rozstrzygniętych:
+
+| Tag | Znaczenie | Reguła |
+|---|---|---|
+| `BLOCKED(user)` / `BLOCKED(external)` | Czeka na konkretną decyzję/dane. | **Musi nazwać** brakującą decyzję/wejście. Jeśli nie umiesz jej nazwać → to NIE jest blokada (to `READY`). |
+| `READY` | Odblokowane, specyfikacja kompletna — można implementować. | Brak otwartych pytań. "Niezaimplementowane" ≠ "zablokowane". |
+| `LOCKED` | Rozstrzygnięte przez usera, **poza zakresem** — nie podnosić. | NIE przekształcaj z powrotem w pytanie. Trafia do "Decyzje zamrożone". Implementacja tylko na wyraźne polecenie. |
+| `WAITING(prereq)` | Czeka na inny krok/fazę (nie na usera). | Nazwij prerekwizyt. |
+
 ## Szablon
 
 Kopiuj poniższy blok przy ręcznym tworzeniu wątku (skill `/handoff-start` robi to za ciebie):
@@ -93,7 +104,12 @@ Kopiuj poniższy blok przy ręcznym tworzeniu wątku (skill `/handoff-start` rob
 ## Pliki dotknięte
 - `path/...` — <co zrobione>
 
+## Decyzje zamrożone (NIE podnosić ponownie)
+*(Pozycje `LOCKED` — rozstrzygnięte przez usera, poza zakresem. Czytaj PRZED wylistowaniem "co zostało". NIE przekształcaj w "PYTANIE DO USERA". Implementuj tylko na wyraźne polecenie.)*
+- <data>: <decyzja> — <powód / odniesienie>
+
 ## Hipotezy / pytania otwarte
+*(Każdą pozycję taguj statusem: `BLOCKED(user)` / `READY` / `WAITING(prereq)`. Patrz "Słownik statusów" w docs/handoffs/README.md.)*
 - ...
 
 ## Jak zweryfikować
