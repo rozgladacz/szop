@@ -220,6 +220,76 @@ def test_order_replay_reconstructs_override_and_limit():
 
 
 # ---------------------------------------------------------------------------
+# Faza 3 — wygaśnięcie override'ów na końcu aktywacji (pkt 11.b.vi)
+# ---------------------------------------------------------------------------
+
+
+def test_activation_phase_clears_ability_overrides():
+    """Po aktywacji override'y wszystkich oddziałów są wyczyszczone (pkt 11.b.vi)."""
+    from app.services.engine.actions import ManeuverAction
+    from app.services.engine.dice import DeterministicDice
+    from app.services.engine.phases import activation_phase
+
+    actor = _blob(blob_id=1, owner=0, pos=(0.0, 0.0))
+    affected = _blob(
+        blob_id=2, owner=0, pos=(5.0, 0.0), overrides=(("nieustraszony", True),)
+    )
+    state = _state(actor, affected)
+    new_state, events = activation_phase(
+        state,
+        ManeuverAction(unit_id=1, target_position=Position(1.0, 0.0)),
+        DeterministicDice(seed=1),
+        sequence=1,
+    )
+    aff = next(b for b in new_state.blobs if b.id == 2)
+    assert aff.ability_overrides == ()
+    assert any(
+        isinstance(e, AbilityOverridesCleared) and e.target_id == 2 for e in events
+    )
+
+
+def test_activation_phase_override_clear_replay_invariant():
+    """apply_events(initial, events) odtwarza wyczyszczone override'y (bit-perfect)."""
+    from app.services.engine.actions import ManeuverAction
+    from app.services.engine.dice import DeterministicDice
+    from app.services.engine.phases import activation_phase
+
+    actor = _blob(blob_id=1, owner=0, pos=(0.0, 0.0))
+    affected = _blob(
+        blob_id=2, owner=0, pos=(5.0, 0.0), overrides=(("nieustraszony", True),)
+    )
+    state = _state(actor, affected)
+    new_state, events = activation_phase(
+        state,
+        ManeuverAction(unit_id=1, target_position=Position(1.0, 0.0)),
+        DeterministicDice(seed=1),
+        sequence=1,
+    )
+    replayed = apply_events(state, events)
+    for uid in (1, 2):
+        live_b = next(b for b in new_state.blobs if b.id == uid)
+        rep_b = next(b for b in replayed.blobs if b.id == uid)
+        assert live_b.ability_overrides == rep_b.ability_overrides == ()
+
+
+def test_activation_phase_no_overrides_no_clear_event():
+    """Brak override'ów → brak AbilityOverridesCleared (producer emituje tylko gdy są)."""
+    from app.services.engine.actions import ManeuverAction
+    from app.services.engine.dice import DeterministicDice
+    from app.services.engine.phases import activation_phase
+
+    actor = _blob(blob_id=1, owner=0, pos=(0.0, 0.0))
+    state = _state(actor)
+    _, events = activation_phase(
+        state,
+        ManeuverAction(unit_id=1, target_position=Position(1.0, 0.0)),
+        DeterministicDice(seed=1),
+        sequence=1,
+    )
+    assert not any(isinstance(e, AbilityOverridesCleared) for e in events)
+
+
+# ---------------------------------------------------------------------------
 # effective_passives
 # ---------------------------------------------------------------------------
 

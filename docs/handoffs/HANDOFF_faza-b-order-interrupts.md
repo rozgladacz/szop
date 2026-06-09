@@ -48,9 +48,9 @@ Policy (user, autor reguł, 2026-06-09): wyzwalane w `BEFORE_ACTION` (pkt 11.b.i
 - [x] 2.4: Testy `test_engine_order_abilities.py` (+10: grant ally/range, suppress, klatwa enemy + reject ally, rozkaz reject enemy, out-of-range, non-rozkaz_tak, raz-na-rundę, defeated target, replay limit+override). pytest 1460/1460.
 - **Uproszczenie MVP (H-note):** Oznaczenie (pkt 49) — precyzyjny trigger „sojusznik atakujący cel w 12″ od nosiciela" uproszczony do „sojusznik w 12″ od nosiciela" (jak Rozkaz, osobny slug+limit). Pełny trigger ataku wymaga orkiestracji przerwań (H2/B4).
 
-### Faza 3 — Revert na końcu aktywacji
-- [ ] 3.1: `activation_phase` na końcu (pkt 11.b.vi) czyści `ability_overrides` wszystkich oddziałów — emit `AbilityRemoved`/revert event dla replay.
-- [ ] 3.2: Testy: override aktywny w trakcie aktywacji, wyczyszczony po. Replay invariant.
+### Faza 3 — Revert na końcu aktywacji — **DONE 2026-06-09**
+- [x] 3.1: `activation_phase` po Aktywowany (pkt 11.b.vi) czyści `ability_overrides` WSZYSTKICH oddziałów — emit `AbilityOverridesCleared` per oddział z override'ami (replay mirror `_reduce_ability_overrides_cleared`).
+- [x] 3.2: Testy (+3): override wyczyszczony po aktywacji, replay invariant (ability_overrides bit-perfect), brak eventu gdy brak override'ów. pytest 1463/1463, smoke EXIT 0.
 
 ### Faza 4 — Weryfikacja end-to-end (Definition of Done)
 - [ ] `python -m pytest -q`

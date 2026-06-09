@@ -44,6 +44,7 @@ from app.services.engine.combat import (
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
+    AbilityOverridesCleared,
     BattleEvent,
     EffectApplied,
     MeleeBalanceReset,
@@ -842,6 +843,17 @@ def activation_phase(
             events.append(MeleeBalanceReset(sequence=seq, target_id=actor.id))
             seq += 1
         state = _replace_blob(state, actor)
+
+    # faza-b-order-interrupts (pkt 11.b.vi): efekty „do końca aktywacji" wygasają.
+    # Czyścimy czasowe override'y pasywów (Rozkaz/Klątwa/Oznaczenie id 50/45/49)
+    # na WSZYSTKICH oddziałach — przerwanie mogło nadać X dowolnemu oddziałowi
+    # w trakcie tej aktywacji. Emit AbilityOverridesCleared per oddział z
+    # override'ami (replay mirror — `_reduce_ability_overrides_cleared`).
+    for b in state.blobs:
+        if b.ability_overrides:
+            state = _replace_blob(state, replace(b, ability_overrides=()))
+            events.append(AbilityOverridesCleared(sequence=seq, target_id=b.id))
+            seq += 1
 
     return state, tuple(events)
 
