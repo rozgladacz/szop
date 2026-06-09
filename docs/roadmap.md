@@ -274,11 +274,12 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 > Bot players do exploit-hunting i balansu. Wszystko na MVP modelu z B.
 
-### D1. Heuristic players (4 tyg)
-- [ ] `app/services/agents/base.py` — `class Player(ABC)`: `choose_action(state) → Action`
-- [ ] `random_player.py` — losowy wybór spośród valid actions
-- [ ] `greedy_player.py` — maks `damage_dealt - damage_taken` w 1 turze; używa `prediction.py`
-- [ ] `policy_eval.py` — `evaluate_state(state, perspective) → float` (HP balance + board control)
+### D1. Heuristic players (4 tyg) — **MVP DONE 2026-06-09** (wątek `faza-d-heuristic-players`, ADR-0031)
+- [x] `app/services/agents/base.py` — `class Player(ABC)`: `choose_action(state, perspective) → Action | None` + współdzielony enumerator `legal_actions` (silnik celowo jednoakcyjny — kandydaci budowani z `actions.Action`) + selektory.
+- [x] `random_player.py` — `RandomPlayer(seed)` losowy uniform z `legal_actions`, deterministyczny per seed.
+- [x] `greedy_player.py` — `GreedyPlayer` depth-1 argmax: `prediction.expected_damage(...).mean` dla ataków + Δ`evaluate_state` dla ruchu (ADR-0044).
+- [x] `policy_eval.py` — `evaluate_state(state, perspective) → float` (bilans HP + kontrola/bliskość celów pkt 5).
+- [x] ADR-0031 (Accepted) + 26 testów (`tests/test_agents_{base,random,policy,greedy}.py`). **Odłożone (H2):** pętla bitwy / driver przebiegu gry (B4/B5 LocalClient) — boty produkują akcje, ale D2 `balance_simulate` wymaga orkiestratora `apply`+`round_end_phase`+alternacja.
 
 ### D2. Balance simulation (2 tyg)
 - [ ] `scripts/balance_simulate.py --ruleset v1 -n 1000` → CSV: win rates per rozpiska/zdolność/broń
@@ -356,6 +357,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0024 | Consent-gated agent writes | — |
 | 0025 | Rola agent + scoped tokens | — |
 | 0030 | Wielu agentów: osobne konta + leaderboard | — |
+| 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
 | 0040 | Migration blob → per-model | — |
 | 0041 | Terrain shapes beyond circle/line | — |
 | 0042 | Facing: wprowadzane z Zwrot | — |
