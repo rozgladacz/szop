@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
-| [HANDOFF_faza-d-heuristic-players](docs/handoffs/HANDOFF_faza-d-heuristic-players.md) | Strumień D1 — gracze heurystyczni (`app/services/agents/`): enumerator legalnych akcji + RandomPlayer + GreedyPlayer + evaluate_state nad publicznym API silnika. | `app/services/agents/` (NEW), `tests/test_agents_*.py` (NEW) | **W TRAKCIE: 2026-06-09** — Faza 1 (base.py + enumerator). Czyta tylko engine API, zero kolizji z rdzeniem silnika. |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -48,6 +47,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-09 — faza-d-heuristic-players (archived) — Strumień D1 MVP: gracze heurystyczni
+- Nowy pakiet `app/services/agents/` (Strumień D1, roadmap) — czysta warstwa decyzji botów **nad** publicznym API silnika (B3.9), zero zmian w rdzeniu (`agents/` tylko czyta `engine/`). Silnik jest jednoakcyjny (`resolver.apply`), więc enumerację legalnych akcji trzyma warstwa agentów. **Wybór niekolidujący** z aktywnym wątkiem `faza-b-order-interrupts` (locki na rdzeniu silnika). 4 moduły: `base.py` (`Player` ABC + `legal_actions` enumerator z `actions.Action`, pkt 14 + selektory), `random_player.py` (`RandomPlayer(seed)` deterministyczny), `greedy_player.py` (`GreedyPlayer` depth-1: `prediction.expected_damage.mean` dla ataków + Δ`evaluate_state` dla ruchu), `policy_eval.py` (`evaluate_state` = bilans HP + kontrola/bliskość celów pkt 5). **ADR-0031 Accepted.**
+- Pliki: `app/services/agents/{__init__,base,random_player,greedy_player,policy_eval}.py` (NEW), `tests/test_agents_{base,random,policy,greedy}.py` (NEW, 26 testów), `docs/adr/0031-heuristic-players.md` (NEW Accepted), `docs/roadmap.md` (D1 statusy + ADR index 0031), `docs/architecture.md` (sekcja "Gracze heurystyczni"), `docs/handoffs/HANDOFF_faza-b-engine-mvp.md` (notatka). Commit na `Faza_A`: `<this>`.
+- Weryfikacja: pytest **1489/1489** (1463 baseline + 26); parity `both_assert` 156/156 + `yaml` 93/93 (bot path nie rusza kosztów, sanity); `/simplify` inline 4 kąty — 0 zmian (kod czysty); `/review` świadomie pominięty (izolowany nowy pakiet, czyste funkcje, brak hot-path/SSOT/auth, 0 integracji runtime, pełne pokrycie testami) — inline self-review correctness wykonany; `/security-review` N/A.
+- **Następny krok (READY, parent `faza-b-engine-mvp`):** pętla bitwy = orkiestrator `apply`+`round_end_phase`+alternacja inicjatywy (B5 LocalClient / B4 routers) — odblokowuje D2 `balance_simulate` + D3 `exploit_hunt`. Boty kompletne, brakuje warstwy uruchamiającej je w pełnej grze.
+- Doc updates: roadmap (D1 ✅ + ADR-0031 ✓), architecture (nowa sekcja "Gracze heurystyczni — app/services/agents/"), parent handoff notatka.
 
 ### 2026-06-09 — faza-b-rules-resync (archived) — RW final, resync 3 warstw SSOT domknięty
 - Synchronizacja YAML SSOT + procedural oracle + engine z driftem zasad 2026-06-03 (Lokalizacja enum pkt 26, formuła kosztu aur/rozkazów `T_eff=clamp(4/3×T,8,24)`, status mutex Przyszpilony↔Ufortyfikowany pkt 22.b/c → `MutexCollision` event, broń Zguba = licznik `wounds_eliminating` + ELIMINOWANY dispatch pkt 26.d/27.a, trigger Przegrupowania pkt 20.a `received>dealt` via ActivationContext, Niebezpieczny teren per-oddział pkt 4.c.v, 8 zdolności przepisanych). Wszystkie fazy R0–R7 + RW ✅. Pełny rekord: **ADR-0048** (Accepted).

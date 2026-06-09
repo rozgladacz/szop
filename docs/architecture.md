@@ -202,6 +202,19 @@ while not is_battle_over(state):
 
 Pozostałe rozszerzenia (Furia/Impet/Maskowanie/Niewrazliwy/Przebijająca/Zabójczy + pełne implementacje 6 stubów aktywnych zdolności z B3.9.e) → przyrostowe PR-y bez zmian ADR-0011/0045/0046/0047 (architecture stable, registry patterns pozwalają dodawać bez modyfikacji dispatcher-ów).
 
+## Gracze heurystyczni — `app/services/agents/` (Strumień D1, MVP 2026-06-09, ADR-0031)
+
+Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rdzeniu (`agents/` tylko czyta `engine/`). Silnik jest jednoakcyjny (`resolver.apply`); enumerację legalnych akcji i ocenę stanu trzyma warstwa agentów.
+
+| Moduł | Zawartość |
+|---|---|
+| `base.py` | `Player(ABC)` (`choose_action(state, perspective) -> Action \| None`) + `legal_actions(state, perspective)` (enumerator kandydatów z `actions.Action`, pkt 14) + selektory `own_active_units`/`enemy_units` |
+| `random_player.py` | `RandomPlayer(seed)` — uniform z `legal_actions`, deterministyczny per seed |
+| `greedy_player.py` | `GreedyPlayer` — depth-1 argmax: `prediction.expected_damage(...).mean` dla ataków, Δ`evaluate_state` dla ruchu |
+| `policy_eval.py` | `evaluate_state(state, perspective) -> float` — bilans HP + kontrola/bliskość celów (pkt 5) |
+
+**Konsumenci (planowane):** D2 `balance_simulate`, D3 `exploit_hunt`, D4 `minimax_player` — wszystkie wymagają jeszcze **pętli bitwy** (orkiestrator `apply`+`round_end_phase`+alternacja inicjatywy = B5 LocalClient / B4 routers). Boty są kompletne i testowalne w izolacji (26 testów), ale nikt ich jeszcze nie uruchamia w pełnej grze.
+
 ## Frontend JS — mapa modułów
 
 Aktualna mapa zależności i lista call sites po podziale `app/static/js/app.js`: `docs/frontend_js_modules.md`.
