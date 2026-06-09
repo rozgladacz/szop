@@ -41,11 +41,12 @@ Policy (user, autor reguł, 2026-06-09): wyzwalane w `BEFORE_ACTION` (pkt 11.b.i
 - [x] 1.4: Eventy `AbilityOverrideApplied(target_id, ability, granted, source_id)` / `AbilityOverridesCleared(target_id)` w `events.py` (Union + _EVENT_REGISTRY) + reducery w `reducers.py` + `ability_overrides` w `_BLOB_REPLAY_FIELDS`.
 - [x] 1.5: Testy substratu — `tests/test_engine_order_abilities.py` (15: effective_passives ×8 + integracja morale ×2 + reducer/replay ×5). pytest 1450/1450.
 
-### Faza 2 — Per-round limit + handlery
-- [ ] 2.1: `BattleState.used_interrupts_this_round: tuple[tuple[int,str], ...] = ()` + reset w `round_end_phase`.
-- [ ] 2.2: Handlery `rozkaz`/`klatwa`/`oznaczenie` w `effects.py`, rejestracja `@register_interrupt_handler(BEFORE_ACTION, slug)`. Walidacja: X z `rozkaz_tak: true`, zasięg 12″, ally (rozkaz/oznaczenie) vs enemy (klatwa), raz na rundę. Emit `AbilityGranted`/`AbilityRemoved` + `InterruptTriggered`.
-- [ ] 2.3: Usuń `rozkaz`/`klatwa`/`oznaczenie` z `INCOMPLETE_ABILITIES` jeśli były (sprawdzić).
-- [ ] 2.4: Testy handlerów (zasięg, ally/enemy, rozkaz_tak walidacja, raz-na-rundę).
+### Faza 2 — Per-round limit + handlery — **DONE 2026-06-09**
+- [x] 2.1: `BattleState.used_interrupts_this_round: tuple[tuple[int,str], ...] = ()` + reset w `round_end_phase` (producer) + `_reduce_round_ended` (replay).
+- [x] 2.2: Handlery `rozkaz`/`klatwa`/`oznaczenie` w `interrupts.py` (przy Strażniku), `@register_interrupt_handler(BEFORE_ACTION, slug)`. Wspólny `_apply_order_like` — walidacja `InvalidInterruptError`: X z `rozkaz_tak:true` (`_rozkaz_capable_slugs` lru_cache), zasięg 12″ (`circle_edge_distance`), ally (rozkaz/oznaczenie) vs enemy (klatwa), raz-na-rundę. Emit `InterruptTriggered`+`AbilityOverrideApplied`. `_reduce_interrupt_triggered` odtwarza limit dla `ONCE_PER_ROUND_INTERRUPTS`.
+- [x] 2.3: `rozkaz`/`klatwa`/`oznaczenie` NIE były w `INCOMPLETE_ABILITIES` (type=active, nie stub) — nic do usunięcia. Slugi nosicieli + `nieustraszony` (X) potwierdzone w abilities.yaml.
+- [x] 2.4: Testy `test_engine_order_abilities.py` (+10: grant ally/range, suppress, klatwa enemy + reject ally, rozkaz reject enemy, out-of-range, non-rozkaz_tak, raz-na-rundę, defeated target, replay limit+override). pytest 1460/1460.
+- **Uproszczenie MVP (H-note):** Oznaczenie (pkt 49) — precyzyjny trigger „sojusznik atakujący cel w 12″ od nosiciela" uproszczony do „sojusznik w 12″ od nosiciela" (jak Rozkaz, osobny slug+limit). Pełny trigger ataku wymaga orkiestracji przerwań (H2/B4).
 
 ### Faza 3 — Revert na końcu aktywacji
 - [ ] 3.1: `activation_phase` na końcu (pkt 11.b.vi) czyści `ability_overrides` wszystkich oddziałów — emit `AbilityRemoved`/revert event dla replay.

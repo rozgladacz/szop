@@ -965,5 +965,7 @@ def round_end_phase(
         state,
         round=state.round + 1 if not is_over else state.round,
         is_game_over=is_over,
+        # faza-b-order-interrupts: reset limitu „raz na rundę" (pkt 12).
+        used_interrupts_this_round=(),
     )
     return state, tuple(events)

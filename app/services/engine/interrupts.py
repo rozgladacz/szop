@@ -44,11 +44,17 @@ integracją w `phases.py`.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
+from functools import lru_cache
 from typing import Any, Callable
 
-from app.services.engine.events import BattleEvent, InterruptTriggered
+from app.services.engine.events import (
+    AbilityOverrideApplied,
+    BattleEvent,
+    InterruptTriggered,
+)
+from app.services.engine.geometry import circle_edge_distance
 from app.services.engine.state import BattleState, UnitBlob, effective_passives
 
 
@@ -193,3 +199,166 @@ def _straznik_handler(
     )
     # MVP: state nie ulega zmianie (stub). B3.6 zaktualizuje state.
     return context.state, (event,)
+
+
+# ---------------------------------------------------------------------------
+# Rozkaz(X) / Klątwa(X) / Oznaczenie(X) (id 50/45/49) — faza-b-order-interrupts
+# ---------------------------------------------------------------------------
+#
+# Policy (user, autor reguł, 2026-06-09): wyzwalane w `BEFORE_ACTION` (pkt 11.b.i),
+# raz na rundę, efekt do końca aktywacji, X = pasywka z `rozkaz_tak: true`.
+# - Rozkaz(X) — sojuszniczy oddział w 12″ (nie)ma X (pkt 50).
+# - Klątwa(X) — wrogi oddział w 12″ (nie)ma X (pkt 45).
+# - Oznaczenie(X) — sojuszniczy oddział atakujący cel w 12″ od nosiciela (pkt 49).
+#
+# Mechanika: emit `AbilityOverrideApplied(target, X, granted)` → substrat
+# `UnitBlob.ability_overrides` (Faza 1) → `effective_passives` aplikuje X do
+# końca aktywacji (`activation_phase` emituje `AbilityOverridesCleared`).
+# `granted` (payload, default True) rozróżnia wariant pozytywny (nadaj X) od
+# negatywnego (odbierz X) — „(nie)miał zdolność X" (pkt 12).
+
+ORDER_RANGE_INCHES = 12.0
+# Sluggi przerwań z limitem „raz na rundę" (pkt 12). Strażnik NIE jest tu —
+# nie ma per-rundowego limitu w regułach.
+ONCE_PER_ROUND_INTERRUPTS = frozenset({"rozkaz", "klatwa", "oznaczenie"})
+
+
+class InvalidInterruptError(ValueError):
+    """Niedozwolone wywołanie przerwania (zasięg / cel ally-enemy / X bez
+    `rozkaz_tak` / limit raz-na-rundę)."""
+
+
+@lru_cache(maxsize=4)
+def _rozkaz_capable_slugs(ruleset_version: str = "v1") -> frozenset[str]:
+    """Zbiór slugów pasywek z `rozkaz_tak: true` (dozwolone jako X). lru_cache —
+    ruleset jest immutable per wersja."""
+    from app.services.rulesets.loader import load_ruleset
+
+    ruleset = load_ruleset(ruleset_version)
+    return frozenset(a.slug for a in ruleset.abilities if a.rozkaz_tak)
+
+
+def _apply_order_like(
+    context: InterruptContext,
+    payload: dict[str, Any],
+    *,
+    slug: str,
+    require_enemy: bool,
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Wspólna logika Rozkaz/Klątwa/Oznaczenie (pkt 12 + 45/49/50).
+
+    Payload: `target_id` (oddział-cel), `ability` (X — pasywka `rozkaz_tak:true`),
+    `granted` (bool, default True — nadaj/odbierz), `sequence`.
+
+    Walidacja (raise `InvalidInterruptError`): limit raz-na-rundę, istnienie celu,
+    `rozkaz_tak`, ally/enemy, zasięg 12″ (krawędź-krawędź). Emit `InterruptTriggered`
+    + `AbilityOverrideApplied`; mutacja live state (override na celu + zapis limitu).
+    """
+    state = context.state
+    source_id = context.source_unit_id
+    source = next((b for b in state.blobs if b.id == source_id), None)
+    if source is None:
+        raise InvalidInterruptError(f"{slug}: source unit {source_id} not found")
+
+    if "target_id" not in payload or "ability" not in payload:
+        raise InvalidInterruptError(
+            f"{slug}: payload requires 'target_id' and 'ability'"
+        )
+    target_id = int(payload["target_id"])
+    ability = str(payload["ability"])
+    granted = bool(payload.get("granted", True))
+    seq = int(payload.get("sequence", 0))
+
+    if (source_id, slug) in state.used_interrupts_this_round:
+        raise InvalidInterruptError(
+            f"{slug}: already used by unit {source_id} this round (raz na rundę)"
+        )
+
+    target = next((b for b in state.blobs if b.id == target_id), None)
+    if target is None or target.models_alive == 0:
+        raise InvalidInterruptError(
+            f"{slug}: target {target_id} not found or defeated"
+        )
+
+    if ability not in _rozkaz_capable_slugs():
+        raise InvalidInterruptError(
+            f"{slug}: ability {ability!r} is not rozkaz_tak-capable (pkt 12 — X "
+            f"musi mieć rozkaz_tak: true)"
+        )
+
+    is_enemy = target.owner_player != source.owner_player
+    if require_enemy and not is_enemy:
+        raise InvalidInterruptError(f"{slug}: target {target_id} must be enemy")
+    if not require_enemy and is_enemy:
+        raise InvalidInterruptError(f"{slug}: target {target_id} must be ally")
+
+    gap = circle_edge_distance(
+        source.position, source.radius_inches, target.position, target.radius_inches
+    )
+    if gap > ORDER_RANGE_INCHES:
+        raise InvalidInterruptError(
+            f"{slug}: target {target_id} out of {ORDER_RANGE_INCHES}\" range "
+            f"(edge gap={gap:.2f})"
+        )
+
+    events: tuple[BattleEvent, ...] = (
+        InterruptTriggered(
+            sequence=seq,
+            interrupt_point=context.point.value,
+            slug=slug,
+            source_unit_id=source_id,
+            target_unit_id=target_id,
+            payload={"ability": ability, "granted": granted},
+        ),
+        AbilityOverrideApplied(
+            sequence=seq + 1,
+            target_id=target_id,
+            ability=ability,
+            granted=granted,
+            source_id=source_id,
+        ),
+    )
+    # Mutacja live state (mirror reducerów: AbilityOverrideApplied + InterruptTriggered).
+    new_target = replace(
+        target, ability_overrides=target.ability_overrides + ((ability, granted),)
+    )
+    new_blobs = tuple(new_target if b.id == target_id else b for b in state.blobs)
+    new_state = replace(
+        state,
+        blobs=new_blobs,
+        used_interrupts_this_round=state.used_interrupts_this_round
+        + ((source_id, slug),),
+    )
+    return new_state, events
+
+
+@register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "rozkaz")
+def _rozkaz_handler(
+    context: InterruptContext, payload: dict[str, Any]
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Rozkaz(X) (id 50): sojuszniczy oddział w 12″ (nie)ma X do końca aktywacji."""
+    return _apply_order_like(context, payload, slug="rozkaz", require_enemy=False)
+
+
+@register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "klatwa")
+def _klatwa_handler(
+    context: InterruptContext, payload: dict[str, Any]
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Klątwa(X) (id 45): wrogi oddział w 12″ (nie)ma X do końca aktywacji."""
+    return _apply_order_like(context, payload, slug="klatwa", require_enemy=True)
+
+
+@register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "oznaczenie")
+def _oznaczenie_handler(
+    context: InterruptContext, payload: dict[str, Any]
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Oznaczenie(X) (id 49): sojuszniczy oddział (nie)ma X do końca aktywacji.
+
+    **Uproszczenie MVP (H-note):** reguła pkt 49 celuje w sojusznika, który
+    *atakuje cel w 12″ od nosiciela* — tj. zasięg mierzony do ofiary ataku, a
+    wyzwalany przy deklaracji ataku sojusznika. Pełny trigger wymaga kontekstu
+    ataku (orkiestracja przerwań, H2/B4). MVP: traktujemy jak „sojusznik w 12″
+    od nosiciela ma X" (mechanicznie jak Rozkaz, osobny slug + limit). Precyzyjny
+    trigger ataku — follow-up po wpięciu deklaracji przerwań w pętlę aktywacji.
+    """
+    return _apply_order_like(context, payload, slug="oznaczenie", require_enemy=False)

@@ -226,6 +226,10 @@ class BattleState:
     score: tuple[int, int] = (0, 0)  # zajęte cele per player (pkt 5.f)
     is_game_over: bool = False  # True po round_end_phase rundy 4 (pkt 5.f)
     initial_toughness_snapshot: tuple[tuple[int, int], ...] = ()  # ADR-0045
+    # Limit „raz na rundę" przerwań Rozkaz/Klątwa/Oznaczenie (pkt 12) — krotka
+    # `(source_unit_id, slug)` użytych w tej rundzie. Reset w round_end_phase +
+    # RoundEnded reducer. faza-b-order-interrupts 2026-06-09.
+    used_interrupts_this_round: tuple[tuple[int, str], ...] = ()
 
 
 def compute_radius_inches(

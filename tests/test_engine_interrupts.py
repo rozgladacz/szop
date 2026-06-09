@@ -171,13 +171,17 @@ def test_trigger_interrupt_unknown_slug_raises():
 
 
 def test_trigger_interrupt_unregistered_slug_at_point_raises():
-    """Slug niezarejestrowany w BEFORE_ACTION → raise (lookup po (point, slug))."""
+    """Slug niezarejestrowany w BEFORE_ACTION → raise (lookup po (point, slug)).
+
+    `koordynacja` to przyszłe przerwanie (ADR-0015) jeszcze nie zaimplementowane —
+    brak handlera. (rozkaz/klatwa/oznaczenie SĄ zarejestrowane od faza-b-order-interrupts.)
+    """
     state = make_state()
     ctx = InterruptContext(
         state=state, point=InterruptPoint.BEFORE_ACTION, source_unit_id=1
     )
     with pytest.raises(ValueError, match="No interrupt handler"):
-        trigger_interrupt(ctx, slug="rozkaz", payload={})
+        trigger_interrupt(ctx, slug="koordynacja", payload={})
 
 
 def test_trigger_interrupt_payload_propagated():

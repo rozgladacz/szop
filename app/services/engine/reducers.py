@@ -363,7 +363,19 @@ def _reduce_ability_overrides_cleared(
 def _reduce_interrupt_triggered(
     state: BattleState, event: InterruptTriggered
 ) -> BattleState:
-    del event
+    """Annotation — bez delty na blobach. Wyjątek (faza-b-order-interrupts):
+    dla przerwań z limitem „raz na rundę" (Rozkaz/Klątwa/Oznaczenie, pkt 12)
+    dopisuje `(source, slug)` do `used_interrupts_this_round` — mirror producer
+    `interrupts._apply_order_like`. Idempotentny dla pozostałych slugów."""
+    from app.services.engine.interrupts import ONCE_PER_ROUND_INTERRUPTS
+
+    if event.slug in ONCE_PER_ROUND_INTERRUPTS:
+        key = (event.source_unit_id, event.slug)
+        if key not in state.used_interrupts_this_round:
+            return replace(
+                state,
+                used_interrupts_this_round=state.used_interrupts_this_round + (key,),
+            )
     return state
 
 
@@ -430,4 +442,6 @@ def _reduce_round_ended(state: BattleState, event: RoundEnded) -> BattleState:
         round=event.round_number + 1 if not is_over else event.round_number,
         is_game_over=is_over,
         score=event.objectives_held,
+        # faza-b-order-interrupts: reset limitu „raz na rundę" (mirror producer).
+        used_interrupts_this_round=(),
     )
