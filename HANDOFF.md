@@ -11,8 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (B3.9 done; B2 ORM lub D pierwsze) |
-| [HANDOFF_faza-b-rules-resync](docs/handoffs/HANDOFF_faza-b-rules-resync.md) | Sync YAML+engine z driftem zasad 2026-06-03 (Przegrupowanie per-action, Leczenie EOA, formuła T_eff aur/rozkazów, Lokalizacja enum, 8 abilities przepisanych). | `app/rulesets/v1/*.yaml`, `app/services/engine/{phases,combat,status,state,actions,effects}.py`, `app/services/rulesets/{cost_functions,handlers}.py` | In progress (R0–R7 ✅ + R4.Zguba ✅ [ADR-0048 + docs DONE 2026-06-08]; Klątwa/Rozkaz/Oznaczenie engine interrupt + RW final pozostałe) |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog przyrostowych zdolności: Klątwa/Rozkaz/Oznaczenie + Dywersant + H7) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -38,7 +37,7 @@
 
 *(Krótkie alerty istotne dla wielu wątków. Coś, co nie pasuje jeszcze do `docs/`, ale dotyczy więcej niż jednego wątku. Sprzątaj regularnie — przenoś do `docs/*` jeśli reguła stała się trwała.)*
 
-- **2026-06-07:** **Faza_A → main MERGED** (PR #455, commit `418b0ff`). 83 commity: B0+B3+B3.9+rules-resync R0-R6. **B2/B4/B5 ODBLOKOWANE** — engine schema stabilna (`BattleEvent.payload_json` event types 1-13 locked per ADR-0046+0047). Sub-wątki startują na bazie `main`. Faza_B branch otwieramy gdy B2/B4/B5 startują. Rules-resync kontynuuje na `Faza_A` (R4.Zguba + Klątwa/Rozkaz/Oznaczenie + R7 + RW).
+- **2026-06-07:** **Faza_A → main MERGED** (PR #455, commit `418b0ff`). 83 commity: B0+B3+B3.9+rules-resync R0-R6. **B2/B4/B5 ODBLOKOWANE** — engine schema stabilna (`BattleEvent.payload_json` event types 1-13 locked per ADR-0046+0047). Sub-wątki startują na bazie `main`. Faza_B branch otwieramy gdy B2/B4/B5 startują. **Rules-resync ZAMKNIĘTY 2026-06-09** (R0–R7 + RW ✅, ADR-0048; backlog przyrostowych zdolności Klątwa/Rozkaz/Oznaczenie + Dywersant + H7 w parent `faza-b-engine-mvp`). 3 commity `Faza_A` ahead of origin (`5967193`/`9a3ac96`/`bbf4538` R4.Zguba+R7) — do push/merge.
 - **2026-05-20:** Lokalny runtime na Windows — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
 - **2026-05-12:** Merge conflicts gałęzi Klasyfikacja nadal nierozwiązane — blokują SSOT Phase 5. Patrz [docs/roadmap.md](docs/roadmap.md).
 
@@ -47,6 +46,12 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-09 — faza-b-rules-resync (archived) — RW final, resync 3 warstw SSOT domknięty
+- Synchronizacja YAML SSOT + procedural oracle + engine z driftem zasad 2026-06-03 (Lokalizacja enum pkt 26, formuła kosztu aur/rozkazów `T_eff=clamp(4/3×T,8,24)`, status mutex Przyszpilony↔Ufortyfikowany pkt 22.b/c → `MutexCollision` event, broń Zguba = licznik `wounds_eliminating` + ELIMINOWANY dispatch pkt 26.d/27.a, trigger Przegrupowania pkt 20.a `received>dealt` via ActivationContext, Niebezpieczny teren per-oddział pkt 4.c.v, 8 zdolności przepisanych). Wszystkie fazy R0–R7 + RW ✅. Pełny rekord: **ADR-0048** (Accepted).
+- Faza RW (ta sesja): weryfikacja end-to-end — call-site check CLEAN (0 odwołań do usuniętych `cost.aura`/`cost.rozkaz`), diff review R1–R7 (R7 docs-only; engine zmiany z R4.Zguba `5967193` + morale-broken fix `9a3ac96`, oba zrecenzowane). **Elementy odroczone post-MVP migrowane do parent `faza-b-engine-mvp`** jako backlog z pytaniami do usera: Klątwa/Rozkaz/Oznaczenie engine interrupt (id 45/49/50, blokada: policy interruptu + semantyka X), Dywersant engine policy (id 6, ×2 ataki vs Przyszpilony), H7 heal-revive (czeka na fazę Leczenia pkt 21). Cost-side wszystkich done.
+- Pliki: `app/rulesets/v1/{tables,abilities,ability_costs,source_hashes,drift_allowlist}.yaml`, `app/services/rulesets/{models,cost_functions,handlers}.py`, `app/services/engine/{state,events,combat,phases,reducers,effects,status,actions}.py`, `docs/adr/{0048 NEW,0011 refresh}.md`, `docs/{roadmap,architecture}.md`. Commity na `Faza_A`: `549476d`/`fb0ffa9` (R0–R3), `41d2a8a` (Lokalizacja+rozkaz_tak+R5.c/f), `ee8975f` (R5.d), `203daac` (R5.g), `422412c`+`c672a22` (R5.a WYCOFANY), `b09530f` (R6), `5967193`+`9a3ac96` (R4.Zguba), `bbf4538` (R7).
+- Weryfikacja: pytest **1435/1435**; both_assert **156/156**; yaml **93/93**; drift WARN (R1=0/R2=0/R3=29/R4=0, exit 2) + sources CLEAN; smoke replay EXIT 0 (48 events, 14 event types). Doc updates: roadmap (sekcja "Rules resync 2026-06" + ADR-0048 w indeksie), architecture (Game engine: Lokalizacja/wounds_eliminating/MutexCollision/T_eff), ADR-0011 refresh — wszystko zrobione w R7.
 
 ### 2026-06-02 — faza-b-3-hardening (archived) — B3.9 architecture hardening done
 
