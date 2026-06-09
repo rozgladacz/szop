@@ -364,12 +364,11 @@ def _reduce_interrupt_triggered(
     state: BattleState, event: InterruptTriggered
 ) -> BattleState:
     """Annotation — bez delty na blobach. Wyjątek (faza-b-order-interrupts):
-    dla przerwań z limitem „raz na rundę" (Rozkaz/Klątwa/Oznaczenie, pkt 12)
+    gdy event ma `consumes_round_limit` (Rozkaz/Klątwa/Oznaczenie, pkt 12)
     dopisuje `(source, slug)` do `used_interrupts_this_round` — mirror producer
-    `interrupts._apply_order_like`. Idempotentny dla pozostałych slugów."""
-    from app.services.engine.interrupts import ONCE_PER_ROUND_INTERRUPTS
-
-    if event.slug in ONCE_PER_ROUND_INTERRUPTS:
+    `interrupts._apply_order_like`. Generyczny: czyta flagę z eventu, nie
+    hardkoduje listy slugów. Idempotentny (guard `not in`)."""
+    if event.consumes_round_limit:
         key = (event.source_unit_id, event.slug)
         if key not in state.used_interrupts_this_round:
             return replace(

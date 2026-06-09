@@ -287,10 +287,11 @@ def _apply_order_like(
         )
 
     is_enemy = target.owner_player != source.owner_player
-    if require_enemy and not is_enemy:
-        raise InvalidInterruptError(f"{slug}: target {target_id} must be enemy")
-    if not require_enemy and is_enemy:
-        raise InvalidInterruptError(f"{slug}: target {target_id} must be ally")
+    if is_enemy != require_enemy:
+        raise InvalidInterruptError(
+            f"{slug}: target {target_id} must be "
+            f"{'enemy' if require_enemy else 'ally'}"
+        )
 
     gap = circle_edge_distance(
         source.position, source.radius_inches, target.position, target.radius_inches
@@ -309,6 +310,7 @@ def _apply_order_like(
             source_unit_id=source_id,
             target_unit_id=target_id,
             payload={"ability": ability, "granted": granted},
+            consumes_round_limit=slug in ONCE_PER_ROUND_INTERRUPTS,
         ),
         AbilityOverrideApplied(
             sequence=seq + 1,

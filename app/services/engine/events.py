@@ -149,6 +149,12 @@ class InterruptTriggered:
     `interrupt_point` == "before_action" (pkt 11.b.i; jedyny punkt po korekcie
     2026-06-09 — zob. ADR-0015). `slug` = zdolność triggerująca (Strażnik /
     Rozkaz / Klątwa / etc.).
+
+    `consumes_round_limit` (faza-b-order-interrupts) — czy to przerwanie zużywa
+    limit „raz na rundę" (pkt 12). Event samoopisujący się (jak
+    `MutexCollision.dropped_statuses`): reducer `_reduce_interrupt_triggered`
+    dopisuje `(source, slug)` do `used_interrupts_this_round` gdy True, bez
+    hardkodowania listy slugów. Strażnik = False (brak limitu w regułach).
     """
 
     sequence: int
@@ -157,6 +163,7 @@ class InterruptTriggered:
     source_unit_id: int
     target_unit_id: int | None = None
     payload: dict[str, Any] = field(default_factory=dict)
+    consumes_round_limit: bool = False
     version: int = SCHEMA_VERSION
 
 

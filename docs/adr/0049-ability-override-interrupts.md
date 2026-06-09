@@ -44,10 +44,12 @@ propagację (`apply_events(initial, events)` bit-perfect).
 
 `BattleState.used_interrupts_this_round: tuple[tuple[int, str], ...]` — pary
 `(source_unit_id, slug)` użyte w rundzie. Reset w `round_end_phase` (producer) +
-`_reduce_round_ended` (replay). Mirror w `_reduce_interrupt_triggered` dla slugów
-z `ONCE_PER_ROUND_INTERRUPTS = {rozkaz, klatwa, oznaczenie}` (Strażnik NIE ma
-limitu — nie jest tu). Klucz `(source, slug)` ⇒ jeden oddział z Rozkaz i Klątwą
-może użyć każdej raz.
+`_reduce_round_ended` (replay). `InterruptTriggered.consumes_round_limit: bool`
+czyni event **samoopisującym się** (jak `MutexCollision.dropped_statuses`):
+producer ustawia flagę z `ONCE_PER_ROUND_INTERRUPTS = {rozkaz, klatwa, oznaczenie}`
+(źródło polityki), a `_reduce_interrupt_triggered` dopisuje `(source, slug)` gdy
+flaga True — bez hardkodowania listy slugów w reducerze (Strażnik=False, brak
+limitu). Klucz `(source, slug)` ⇒ jeden oddział z Rozkaz i Klątwą może użyć każdej raz.
 
 ### 4. Handlery (interrupt `BEFORE_ACTION`)
 
