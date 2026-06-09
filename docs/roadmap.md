@@ -209,7 +209,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] **R5.a/c/d/e/f/g** — Lokalizacja enum + pokonanie→WYCOFANY (rany+morale), kontratak conditional Wyczerpany (pkt 14.d.iv), Przegrupowanie warunki (pkt 20.a/b/c via ActivationContext), `MutexCollision` event (pkt 22.b/c), Ufortyfikowany rozstawienie (pkt 13.c), Niebezpieczny teren (pkt 4.c.v). R5.b skip (H4).
 - [x] **R6** — drift gate WARN + parity both_assert 156/156 + yaml 93/93 + smoke replay EXIT 0 + procedural oracle sync.
 - [x] **R7** — ADR-0048 (NEW Accepted) + refresh ADR-0011 (Lokalizacja/MutexCollision w Public API) + roadmap + architecture.
-- [ ] **R4.Klątwa/Rozkaz/Oznaczenie** (id 45/49/50) — engine interrupt handler. Deferred (wymaga interrupt orchestracji + decyzji policy). Cost-side + `rozkaz_tak` done.
+- [x] **R4.Klątwa/Rozkaz/Oznaczenie** (id 45/49/50) — **MVP DONE 2026-06-09** (wątek `faza-b-order-interrupts`, ADR-0049): substrat `ability_overrides` + `effective_passives` + handlery interrupt `BEFORE_ACTION` (zasięg 12″, ally/enemy, `rozkaz_tak`, raz-na-rundę) + wygaśnięcie na końcu aktywacji. Uproszczenia: Oznaczenie precyzyjny trigger ataku + auto-orkiestracja w pętli aktywacji → H2/B4.
 - [ ] **Dywersant engine policy** (id 6) — ×2 ataki vs Przyszpilony. Deferred post-MVP (`INCOMPLETE_ABILITIES` stub). Cost-side done.
 - [ ] **H7 (open)** — heal-revive limit dla ELIMINOWANY/Zguby; czeka na fazę Leczenia (pkt 21), nie blokuje B2/B4.
 
@@ -365,6 +365,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0046 | Event-sourced state mutations (B3.9.d, proof ADR-0010) | ✓ |
 | 0047 | UnitBlob weapons inventory + ACTIVE_ABILITY_REGISTRY (B3.9.e) | ✓ |
 | 0048 | Rules resync 2026-06: Lokalizacja enum + T_eff + status mutex + Zguba eliminating | ✓ |
+| 0049 | Czasowy ability-override + przerwania Rozkaz/Klątwa/Oznaczenie (BEFORE_ACTION) | ✓ |
 
 ---
 

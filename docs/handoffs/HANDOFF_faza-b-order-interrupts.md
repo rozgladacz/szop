@@ -53,13 +53,17 @@ Policy (user, autor reguł, 2026-06-09): wyzwalane w `BEFORE_ACTION` (pkt 11.b.i
 - [x] 3.2: Testy (+3): override wyczyszczony po aktywacji, replay invariant (ability_overrides bit-perfect), brak eventu gdy brak override'ów. pytest 1463/1463, smoke EXIT 0.
 
 ### Faza 4 — Weryfikacja end-to-end (Definition of Done)
-- [ ] `python -m pytest -q`
-- [ ] `OPR_RULES_BACKEND=both_assert pytest tests/test_ruleset_parity.py` (156/156)
-- [ ] `OPR_RULES_BACKEND=yaml pytest tests/yaml_backend/` (93/93)
-- [ ] `python scripts/engine_smoke_replay.py` (EXIT 0)
-- [ ] `/simplify` + Call-site check
-- [ ] ADR-0049 (NEW) + refresh ADR-0011/roadmap; handoff update
-- [ ] `/handoff-archive faza-b-order-interrupts`
+- [x] `python -m pytest -q` — **1463 passed**.
+- [x] `OPR_RULES_BACKEND=both_assert pytest tests/test_ruleset_parity.py` — **156/156**.
+- [x] `OPR_RULES_BACKEND=yaml pytest tests/yaml_backend/` — **93/93**.
+- [x] `python scripts/engine_smoke_replay.py` — **EXIT 0** (48 events).
+- [x] ADR-0049 (NEW Accepted) + refresh ADR-0011 (16 event types + substrat) + roadmap (R4.Klątwa MVP done + ADR index) + parent handoff backlog.
+- [ ] `/simplify` + Call-site check — przy domknięciu wątku (follow-upy pozostają).
+- [ ] `/handoff-archive faza-b-order-interrupts` — po follow-upach (Oznaczenie trigger + auto-orkiestracja) LUB świadomej decyzji o ich deferze.
+
+## Stan: MVP mechanizmu DONE (Fazy 1-3 ✅). Pozostałe follow-upy
+- **`READY`** Oznaczenie precyzyjny trigger: „sojusznik atakujący cel w 12″ od nosiciela" (zasięg do ofiary ataku) — wymaga kontekstu ataku.
+- **`WAITING(B4)`** auto-orkiestracja: wpięcie deklaracji przerwań w pętlę `activation_phase`/resolver (kto wywołuje + wybór celu = decyzja gracza, jak Action).
 
 ## Pliki dotknięte
 *(wypełni się w trakcie)*
