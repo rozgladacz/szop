@@ -388,8 +388,11 @@ INCOMPLETE_ABILITIES: frozenset[str] = frozenset(
     {
         # Active stubs (B3.9 — emit EffectApplied annotation)
         "latanie", "mag", "mobilizacja", "presja", "przepowiednia", "meczennik",
-        # Passive/weapon pending engine impl (R5.x 2026-06-05 — H3 deferred)
-        "dywersant",  # H3 — interrupt before_hit_rolls + policy (×2 ataki vs Przyszpilony)
+        # DECYZJA ZAMROŻONA (user H3, potwierdzona 3×: 2026-06-06 + 2026-06-09):
+        # Dywersant POZA ZAKRESEM tej fazy MVP. Stub tutaj to stan DOCELOWY, nie TODO.
+        # NIE re-eskalować jako otwarte pytanie/blokadę. Implementacja (×2 ataki vs
+        # Przyszpilony, before-hit interrupt) tylko na wyraźne polecenie usera.
+        "dywersant",
         # "zguba" — R4.Zguba DONE 2026-06-07: licznik `wounds_eliminating` +
         # ELIMINOWANY dispatch w combat.py/reducers.py (H5 RESOLVED).
     }
