@@ -142,8 +142,8 @@ class EffectApplied:
 class InterruptTriggered:
     """Wywołanie przerwania (pkt 12).
 
-    `interrupt_point` ∈ {"activation_start", "after_action", "before_regroup",
-    "after_regroup"} per ADR-0015. `slug` = zdolność triggerująca (Strażnik /
+    `interrupt_point` == "before_action" (pkt 11.b.i; jedyny punkt po korekcie
+    2026-06-09 — zob. ADR-0015). `slug` = zdolność triggerująca (Strażnik /
     Rozkaz / Klątwa / etc.).
     """
 

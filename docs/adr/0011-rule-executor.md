@@ -22,7 +22,7 @@
 | `prediction.py` (B3.3) | `expected_damage(...) → DamageDistribution` | analityczny binomial CDF (bez RNG) |
 | `combat.py` (B3.4 + B3.9.b/d/e) | `resolve_ranged_attack`, `resolve_melee_attack`, `resolve_charge_attack` — 3 fazy + reactive window + `circle_edge_distance` w min_gap + `defender.melee_weapons[0]` w counter + `StatusAdded(Wyczerpany)` emit | (state, attacker, target, weapon, dice, terrain) → CombatResult |
 | `effects.py` (B3.5 + B3.9.e) | Per-hook passive registry (defense/attack/morale/weapon) + `_ACTIVE_ABILITY_REGISTRY` z `register_active_ability(slug)` (built-in `discard_exhausted` + 6 stubów MVP) | (UnitBlob, context) → modifier / (state, actor, payload, seq) → (state, events, next_seq) |
-| `interrupts.py` (B3.5) | `InterruptManager` — 4 zamknięte punkty (ADR-0015) | (state, interrupt_point) → events |
+| `interrupts.py` (B3.5) | `InterruptManager` — 1 punkt `BEFORE_ACTION` pkt 11.b.i (ADR-0015, korekta 2026-06-09) | (state, interrupt_point) → events |
 | `phases.py` (B3.6 + B3.9.c/d/e) | `setup_phase`, `deployment_round`, `activation_phase` (`ActivationContext` per ADR-0045 + Status*/MeleeBalanceReset emit per ADR-0046 + `_apply_special` deleguje do `_ACTIVE_ABILITY_REGISTRY` per ADR-0047), `round_end_phase` | (state, action, ruleset) → (state, events) |
 | `resolver.py` (B3.7) | `apply(state, action, dice, ruleset, terrain)` — top-level dispatcher | polimorficzny Action |
 

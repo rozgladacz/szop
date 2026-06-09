@@ -1,11 +1,19 @@
-"""B3.5 — Interrupt manager (`SZOP_Rozjemca.md pkt 12` + ADR-0015).
+"""B3.5 — Interrupt manager (`SZOP_Rozjemca.md pkt 11.b.i + pkt 12` + ADR-0015).
 
-4 zamknięte punkty przerwań per ADR-0015:
-- `ACTIVATION_START` — przed pierwszą akcją oddziału aktywowanego (Strażnik id 31
-  najczęściej tu)
-- `AFTER_ACTION` — po wykonaniu akcji (pkt 14)
-- `BEFORE_REGROUP` — przed testem Przegrupowania (pkt 20)
-- `AFTER_REGROUP` — po Przegrupowaniu, przed Odzyskiwaniem ran (pkt 21)
+**Punkt przerwania = przed akcją (pkt 11.b.i).** Aktualne reguły (pkt 11.b)
+rozpatrują przerwania w JEDNYM miejscu — kroku "Rozpatrujemy przerwania" (pkt
+11.b.i), który pętla aktywacji (pkt 11.b.iv → i) odwiedza na początku każdej
+iteracji. Ponieważ oddział wykonuje do dwóch akcji, daje to **do dwóch okien
+przed-akcyjnych** na aktywację (przed akcją #1 i przed akcją #2).
+
+- `BEFORE_ACTION` — przed akcją oddziału (pkt 11.b.i). Strażnik (id 31), Rozkaz/
+  Klątwa/Oznaczenie wyzwalają się tutaj.
+
+> **Korekta drift 2026-06-09 (user, rules author):** ADR-0015 (2026-05-30)
+> modelował 4 punkty (ACTIVATION_START/AFTER_ACTION/BEFORE_REGROUP/AFTER_REGROUP)
+> wyprowadzone z *przejść* sekwencji pkt 11.b. Aktualny tekst pkt 11/12 umiejscawia
+> przerwania TYLKO przed akcją — pozostałe 3 punkty nie miały oparcia w regułach.
+> Zredukowano do `BEFORE_ACTION`. Patrz ADR-0015 (sekcja Korekta).
 
 Rozróżnienie z reactive window (ADR-0015a):
 - **Reactive window** żyje wewnątrz Ataku (combat.py) — kontratak w Szarży.
@@ -45,12 +53,14 @@ from app.services.engine.state import BattleState, UnitBlob
 
 
 class InterruptPoint(Enum):
-    """4 zamknięte punkty przerwań per ADR-0015."""
+    """Punkt przerwania per pkt 11.b.i (przed akcją).
 
-    ACTIVATION_START = "activation_start"
-    AFTER_ACTION = "after_action"
-    BEFORE_REGROUP = "before_regroup"
-    AFTER_REGROUP = "after_regroup"
+    Jeden zamknięty punkt — `BEFORE_ACTION`. Pętla aktywacji (pkt 11.b.iv → i)
+    odwiedza go przed każdą z ≤2 akcji, stąd do dwóch okien przed-akcyjnych na
+    aktywację. (Korekta 2026-06-09 — zob. docstring modułu + ADR-0015.)
+    """
+
+    BEFORE_ACTION = "before_action"
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,13 +165,15 @@ def trigger_interrupt(
 # ---------------------------------------------------------------------------
 
 
-@register_interrupt_handler(InterruptPoint.ACTIVATION_START, "straznik")
+@register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "straznik")
 def _straznik_handler(
     context: InterruptContext,
     payload: dict[str, Any],
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Strażnik (id 31): "Możesz przerwać w aktywacji przeciwnika, aby wykonać
     Ostrzał. Następnie twój oddział zostaje wyczerpany."
+
+    Wyzwalany w `BEFORE_ACTION` (pkt 11.b.i) — przed akcją aktywowanego wroga.
 
     **MVP stub**: emit `InterruptTriggered` event tylko (faktyczny Ostrzał +
     set status Wyczerpany w B3.6 phases gdy integrate z full activation).

@@ -1,19 +1,22 @@
-# ADR-0015 — Interrupts: 4 zamknięte punkty
+# ADR-0015 — Interrupts: punkt przerwania przed akcją (pkt 11.b.i)
 
-- **Status:** Accepted
-- **Data:** 2026-05-30
+- **Status:** Accepted (skorygowany 2026-06-09 — patrz "Korekta" niżej; oryginalnie "4 zamknięte punkty")
+- **Data:** 2026-05-30 (korekta 2026-06-09)
 - **Kontekst:** Strumień B, Faza B3.5 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`). `SZOP_Rozjemca.md pkt 12` definiuje "przerwania" jako mechanizm gdzie gracze wywołują efekty zdolności poza normalnym przepływem aktywacji. Bez jasnej semantyki "gdzie wolno przerywać" ryzyko: pętle, nondeterminizm, ambiguity inicjatywy.
+
+## Korekta 2026-06-09 (user, autor reguł)
+
+Pierwotna decyzja (4 punkty) była **driftem** — wyprowadzono ją z *przejść* sekwencji pkt 11.b w wersji 2026-05-30, a nie z explicit "Rozpatrujemy przerwania" w tekście reguł. Aktualny **pkt 11.b** umiejscawia przerwania w JEDNYM kroku — **pkt 11.b.i ("Rozpatrujemy przerwania"), przed akcją** — który pętla aktywacji (pkt 11.b.iv → i) odwiedza przed każdą z ≤2 akcji. Stąd **do dwóch okien przed-akcyjnych** na aktywację. Punkty `AFTER_ACTION` / `BEFORE_REGROUP` / `AFTER_REGROUP` nie mają oparcia w obecnym pkt 11/12 — **usunięte**. Enum zredukowany do `BEFORE_ACTION` (`interrupts.py`). Strażnik (id 31) i Rozkaz/Klątwa/Oznaczenie wyzwalają się w `BEFORE_ACTION`. Tabela poniżej zaktualizowana; reszta semantyki (atomowość, no-nested, per-runda limit, inicjatywa) bez zmian.
 
 ## Decyzja
 
-**4 zamknięte (closed) punkty interruptu** w `app/services/engine/interrupts.py`:
+**Jeden zamknięty (closed) punkt interruptu** w `app/services/engine/interrupts.py` (po korekcie 2026-06-09):
 
 | Punkt | Symbol | Kiedy w aktywacji |
 |---|---|---|
-| `ACTIVATION_START` | activation_start | Przed pierwszą akcją oddziału aktywowanego (pkt 11.b.i) |
-| `AFTER_ACTION` | after_action | Po wykonaniu akcji (pkt 14), przed kolejną decyzją gracza |
-| `BEFORE_REGROUP` | before_regroup | Przed testem Przegrupowania (pkt 11.b.iv → pkt 20) |
-| `AFTER_REGROUP` | after_regroup | Po Przegrupowaniu, przed Odzyskiwaniem ran (pkt 11.b.v → pkt 21) |
+| `BEFORE_ACTION` | before_action | Przed akcją oddziału (pkt 11.b.i); pętla 11.b.iv→i ⇒ ≤2 okna na aktywację |
+
+> **Historycznie (2026-05-30 – 2026-06-09):** 4 punkty `ACTIVATION_START`/`AFTER_ACTION`/`BEFORE_REGROUP`/`AFTER_REGROUP`. Usunięte jako drift — zob. Korekta.
 
 ### Constrainty (semantyka)
 
@@ -81,7 +84,7 @@ Plus pasywna `Strażnik` (id 31) — wywoływany przy `ACTIVATION_START` wrogieg
 
 ## Inwarianty (test regulacyjne w B3.5/B3.6)
 
-1. **Każdy `InterruptTriggered` event** ma `interrupt_point ∈ {activation_start, after_action, before_regroup, after_regroup}`.
+1. **Każdy `InterruptTriggered` event** ma `interrupt_point == "before_action"` (po korekcie 2026-06-09; historycznie 1 z 4 wartości).
 2. **No re-entry**: w trakcie handler-a interruptu wywołanie `trigger_interrupt` z tym samym `(point, slug)` raise (defensive — TODO check w B3.6).
 3. **Eligible filter**: `get_eligible_interrupts(state, point)` zwraca tylko bloby z `models_alive > 0` z passive registered dla tego punktu.
 4. **Replay determinism**: `apply_events(initial, events_with_interrupts)` jest deterministyczny dla tej samej sekwencji.

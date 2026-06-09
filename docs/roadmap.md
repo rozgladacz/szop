@@ -165,9 +165,9 @@ Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 wea
 
 **Effects + Interrupts (`app/services/engine/{effects,interrupts}.py`):**
 - [x] `EffectContext` frozen + 4 per-hook registries (defense/attack/morale/weapon modifiers). `aggregate_*_modifier` aggregators. MVP passive: Cierpliwy/Tarcza/Nieustraszony.
-- [x] `InterruptPoint` enum (4 punkty per ADR-0015), `register_interrupt_handler(point, slug)`, `get_eligible_interrupts`, `trigger_interrupt`. Strażnik (id 31) MVP stub.
+- [x] `InterruptPoint` enum (1 punkt `BEFORE_ACTION` pkt 11.b.i per ADR-0015, korekta 2026-06-09 z 4 punktów), `register_interrupt_handler(point, slug)`, `get_eligible_interrupts`, `trigger_interrupt`. Strażnik (id 31) MVP stub.
 - [x] 38 testów (21 effects + 17 interrupts).
-- [x] ADR-0015 Accepted: 4 zamknięte punkty per pkt 12, no nested.
+- [x] ADR-0015 Accepted (korekta 2026-06-09): 1 punkt `BEFORE_ACTION` per pkt 11.b.i (≤2 okna/aktywację via pętla 11.b.iv), no nested.
 
 **Phases (`app/services/engine/phases.py`):**
 - [x] `setup_phase(rosters, terrain, objectives, initiative)` — pkt 7+9.
@@ -345,7 +345,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0012 | Dice: własna biblioteka, deterministyczny seed | ✓ |
 | 0013 | Engine headless-first | — |
 | 0014 | Obrażenia per-oddział (= Stan bitewny) — 4 kategorie ran | ✓ |
-| 0015 | 4 zamknięte interrupt points | ✓ |
+| 0015 | Interrupt point `BEFORE_ACTION` (pkt 11.b.i; korekta 2026-06-09 z 4 punktów) | ✓ |
 | 0015a | Reactive window w akcji ataku (atomowe) | ✓ |
 | 0016 | szop_client jako wydzielony moduł | — |
 | 0017 | Telemetria od dnia 1 | — |
