@@ -59,6 +59,7 @@ from app.services.engine.state import (
     UNARMED_WEAPON,
     UnitBlob,
     WeaponProfile,
+    effective_passives,
 )
 from app.services.engine.status import STATUS_WYCZERPANY, add_status
 
@@ -741,7 +742,7 @@ def resolve_charge_attack(
         charger_after_counter = counter_result.new_defender
         if (
             charger_after_counter.models_alive > 0
-            and ABILITY_BASTION not in post_counter_defender.passives
+            and ABILITY_BASTION not in effective_passives(post_counter_defender)
             and STATUS_WYCZERPANY not in post_counter_defender.status_flags
         ):
             post_counter_defender = add_status(post_counter_defender, STATUS_WYCZERPANY)

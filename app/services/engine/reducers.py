@@ -23,6 +23,8 @@ from __future__ import annotations
 from dataclasses import replace
 
 from app.services.engine.events import (
+    AbilityOverrideApplied,
+    AbilityOverridesCleared,
     EffectApplied,
     InitiativePassed,
     InterruptTriggered,
@@ -308,6 +310,48 @@ def _reduce_effect_applied(state: BattleState, event: EffectApplied) -> BattleSt
         wounds = event.payload.get("wounds_inflicted", 0)
         return _push_wounds(state, event.target_unit_id, wounds)
     return state  # annotation-only dla pozostałych slugów (MVP B3.9.d scope)
+
+
+# ---------------------------------------------------------------------------
+# AbilityOverrideApplied / AbilityOverridesCleared (faza-b-order-interrupts)
+# ---------------------------------------------------------------------------
+# Mirror producer-ów handlerów Rozkaz/Klątwa/Oznaczenie (effects.py) +
+# wygaśnięcia w activation_phase (pkt 11.b.vi). `effective_passives` liczy
+# efektywny zbiór z `ability_overrides` — replay bit-perfect (`ability_overrides`
+# w `_BLOB_REPLAY_FIELDS`).
+
+
+@register_reducer("AbilityOverrideApplied")
+def _reduce_ability_override_applied(
+    state: BattleState, event: AbilityOverrideApplied
+) -> BattleState:
+    """Dopisuje `(ability, granted)` do `target.ability_overrides`.
+
+    Mirror handlerów Rozkaz/Klątwa/Oznaczenie. No-op gdy oddział nie istnieje.
+    """
+    blob = _find_blob_or_none(state, event.target_id)
+    if blob is None:
+        return state
+    new_overrides = blob.ability_overrides + ((event.ability, event.granted),)
+    return _find_and_replace_blob(
+        state, event.target_id, replace(blob, ability_overrides=new_overrides)
+    )
+
+
+@register_reducer("AbilityOverridesCleared")
+def _reduce_ability_overrides_cleared(
+    state: BattleState, event: AbilityOverridesCleared
+) -> BattleState:
+    """Czyści `ability_overrides` oddziału (koniec aktywacji, pkt 11.b.vi).
+
+    Idempotentny — powtórna aplikacja na pustych override'ach = no-op.
+    """
+    blob = _find_blob_or_none(state, event.target_id)
+    if blob is None or not blob.ability_overrides:
+        return state
+    return _find_and_replace_blob(
+        state, event.target_id, replace(blob, ability_overrides=())
+    )
 
 
 # ---------------------------------------------------------------------------

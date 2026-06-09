@@ -75,6 +75,7 @@ _BLOB_REPLAY_FIELDS = (
     "wounds_eliminating",  # R4.Zguba (pkt 26.d): event-derived (Shot/MeleeResolved + ModelKilled)
     "melee_balance",
     "location",  # R5.a (pkt 27.b): event-derived przez ModelKilled reducer
+    "ability_overrides",  # faza-b-order-interrupts: AbilityOverrideApplied/Cleared
 )
 
 

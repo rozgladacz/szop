@@ -32,7 +32,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
-from app.services.engine.state import BattleState, UnitBlob, WeaponProfile
+from app.services.engine.state import (
+    BattleState,
+    UnitBlob,
+    WeaponProfile,
+    effective_passives,
+)
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYSZPILONY,
@@ -136,7 +141,7 @@ def aggregate_defense_modifier(context: EffectContext) -> int:
     blob.defense, modifier=...)`. Wartość dodatnia ⇒ łatwiej obronić.
     """
     total = 0
-    for slug in context.blob.passives:
+    for slug in effective_passives(context.blob):
         fn = _DEFENSE_MODIFIERS.get(slug)
         if fn is not None:
             total += fn(context)
@@ -146,7 +151,7 @@ def aggregate_defense_modifier(context: EffectContext) -> int:
 def aggregate_attack_modifier(context: EffectContext) -> int:
     """Sum attack modifiers — analogicznie do defense."""
     total = 0
-    for slug in context.blob.passives:
+    for slug in effective_passives(context.blob):
         fn = _ATTACK_MODIFIERS.get(slug)
         if fn is not None:
             total += fn(context)
@@ -159,7 +164,7 @@ def aggregate_morale_modifier(context: EffectContext) -> int:
     Wartość ujemna = mniej testów (lepiej dla oddziału, np. Nieustraszony -1).
     """
     total = 0
-    for slug in context.blob.passives:
+    for slug in effective_passives(context.blob):
         fn = _MORALE_MODIFIERS.get(slug)
         if fn is not None:
             total += fn(context)
@@ -172,7 +177,7 @@ def apply_weapon_modifiers(weapon: WeaponProfile, blob: UnitBlob) -> WeaponProfi
     Kolejność: każdy modifier w kolejności rejestracji `blob.passives` tuple.
     """
     current = weapon
-    for slug in blob.passives:
+    for slug in effective_passives(blob):
         fn = _WEAPON_MODIFIERS.get(slug)
         if fn is not None:
             current = fn(current, blob)

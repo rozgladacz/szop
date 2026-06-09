@@ -163,6 +163,12 @@ class UnitBlob:
     defense: int = 5  # obrona modelu (threshold for defense per pkt 17.b); default D5
     is_hero_unit: bool = False  # czy w oddziale jest model z zdolnością Bohater (id 2)
     passives: tuple[str, ...] = ()
+    # Czasowe override'y pasywów (Rozkaz/Klątwa/Oznaczenie id 50/45/49, pkt 12 +
+    # 11.b.i) — krotka `(slug, granted)`: granted=True nadaje X, granted=False
+    # odbiera/tłumi X. Aktywne **do końca aktywacji** (czyszczone w pkt 11.b.vi).
+    # Efektywny zbiór pasywów liczy `effective_passives(blob)`; agregatory
+    # `effects.py` + `interrupts`/`combat` czytają effective, nie surowe `passives`.
+    ability_overrides: tuple[tuple[str, bool], ...] = ()
     status_flags: tuple[str, ...] = ()
     wounds_received: int = 0
     wounds_pending: int = 0
@@ -355,6 +361,32 @@ def build_initial_state(
         terrain=tuple(terrain),
         initial_toughness_snapshot=snapshot,
     )
+
+
+def effective_passives(blob: UnitBlob) -> tuple[str, ...]:
+    """Efektywny zbiór pasywów oddziału z uwzględnieniem czasowych override'ów.
+
+    Rozkaz(X)/Klątwa(X)/Oznaczenie(X) (id 50/45/49) nadają (`granted=True`) lub
+    odbierają (`granted=False`) pasywkę X do końca aktywacji. `effective_passives`
+    łączy bazowe `blob.passives` z override'ami, **zachowując kolejność**
+    rejestracji (agregatory `effects.py` iterują w kolejności — determinizm
+    replay): najpierw bazowe pasywy (z usunięciem suppressed), potem nadane
+    nieobecne w bazie.
+
+    Override'y aplikowane w kolejności (ostatni wygrywa): grant dodaje X (jeśli
+    nieobecny), suppress usuwa X (jeśli obecny). Fast-path: brak override'ów →
+    zwraca `blob.passives` (identity, zero alokacji).
+    """
+    if not blob.ability_overrides:
+        return blob.passives
+    result = list(blob.passives)
+    for slug, granted in blob.ability_overrides:
+        if granted:
+            if slug not in result:
+                result.append(slug)
+        elif slug in result:
+            result.remove(slug)
+    return tuple(result)
 
 
 def initial_toughness_for(state: BattleState, unit_id: int) -> int:

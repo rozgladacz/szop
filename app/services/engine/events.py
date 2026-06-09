@@ -22,6 +22,10 @@ Wszystkie 10 typów:
 - `StatusRemoved` (B3.9.d / ADR-0046) — status flag usunięty z oddziału
 - `MeleeBalanceReset` (B3.9.d / ADR-0046) — reset bilansu wręcz po Przegrupowaniu
 - `MutexCollision` (R5.e / resync 2026-06) — Przyszpilony↔Ufortyfikowany mutex, oba odrzucone (pkt 22.b/c)
+- `AbilityOverrideApplied` (faza-b-order-interrupts 2026-06) — nadanie/odebranie pasywki X (Rozkaz/Klątwa/Oznaczenie, pkt 12)
+- `AbilityOverridesCleared` (faza-b-order-interrupts 2026-06) — wygaśnięcie override'ów na końcu aktywacji (pkt 11.b.vi)
+
+(Lista historycznie „10 typów"; aktualnie 16 — `ObjectiveControlChanged`/`InitiativePassed` z CR-fix B3.9.f + 2 powyższe.)
 """
 
 from __future__ import annotations
@@ -291,6 +295,41 @@ class MutexCollision:
     version: int = SCHEMA_VERSION
 
 
+@dataclass(frozen=True, slots=True)
+class AbilityOverrideApplied:
+    """Czasowe nadanie/odebranie pasywki X (Rozkaz/Klątwa/Oznaczenie id 50/45/49).
+
+    faza-b-order-interrupts (2026-06-09 / ADR-0049). Przerwanie `BEFORE_ACTION`
+    (pkt 11.b.i) nadaje (`granted=True`) lub odbiera/tłumi (`granted=False`)
+    pasywkę `ability` oddziałowi `target_id` **do końca aktywacji** (pkt 12 —
+    „od teraz do końca aktywacji (nie)miał zdolność X"). Reducer dopisuje
+    `(ability, granted)` do `UnitBlob.ability_overrides`; `effective_passives`
+    liczy efektywny zbiór. `source_id` = nosiciel zdolności (audyt/replay).
+    """
+
+    sequence: int
+    target_id: int
+    ability: str
+    granted: bool
+    source_id: int | None = None
+    version: int = SCHEMA_VERSION
+
+
+@dataclass(frozen=True, slots=True)
+class AbilityOverridesCleared:
+    """Wygaśnięcie czasowych override'ów na końcu aktywacji (pkt 11.b.vi).
+
+    faza-b-order-interrupts (2026-06-09 / ADR-0049). Emitowany w
+    `activation_phase` po nadaniu Aktywowany — czyści `UnitBlob.ability_overrides`
+    (efekty „do końca aktywacji"). Reducer ustawia `ability_overrides=()`.
+    Idempotentny (no-op gdy brak override'ów; producer emituje tylko gdy są).
+    """
+
+    sequence: int
+    target_id: int
+    version: int = SCHEMA_VERSION
+
+
 # Union polimorficzny dla type hints. `BattleEvent` jest aliasem.
 BattleEvent = Union[
     MoveExecuted,
@@ -307,6 +346,8 @@ BattleEvent = Union[
     MutexCollision,
     ObjectiveControlChanged,
     InitiativePassed,
+    AbilityOverrideApplied,
+    AbilityOverridesCleared,
 ]
 
 _EVENT_REGISTRY: dict[str, type] = {
@@ -326,6 +367,8 @@ _EVENT_REGISTRY: dict[str, type] = {
         MutexCollision,
         ObjectiveControlChanged,
         InitiativePassed,
+        AbilityOverrideApplied,
+        AbilityOverridesCleared,
     )
 }
 

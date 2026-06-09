@@ -49,7 +49,7 @@ from enum import Enum
 from typing import Any, Callable
 
 from app.services.engine.events import BattleEvent, InterruptTriggered
-from app.services.engine.state import BattleState, UnitBlob
+from app.services.engine.state import BattleState, UnitBlob, effective_passives
 
 
 class InterruptPoint(Enum):
@@ -127,7 +127,7 @@ def get_eligible_interrupts(
     for blob in state.blobs:
         if blob.models_alive == 0:
             continue
-        for slug in blob.passives:
+        for slug in effective_passives(blob):
             if (point, slug) in _INTERRUPT_HANDLERS:
                 eligible.append((blob, slug))
     return eligible
