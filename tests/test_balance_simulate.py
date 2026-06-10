@@ -17,6 +17,7 @@ import pytest
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 _SCRIPT = _REPO_ROOT / "scripts" / "balance_simulate.py"
 _FIXTURE = _REPO_ROOT / "tests" / "fixtures" / "battles" / "demo_skirmish.yaml"
+_PROFILES_FIXTURE = _REPO_ROOT / "tests" / "fixtures" / "battles" / "unit_profiles.yaml"
 
 
 def _load_module():
@@ -47,6 +48,25 @@ def test_fixture_shape_and_objects():
     assert fx.terrain[0].radius_inches == 3
     # 4 oddziały/stronę (pkt 2.a min. armii)
     assert all(len(r["units"]) == 4 for r in fx.rosters)
+
+
+def test_unit_profiles_fixture_has_four_distinct_profiles():
+    # 4 typy uzbrojenia (max zasięg dystansowy, suma ataków wręcz) per strona.
+    fx = bs.load_battle_fixture(_PROFILES_FIXTURE)
+    for roster in fx.rosters:
+        profiles = set()
+        for u in roster["units"]:
+            ranged = max((w["range_inches"] for w in u["weapons"] if w["range_inches"] > 0), default=0)
+            melee = sum(w["attacks"] for w in u["weapons"] if w["range_inches"] == 0)
+            profiles.add((ranged, melee))
+        assert profiles == {(24, 1), (18, 1), (12, 2), (0, 3)}
+
+
+def test_unit_profiles_fixture_simulates():
+    fx = bs.load_battle_fixture(_PROFILES_FIXTURE)
+    r = bs.simulate_balance(fx, n=3, player_kinds=("priority", "random"), base_seed=1)
+    assert r.n_games == 3
+    assert r.wins_p0 + r.wins_p1 + r.draws == 3
 
 
 def test_fixture_objectives_satisfy_placement_rules():

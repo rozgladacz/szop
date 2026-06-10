@@ -1,0 +1,46 @@
+# Fixtura roster-pair: 4 zróżnicowane profile oddziałów (spec usera 2026-06-10).
+# Realna geometria jak demo_skirmish (72×48, strefy 24″ apart, oddziały na
+# granicy y=12 / y=36). 5 celów wg pkt 5.b/5.c.
+#
+# Profile (jednolite staty 5×T3 Q4 D5 — izolujemy efekt UZBROJENIA):
+#   Strzelec-24 : 1 atak @24″ + 1 @0″   (dystansowy daleki)
+#   Strzelec-18 : 1 atak @18″ + 1 @0″   (dystansowy średni)
+#   Wojownik-mix: 1 atak @12″ + 2 @0″   (hybryda, przewaga wręcz)
+#   Wojownik    : 3 ataki @0″           (czysty wręcz)
+#
+# Lustrzane strony (każda ma po jednym z 4 typów) → mierzymy zachowanie botów na
+# zróżnicowanych armiach (czy Strzelcy kitują/strzelają, Wojownicy szarżują),
+# bez confoundu z niesymetrią list.
+
+name: "Profile 4-typy (Strzelec/Wojownik, 72x48)"
+
+objectives:
+  - {id: 1, position: [18, 8]}
+  - {id: 2, position: [54, 8]}
+  - {id: 3, position: [36, 24]}
+  - {id: 4, position: [18, 40]}
+  - {id: 5, position: [54, 40]}
+
+terrain:
+  - shape: circle
+    center: [36, 24]
+    radius: 3
+    features: [Blokujacy]
+
+rosters:
+  - owner_player: 0
+    units:
+      # Strzelec-24
+      - {id: 1, position: [18, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle24, name: "Karabin", range_inches: 24, attacks: 1, ap: 0}, {slug: blade, name: "Ostrze", range_inches: 0, attacks: 1, ap: 0}]}
+      # Strzelec-18
+      - {id: 2, position: [30, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: carbine18, name: "Karabinek", range_inches: 18, attacks: 1, ap: 0}, {slug: blade, name: "Ostrze", range_inches: 0, attacks: 1, ap: 0}]}
+      # Wojownik-mix
+      - {id: 3, position: [42, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: pistol12, name: "Pistolet", range_inches: 12, attacks: 1, ap: 0}, {slug: axe, name: "Topor", range_inches: 0, attacks: 2, ap: 0}]}
+      # Wojownik (czysty wręcz)
+      - {id: 4, position: [54, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: greatblade, name: "Wielkie ostrze", range_inches: 0, attacks: 3, ap: 0}]}
+  - owner_player: 1
+    units:
+      - {id: 5, position: [18, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle24, name: "Karabin", range_inches: 24, attacks: 1, ap: 0}, {slug: blade, name: "Ostrze", range_inches: 0, attacks: 1, ap: 0}]}
+      - {id: 6, position: [30, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: carbine18, name: "Karabinek", range_inches: 18, attacks: 1, ap: 0}, {slug: blade, name: "Ostrze", range_inches: 0, attacks: 1, ap: 0}]}
+      - {id: 7, position: [42, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: pistol12, name: "Pistolet", range_inches: 12, attacks: 1, ap: 0}, {slug: axe, name: "Topor", range_inches: 0, attacks: 2, ap: 0}]}
+      - {id: 8, position: [54, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: greatblade, name: "Wielkie ostrze", range_inches: 0, attacks: 3, ap: 0}]}
