@@ -1,30 +1,29 @@
-# Fixtura roster-pair wierna regułom: 5 celów + 4 oddziały/stronę, 72″×48″.
+# Fixtura roster-pair wierna regułom + realnej geometrii (spec usera 2026-06-10).
 #
-# Format engine-dict 1:1 z `app/services/engine/state.build_initial_state`.
-# Plansza 6'×4' = 72″×48″ (pkt 3.b). Strefy rozstawienia 24″ od siebie (pkt 3.a):
-# P0 x∈[0,24], P1 x∈[48,72]. Origin = lewy-dolny róg (pkt 3).
+# Plansza 72″ (szerokość, oś x) × 48″ (głębokość, oś y). Origin = lewy-dolny róg.
+# Strefy rozstawienia wzdłuż osi y (pkt 3.a, 24″ od siebie; głębokość 12″):
+#   P0: y∈[0,12], P1: y∈[36,48]  → granice wewn. y=12 i y=36, odległe o 24″.
+#   12 (P0) + 24 (luka) + 12 (P1) = 48″ głębokości planszy.
+# Oddziały „przyklejone do granicy rozstawienia" → P0 na y=12, P1 na y=36
+#   (armie startują 24″ od siebie — w zasięgu karabinu 24″ od rundy 1).
 #
-# 5 CELÓW (pkt 5.a) rozmieszczonych wg pkt 5.b (≥1 w każdej strefie rozstawienia
-# + po lewej i prawej stronie planszy) i pkt 5.c (≥12″ od siebie, ≥6″ od krawędzi)
-# — układ quincunx (4 narożne + środek):
-#   (12,12) strefa P0 + lewo   (12,36) strefa P0 + prawo
-#   (60,12) strefa P1 + lewo   (60,36) strefa P1 + prawo
-#   (36,24) środek (kontestowany, ~18″ od frontów = kilka ruchów)
-# Wszystkie pary ≥12″, wszystkie ≥6″ od krawędzi (x∈[6,66], y∈[6,42]).
+# 5 CELÓW (pkt 5.a) wg pkt 5.b (≥1 w każdej strefie + lewo/prawo planszy) i
+# pkt 5.c (≥12″ od siebie, ≥6″ od krawędzi → x∈[6,66], y∈[6,42]) — quincunx:
+#   (18,8) P0+lewo   (54,8) P0+prawo
+#   (18,40) P1+lewo  (54,40) P1+prawo
+#   (36,24) środek (kontestowany)
 #
-# 4 PROSTE ODDZIAŁY/stronę (pkt 2.a min. armii 4–8): 5 modeli, T3 Q4 D5, bez
-# bohatera/zdolności; 2× karabin (range 24) + 2× miecz (melee). Lustrzane strony.
-# Rozstawienie standardowe: fronty ~x18 (P0) / ~x54 (P1), 36″ apart — cele
-# środkowe wymagają marszu (kilka ruchów; ujawnia horyzont depth-1 botów).
+# 4 proste oddziały/stronę (pkt 2.a min.): 5 modeli T3 Q4 D5, 2× karabin (24″) +
+# 2× miecz (0″), rozłożone na froncie. Lustrzane strony (symetria).
 
-name: "Demo 4v4 / 5 celów (rules-faithful)"
+name: "Demo 4v4 / 5 celów (72x48, strefy 24 apart)"
 
 objectives:
-  - {id: 1, position: [12, 12]}   # strefa P0, lewo
-  - {id: 2, position: [12, 36]}   # strefa P0, prawo
+  - {id: 1, position: [18, 8]}    # P0, lewo
+  - {id: 2, position: [54, 8]}    # P0, prawo
   - {id: 3, position: [36, 24]}   # środek
-  - {id: 4, position: [60, 12]}   # strefa P1, lewo
-  - {id: 5, position: [60, 36]}   # strefa P1, prawo
+  - {id: 4, position: [18, 40]}   # P1, lewo
+  - {id: 5, position: [54, 40]}   # P1, prawo
 
 terrain:
   - shape: circle
@@ -35,13 +34,13 @@ terrain:
 rosters:
   - owner_player: 0
     units:
-      - {id: 1, position: [18, 8],  models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 2, position: [18, 20], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
-      - {id: 3, position: [18, 28], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 4, position: [18, 40], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 1, position: [18, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
+      - {id: 2, position: [30, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 3, position: [42, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 4, position: [54, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
   - owner_player: 1
     units:
-      - {id: 5, position: [54, 8],  models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 6, position: [54, 20], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
-      - {id: 7, position: [54, 28], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 8, position: [54, 40], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 5, position: [18, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
+      - {id: 6, position: [30, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 7, position: [42, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 8, position: [54, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}

@@ -1,35 +1,35 @@
-# Fixtura roster-pair wierna regułom: 5 celów + 4 oddziały/stronę, 72″×48″.
-# Identyczny layout celów co demo_skirmish (pkt 5.a/b/c), różni się ROZSTAWIENIEM.
+# Fixtura roster-pair: realna geometria (72×48, strefy 24″ apart, oddziały na
+# granicy y=12 / y=36), wariant ROZSTAWIENIA = centralny napór.
 #
-# Rozstawienie WYSUNIĘTE: oddziały startują przy własnych celach w strefie
-# (pkt 5.b: ≥1 cel/strefa) → cele w strefie są osiągalne w JEDNYM ruchu (pkt 15.a,
-# 6″). W przeciwieństwie do demo_skirmish (cel środkowy ~18″ = kilka ruchów, poza
-# horyzontem depth-1), tu bot z kontrolą celów (pkt 5.d/5.f) od razu zajmuje i
-# trzyma 2 cele domowe → demonstruje, że heurystyka realnie wykorzystuje cele,
-# gdy są w horyzoncie. Cel środkowy (36,24) pozostaje poza strefą (x>24) =
-# nieosiągalny w 1 ruchu nawet stąd (realne ograniczenie reguł rozstawienia).
+# W przeciwieństwie do demo_skirmish (oddziały rozłożone równo na froncie), tu
+# oba zgrupowania startują skupione w centrum (x≈27–45) → bezpośrednie starcie o
+# środek, cele narożne (12/60) trzeba dopiero zdobyć skrzydłami. Test dynamiki
+# kontroli celów (pkt 5.d) i rozpraszania botów na skrzydła.
+#
+# 5 celów wg pkt 5.b/5.c (≥1/strefa + lewo/prawo; ≥12″, ≥6″ od krawędzi),
+# narożniki przy x=12/60 (skrzydła). 4 proste oddziały/stronę (T3 Q4 D5).
 
-name: "Clash 4v4 / 5 celów (rozstawienie wysunięte)"
+name: "Clash 4v4 / 5 celów (centralny napór, 72x48)"
 
 objectives:
-  - {id: 1, position: [12, 12]}   # strefa P0, lewo
-  - {id: 2, position: [12, 36]}   # strefa P0, prawo
-  - {id: 3, position: [36, 24]}   # środek (poza strefami → 1-ruch niedostępny)
-  - {id: 4, position: [60, 12]}   # strefa P1, lewo
-  - {id: 5, position: [60, 36]}   # strefa P1, prawo
+  - {id: 1, position: [12, 8]}    # P0, lewo (skrzydło)
+  - {id: 2, position: [60, 8]}    # P0, prawo (skrzydło)
+  - {id: 3, position: [36, 24]}   # środek
+  - {id: 4, position: [12, 40]}   # P1, lewo
+  - {id: 5, position: [60, 40]}   # P1, prawo
 
 terrain: []
 
 rosters:
   - owner_player: 0
     units:
-      - {id: 1, position: [12, 14], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 2, position: [12, 34], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
-      - {id: 3, position: [22, 20], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 4, position: [22, 28], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 1, position: [27, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
+      - {id: 2, position: [33, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 3, position: [39, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 4, position: [45, 12], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
   - owner_player: 1
     units:
-      - {id: 5, position: [60, 14], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 6, position: [60, 34], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
-      - {id: 7, position: [50, 20], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
-      - {id: 8, position: [50, 28], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 5, position: [27, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}
+      - {id: 6, position: [33, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 7, position: [39, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: sword, name: "Miecz",   range_inches: 0,  attacks: 2, ap: 0}]}
+      - {id: 8, position: [45, 36], models: 5, toughness: 3, quality: 4, defense: 5, passives: [], weapons: [{slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}]}

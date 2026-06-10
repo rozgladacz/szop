@@ -749,6 +749,35 @@ def test_objective_disputed_keeps_previous_controller():
     assert obj_after.controller == 0
 
 
+def test_objective_persists_when_vacated():
+    """Pkt 5.d — cel kontrolowany POZOSTAJE zajęty, gdy wszyscy go opuszczą
+    (nikt w 3″). To NIE jest błędne naliczanie — `_check_objective_control`
+    zachowuje poprzedniego kontrolera gdy `len(players_in_range) != 1`."""
+    obj = Objective(id=1, position=Position(0, 0), controller=0)
+    rosters = [
+        make_roster(0, [make_unit(1, x=50, y=50)]),  # gracz 0 odszedł — daleko
+        make_roster(1, [make_unit(2, x=60, y=60)]),  # gracz 1 też daleko
+    ]
+    state = setup_phase(rosters, objectives=[obj])
+    state, _ = deployment_round(state, [])
+    new_state, _ = round_end_phase(state)
+    assert new_state.objectives[0].controller == 0  # zostaje 0 (nikt nie odbił)
+
+
+def test_objective_recaptured_only_by_opponent():
+    """Pkt 5.d — kontrolę przejmuje cel TYLKO przeciwnik będąc jedynym w 3″.
+    Potwierdza: to przeciwnik odbija (len==1 → przeciwnik), nie system."""
+    obj = Objective(id=1, position=Position(0, 0), controller=0)
+    rosters = [
+        make_roster(0, [make_unit(1, x=50, y=50)]),  # gracz 0 odszedł
+        make_roster(1, [make_unit(2, x=0, y=0, models=1)]),  # przeciwnik na celu
+    ]
+    state = setup_phase(rosters, objectives=[obj])
+    state, _ = deployment_round(state, [])
+    new_state, _ = round_end_phase(state)
+    assert new_state.objectives[0].controller == 1  # przeciwnik odbił
+
+
 def test_objective_pinned_unit_does_not_control():
     """Pkt 22.b.ii — Przyszpilony oddział nie kontroluje celów."""
     obj = Objective(id=1, position=Position(0, 0))
