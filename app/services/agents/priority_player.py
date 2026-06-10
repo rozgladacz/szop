@@ -1,28 +1,29 @@
-"""D — `PriorityPlayer`: bot pół-deterministyczny (spec usera 2026-06-10).
+"""D — `PriorityPlayer`: bot pół-deterministyczny (spec usera 2026-06-10, rev. 2).
 
-Selekcja oddziału: aktywuj **najdroższy** oddział, który **ma cel w zasięgu**.
-W ramach aktywacji — pierwsza spełniona reguła z priorytetu:
+Selekcja oddziału: **aktywuj oddział, który ma najbliżej do wroga**
+(min. dystans do dowolnego wroga; remis → najniższe id).
 
-  1. Strzelaj do najbliższego wroga (Ostrzał, pkt 14.c).
-  2. Szarżuj na najbliższego wroga (Szarża, pkt 14.d).
-  3. Zdejmij Wyczerpany (SpecialAction discard_exhausted, pkt 22.a).
-  4. Zdejmij Przyszpilony (Obrona → Ufortyfikowany odrzuca Przyszpilony, pkt 22.b.v).
-  5. Jeśli (Wojownik/Mag) i kontrolujesz mniej celów niż przeciwnik —
-     ruch do najbliższego nie-twojego celu (pkt 5.d/5.f).
-  6. Ruch do najbliższego celu, jeśli nie jesteś na celu.
-  7. Obrona (pkt 14.b).
+W ramach aktywacji — pierwsza spełniona reguła z priorytetu (pkt 11.b.iv: do 2
+akcji, Ostrzał/Szarża raz — pkt 14.c.v/14.d.vi; przy 2. akcji pomijamy już
+wykonany Ostrzał/Szarżę i bierzemy następną dostępną):
 
-Pół-deterministyczny: zero RNG w decyzji (RNG tylko w combat przy `apply`);
-remisy rozstrzygane stabilnie (najniższe id). Czysta funkcja decyzji nad
-publicznym API silnika (ADR-0011/0031), zero zmian w rdzeniu.
+  1. Jeśli Wyczerpany — zdejmij (SpecialAction discard_exhausted, pkt 22.a).
+  2. Jeśli możesz — Strzelaj do najbliższego widocznego wroga (pkt 14.c).
+  3. Jeśli możesz — Szarżuj na najbliższego wroga (pkt 14.d).
+  4. Jeśli Przyszpilony — zdejmij (Obrona → Ufortyfikowany odrzuca Przyszpilony, pkt 22.b.v).
+  5. Ruch do najbliższego celu **nie zajętego przez twoją stronę** (pkt 5.d),
+     **dla którego jesteś najbliższym własnym oddziałem** (anty-klastrowanie —
+     rozprasza oddziały po celach).
+  6. Ruch do najbliższego celu nie zajętego przez twoją stronę.
+  7. Ruch do najbliższego wroga.
 
-ZAŁOŻENIA (silnik nie ma kosztu punktowego ani slugu „Wojownik"):
-- **„najdroższy"** → proxy `models_alive × toughness_per_model` (HP pool).
-  Remis → najniższe id. Na oddziałach o równych statystykach proxy jest uniform.
-- **„cel w zasięgu" (selekcja)** → cel z `circle_edge_distance ≤ move_inches`.
-  Brak → fallback: najdroższy aktywny oddział.
-- **Krok 5 „Wojownik/Mag"** → pasywka ∈ {`mag`, `bohater`} (`wojownik` nie jest
-  slugiem w rulesecie). Inertny na oddziałach bez zdolności.
+Zajęcie celów (pkt 5.d) liczone z aktualnych pozycji przez
+`phases._check_objective_control` (SSOT). Pół-deterministyczny: zero RNG w
+decyzji (RNG tylko w combat przy `apply`); remisy rozstrzygane po id. Czysta
+funkcja decyzji nad publicznym API silnika (ADR-0011/0031), zero zmian w rdzeniu.
+
+Bezpiecznik: gdy żadna z 1–7 nie ma zastosowania (degenerat: brak wrogów i
+niezajętych celów) → Obrona (poza 7 priorytetami usera, zapobiega brakowi akcji).
 """
 
 from __future__ import annotations
@@ -44,53 +45,64 @@ from app.services.engine.actions import (
     ShootAction,
     SpecialAction,
 )
-from app.services.engine.geometry import circle_edge_distance, distance
-from app.services.engine.phases import (
-    OBJECTIVE_CONTROL_RANGE,
-    _check_objective_control,
-)
+from app.services.engine.geometry import distance
+from app.services.engine.phases import _check_objective_control
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Objective,
     UnitBlob,
-    effective_passives,
 )
 from app.services.engine.status import STATUS_PRZYSZPILONY, STATUS_WYCZERPANY
-
-#: Pasywki kwalifikujące do kroku 5 (proxy „Wojownik/Mag"; `wojownik` poza regułami).
-_AGGRESSIVE_OBJECTIVE_SLUGS = frozenset({"mag", "bohater"})
 
 
 def _blob_by_id(state: BattleState, unit_id: int) -> UnitBlob | None:
     return next((b for b in state.blobs if b.id == unit_id), None)
 
 
-def _unit_cost(blob: UnitBlob) -> int:
-    """Proxy kosztu oddziału (silnik nie ma punktów): HP pool = modele × wytrzymałość."""
-    return blob.models_alive * blob.toughness_per_model
+def _dist_to_nearest_enemy(unit: UnitBlob, enemies: list[UnitBlob]) -> float:
+    """Dystans do najbliższego wroga (środek-środek); `inf` gdy brak wrogów."""
+    if not enemies:
+        return float("inf")
+    return min(distance(unit.position, e.position) for e in enemies)
 
 
-def _objective_edge_gap(blob: UnitBlob, obj: Objective) -> float:
-    """Odległość obwodu oddziału od celu (≈ pkt 5.d mierzone 3″ od celu)."""
-    return max(distance(blob.position, obj.position) - blob.radius_inches, 0.0)
+def _own_field_units(state: BattleState, perspective: int) -> list[UnitBlob]:
+    """Wszystkie żywe własne oddziały na Froncie (także Aktywowane — wciąż
+    zajmują miejsce przy celu; istotne dla testu „najbliższy oddział")."""
+    return [
+        b
+        for b in state.blobs
+        if b.owner_player == perspective
+        and b.models_alive > 0
+        and b.location == Lokalizacja.FRONT
+    ]
 
 
-def _has_objective_in_range(blob: UnitBlob, state: BattleState, move: float) -> bool:
-    """Czy oddział ma cel osiągalny w tej aktywacji (gap ≤ move_inches)."""
-    return any(_objective_edge_gap(blob, o) <= move for o in state.objectives)
+def _is_closest_own_unit(
+    unit: UnitBlob, obj: Objective, own_units: list[UnitBlob]
+) -> bool:
+    """Czy `unit` jest najbliższym własnym oddziałem do `obj` (remis → najniższe id)."""
+    if not own_units:
+        return False
+    nearest = min(own_units, key=lambda b: (distance(b.position, obj.position), b.id))
+    return nearest.id == unit.id
 
 
-def _is_on_objective(blob: UnitBlob, state: BattleState) -> bool:
-    """Czy oddział jest na jakimś celu (w zasięgu kontroli 3″, pkt 5.d)."""
-    return any(
-        _objective_edge_gap(blob, o) <= OBJECTIVE_CONTROL_RANGE for o in state.objectives
-    )
+def _objectives_not_controlled(
+    state: BattleState, perspective: int
+) -> list[Objective]:
+    """Cele NIE zajęte przez `perspective` (pkt 5.d, kontrola przeliczona z
+    pozycji przez `_check_objective_control` — SSOT). Zwraca obiekty `Objective`
+    z aktualnym `controller` (niezajęte lub wrogie)."""
+    controlled, _events, _seq = _check_objective_control(state)
+    return [o for o in controlled.objectives if o.controller != perspective]
 
 
 def _nearest_enemy_shoot(
     unit: UnitBlob, enemies: list[UnitBlob], terrain: tuple
 ) -> ShootAction | None:
-    """Ostrzał najbliższego wroga osiągalnego którąkolwiek bronią dystansową."""
+    """Ostrzał najbliższego widocznego wroga osiągalnego bronią dystansową."""
     for enemy in sorted(enemies, key=lambda e: distance(unit.position, e.position)):
         for weapon in unit.ranged_weapons:
             if _can_shoot(unit, enemy, weapon, terrain):
@@ -110,62 +122,47 @@ def _nearest_enemy_charge(
     return None
 
 
-def _controlled_counts(state: BattleState, perspective: int) -> tuple[int, int]:
-    """(własne, wroga) zajęte cele po przeliczeniu kontroli z pozycji (pkt 5.d, SSOT)."""
-    controlled, _events, _seq = _check_objective_control(state)
-    own = sum(1 for o in controlled.objectives if o.controller == perspective)
-    enemy = sum(
-        1 for o in controlled.objectives
-        if o.controller is not None and o.controller != perspective
-    )
-    return own, enemy
-
-
 def _move_to_objective(
     unit: UnitBlob, objectives: list[Objective], move: float
 ) -> ManeuverAction | None:
-    """Manewr ku najbliższemu celowi z listy (clamp move_inches). None gdy pusto."""
+    """Manewr ku najbliższemu celowi z listy (clamp move_inches). None gdy lista
+    pusta lub oddział już na pozycji (brak no-op ruchu)."""
     if not objectives:
         return None
     target = min(objectives, key=lambda o: distance(unit.position, o.position))
     dest = _move_toward(unit.position, target.position, move)
     if dest == unit.position:
-        return None  # już na miejscu — nie generuj no-op ruchu
+        return None
     return ManeuverAction(unit_id=unit.id, target_position=dest)
 
 
 class PriorityPlayer(Player):
-    """Bot pół-deterministyczny: selekcja po koszcie + cel-w-zasięgu, akcja po priorytecie 1–7."""
+    """Bot pół-deterministyczny: selekcja „najbliżej wroga" + priorytet akcji 1–7."""
 
     def choose_action(self, state: BattleState, perspective: int) -> Action | None:
         units = own_active_units(state, perspective)
         if not units:
             return None
-        return self._act(state, perspective, self._select_unit(state, units))
+        return self._act(state, perspective, self._select_unit(state, perspective, units))
 
     def continue_activation(
         self, state: BattleState, perspective: int, unit_id, actions_taken
     ) -> Action | None:
         """2. akcja (pkt 11.b.iv): kolejna akcja wg PEŁNEGO priorytetu 1–7,
-        pomijając już wykorzystany Ostrzał/Szarżę (pkt 14.c.v/14.d.vi). Dzięki
-        temu po strzale (Ostrzał zużyty) bot schodzi do celu (priorytet 6) lub
-        broni go (7) — „najpierw strzela, potem idzie do celu" — zamiast marnować
-        akcję. Zawsze zwraca dostępną akcję (oddział żywy); None tylko gdy oddział
+        pomijając już wykorzystany Ostrzał/Szarżę. Po strzale bot schodzi do celu
+        (5/6) lub idzie do wroga (7) — nie marnuje akcji. None tylko gdy oddział
         zniknął."""
         unit = _blob_by_id(state, unit_id)
         if unit is None:
             return None
         return self._act(state, perspective, unit, actions_taken)
 
-    def _select_unit(self, state: BattleState, units: list[UnitBlob]) -> UnitBlob:
-        """Najdroższy oddział z celem w zasięgu; fallback: najdroższy aktywny.
-
-        Remis kosztu → najniższe id (determinizm). Klucz sort: (-koszt, id).
-        """
-        move = _move_inches()
-        with_objective = [u for u in units if _has_objective_in_range(u, state, move)]
-        pool = with_objective or units
-        return min(pool, key=lambda u: (-_unit_cost(u), u.id))
+    def _select_unit(
+        self, state: BattleState, perspective: int, units: list[UnitBlob]
+    ) -> UnitBlob:
+        """Oddział o najmniejszym dystansie do wroga (remis → najniższe id)."""
+        enemies = enemy_units(state, perspective)
+        return min(units, key=lambda u: (_dist_to_nearest_enemy(u, enemies), u.id))
 
     def _act(
         self,
@@ -174,45 +171,49 @@ class PriorityPlayer(Player):
         unit: UnitBlob,
         actions_taken: tuple[Action, ...] = (),
     ) -> Action:
-        """Wybiera akcję wg priorytetu 1–7, pomijając Ostrzał/Szarżę już
-        wykonane w tej aktywacji (pkt 14.c.v/14.d.vi). `actions_taken` puste dla
-        1. akcji; niepuste dla kontynuacji (2. akcja) → bot „przechodzi listę
-        ponownie" i wybiera następną DOSTĘPNĄ akcję, nie marnując slotu."""
         move = _move_inches()
         enemies = enemy_units(state, perspective)
         shoot_used = any(isinstance(a, ShootAction) for a in actions_taken)
         charge_used = any(isinstance(a, ChargeAction) for a in actions_taken)
 
-        # 1. Strzelaj do najbliższego (o ile Ostrzał nie wykonany — pkt 14.c.v).
+        # 1. Zdejmij Wyczerpany.
+        if STATUS_WYCZERPANY in unit.status_flags:
+            return SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
+        # 2. Strzelaj do najbliższego widocznego (o ile Ostrzał nie wykonany, pkt 14.c.v).
         if not shoot_used:
             shoot = _nearest_enemy_shoot(unit, enemies, state.terrain)
             if shoot is not None:
                 return shoot
-        # 2. Szarżuj na najbliższego (o ile Szarża nie wykonana — pkt 14.d.vi).
+        # 3. Szarżuj na najbliższego (o ile Szarża nie wykonana, pkt 14.d.vi).
         if not charge_used:
             charge = _nearest_enemy_charge(unit, enemies, move)
             if charge is not None:
                 return charge
-        # 3. Zdejmij Wyczerpany.
-        if STATUS_WYCZERPANY in unit.status_flags:
-            return SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
         # 4. Zdejmij Przyszpilony (Obrona → Ufortyfikowany odrzuca Przyszpilony, pkt 22.b.v).
         if STATUS_PRZYSZPILONY in unit.status_flags:
             return DefendAction(unit_id=unit.id)
-        # 5. (Wojownik/Mag) i kontrolujesz mniej celów → ruch do nie-twojego celu.
-        if _AGGRESSIVE_OBJECTIVE_SLUGS.intersection(effective_passives(unit)):
-            own_ctrl, enemy_ctrl = _controlled_counts(state, perspective)
-            if own_ctrl < enemy_ctrl:
-                not_mine = [
-                    o for o in state.objectives if o.controller != perspective
-                ]
-                mv = _move_to_objective(unit, not_mine, move)
-                if mv is not None:
-                    return mv
-        # 6. Ruch do najbliższego celu, jeśli nie jesteś na celu.
-        if not _is_on_objective(unit, state):
-            mv = _move_to_objective(unit, list(state.objectives), move)
-            if mv is not None:
-                return mv
-        # 7. Obrona.
+
+        # 5/6. Ruch do najbliższego celu nie zajętego przez naszą stronę (pkt 5.d).
+        not_mine = _objectives_not_controlled(state, perspective)
+        # 5. ...dla którego jestem najbliższym własnym oddziałem (anty-klastrowanie).
+        own_field = _own_field_units(state, perspective)
+        my_objectives = [o for o in not_mine if _is_closest_own_unit(unit, o, own_field)]
+        mv = _move_to_objective(unit, my_objectives, move)
+        if mv is not None:
+            return mv
+        # 6. ...dowolnego niezajętego.
+        mv = _move_to_objective(unit, not_mine, move)
+        if mv is not None:
+            return mv
+
+        # 7. Ruch do najbliższego wroga.
+        if enemies:
+            target = min(
+                enemies, key=lambda e: (distance(unit.position, e.position), e.id)
+            )
+            dest = _move_toward(unit.position, target.position, move)
+            if dest != unit.position:
+                return ManeuverAction(unit_id=unit.id, target_position=dest)
+
+        # Bezpiecznik (poza specem): brak wrogów i niezajętych celów → Obrona.
         return DefendAction(unit_id=unit.id)

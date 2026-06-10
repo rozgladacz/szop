@@ -1,4 +1,4 @@
-"""D — testy `PriorityPlayer` (selekcja po koszcie + priorytet akcji 1–7)."""
+"""D — testy `PriorityPlayer` (selekcja „najbliżej wroga" + priorytet 1–7, rev. 2)."""
 
 from __future__ import annotations
 
@@ -57,39 +57,37 @@ def test_returns_none_when_no_active_units():
     assert PriorityPlayer().choose_action(_state(blobs), perspective=0) is None
 
 
-# --- selekcja oddziału ---
+# --- selekcja: oddział najbliżej wroga ---
 
 
-def test_selects_most_expensive_unit_with_objective_in_range():
-    # Oba mają cel w zasięgu; droższy (więcej HP) zostaje wybrany.
-    cheap = _blob(1, 0, 0, 0, models_alive=2)          # HP 6
-    pricey = _blob(2, 0, 0, 4, models_alive=8)         # HP 24
-    obj = Objective(id=1, position=Position(2, 2))     # ~w zasięgu obu
-    action = PriorityPlayer().choose_action(_state((cheap, pricey), (obj,)), 0)
-    assert action is not None and action.unit_id == 2
+def test_selects_unit_closest_to_enemy():
+    far = _blob(1, 0, 0, 0)
+    near = _blob(2, 0, 20, 0)
+    enemy = _blob(3, 1, 25, 0)
+    action = PriorityPlayer().choose_action(_state((far, near, enemy)), 0)
+    assert action is not None and action.unit_id == 2  # near
 
 
-def test_selection_fallback_when_no_objective_in_range():
-    # Cel daleko poza zasięgiem ruchu → fallback: najdroższy aktywny i tak działa.
-    u1 = _blob(1, 0, 0, 0, models_alive=3)
-    u2 = _blob(2, 0, 0, 4, models_alive=7)
-    obj = Objective(id=1, position=Position(60, 60))
-    action = PriorityPlayer().choose_action(_state((u1, u2), (obj,)), 0)
-    assert action is not None and action.unit_id == 2  # droższy
-
-
-def test_cost_tie_breaks_by_lowest_id():
-    a = _blob(3, 0, 0, 0)
-    b = _blob(7, 0, 0, 4)
-    obj = Objective(id=1, position=Position(2, 2))
-    action = PriorityPlayer().choose_action(_state((a, b), (obj,)), 0)
-    assert action is not None and action.unit_id == 3
+def test_selection_tie_breaks_by_lowest_id():
+    a = _blob(5, 0, 0, 0)
+    b = _blob(2, 0, 0, 0)  # ten sam dystans do wroga
+    enemy = _blob(9, 1, 30, 0)
+    action = PriorityPlayer().choose_action(_state((a, b, enemy)), 0)
+    assert action is not None and action.unit_id == 2  # niższe id
 
 
 # --- priorytet akcji ---
 
 
-def test_priority1_shoot_nearest():
+def test_priority1_discard_exhausted_before_shoot():
+    # Wyczerpany (priorytet 1) ma pierwszeństwo NAWET gdy strzał możliwy (priorytet 2).
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,), status_flags=(STATUS_WYCZERPANY,))
+    enemy = _blob(2, 1, 8, 0)
+    action = PriorityPlayer().choose_action(_state((own, enemy)), 0)
+    assert isinstance(action, SpecialAction) and action.ability_slug == "discard_exhausted"
+
+
+def test_priority2_shoot_nearest_visible():
     own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
     near = _blob(2, 1, 8, 0)
     far = _blob(3, 1, 16, 0)
@@ -97,112 +95,94 @@ def test_priority1_shoot_nearest():
     assert isinstance(action, ShootAction) and action.target_id == 2
 
 
-def test_priority2_charge_when_no_shoot():
+def test_priority3_charge_when_no_shoot():
     own = _blob(1, 0, 0, 0, melee_weapons=(SWORD,))  # brak broni dystansowej
-    enemy = _blob(2, 1, 3, 0)                          # w zasięgu Związania
+    enemy = _blob(2, 1, 3, 0)
     action = PriorityPlayer().choose_action(_state((own, enemy)), 0)
     assert isinstance(action, ChargeAction) and action.target_id == 2
 
 
-def test_priority3_discard_exhausted():
-    # Brak wrogów → bez strzału/szarży; Wyczerpany → Odrzuć Wyczerpany.
-    own = _blob(1, 0, 0, 0, status_flags=(STATUS_WYCZERPANY,))
-    action = PriorityPlayer().choose_action(_state((own,)), 0)
-    assert isinstance(action, SpecialAction) and action.ability_slug == "discard_exhausted"
-
-
 def test_priority4_defend_when_pinned():
-    # Przyszpilony (nie Wyczerpany), brak wrogów → Obrona (odrzuca Przyszpilony pkt 22.b.v).
+    # Przyszpilony, brak wroga w zasięgu walki → Obrona (odrzuca Przyszpilony pkt 22.b.v).
     own = _blob(1, 0, 0, 0, status_flags=(STATUS_PRZYSZPILONY,))
-    action = PriorityPlayer().choose_action(_state((own,)), 0)
+    enemy = _blob(2, 1, 60, 0)
+    action = PriorityPlayer().choose_action(_state((own, enemy)), 0)
     assert isinstance(action, DefendAction)
 
 
-def test_priority6_move_to_objective_when_not_on_it():
+# --- priorytet 5/6: ruch do niezajętego celu ---
+
+
+def test_priority5_moves_to_uncontrolled_objective():
     own = _blob(1, 0, 0, 0)
-    obj = Objective(id=1, position=Position(10, 0))  # gap 9 > 3 → nie na celu
-    action = PriorityPlayer().choose_action(_state((own,), (obj,)), 0)
+    obj = Objective(id=1, position=Position(10, 0), controller=None)  # niezajęty, >3"
+    enemy = _blob(2, 1, 60, 0)  # daleko (brak strzału/szarży)
+    action = PriorityPlayer().choose_action(_state((own, enemy), (obj,)), 0)
     assert isinstance(action, ManeuverAction)
-    assert action.target_position != own.position  # ruch ku celowi
+    assert distance(action.target_position, obj.position) < distance(own.position, obj.position)
 
 
-def test_holds_objective_when_already_on_it():
-    # Na celu + brak wrogów → krok 6 nie odpala → Obrona (trzyma cel).
+def test_priority5_anti_clustering_each_unit_to_its_closest_objective():
+    # Anty-klastrowanie: A rusza do obj1 (jest mu najbliżej), B do obj2 — nie oba na ten sam.
+    a = _blob(1, 0, 0, 0)
+    b = _blob(2, 0, 0, 20)
+    obj1 = Objective(id=1, position=Position(8, 0), controller=None)   # bliżej A
+    obj2 = Objective(id=2, position=Position(8, 20), controller=None)  # bliżej B
+    state = _state((a, b), (obj1, obj2))
+    bot = PriorityPlayer()
+    mv_a = bot._act(state, 0, a)
+    mv_b = bot._act(state, 0, b)
+    assert isinstance(mv_a, ManeuverAction) and isinstance(mv_b, ManeuverAction)
+    # A celuje w obj1 (maleje dystans do obj1), B w obj2.
+    assert distance(mv_a.target_position, obj1.position) < distance(a.position, obj1.position)
+    assert distance(mv_b.target_position, obj2.position) < distance(b.position, obj2.position)
+
+
+def test_priority6_falls_back_to_nearest_uncontrolled_when_not_closest():
+    # A nie jest najbliższy do żadnego niezajętego celu (B bliżej obu) → priorytet 6:
+    # i tak rusza do najbliższego niezajętego (nie stoi).
+    a = _blob(1, 0, 0, 0)
+    b = _blob(2, 0, 7, 0)  # bliżej obu celów
+    obj1 = Objective(id=1, position=Position(10, 0), controller=None)
+    obj2 = Objective(id=2, position=Position(12, 0), controller=None)
+    state = _state((a, b), (obj1, obj2))
+    mv_a = PriorityPlayer()._act(state, 0, a)
+    assert isinstance(mv_a, ManeuverAction)  # rusza (priorytet 6), nie stoi
+
+
+def test_priority7_moves_to_nearest_enemy_when_no_uncontrolled_objective():
+    # Brak niezajętych celów → priorytet 7: ruch do najbliższego wroga.
     own = _blob(1, 0, 0, 0)
-    obj = Objective(id=1, position=Position(1, 0))  # gap 0 ≤ 3 → na celu
-    action = PriorityPlayer().choose_action(_state((own,), (obj,)), 0)
-    assert isinstance(action, DefendAction)
-
-
-def test_priority5_aggressive_unit_seeks_enemy_objective_when_behind():
-    # Mag na własnym celu, ale przeciwnik kontroluje 2 > 1 → rusza na nie-swój cel
-    # (zamiast Obrony z kroku 7). Bez wrogów w zasięgu walki.
-    mag = _blob(1, 0, 0, 0, passives=("mag",))
-    obj_mine = Objective(id=1, position=Position(1, 0))      # mag na nim → own=1
-    e1 = _blob(2, 1, 30, 0)
-    e2 = _blob(3, 1, 30, 6)
-    obj_e1 = Objective(id=2, position=Position(30, 0))       # enemy
-    obj_e2 = Objective(id=3, position=Position(30, 6))       # enemy → enemy=2
-    state = _state((mag, e1, e2), (obj_mine, obj_e1, obj_e2))
-    action = PriorityPlayer().choose_action(state, 0)
+    enemy = _blob(2, 1, 30, 0)
+    action = PriorityPlayer().choose_action(_state((own, enemy)), 0)
     assert isinstance(action, ManeuverAction)
-    assert action.target_position != mag.position  # opuszcza swój cel ku wrogiemu
-
-
-def test_plain_unit_on_objective_does_not_seek_enemy_objective():
-    # Bez mag/bohater krok 5 nie odpala → na własnym celu Obrona (trzyma), mimo deficytu.
-    plain = _blob(1, 0, 0, 0)
-    obj_mine = Objective(id=1, position=Position(1, 0))
-    e1 = _blob(2, 1, 30, 0)
-    e2 = _blob(3, 1, 30, 6)
-    obj_e1 = Objective(id=2, position=Position(30, 0))
-    obj_e2 = Objective(id=3, position=Position(30, 6))
-    state = _state((plain, e1, e2), (obj_mine, obj_e1, obj_e2))
-    action = PriorityPlayer().choose_action(state, 0)
-    assert isinstance(action, DefendAction)
-
-
-def test_deterministic_choice():
-    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
-    enemy = _blob(2, 1, 8, 0)
-    state = _state((own, enemy))
-    a1 = PriorityPlayer().choose_action(state, 0)
-    a2 = PriorityPlayer().choose_action(state, 0)
-    assert a1 == a2
+    assert distance(action.target_position, enemy.position) < distance(own.position, enemy.position)
 
 
 # --- continue_activation (2. akcja, pkt 11.b.iv) ---
 
 
 def test_continue_activation_shoots_after_maneuver():
-    # Po Manewrze (akcja 1) wróg w zasięgu → priorytet 1 = Ostrzał najbliższego.
     own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
     enemy = _blob(2, 1, 8, 0)
-    state = _state((own, enemy))
     taken = (ManeuverAction(1, Position(0, 0)),)
-    nxt = PriorityPlayer().continue_activation(state, 0, 1, taken)
+    nxt = PriorityPlayer().continue_activation(_state((own, enemy)), 0, 1, taken)
     assert isinstance(nxt, ShootAction) and nxt.target_id == 2
 
 
 def test_continue_activation_moves_to_objective_after_shoot():
-    # KLUCZOWA poprawka: po Ostrzale (zużyty, pkt 14.c.v) bot NIE marnuje akcji —
-    # schodzi do celu (priorytet 6), zamiast stać w miejscu.
-    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))  # brak broni wręcz
+    # Po Ostrzale (zużyty, pkt 14.c.v) bot schodzi do niezajętego celu — nie marnuje akcji.
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
     enemy = _blob(2, 1, 8, 0)
-    obj = Objective(id=1, position=Position(20, 0), controller=None)  # nie na celu
-    state = _state((own, enemy), (obj,))
+    obj = Objective(id=1, position=Position(20, 0), controller=None)
     taken = (ShootAction(1, 2, RIFLE),)
-    nxt = PriorityPlayer().continue_activation(state, 0, 1, taken)
+    nxt = PriorityPlayer().continue_activation(_state((own, enemy), (obj,)), 0, 1, taken)
     assert isinstance(nxt, ManeuverAction)
-    # Ruch zbliża do celu (maleje dystans do (20,0)).
     assert distance(nxt.target_position, obj.position) < distance(own.position, obj.position)
 
 
-def test_continue_activation_defends_on_objective_after_shoot():
-    # Po Ostrzale, już na celu, brak wroga w zasięgu → priorytet 7 Obrona (trzyma cel).
+def test_deterministic_choice():
     own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
-    obj = Objective(id=1, position=Position(1, 0), controller=None)  # na celu (gap≤3)
-    far_enemy = _blob(2, 1, 60, 0)
-    state = _state((own, far_enemy), (obj,))
-    taken = (ShootAction(1, 2, RIFLE),)
-    assert isinstance(PriorityPlayer().continue_activation(state, 0, 1, taken), DefendAction)
+    enemy = _blob(2, 1, 8, 0)
+    state = _state((own, enemy))
+    assert PriorityPlayer().choose_action(state, 0) == PriorityPlayer().choose_action(state, 0)
