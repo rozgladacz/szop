@@ -13,6 +13,7 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
+| [HANDOFF_faza-d-realistic-fixtures](docs/handoffs/HANDOFF_faza-d-realistic-fixtures.md) | Fixtury balansu wierne regułom — 5 celów (pkt 5.a/b/c) + 4 proste oddziały/stronę (pkt 2.a) na 72″×48″. | `tests/fixtures/battles/*.yaml`, `tests/test_balance_simulate.py` | In progress (tylko dane fixtur + asercje, zero zmian w kodzie) |
 
 
 ## Zasoby zablokowane (reverse lookup)

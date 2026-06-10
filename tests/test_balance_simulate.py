@@ -40,11 +40,25 @@ def test_fixture_shape_and_objects():
     fx = bs.load_battle_fixture(_FIXTURE)
     assert len(fx.rosters) == 2
     assert {r["owner_player"] for r in fx.rosters} == {0, 1}
-    # 1 cel + 1 teren-koło z fixtury
-    assert len(fx.objectives) == 1
-    assert fx.objectives[0].id == 1
+    # 5 celów (pkt 5.a) + 1 teren-koło z fixtury
+    assert len(fx.objectives) == 5
+    assert {o.id for o in fx.objectives} == {1, 2, 3, 4, 5}
     assert len(fx.terrain) == 1
     assert fx.terrain[0].radius_inches == 3
+    # 4 oddziały/stronę (pkt 2.a min. armii)
+    assert all(len(r["units"]) == 4 for r in fx.rosters)
+
+
+def test_fixture_objectives_satisfy_placement_rules():
+    # pkt 5.c: cele ≥12″ od siebie, ≥6″ od krawędzi (plansza 72×48).
+    fx = bs.load_battle_fixture(_FIXTURE)
+    pts = [(o.position.x, o.position.y) for o in fx.objectives]
+    for x, y in pts:
+        assert 6 <= x <= 66 and 6 <= y <= 42  # ≥6″ od krawędzi
+    for i in range(len(pts)):
+        for j in range(i + 1, len(pts)):
+            (ax, ay), (bx, by) = pts[i], pts[j]
+            assert ((ax - bx) ** 2 + (ay - by) ** 2) ** 0.5 >= 12.0  # ≥12″ apart
 
 
 def test_fixture_rejects_non_pair(tmp_path):
