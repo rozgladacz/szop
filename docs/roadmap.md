@@ -285,7 +285,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### D2. Balance simulation (2 tyg)
 > **Prereq DONE 2026-06-10** (wątek `faza-d-match-runner`, ADR-0032): headless pętla bitwy `app/services/agents/match.py` — `run_match(state, players, dice)` + `simulate_from_rosters(rosters, players, *, seed, ...)` → `MatchResult(final_state, events, winner, rounds_played)`. Jedno wywołanie = jedna pełna gra (pkt 8 pętla rund, pkt 5.f winner). D2 agreguje N gier. 6 testów.
-- [ ] `scripts/balance_simulate.py --ruleset v1 -n 1000` → CSV: win rates per rozpiska/zdolność/broń
+- [x] `scripts/balance_simulate.py` — **MVP DONE 2026-06-10** (wątek `faza-d-2-balance-sim`): agreguje N gier (`simulate_from_rosters`) → win-rate per rozpiska (owner_player 0/1) + draw-rate + śr. rund, CSV (`--out`) + podsumowanie. Inicjatywa naprzemienna (`i % 2`) usuwa bias 1. gracza; gracze konfigurowalni (`--players random,greedy`); fixtura roster-pair YAML (`tests/fixtures/battles/*.yaml`). 15 testów. **Odłożone:** breakdown per zdolność/broń (wymaga adaptera ORM `Roster`→engine-dict + heurystyki auto-rozstawienia pozycji).
 - [ ] `scripts/balance_report.py` → `reports/balance/YYYY-MM-DD.md` z wykresami
 
 ### D3. Exploit hunting (2 tyg)

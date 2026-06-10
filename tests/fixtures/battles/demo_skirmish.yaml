@@ -1,0 +1,67 @@
+# Fixtura roster-pair dla D2 balance_simulate (Strumień D, ADR-0032).
+#
+# Format engine-dict 1:1 z `app/services/engine/state.build_initial_state`:
+#   rosters[i] = {owner_player, units:[{id, position, models, toughness,
+#                 quality, defense, passives, weapons}]}
+# Pozycje `position` to cale (origin = lewy-dolny róg pola bitwy, pkt 3).
+# `terrain[*].shape ∈ {circle, line}`; `features` per pkt 4.c
+#   (Niedostepny/Blokujacy/Zaslaniajacy/Trudny/Niebezpieczny/Obronny).
+# `objectives[*]` per pkt 5 (id + position).
+#
+# Symetryczna potyczka 2v2 (lustrzane statystyki) z jednym celem w centrum —
+# parzysta baza do sanity-checków agregatora (idealny balans ≈ 50/50 modulo
+# inicjatywa/kości).
+
+name: "Demo skirmish 2v2 (symmetric)"
+
+objectives:
+  - id: 1
+    position: [18, 3]
+
+terrain:
+  - shape: circle
+    center: [18, 3]
+    radius: 3
+    features: [Blokujacy]
+
+rosters:
+  - owner_player: 0
+    units:
+      - id: 1
+        position: [6, 0]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}
+      - id: 2
+        position: [6, 6]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: sword, name: "Miecz", range_inches: 0, attacks: 2, ap: 0}
+  - owner_player: 1
+    units:
+      - id: 3
+        position: [30, 0]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}
+      - id: 4
+        position: [30, 6]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: sword, name: "Miecz", range_inches: 0, attacks: 2, ap: 0}
