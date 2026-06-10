@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
-| [HANDOFF_faza-d-greedy-objectives](docs/handoffs/HANDOFF_faza-d-greedy-objectives.md) | Kontrola celów (pkt 5.d/5.f) w heurystyce `GreedyPlayer` — atak/manewr na wspólnej skali wartości celów. | `app/services/agents/{policy_eval,greedy_player}.py` | In progress (warstwa agentów, zero zmian w engine/*) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -48,6 +47,12 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-10 — faza-d-greedy-objectives (archived) — kontrola celów w heurystyce GreedyPlayer
+- Follow-up z insightu D2 (greedy przegrywał z random, bo punktował tylko obrażenia). `policy_eval.py`: refaktor `evaluate_state` na `_hp_balance`+`_objective_balance` (reuse, zachowanie 1:1) + nowy `objective_balance_with_control` — przelicza kontrolę celów z pozycji (pkt 5.d) reużywając `phases._check_objective_control` (SSOT, [CRITICAL] #3). `greedy_player.py`: atak/manewr punktowane na **wspólnej walucie wartości celów** (przejęcie/utrata kontroli, pkt 5.f), nie tylko obrażeniach — atak `mean×WOUND_VALUE` (HP fine-grained) + Δ kontroli na hipotetycznym stanie z wymiecionymi modelami (`round(expected_models_killed())`); manewr = Δ kontroli (ruch nie zmienia HP). Brak double-count. `_replace_blob` helper wspólny. **Warstwa agentów — zero zmian w `engine/*`** → brak kolizji z `faza-b-order-interrupts`.
+- Pliki: `app/services/agents/{policy_eval,greedy_player}.py` (MOD), `tests/test_agents_{policy,greedy}.py` (+6: 4 policy + 2 greedy), `tests/fixtures/battles/objective_clash.yaml` (NEW — cel osiągalny w 1 ruchu), `docs/roadmap.md` (D1 greedy/policy). Commit na `Faza_A`: `835c205`.
+- Weryfikacja: pytest **1525 passed** (1519 + 6); both_assert **156/156**; call-site check `evaluate_state` (tylko testy+export, zachowanie 1:1); `/simplify` inline 4 kąty (1 dedup `_replace_blob`). **Efekt balansowy:** na `objective_clash` (cel w 1 ruchu) greedy vs random **18:0** (0 porażek) vs random-random ~remisy — mechanizm działa. Na `demo_skirmish` (cel ~12″) greedy nadal przegrywa = **miopia depth-1** (cel >1 ruch poza horyzontem; adresuje to D4 minimax), nie luka w wartościowaniu.
+- Doc updates: `docs/roadmap.md` (D1 `greedy_player`/`policy_eval` — kontrola celów + ograniczenie depth-1).
 
 ### 2026-06-10 — faza-d-2-balance-sim (archived) — D2 balance_simulate MVP
 - Strumień D2 (roadmap): `scripts/balance_simulate.py` — agregator balansu nad headless match runnerem (`app/services/agents/simulate_from_rosters`, ADR-0032). Rozgrywa N pełnych gier, agreguje zwycięzców per `owner_player` (pkt 5.f — więcej zajętych celów na koniec gry, źródło potwierdzone tej sesji) → win-rate / draw-rate / śr. rund; CSV (`--out`) + podsumowanie stdout. **Inicjatywa naprzemienna** (`i % 2`) usuwa bias pierwszego gracza; gracze konfigurowalni (`--players random,greedy`, D1); para rosterów z fixtury YAML (`tests/fixtures/battles/`, format engine-dict 1:1 z `build_initial_state`). **Skrypt-liść — zero zmian w `app/services/engine/*` ani `agents/*`** → brak kolizji z lockami aktywnych wątków `faza-b-engine-mvp`/`faza-b-order-interrupts`.
