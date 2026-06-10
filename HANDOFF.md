@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
-| [HANDOFF_faza-b-multi-action](docs/handoffs/HANDOFF_faza-b-multi-action.md) | Aktywacja = do 2 akcji (pkt 11.b.iv) — pętla akcji w silniku + napęd botów + match. | `app/services/engine/{phases,resolver}.py`, `app/services/agents/*` | In progress (Faza 1 engine; postęp lokalny, bez zmian state.py/schematu) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -48,6 +47,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-10 — faza-b-multi-action (archived) — aktywacja wieloakcyjna (pkt 11.b.iv, ADR-0051)
+- Silnik wspiera **do 2 akcji/aktywację** zamiast 1 (luka MVP wykryta przy ocenie botów; user poprawił źródło pkt 11.b.iv — Manewr liczy się do limitu, punkt „akcja różna" usunięty; Ostrzał/Szarża raz z definicji pkt 14.c.v/14.d.vi). **Decyzja (ADR-0051):** postęp aktywacji LOKALNY w orkiestratorze `resolver.apply_activation` (nie w `BattleState`) → zero zmian schematu/replay, brak nowych typów eventów, brak kolizji z lockiem `state.py`. Split `phases.activation_phase` na `_begin_activation` (zdejmij Ufortyfikowany RAZ pkt 22.c.iv) + `_apply_single_action` (akcja + Przegrupowanie per akcja pkt 11.b.iii) + `_finalize_activation` (Aktywowany + wygaśnięcie override'ów); wrapper zachowuje zachowanie 1:1. `apply` (1 akcja) zostaje dla B4 per-action API. Boty: `Player.continue_activation` (default None — wsteczna kompat) + override Random/Greedy/Priority; `base.legal_followup_actions` reużywa `_can_take_followup` (SSOT). `match.run_match` → `apply_activation`.
+- Pliki: `app/services/engine/{phases,resolver}.py`, `app/services/agents/{base,random_player,greedy_player,priority_player,match}.py`, `app/rulesets/v1/source_hashes.yaml` (nowy hash Rozjemca.md), `tests/test_engine_multi_action.py` (NEW 13) + `tests/test_agents_{priority,greedy,random}.py` (+6), `docs/adr/0051-*.md` (NEW Accepted), `docs/roadmap.md`. Commit na `Faza_A`: `<this>`.
+- Weryfikacja: pytest **1558** (1539 + 19); both_assert **156/156**; smoke replay **EXIT 0** (replay invariant z 2-akcjami); `apply_activation` bez continuation == `apply` (wsteczna kompat); `/simplify`+`/review` inline (zmiana rdzenia/replay).
+- **Efekt balansu:** bardziej rozstrzygający (demo random/random remisy 85%→53%); **ujawnił słabość heurystyk** — 2 akcje = więcej walki, boty agresywne (greedy/priority) zaniedbują kontrolę celów (pkt 5.f) i grają słabiej vs random (np. demo greedy/random 37→20% wygranych). Mechanika poprawna; to jakość botów. **Follow-up D:** bot objective-aware/„hold" (lub depth-2); zróżnicowane fixtury 4 typów (Strzelec/Wojownik) dla move-then-shoot.
+- Doc updates: roadmap (B3 activation_phase + ADR index 0051), parent `faza-b-engine-mvp` (luka oznaczona ✅ ROZWIĄZANE).
 
 ### 2026-06-10 — faza-d-priority-player (archived) — bot pół-deterministyczny PriorityPlayer
 - Implementacja zaproponowanego przez usera bota: `app/services/agents/priority_player.py` — selekcja najdroższego oddziału z celem w zasięgu (proxy HP = `models×toughness`, bo silnik nie ma kosztu pkt; remis→najniższe id), akcja po stałym priorytecie 1–7 (strzał→szarża→Odrzuć Wyczerpany→Obrona[odrzuca Przyszpilony pkt 22.b.v]→[Mag/Bohater] agresja na nie-swój cel gdy deficyt→ruch na cel jeśli nie na celu→Obrona). Reuse helperów `base.py` + `_check_objective_control` (SSOT pkt 5.d) + `effective_passives`. Wpięty w `balance_simulate` (`--players priority`). Warstwa agentów — zero zmian w `engine/*`.
