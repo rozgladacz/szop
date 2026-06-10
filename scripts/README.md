@@ -230,6 +230,20 @@ python scripts/profile_quote.py 10 --backend both_assert   # parity diagnostic
 make profile ROSTER=10 BACKEND=yaml                        # convenience wrapper
 ```
 
+### `balance_simulate.py` (D2)
+
+Agreguje N headless gier (`app.services.agents.simulate_from_rosters`,
+ADR-0032) → win-rate per rozpiska + draw-rate + śr. rund. Inicjatywa
+naprzemienna usuwa bias 1. gracza. Para rosterów z fixtury YAML
+(`tests/fixtures/battles/*.yaml`, format engine-dict). Headless,
+deterministyczny per `--seed`. Zero zmian w rdzeniu silnika.
+
+```powershell
+python scripts/balance_simulate.py                                   # demo fixtura, stdout
+python scripts/balance_simulate.py -n 200 --players greedy,random    # 200 gier, P0 greedy
+python scripts/balance_simulate.py --fixture <PATH> --out build/balance.csv
+```
+
 ### `reflect_and_improve.py`
 
 Analiza ostatnich 10 transkryptów Claude Code, generuje

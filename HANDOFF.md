@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
-| [HANDOFF_faza-d-2-balance-sim](docs/handoffs/HANDOFF_faza-d-2-balance-sim.md) | Strumień D2 — `scripts/balance_simulate.py`: agregator N headless gier → win-rate per rozpiska (CSV + podsumowanie). | `scripts/balance_simulate.py` (NEW), `tests/fixtures/battles/` (NEW), `tests/test_balance_simulate.py` (NEW) | In progress (impl — skrypt-liść, zero zmian w engine/agents) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -48,6 +47,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-10 — faza-d-2-balance-sim (archived) — D2 balance_simulate MVP
+- Strumień D2 (roadmap): `scripts/balance_simulate.py` — agregator balansu nad headless match runnerem (`app/services/agents/simulate_from_rosters`, ADR-0032). Rozgrywa N pełnych gier, agreguje zwycięzców per `owner_player` (pkt 5.f — więcej zajętych celów na koniec gry, źródło potwierdzone tej sesji) → win-rate / draw-rate / śr. rund; CSV (`--out`) + podsumowanie stdout. **Inicjatywa naprzemienna** (`i % 2`) usuwa bias pierwszego gracza; gracze konfigurowalni (`--players random,greedy`, D1); para rosterów z fixtury YAML (`tests/fixtures/battles/`, format engine-dict 1:1 z `build_initial_state`). **Skrypt-liść — zero zmian w `app/services/engine/*` ani `agents/*`** → brak kolizji z lockami aktywnych wątków `faza-b-engine-mvp`/`faza-b-order-interrupts`.
+- Pliki: `scripts/balance_simulate.py` (NEW), `tests/fixtures/battles/demo_skirmish.yaml` (NEW), `tests/test_balance_simulate.py` (NEW, 15 testów), `docs/roadmap.md` (D2 odznaczone), `scripts/README.md` (wpis skryptu). Commit na `Faza_A`: `<impl>` + archiwizacja.
+- Weryfikacja: pytest **1519 passed** (1504 baseline + 15); both_assert **156/156** (sanity — skrypt nie rusza kosztów); smoke run OK. `/simplify` inline 4 kąty — 1 dedup (`write_csv` reużywa `result_to_csv_string`); `/review` N/A (izolowany liść, brak hot-path/SSOT/auth); `/security-review` N/A (brak auth/DB-write).
+- **Insight z narzędzia (nie bug):** `GreedyPlayer` (depth-1 max. obrażeń, ADR-0044) przegrywa z `RandomPlayer` na demo, bo wygrana liczy się po celach (pkt 5.f), nie obrażeniach → kandydat na follow-up: heurystyka bota powinna ważyć kontrolę celów (osobny wątek D-stream). **Odłożone z D2:** breakdown win-rate per zdolność/broń (wymaga adaptera ORM `Roster`→engine-dict + auto-rozstawienia pozycji); `balance_report.py` z wykresami.
+- Doc updates: `docs/roadmap.md` (D2 `balance_simulate.py` ✅ + odłożenia), `scripts/README.md` (sekcja „Inne skrypty" — wpis `balance_simulate.py`).
 
 ### 2026-06-10 — faza-b-2-event-store (archived) — persystencja event-store (slice B2)
 - Slice B2 (ADR-0050): rdzeń event-sourcingu po stronie persystencji. Dwie nowe tabele w `app/models.py` — `battles` (`Battle`: metadane gry, `rng_seed`, `status`, nullable user/roster FK) + `battle_events` (`BattleEvent`: append-only, `event_type`+`payload_json`, `UniqueConstraint(battle_id, sequence)`). `app/services/engine/persistence.py` (NEW) — `save_events`/`load_events` jako warstwa-granica engine↔ORM (jedyny moduł engine dotykający DB; reszta silnika czysta). **Brak Alembic** w projekcie → tabele addytywne via `Base.metadata.create_all`, zero ryzyka dla `data/szop.db`. **Niekolidujący** — `app/models.py` wolny od locków (engine-mvp/order-interrupts → `engine/*`, match-runner → `agents/*`). Pierwotny wybór (orkiestrator pętli bitwy) okazał się duplikatem aktywnego `faza-d-match-runner` → pivot na B2.
