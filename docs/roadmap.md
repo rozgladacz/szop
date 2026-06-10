@@ -278,8 +278,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 ### D1. Heuristic players (4 tyg) — **MVP DONE 2026-06-09** (wątek `faza-d-heuristic-players`, ADR-0031)
 - [x] `app/services/agents/base.py` — `class Player(ABC)`: `choose_action(state, perspective) → Action | None` + współdzielony enumerator `legal_actions` (silnik celowo jednoakcyjny — kandydaci budowani z `actions.Action`) + selektory.
 - [x] `random_player.py` — `RandomPlayer(seed)` losowy uniform z `legal_actions`, deterministyczny per seed.
-- [x] `greedy_player.py` — `GreedyPlayer` depth-1 argmax: `prediction.expected_damage(...).mean` dla ataków + Δ`evaluate_state` dla ruchu (ADR-0044).
-- [x] `policy_eval.py` — `evaluate_state(state, perspective) → float` (bilans HP + kontrola/bliskość celów pkt 5).
+- [x] `greedy_player.py` — `GreedyPlayer` depth-1 argmax: `expected_damage(...).mean × WOUND_VALUE` (HP, ADR-0044) **+ Δ kontroli celów** (`objective_balance_with_control`, pkt 5.d/5.f) dla ataku i manewru. **Kontrola celów 2026-06-10** (wątek `faza-d-greedy-objectives`): atak/manewr punktowane na wspólnej walucie wartości celów (przeliczenie kontroli z pozycji), nie tylko obrażeniach — bot zajmuje/broni celów osiągalnych w horyzoncie. **Ograniczenie depth-1:** cele >1 ruch poza horyzontem (D4 minimax to adresuje).
+- [x] `policy_eval.py` — `evaluate_state` (bilans HP + kontrola/bliskość celów pkt 5) + `objective_balance_with_control` (przelicza kontrolę pkt 5.d przez `phases._check_objective_control`, SSOT).
 - [x] ADR-0031 (Accepted) + 26 testów (`tests/test_agents_{base,random,policy,greedy}.py`). **Odłożone (H2):** pętla bitwy / driver przebiegu gry (B4/B5 LocalClient) — boty produkują akcje, ale D2 `balance_simulate` wymaga orkiestratora `apply`+`round_end_phase`+alternacja.
 
 ### D2. Balance simulation (2 tyg)

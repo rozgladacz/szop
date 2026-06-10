@@ -6,6 +6,7 @@ from app.services.agents.policy_eval import (
     OBJECTIVE_WEIGHT,
     PROXIMITY_WEIGHT,
     evaluate_state,
+    objective_balance_with_control,
 )
 from app.services.engine.state import (
     BattleState,
@@ -13,6 +14,7 @@ from app.services.engine.state import (
     Position,
     UnitBlob,
 )
+from app.services.engine.status import STATUS_PRZYSZPILONY
 
 
 def _blob(uid: int, owner: int, x: float, y: float, **kw) -> UnitBlob:
@@ -89,3 +91,44 @@ def test_objective_outweighs_single_wound_swing():
     obj_state = _state(blobs, (Objective(id=1, position=Position(50, 50), controller=0),))
     # 1 model toughness 3 = 3 HP; OBJECTIVE_WEIGHT > 3.
     assert OBJECTIVE_WEIGHT > 3
+
+
+# --- objective_balance_with_control (przelicza kontrolę z pozycji, pkt 5.d) ---
+
+
+def test_control_recompute_flips_uncontrolled_objective():
+    # Własny oddział w 3″ niezajętego celu → kontrola gracza 0 (+OBJECTIVE_WEIGHT).
+    # evaluate_state (bez przeliczenia) widzi tylko proximity; with_control widzi pełną kontrolę.
+    obj = Objective(id=1, position=Position(0, 0), controller=None)
+    own = _blob(1, 0, 0, 0)  # na celu (edge_dist = -1 ≤ 3)
+    state = _state((own,), (obj,))
+    assert objective_balance_with_control(state, 0) == OBJECTIVE_WEIGHT
+    # Stała funkcja evaluate_state (controller=None) daje tylko proximity < OBJECTIVE_WEIGHT.
+    assert evaluate_state(state, 0) < OBJECTIVE_WEIGHT
+
+
+def test_control_recompute_contested_stays_uncontrolled():
+    # Oba oddziały w 3″ → nikt nie kontroluje (pkt 5.d: tylko jeden gracz w zasięgu).
+    obj = Objective(id=1, position=Position(0, 0), controller=None)
+    own = _blob(1, 0, 0, 0)
+    enemy = _blob(2, 1, 0, 0)
+    state = _state((own, enemy), (obj,))
+    # Brak kontroli → tylko proximity (oba w tym samym miejscu), < OBJECTIVE_WEIGHT.
+    assert objective_balance_with_control(state, 0) < OBJECTIVE_WEIGHT
+
+
+def test_control_recompute_pinned_does_not_control():
+    # Przyszpilony nie kontroluje celów (pkt 22.b.ii) — kontrola nie flipuje.
+    obj = Objective(id=1, position=Position(0, 0), controller=None)
+    pinned = _blob(1, 0, 0, 0, status_flags=(STATUS_PRZYSZPILONY,))
+    state = _state((pinned,), (obj,))
+    # Brak kontroli (jedyny oddział Przyszpilony) → proximity tylko.
+    assert objective_balance_with_control(state, 0) < OBJECTIVE_WEIGHT
+
+
+def test_control_recompute_enemy_on_objective_penalizes():
+    # Wrogi oddział na celu → −OBJECTIVE_WEIGHT z perspektywy gracza 0.
+    obj = Objective(id=1, position=Position(0, 0), controller=None)
+    enemy = _blob(2, 1, 0, 0)
+    state = _state((enemy,), (obj,))
+    assert objective_balance_with_control(state, 0) == -OBJECTIVE_WEIGHT

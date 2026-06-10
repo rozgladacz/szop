@@ -1,0 +1,58 @@
+# Fixtura roster-pair: cel centralny osiągalny w JEDNYM ruchu (pkt 15.a, 6″).
+#
+# W przeciwieństwie do demo_skirmish (cel ~12″ od startu = 2 ruchy, poza
+# horyzontem depth-1 GreedyPlayer), tu oba startowe pozycje są ~5″ od celu →
+# manewr zajmuje cel w jednej aktywacji. Pokazuje, że heurystyka z kontrolą
+# celów (pkt 5.d/5.f) realnie zmienia zachowanie, gdy cel jest w zasięgu
+# horyzontu bota. Symetryczna — przy równych botach remis; greedy vs random
+# greedy częściej utrzymuje cel.
+
+name: "Objective clash (cel w 1 ruchu)"
+
+objectives:
+  - id: 1
+    position: [18, 3]
+
+terrain: []
+
+rosters:
+  - owner_player: 0
+    units:
+      - id: 1
+        position: [13, 3]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}
+      - id: 2
+        position: [13, 7]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: sword, name: "Miecz", range_inches: 0, attacks: 2, ap: 0}
+  - owner_player: 1
+    units:
+      - id: 3
+        position: [23, 3]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: rifle, name: "Karabin", range_inches: 24, attacks: 2, ap: 0}
+      - id: 4
+        position: [23, 7]
+        models: 5
+        toughness: 3
+        quality: 4
+        defense: 5
+        passives: []
+        weapons:
+          - {slug: sword, name: "Miecz", range_inches: 0, attacks: 2, ap: 0}

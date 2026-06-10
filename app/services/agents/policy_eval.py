@@ -16,6 +16,7 @@ Wagi dobrane tak, by jeden cel (~strategiczny) przeważał kilka punktów ran
 from __future__ import annotations
 
 from app.services.engine.geometry import distance
+from app.services.engine.phases import _check_objective_control
 from app.services.engine.state import BattleState, Objective, UnitBlob
 
 #: Waga zajętego celu w punktach oceny. Dobrana > typowego bilansu HP jednej
@@ -50,11 +51,8 @@ def _proximity_bonus(
     return PROXIMITY_WEIGHT / (1.0 + nearest_gap)
 
 
-def evaluate_state(state: BattleState, perspective: int) -> float:
-    """Skalarna ocena `state` z perspektywy gracza `perspective` (wyższa lepsza).
-
-    Patrz docstring modułu: bilans HP + kontrola/bliskość celów.
-    """
+def _hp_balance(state: BattleState, perspective: int) -> float:
+    """Bilans wytrzymałości: Σ HP własne − Σ HP wroga (proxy siły bojowej)."""
     own_hp = sum(
         _unit_hp(b)
         for b in state.blobs
@@ -65,18 +63,49 @@ def evaluate_state(state: BattleState, perspective: int) -> float:
         for b in state.blobs
         if b.owner_player != perspective and b.models_alive > 0
     )
-    score = float(own_hp - enemy_hp)
+    return float(own_hp - enemy_hp)
 
+
+def _objective_balance(state: BattleState, perspective: int) -> float:
+    """Składowa celów: kontrola (`±OBJECTIVE_WEIGHT`, wg `obj.controller`) +
+    proximity dla niezajętych. Czyta `state.objectives[*].controller` jak jest —
+    przeliczenie z pozycji robi `objective_balance_with_control`.
+    """
     own_units = [
         b
         for b in state.blobs
         if b.owner_player == perspective and b.models_alive > 0
     ]
+    total = 0.0
     for obj in state.objectives:
         if obj.controller == perspective:
-            score += OBJECTIVE_WEIGHT
+            total += OBJECTIVE_WEIGHT
         elif obj.controller is not None:
-            score -= OBJECTIVE_WEIGHT
+            total -= OBJECTIVE_WEIGHT
         else:
-            score += _proximity_bonus(obj, own_units)
-    return score
+            total += _proximity_bonus(obj, own_units)
+    return total
+
+
+def evaluate_state(state: BattleState, perspective: int) -> float:
+    """Skalarna ocena `state` z perspektywy gracza `perspective` (wyższa lepsza).
+
+    Patrz docstring modułu: bilans HP + kontrola/bliskość celów. Czyta
+    `obj.controller` jak jest (kontrola aktualizowana w `round_end_phase`,
+    pkt 8.c.ii); boty chcące wycenić zmianę kontroli *w obrębie* akcji używają
+    `objective_balance_with_control`.
+    """
+    return _hp_balance(state, perspective) + _objective_balance(state, perspective)
+
+
+def objective_balance_with_control(state: BattleState, perspective: int) -> float:
+    """Wartość celów po **przeliczeniu kontroli z aktualnych pozycji** (pkt 5.d).
+
+    Wspólna waluta dla botów: pozwala wycenić przejęcie/utratę celu *w obrębie*
+    rozważanej akcji, zanim `round_end_phase` to potwierdzi (pkt 8.c.ii). Bez tego
+    ruch na niezajęty cel widać tylko jako proximity (≤`PROXIMITY_WEIGHT`), nie
+    jako kontrolę (`OBJECTIVE_WEIGHT`). Reużywa `phases._check_objective_control`
+    (SSOT pkt 5.d — 3″, Przyszpilony nie kontroluje pkt 22.b.ii).
+    """
+    controlled, _events, _seq = _check_objective_control(state)
+    return _objective_balance(controlled, perspective)

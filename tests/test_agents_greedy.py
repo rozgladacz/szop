@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from app.services.agents.greedy_player import GreedyPlayer
 from app.services.engine.actions import ManeuverAction, ShootAction
+from app.services.engine.geometry import distance
 from app.services.engine.state import (
     BattleState,
     Objective,
@@ -14,6 +15,10 @@ from app.services.engine.state import (
 from app.services.engine.status import STATUS_AKTYWOWANY
 
 RIFLE = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=3)
+#: Słaby (1 atak) — niskie oczekiwane obrażenia, by kontrola celu przeważyła.
+WEAK = WeaponProfile(slug="pistol", name="Pistol", range_inches=24, attacks=1)
+#: Mocny (6 ataków) — wymiata słaby oddział (expected_models_killed → 1).
+STRONG = WeaponProfile(slug="cannon", name="Cannon", range_inches=24, attacks=6)
 
 
 def _blob(uid: int, owner: int, x: float, y: float, **kw) -> UnitBlob:
@@ -67,3 +72,29 @@ def test_deterministic_choice():
     a1 = GreedyPlayer().choose_action(state, perspective=0)
     a2 = GreedyPlayer().choose_action(state, perspective=0)
     assert a1 == a2
+
+
+def test_prefers_taking_objective_over_weak_attack():
+    # Słaby atak (1 atak vs wytrzymały wróg) daje mało obrażeń; marsz na niezajęty
+    # cel przejmuje kontrolę (pkt 5.d, +OBJECTIVE_WEIGHT) → przeważa.
+    own = _blob(1, 0, 0, 0, ranged_weapons=(WEAK,))
+    enemy = _blob(2, 1, 10, 0, toughness_per_model=6)  # daleko od celu, wytrzymały
+    obj = Objective(id=1, position=Position(5, 0), controller=None)
+    action = GreedyPlayer().choose_action(_state((own, enemy), (obj,)), perspective=0)
+    assert isinstance(action, ManeuverAction)
+    # Ruch ląduje w 3″ od celu (zajmuje go, pkt 5.d).
+    assert distance(action.target_position, obj.position) <= 3.0
+
+
+def test_attack_prefers_enemy_contesting_my_objective():
+    # Dwa identyczne, wymiataalne wrogie oddziały: A kontestuje mój cel, B w polu.
+    # Obrażenia równe → bonus kontroli celu (wymiecenie A → przejęcie) rozstrzyga.
+    own = _blob(1, 0, 0, 0, ranged_weapons=(STRONG,))
+    enemy_a = _blob(2, 1, 1, 0, models_alive=1, toughness_per_model=1)  # na celu
+    enemy_b = _blob(3, 1, 5, 0, models_alive=1, toughness_per_model=1)  # w polu
+    obj = Objective(id=1, position=Position(0, 0), controller=None)
+    action = GreedyPlayer().choose_action(
+        _state((own, enemy_a, enemy_b), (obj,)), perspective=0
+    )
+    assert isinstance(action, ShootAction)
+    assert action.target_id == enemy_a.id
