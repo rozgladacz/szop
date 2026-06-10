@@ -282,6 +282,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] ADR-0031 (Accepted) + 26 testów (`tests/test_agents_{base,random,policy,greedy}.py`). **Odłożone (H2):** pętla bitwy / driver przebiegu gry (B4/B5 LocalClient) — boty produkują akcje, ale D2 `balance_simulate` wymaga orkiestratora `apply`+`round_end_phase`+alternacja.
 
 ### D2. Balance simulation (2 tyg)
+> **Prereq DONE 2026-06-10** (wątek `faza-d-match-runner`, ADR-0032): headless pętla bitwy `app/services/agents/match.py` — `run_match(state, players, dice)` + `simulate_from_rosters(rosters, players, *, seed, ...)` → `MatchResult(final_state, events, winner, rounds_played)`. Jedno wywołanie = jedna pełna gra (pkt 8 pętla rund, pkt 5.f winner). D2 agreguje N gier. 6 testów.
 - [ ] `scripts/balance_simulate.py --ruleset v1 -n 1000` → CSV: win rates per rozpiska/zdolność/broń
 - [ ] `scripts/balance_report.py` → `reports/balance/YYYY-MM-DD.md` z wykresami
 
@@ -358,6 +359,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0025 | Rola agent + scoped tokens | — |
 | 0030 | Wielu agentów: osobne konta + leaderboard | — |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
+| 0032 | Headless match runner (orkiestrator pełnej gry dla botów) | ✓ |
 | 0040 | Migration blob → per-model | — |
 | 0041 | Terrain shapes beyond circle/line | — |
 | 0042 | Facing: wprowadzane z Zwrot | — |

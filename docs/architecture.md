@@ -212,8 +212,9 @@ Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rd
 | `random_player.py` | `RandomPlayer(seed)` — uniform z `legal_actions`, deterministyczny per seed |
 | `greedy_player.py` | `GreedyPlayer` — depth-1 argmax: `prediction.expected_damage(...).mean` dla ataków, Δ`evaluate_state` dla ruchu |
 | `policy_eval.py` | `evaluate_state(state, perspective) -> float` — bilans HP + kontrola/bliskość celów (pkt 5) |
+| `match.py` (ADR-0032) | **Headless pętla bitwy**: `run_match(state, players, dice) -> MatchResult` + `simulate_from_rosters(rosters, players, *, seed, ...)`. Orkiestruje `apply`+`round_end_phase`+alternacja inicjatywy (pkt 8); jedno wywołanie = jedna pełna gra (pkt 5.f winner) |
 
-**Konsumenci (planowane):** D2 `balance_simulate`, D3 `exploit_hunt`, D4 `minimax_player` — wszystkie wymagają jeszcze **pętli bitwy** (orkiestrator `apply`+`round_end_phase`+alternacja inicjatywy = B5 LocalClient / B4 routers). Boty są kompletne i testowalne w izolacji (26 testów), ale nikt ich jeszcze nie uruchamia w pełnej grze.
+**Konsumenci (planowane):** D2 `balance_simulate` (agreguje N `simulate_from_rosters` do win-rate), D3 `exploit_hunt`, D4 `minimax_player`. `run_match` to zalążek **B5 `LocalClient.simulate`** (pełen B5 z Protocol GameClient + HttpClient poza zakresem). Boty + runner testowalne headless w izolacji (31 testów: 26 graczy + 5 runner).
 
 ## Frontend JS — mapa modułów
 
