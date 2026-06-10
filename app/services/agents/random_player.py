@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import random
 
-from app.services.agents.base import Player, legal_actions
+from app.services.agents.base import (
+    Player,
+    legal_actions,
+    legal_followup_actions,
+)
 from app.services.engine.actions import Action
 from app.services.engine.state import BattleState
 
@@ -31,3 +35,11 @@ class RandomPlayer(Player):
         if not candidates:
             return None
         return self._rng.choice(candidates)
+
+    def continue_activation(
+        self, state, perspective, unit_id, actions_taken
+    ) -> Action | None:
+        """2. akcja (pkt 11.b.iv): losowo spośród legalnych kontynuacji lub stop
+        (None w puli) — zachowuje losowy charakter baseline'u."""
+        followups = legal_followup_actions(state, perspective, unit_id, actions_taken)
+        return self._rng.choice([*followups, None])

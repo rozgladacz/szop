@@ -13,6 +13,7 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
+| [HANDOFF_faza-b-multi-action](docs/handoffs/HANDOFF_faza-b-multi-action.md) | Aktywacja = do 2 akcji (pkt 11.b.iv) — pętla akcji w silniku + napęd botów + match. | `app/services/engine/{phases,resolver}.py`, `app/services/agents/*` | In progress (Faza 1 engine; postęp lokalny, bez zmian state.py/schematu) |
 
 
 ## Zasoby zablokowane (reverse lookup)

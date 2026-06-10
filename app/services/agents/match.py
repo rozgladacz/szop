@@ -32,7 +32,11 @@ from app.services.engine.phases import (
     round_end_phase,
     setup_phase,
 )
-from app.services.engine.resolver import apply, is_battle_over, should_end_round
+from app.services.engine.resolver import (
+    apply_activation,
+    is_battle_over,
+    should_end_round,
+)
 from app.services.engine.state import (
     BattleState,
     Objective,
@@ -125,7 +129,18 @@ def run_match(
                 # rundy nie zakończyłaby się. Round_end i tak domknie grę po pkt 5.f.
                 break
 
-            result = apply(state, action, dice, sequence=seq)
+            # Aktywacja do 2 akcji (pkt 11.b.iv) — aktywny gracz dostarcza
+            # kolejne akcje przez `continue_activation`.
+            player = players[active]
+            result = apply_activation(
+                state,
+                action,
+                dice,
+                sequence=seq,
+                continuation=lambda s, uid, taken, _p=player, _a=active: _p.continue_activation(
+                    s, _a, uid, taken
+                ),
+            )
             state = result.state
             seq = result.next_sequence
             events.extend(result.events)

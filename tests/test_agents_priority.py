@@ -168,3 +168,25 @@ def test_deterministic_choice():
     a1 = PriorityPlayer().choose_action(state, 0)
     a2 = PriorityPlayer().choose_action(state, 0)
     assert a1 == a2
+
+
+# --- continue_activation (2. akcja, pkt 11.b.iv) ---
+
+
+def test_continue_activation_shoots_after_maneuver():
+    # Po Manewrze (akcja 1) wróg w zasięgu → priorytet 1 = Ostrzał najbliższego.
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+    enemy = _blob(2, 1, 8, 0)
+    state = _state((own, enemy))
+    taken = (ManeuverAction(1, Position(0, 0)),)
+    nxt = PriorityPlayer().continue_activation(state, 0, 1, taken)
+    assert isinstance(nxt, ShootAction) and nxt.target_id == 2
+
+
+def test_continue_activation_none_when_shoot_used_and_no_melee():
+    # Ostrzał już wykonany (pkt 14.c.v) + brak broni wręcz → brak kontynuacji.
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+    enemy = _blob(2, 1, 8, 0)
+    state = _state((own, enemy))
+    taken = (ShootAction(1, 2, RIFLE),)
+    assert PriorityPlayer().continue_activation(state, 0, 1, taken) is None

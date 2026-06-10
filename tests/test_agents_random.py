@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from app.services.agents.base import legal_actions
+from app.services.agents.base import legal_actions, legal_followup_actions
 from app.services.agents.random_player import RandomPlayer
+from app.services.engine.actions import ManeuverAction
 from app.services.engine.state import (
     BattleState,
     Position,
@@ -41,6 +42,25 @@ def _state(blobs: tuple[UnitBlob, ...]) -> BattleState:
 def test_returns_none_when_no_legal_actions():
     blobs = (_blob(1, 0, 0, 0, status_flags=(STATUS_AKTYWOWANY,)),)
     assert RandomPlayer(seed=1).choose_action(_state(blobs), perspective=0) is None
+
+
+def test_continue_activation_legal_or_none():
+    # 2. akcja (pkt 11.b.iv): None (stop) albo legalna kontynuacja TEGO oddziału.
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+    enemy = _blob(2, 1, 8, 0)
+    state = _state((own, enemy))
+    taken = (ManeuverAction(1, Position(0, 0)),)
+    legal = legal_followup_actions(state, 0, 1, taken)
+    nxt = RandomPlayer(seed=1).continue_activation(state, 0, 1, taken)
+    assert nxt is None or nxt in legal
+
+
+def test_continue_activation_deterministic_per_seed():
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+    enemy = _blob(2, 1, 8, 0)
+    state = _state((own, enemy))
+    taken = (ManeuverAction(1, Position(0, 0)),)
+    assert RandomPlayer(7).continue_activation(state, 0, 1, taken) == RandomPlayer(7).continue_activation(state, 0, 1, taken)
 
 
 def test_chosen_action_is_legal():

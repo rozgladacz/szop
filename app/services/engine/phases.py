@@ -697,11 +697,15 @@ def activation_phase(
     sequence: int = 1,
     initial_toughness_totals: dict[int, int] | None = None,  # deprecated, B3.9.c
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
-    """Pkt 11.b — Zwykła aktywacja: akcja → Przegrupowanie → Odzyskiwanie ran →
-    status Aktywowany.
+    """Pkt 11.b — Zwykła aktywacja (wrapper 1-akcji): akcja → Przegrupowanie →
+    status Aktywowany. Składa `_begin_activation` + `_apply_single_action` +
+    `_finalize_activation`.
 
-    MVP scope: pojedyncza akcja (pkt 11.b.ii). Pętla 2 akcji (pkt 11.b.iii)
-    eksponowana wyżej (B3.7 resolver).
+    Pętla **do 2 akcji** (pkt 11.b.iv — Manewr liczy się; Ostrzał/Szarża raz,
+    pkt 14.c.v/14.d.vi) jest w `resolver.apply_activation`, który wywołuje te
+    same kroki, powtarzając `_apply_single_action`. Ten wrapper (1 akcja →
+    Aktywowany) zostaje dla wstecznej kompatybilności (`resolver.apply`, B4
+    per-action API, istniejące testy).
 
     Post-B3.9.c per ADR-0045:
     - Snapshot `pre_wounds` per blob PRZED akcją; po akcji budujemy
@@ -724,19 +728,26 @@ def activation_phase(
     Returns:
         (new_state, events).
     """
+    # Wrapper wstecznie kompatybilny (1 akcja = 1 aktywacja). Pętla 1–2 akcji
+    # (pkt 11.b.iv) jest w `resolver.apply_activation`, który składa te same
+    # 3 kroki, wielokrotnie wywołując `_apply_single_action`.
+    state, begin_events, seq = _begin_activation(state, action.unit_id, sequence)
+    state, action_events, seq = _apply_single_action(state, action, dice, seq)
+    state, final_events, seq = _finalize_activation(state, action.unit_id, seq)
+    return state, begin_events + action_events + final_events
+
+
+def _begin_activation(
+    state: BattleState, actor_id: int, sequence: int
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    """Początek aktywacji (pkt 11.b) — RAZ, przed pierwszą akcją.
+
+    CR-fix G (pkt 22.c.iv): Ufortyfikowany odrzucany na POCZĄTKU aktywacji
+    własnego oddziału. Musi być raz (nie per-akcja) — inaczej Obrona jako akcja
+    #1 nadałaby Ufortyfikowany, a początek akcji #2 by go zdjął.
+    """
     events: list[BattleEvent] = []
     seq = sequence
-
-    # B3.9.c: snapshot pre-action wounds_received per blob (do delty)
-    pre_wounds: dict[int, int] = {b.id: b.wounds_received for b in state.blobs}
-
-    actor_id = action.unit_id
-
-    # CR-fix G (pkt 22.c.iv): Ufortyfikowany odrzucany na POCZĄTKU aktywacji
-    # własnego oddziału. Pre-fix: status nigdy nie był usuwany — defender Defendu
-    # z runda 1 niósł Ufortyfikowany przez całą grę (+1 obrona permanentnie).
-    # Emit StatusRemoved + mutacja na live state (idempotentne — guard sprawdza
-    # czy status faktycznie obecny).
     actor_pre = next((b for b in state.blobs if b.id == actor_id), None)
     if actor_pre is not None and STATUS_UFORTYFIKOWANY in actor_pre.status_flags:
         new_actor = _remove_status(actor_pre, STATUS_UFORTYFIKOWANY)
@@ -749,6 +760,27 @@ def activation_phase(
             )
         )
         seq += 1
+    return state, tuple(events), seq
+
+
+def _apply_single_action(
+    state: BattleState,
+    action,  # Action union
+    dice: DeterministicDice,
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    """Jedna akcja w aktywacji (pkt 11.b.ii–iii): akcja → ActivationContext →
+    Przegrupowanie (per akcja, pkt 20) → mutex statusów (pkt 22.b/c) → reset
+    melee_balance starcia. BEZ nadania Aktywowany — to `_finalize_activation`.
+    Wywoływana 1× (single-action wrapper) lub do 2× (apply_activation, pkt 11.b.iv).
+    """
+    events: list[BattleEvent] = []
+    seq = sequence
+
+    # B3.9.c: snapshot pre-action wounds_received per blob (do delty, per akcja)
+    pre_wounds: dict[int, int] = {b.id: b.wounds_received for b in state.blobs}
+
+    actor_id = action.unit_id
 
     # Faza akcji (pkt 14)
     if isinstance(action, ManeuverAction):
@@ -816,6 +848,21 @@ def activation_phase(
             events.append(MeleeBalanceReset(sequence=seq, target_id=combatant_id))
             seq += 1
 
+    return state, tuple(events), seq
+
+
+def _finalize_activation(
+    state: BattleState, actor_id: int, sequence: int
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    """Koniec aktywacji (pkt 11.b.v–vi) — RAZ, po ostatniej akcji.
+
+    (Odzyskiwanie ran pkt 21 — MVP N/A) + status Aktywowany (pkt 11.b.vi,
+    StatusAdded) + safety reset melee_balance aktora + wygaśnięcie efektów „do
+    końca aktywacji" (czyszczenie `ability_overrides` — Rozkaz/Klątwa/Oznaczenie).
+    """
+    events: list[BattleEvent] = []
+    seq = sequence
+
     # Aktor otrzymuje status Aktywowany (pkt 11.b.vi). Sprawdzenie czy nadal istnieje.
     actor = _find_blob(state, actor_id) if any(b.id == actor_id for b in state.blobs) else None
     if actor is not None and actor.models_alive > 0:
@@ -831,13 +878,8 @@ def activation_phase(
                 )
             )
             seq += 1
-        # Pkt 22.c.iv: Ufortyfikowany odrzucany na początku aktywacji oddziału lub
-        # gdy oddział staje się Przyszpilony — tu po Aktywowany interpretujemy
-        # jako "koniec aktywacji" — Ufortyfikowany NIE jest odrzucany tu (per pkt
-        # 22.c.iv: "na początku aktywacji oddziału"). MVP zostawia bez zmian.
-        # Reset melee_balance dla actor (gdy nie był uczestnikiem starcia — np.
-        # Ostrzał z rezultatem 0). Idempotent z resetem powyżej (jeśli był
-        # combatant, melee_balance jest już 0). B3.9.d emit event dla replay.
+        # Safety reset melee_balance aktora (gdy nie był uczestnikiem starcia).
+        # Idempotent z resetem combatants w `_apply_single_action`. B3.9.d emit.
         if actor.melee_balance != 0:
             actor = replace(actor, melee_balance=0)
             events.append(MeleeBalanceReset(sequence=seq, target_id=actor.id))
@@ -855,7 +897,7 @@ def activation_phase(
             events.append(AbilityOverridesCleared(sequence=seq, target_id=b.id))
             seq += 1
 
-    return state, tuple(events)
+    return state, tuple(events), seq
 
 
 # ---------------------------------------------------------------------------

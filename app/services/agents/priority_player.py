@@ -34,6 +34,7 @@ from app.services.agents.base import (
     _move_inches,
     _move_toward,
     enemy_units,
+    legal_followup_actions,
     own_active_units,
 )
 from app.services.engine.actions import (
@@ -59,6 +60,10 @@ from app.services.engine.status import STATUS_PRZYSZPILONY, STATUS_WYCZERPANY
 
 #: Pasywki kwalifikujące do kroku 5 (proxy „Wojownik/Mag"; `wojownik` poza regułami).
 _AGGRESSIVE_OBJECTIVE_SLUGS = frozenset({"mag", "bohater"})
+
+
+def _blob_by_id(state: BattleState, unit_id: int) -> UnitBlob | None:
+    return next((b for b in state.blobs if b.id == unit_id), None)
 
 
 def _unit_cost(blob: UnitBlob) -> int:
@@ -138,6 +143,32 @@ class PriorityPlayer(Player):
         if not units:
             return None
         return self._act(state, perspective, self._select_unit(state, units))
+
+    def continue_activation(
+        self, state: BattleState, perspective: int, unit_id, actions_taken
+    ) -> Action | None:
+        """2. akcja (pkt 11.b.iv) wg priorytetu: Ostrzał, potem Szarża na
+        najbliższego (jeśli legalne, tj. niewykorzystane — pkt 14.c.v/14.d.vi);
+        inaczej None. Kanoniczne combo: Manewr→Ostrzał, Ostrzał→Szarża."""
+        followups = legal_followup_actions(state, perspective, unit_id, actions_taken)
+        unit = _blob_by_id(state, unit_id)
+        if unit is None:
+            return None
+
+        def _nearest(acts: list[Action]) -> Action | None:
+            targeted = [
+                (a, _blob_by_id(state, a.target_id))
+                for a in acts
+            ]
+            targeted = [(a, t) for a, t in targeted if t is not None]
+            if not targeted:
+                return None
+            return min(targeted, key=lambda at: distance(unit.position, at[1].position))[0]
+
+        shoot = _nearest([a for a in followups if isinstance(a, ShootAction)])
+        if shoot is not None:
+            return shoot
+        return _nearest([a for a in followups if isinstance(a, ChargeAction)])
 
     def _select_unit(self, state: BattleState, units: list[UnitBlob]) -> UnitBlob:
         """Najdroższy oddział z celem w zasięgu; fallback: najdroższy aktywny.

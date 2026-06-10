@@ -27,13 +27,26 @@ zero state mutation poza zwracanym ResolverResult.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import Callable
 
-from app.services.engine.actions import Action
+from app.services.engine.actions import Action, ChargeAction, ShootAction
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
-from app.services.engine.phases import activation_phase
+from app.services.engine.phases import (
+    _apply_single_action,
+    _begin_activation,
+    _finalize_activation,
+    activation_phase,
+)
 from app.services.engine.state import BattleState
 from app.services.engine.status import STATUS_AKTYWOWANY
+
+#: Maks. liczba akcji w aktywacji (pkt 11.b.iv — Manewr liczy się do limitu).
+MAX_ACTIONS_PER_ACTIVATION = 2
+
+#: Callback dostarczający kolejną akcję w aktywacji (lub None = koniec).
+#: `(state, unit_id, actions_taken) -> Action | None`.
+ActionProvider = Callable[[BattleState, int, "tuple[Action, ...]"], "Action | None"]
 
 
 class IllegalActionError(Exception):
@@ -167,6 +180,92 @@ def apply(
         state=new_state,
         events=events,
         next_sequence=sequence + len(events),
+    )
+
+
+def _can_take_followup(action: Action, actions_taken: tuple[Action, ...]) -> bool:
+    """Czy `action` jest legalną KOLEJNĄ akcją w aktywacji (pkt 11.b.iv).
+
+    Limit 2 akcji (Manewr liczy się — pkt 11.b.iv po poprawce reguł 2026-06).
+    Brak reguły „akcja różna" na poziomie pkt 11; ograniczenia powtórzeń tylko
+    z definicji: Ostrzał raz (pkt 14.c.v), Szarża raz (pkt 14.d.vi). Więc
+    Manewr+Manewr / Manewr+Ostrzał / Ostrzał+Szarża OK; Ostrzał+Ostrzał i
+    Szarża+Szarża zabronione.
+    """
+    if len(actions_taken) >= MAX_ACTIONS_PER_ACTIVATION:
+        return False
+    if isinstance(action, ShootAction) and any(
+        isinstance(a, ShootAction) for a in actions_taken
+    ):
+        return False  # pkt 14.c.v
+    if isinstance(action, ChargeAction) and any(
+        isinstance(a, ChargeAction) for a in actions_taken
+    ):
+        return False  # pkt 14.d.vi
+    return True
+
+
+def apply_activation(
+    state: BattleState,
+    first_action: Action,
+    dice: DeterministicDice,
+    sequence: int = 1,
+    *,
+    continuation: ActionProvider | None = None,
+) -> ResolverResult:
+    """Pełna aktywacja (pkt 11.b) — do 2 akcji jednego oddziału, potem switch.
+
+    Odpowiednik `apply`, ale realizuje pętlę pkt 11.b.iv: po pierwszej akcji
+    pyta `continuation` o kolejną (dla TEGO samego oddziału), aż zwróci `None`,
+    limit 2 akcji zostanie osiągnięty, akcja będzie nielegalna (Ostrzał/Szarża
+    drugi raz), albo oddział zostanie pokonany. Następnie nadaje Aktywowany
+    (`_finalize_activation`) i przekazuje inicjatywę (pkt 8.a).
+
+    `continuation=None` → zachowanie jak `apply` (1 akcja). Postęp aktywacji
+    (lista akcji) jest LOKALNY — `BattleState` bez zmian schematu, replay
+    invariant zachowany (eventy te same prymitywy: akcja* + Aktywowany + switch).
+
+    Raises:
+        IllegalActionError: pierwsza akcja niedozwolona (zob. `_validate_action`).
+    """
+    _validate_action(state, first_action)
+    unit_id = first_action.unit_id
+    events: list[BattleEvent] = []
+    seq = sequence
+
+    state, begin_events, seq = _begin_activation(state, unit_id, seq)
+    events.extend(begin_events)
+
+    actions_taken: list[Action] = []
+    action: Action | None = first_action
+    while action is not None:
+        state, action_events, seq = _apply_single_action(state, action, dice, seq)
+        events.extend(action_events)
+        actions_taken.append(action)
+
+        if continuation is None or len(actions_taken) >= MAX_ACTIONS_PER_ACTIVATION:
+            break
+        actor = next((b for b in state.blobs if b.id == unit_id), None)
+        if actor is None or actor.models_alive == 0:
+            break  # oddział pokonany w trakcie — koniec aktywacji
+        nxt = continuation(state, unit_id, tuple(actions_taken))
+        if (
+            nxt is None
+            or nxt.unit_id != unit_id  # tylko ten sam oddział (pkt 11: jedna aktywacja)
+            or not _can_take_followup(nxt, tuple(actions_taken))
+        ):
+            break
+        action = nxt
+
+    state, final_events, seq = _finalize_activation(state, unit_id, seq)
+    events.extend(final_events)
+    state, switch_events = _switch_active_player(state, sequence=seq)
+    events.extend(switch_events)
+
+    return ResolverResult(
+        state=state,
+        events=tuple(events),
+        next_sequence=seq + len(switch_events),
     )
 
 

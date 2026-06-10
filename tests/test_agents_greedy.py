@@ -86,6 +86,22 @@ def test_prefers_taking_objective_over_weak_attack():
     assert distance(action.target_position, obj.position) <= 3.0
 
 
+def test_continue_activation_takes_beneficial_followup():
+    # Po Manewrze, wróg w zasięgu → 2. akcja = Ostrzał (score > DEFEND_VALUE).
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+    enemy = _blob(2, 1, 8, 0)
+    state = _state((own, enemy))
+    nxt = GreedyPlayer().continue_activation(state, 0, 1, (ManeuverAction(1, Position(0, 0)),))
+    assert isinstance(nxt, ShootAction)
+
+
+def test_continue_activation_none_when_nothing_beneficial():
+    # Brak wrogów i celów → najlepsza kontynuacja ≤ DEFEND_VALUE → None (nie marnuje akcji).
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+    state = _state((own,))
+    assert GreedyPlayer().continue_activation(state, 0, 1, (ManeuverAction(1, Position(0, 0)),)) is None
+
+
 def test_attack_prefers_enemy_contesting_my_objective():
     # Dwa identyczne, wymiataalne wrogie oddziały: A kontestuje mój cel, B w polu.
     # Obrażenia równe → bonus kontroli celu (wymiecenie A → przejęcie) rozstrzyga.

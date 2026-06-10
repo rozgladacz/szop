@@ -179,6 +179,27 @@ def _can_charge(
     return gap <= move
 
 
+def legal_followup_actions(
+    state: BattleState,
+    perspective: int,
+    unit_id: int,
+    actions_taken: tuple[Action, ...],
+) -> list[Action]:
+    """Legalne KOLEJNE akcje oddziału `unit_id` w trakcie aktywacji (pkt 11.b.iv).
+
+    Filtruje `legal_actions` do tego oddziału i odsiewa nielegalne kontynuacje
+    (limit 2 akcji, Ostrzał/Szarża raz) reużywając `resolver._can_take_followup`
+    (SSOT reguły). Lazy import unika cyklu agents↔resolver na module-load.
+    """
+    from app.services.engine.resolver import _can_take_followup
+
+    return [
+        a
+        for a in legal_actions(state, perspective)
+        if a.unit_id == unit_id and _can_take_followup(a, actions_taken)
+    ]
+
+
 def legal_actions(state: BattleState, perspective: int) -> list[Action]:
     """Enumeruje rozsądnych kandydatów na akcję dla gracza `perspective`.
 
@@ -246,3 +267,19 @@ class Player(ABC):
     ) -> Action | None:
         """Zwraca akcję do wykonania przez gracza `perspective`, albo None."""
         raise NotImplementedError
+
+    def continue_activation(
+        self,
+        state: BattleState,
+        perspective: int,
+        unit_id: int,
+        actions_taken: tuple[Action, ...],
+    ) -> Action | None:
+        """Kolejna akcja TEGO oddziału w aktywacji (pkt 11.b.iv) lub None = koniec.
+
+        Wywoływane przez `resolver.apply_activation` po pierwszej akcji. Default:
+        `None` (1 akcja/aktywację — wsteczna kompatybilność). Boty override, by
+        wykorzystać 2. akcję (np. Manewr→Ostrzał). Kandydaci:
+        `base.legal_followup_actions(state, perspective, unit_id, actions_taken)`.
+        """
+        return None

@@ -27,7 +27,11 @@ from __future__ import annotations
 import math
 from dataclasses import replace
 
-from app.services.agents.base import Player, legal_actions
+from app.services.agents.base import (
+    Player,
+    legal_actions,
+    legal_followup_actions,
+)
 from app.services.agents.policy_eval import objective_balance_with_control
 from app.services.engine.actions import (
     Action,
@@ -99,6 +103,22 @@ class GreedyPlayer(Player):
                 best_score = score
                 best_action = action
         return best_action
+
+    def continue_activation(
+        self, state: BattleState, perspective: int, unit_id, actions_taken
+    ) -> Action | None:
+        """2. akcja (pkt 11.b.iv): najlepsza legalna kontynuacja, jeśli wnosi
+        realną wartość (> `DEFEND_VALUE`); inaczej None (nie marnuje na Obronę)."""
+        followups = legal_followup_actions(state, perspective, unit_id, actions_taken)
+        if not followups:
+            return None
+        base_objective = objective_balance_with_control(state, perspective)
+        best = max(
+            followups,
+            key=lambda a: self._score(state, perspective, a, base_objective),
+        )
+        best_score = self._score(state, perspective, best, base_objective)
+        return best if best_score > DEFEND_VALUE else None
 
     def _score(
         self,

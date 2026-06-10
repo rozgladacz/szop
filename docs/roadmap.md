@@ -173,7 +173,7 @@ Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 wea
 **Phases (`app/services/engine/phases.py`):**
 - [x] `setup_phase(rosters, terrain, objectives, initiative)` — pkt 7+9.
 - [x] `deployment_round(state, actions)` — pkt 13, emit MoveExecuted move_type="deploy".
-- [x] `activation_phase(state, action, dice)` — dispatch per Action type → akcja → Przegrupowanie pkt 20 (uwzględnia pkt 20.b/c/d + passive morale modifiers) → Aktywowany.
+- [x] `activation_phase(state, action, dice)` — dispatch per Action type → akcja → Przegrupowanie pkt 20 (uwzględnia pkt 20.b/c/d + passive morale modifiers) → Aktywowany. **Aktywacja wieloakcyjna 2026-06-10** (ADR-0051, wątek `faza-b-multi-action`): split na `_begin_activation`/`_apply_single_action`/`_finalize_activation`; `resolver.apply_activation` realizuje pętlę do 2 akcji (pkt 11.b.iv — Manewr liczy się; Ostrzał/Szarża raz, pkt 14.c.v/14.d.vi) napędzaną `Player.continue_activation`. `apply` (1 akcja) zostaje dla B4. Postęp lokalny → replay invariant bez nowych eventów.
 - [x] `round_end_phase(state)` — pkt 8.c reset Aktywowany + `_check_objective_control` pkt 5.d (Przyszpilony nie kontroluje pkt 22.b.ii) + RoundEnded + is_game_over po round 4 pkt 5.f.
 - [x] 25 testów.
 
@@ -373,6 +373,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0048 | Rules resync 2026-06: Lokalizacja enum + T_eff + status mutex + Zguba eliminating | ✓ |
 | 0049 | Czasowy ability-override + przerwania Rozkaz/Klątwa/Oznaczenie (BEFORE_ACTION) | ✓ |
 | 0050 | Persystencja event-store: Battle + BattleEvent + persistence.py (B2 slice) | ✓ |
+| 0051 | Aktywacja wieloakcyjna (pkt 11.b.iv): orkiestrator `apply_activation` + `continue_activation` | ✓ |
 
 ---
 
