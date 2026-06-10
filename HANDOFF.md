@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
-| [HANDOFF_faza-d-priority-player](docs/handoffs/HANDOFF_faza-d-priority-player.md) | Bot pół-deterministyczny `PriorityPlayer` (selekcja po koszcie + priorytet akcji 1–7) + ocena balansu. | `app/services/agents/priority_player.py` (NEW), `scripts/balance_simulate.py`, `tests/test_agents_priority.py` | In progress (warstwa agentów, zero zmian w engine/*) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -48,6 +47,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-10 — faza-d-priority-player (archived) — bot pół-deterministyczny PriorityPlayer
+- Implementacja zaproponowanego przez usera bota: `app/services/agents/priority_player.py` — selekcja najdroższego oddziału z celem w zasięgu (proxy HP = `models×toughness`, bo silnik nie ma kosztu pkt; remis→najniższe id), akcja po stałym priorytecie 1–7 (strzał→szarża→Odrzuć Wyczerpany→Obrona[odrzuca Przyszpilony pkt 22.b.v]→[Mag/Bohater] agresja na nie-swój cel gdy deficyt→ruch na cel jeśli nie na celu→Obrona). Reuse helperów `base.py` + `_check_objective_control` (SSOT pkt 5.d) + `effective_passives`. Wpięty w `balance_simulate` (`--players priority`). Warstwa agentów — zero zmian w `engine/*`.
+- Pliki: `app/services/agents/priority_player.py` (NEW), `app/services/agents/__init__.py` (eksport), `scripts/balance_simulate.py` (`priority`), `tests/test_agents_priority.py` (NEW, 13), `docs/roadmap.md` (D1). Commit na `Faza_A`: `<this>`.
+- Weryfikacja: pytest **1539 passed** (1526 + 13); both_assert 156/156; `/simplify` inline (czysto, reuse OK).
+- **Ocena balansu (60 gier/zestaw):** `demo_skirmish` (fronty 36″) priority/random **20-7-33** (wygrywa); `objective_clash` (fronty 28″) priority/random **9-14-37** (PRZEGRYWA); priority/greedy = 100% remisów na obu (oba deterministyczne, symetria). **Wniosek:** zachowuje się jak Greedy — wygrywa bez wczesnej walki (maszeruje na cele i trzyma), przegrywa gdy ogień od startu, bo priorytety 1–2 (strzał/szarża) stoją NAD ruchem na cel (krok 6). „najdroższy" i krok 5 (Wojownik/Mag) inertne na prostych fixturach (równe staty, brak zdolności; `wojownik` nie jest slugiem w rulesecie). **Follow-up (jeśli user chce testować pełną gałąź):** fixtury ze zdolnościami + doprecyzowanie „Wojownik"; rozważyć priorytet ruchu-na-cel nad walką dla botów objective-focused.
+- Doc updates: `docs/roadmap.md` (D1 — `priority_player.py`).
 
 ### 2026-06-10 — faza-d-realistic-fixtures (archived) — fixtury balansu wierne regułom (5 celów, 4 oddziały)
 - Przepisanie `tests/fixtures/battles/{demo_skirmish,objective_clash}.yaml` z 1-cel/2-oddziały (niewierne) na **rules-faithful**: 5 celów (pkt 5.a) rozmieszczonych wg pkt 5.b (≥1 w każdej strefie rozstawienia + lewo/prawo planszy) i pkt 5.c (≥12″ od siebie, ≥6″ od krawędzi) na 72″×48″ (pkt 3.b, strefy 24″ apart pkt 3.a); **4 proste oddziały/stronę** (pkt 2.a min. armii — 5 modeli T3 Q4 D5, bez bohatera/zdolności, 2× karabin + 2× miecz). `demo_skirmish` = rozstawienie standardowe (fronty 36″), `objective_clash` = wysunięte (cele domowe osiągalne w 1 ruchu). Tylko dane fixtur + asercje testów — zero zmian w kodzie silnika/agentów/skryptu.
