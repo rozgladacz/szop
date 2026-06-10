@@ -174,6 +174,14 @@ while not is_battle_over(state):
     save_events(end_events)
 ```
 
+### Persystencja event-store (B2 slice, ADR-0050, 2026-06-10)
+
+`app/services/engine/persistence.py` — jedyny moduł `engine/` dotykający ORM (warstwa-granica; reszta silnika czysta). Dwie nowe tabele w `app/models.py`:
+- **`battles`** (`Battle`): metadane gry (`p1/p2_user_id?`, `p1/p2_roster_id?`, `winner_user_id?`, `current_round`, `rng_seed`, `status`). Przebieg NIE tu — event-sourced.
+- **`battle_events`** (`BattleEvent`, append-only): `event_type` + `payload_json` (`json.dumps(event_to_json(e))`) + `sequence`, `UniqueConstraint(battle_id, sequence)` (optimistic locking).
+
+`save_events(session, battle_id, events, *, flush=True)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0)` (rekonstrukcja przez `json_to_event`). **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`. Odroczone (osobny wątek + user + security-review): `BattleInvite`/`BattleSnapshot`/`AgentToken`/`AgentAuditLog` + kolumny `Unit`.
+
 ### Status B3 (zamknięte 2026-05-30) + B3.9 hardening (zamknięte 2026-06-02)
 
 - **1337/1337 testów** (962 baseline + 282 B3 + 93 nowych w B3.9.a-e: 22 status, 27 geometry, 17 activation_context, 8 replay_invariant, 18 weapons_inventory + 1 regression test)

@@ -103,30 +103,32 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ### B2. Modele danych (4 tyg)
 
+> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). Reszta B2 (User.role/invite/snapshot/Unit-kolumny/AgentToken/AuditLog) odroczona — auth wymaga usera + `/security-review`; kolumny `Unit` wymagają ręcznego ALTER (brak Alembic). Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
+
 **ORM — persistence layer (`app/models.py`):**
 - [ ] `User` — rozszerz: `role` (dodaj `agent`), `owner_user_id?`, `agent_kind?`
-- [ ] `Battle` — `(p1_user_id, p2_user_id, p1_roster_id, p2_roster_id, winner_user_id?, current_round, rng_seed, status, …)`
+- [x] `Battle` — `(p1_user_id?, p2_user_id?, p1_roster_id?, p2_roster_id?, winner_user_id?, current_round, rng_seed, status)` — tabela `battles` (ADR-0050)
 - [ ] `BattleInvite` — `(from_user_id, to_user_id?, roster_id, scenario, status ∈ {pending/accepted/declined/expired}, expires_at)`
-- [ ] `BattleEvent` — append-only: `(battle_id, sequence, event_type, payload_json, timestamp)` + UniqueConstraint
+- [x] `BattleEvent` — append-only: `(battle_id, sequence, event_type, payload_json, timestamp)` + `UniqueConstraint(battle_id, sequence)` — tabela `battle_events` (ADR-0050)
 - [ ] `BattleSnapshot` — opcjonalny: `(battle_id, sequence_at, state_json)` (MVP: nie używany)
 - [ ] `Unit` — dodaj: `base_size_mm: int = 25`, `base_shape: str = "round"`
 - [ ] `AgentToken` — `(agent_user_id, owner_user_id, scope_json, expires_at, revoked_at?, last_used_at)`
 - [ ] `AgentAuditLog` — `(user_id?, agent_user_id?, route, params_json, timestamp)`
-- [ ] Migracja Alembic: `XXX_add_battle_models.py`
+- [!] Migracja Alembic: `XXX_add_battle_models.py` — N/A: projekt nie używa Alembic; nowe tabele addytywne przez `create_all`.
 
 **Runtime dataclass'y — czysty Python (`app/services/engine/state.py`):**
 - [ ] `UnitBlob(frozen=True)` — `(id, owner_player, position, radius_inches, models_alive, wounds_remaining, passives, status_flags)` — semantyka wounds jak istniejący „Stan bitewny"
 - [ ] `BattleState(frozen=True)` — `(round, active_player, activations_remaining, blobs, terrain, pending_effects, pending_interrupts, score)`
 - [ ] `TerrainCircle(frozen=True)`, `TerrainLine(frozen=True)`
 
-**Event definitions (`app/services/engine/events.py`):**
-- [ ] Frozen dataclass per event type: `MoveExecuted`, `ShotResolved`, `MeleeResolved`, `ModelKilled`, `MoraleTestPassed`, `EffectApplied`, `InterruptTriggered`, `RoundEnded`
-- [ ] `event_to_json()` + `json_to_event()` serializer
+**Event definitions (`app/services/engine/events.py`):** — **DONE** (B3.0.3, 16 typów)
+- [x] Frozen dataclass per event type (16: Move/Shot/Melee/ModelKilled/MoraleTest/Effect/Interrupt/RoundEnded/StatusAdded/StatusRemoved/MeleeBalanceReset/MutexCollision/ObjectiveControlChanged/InitiativePassed/AbilityOverrideApplied/AbilityOverridesCleared)
+- [x] `event_to_json()` + `json_to_event()` serializer (+ `_EVENT_REGISTRY` discriminator)
 
-**Persistence (`app/services/engine/persistence.py`):**
-- [ ] `save_events(session, battle_id, events)` — append do BattleEvent
-- [ ] `load_events(session, battle_id, since=0)` — odczyt z db
-- [ ] `create_snapshot()` — optionally save snapshot (MVP: nie wywoływane)
+**Persistence (`app/services/engine/persistence.py`):** — **DONE 2026-06-10** (ADR-0050)
+- [x] `save_events(session, battle_id, events, *, flush=True)` — append do BattleEvent (transakcyjnie neutralny)
+- [x] `load_events(session, battle_id, since=0)` — odczyt z db + rekonstrukcja przez `json_to_event`
+- [!] `create_snapshot()` — N/A w slice (MVP nie wywołuje snapshotów; `BattleSnapshot` model odroczony)
 
 - [ ] ADR-0010: Event-sourced battle log ✓
 - [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence ✓ (scalone z 0010)
@@ -370,6 +372,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0047 | UnitBlob weapons inventory + ACTIVE_ABILITY_REGISTRY (B3.9.e) | ✓ |
 | 0048 | Rules resync 2026-06: Lokalizacja enum + T_eff + status mutex + Zguba eliminating | ✓ |
 | 0049 | Czasowy ability-override + przerwania Rozkaz/Klątwa/Oznaczenie (BEFORE_ACTION) | ✓ |
+| 0050 | Persystencja event-store: Battle + BattleEvent + persistence.py (B2 slice) | ✓ |
 
 ---
 

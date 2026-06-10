@@ -514,6 +514,76 @@ class RosterUnit(TimestampMixin, Base):
     )
 
 
+class Battle(TimestampMixin, Base):
+    """Pojedyncza bitwa 1v1 (Strumień B / ADR-0010 / roadmap B2).
+
+    Wiersz `battles` przechowuje metadane gry; przebieg jest event-sourced w
+    `battle_events` (append-only). `rng_seed` zapewnia determinizm replayu
+    (ADR-0012). `p1_user_id`/`p2_user_id` są nullable — bitwy botów (Strumień D)
+    nie mają człowieka po danej stronie. `status` ∈ {"pending", "active",
+    "finished"} (MVP string; enum w B4). `winner_user_id` ustawiany po pkt 5.f
+    (None = remis lub gra w toku).
+    """
+
+    __tablename__ = "battles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    p1_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    p2_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    p1_roster_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("rosters.id"), nullable=True
+    )
+    p2_roster_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("rosters.id"), nullable=True
+    )
+    winner_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    current_round: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rng_seed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+
+    events: Mapped[List["BattleEvent"]] = relationship(
+        back_populates="battle",
+        cascade="all, delete-orphan",
+        order_by="BattleEvent.sequence",
+    )
+
+
+class BattleEvent(Base):
+    """Append-only event w bitwie (ADR-0010 / ADR-0046 — proof-of-completeness).
+
+    Każdy wiersz to jeden `events.BattleEvent` (16 typów) zserializowany przez
+    `event_to_json` → `payload_json`. `event_type` = nazwa klasy (discriminator,
+    redundantna z payloadem dla zapytań/indeksu). `UniqueConstraint(battle_id,
+    sequence)` egzekwuje globalne uporządkowanie i zapobiega duplikatom przy
+    współbieżnym zapisie (optimistic locking — B4 API obsługuje retry).
+
+    NIE używa `TimestampMixin` — event jest niemutowalny (append-only), więc
+    `updated_at` nie ma sensu; własny `timestamp` znaczy moment zapisu.
+    """
+
+    __tablename__ = "battle_events"
+    __table_args__ = (UniqueConstraint("battle_id", "sequence"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    battle_id: Mapped[int] = mapped_column(
+        ForeignKey("battles.id"), nullable=False, index=True
+    )
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False
+    )
+
+    battle: Mapped[Battle] = relationship(back_populates="events")
+
+
 for cls in [
     User,
     RuleSet,
@@ -527,6 +597,7 @@ for cls in [
     Roster,
     RosterUnit,
     ArmySpell,
+    Battle,
 ]:
     event.listen(cls, "before_insert", touch_timestamps)
     event.listen(cls, "before_update", touch_timestamps)
