@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
-| [HANDOFF_faza-d-realistic-fixtures](docs/handoffs/HANDOFF_faza-d-realistic-fixtures.md) | Fixtury balansu wierne regułom — 5 celów (pkt 5.a/b/c) + 4 proste oddziały/stronę (pkt 2.a) na 72″×48″. | `tests/fixtures/battles/*.yaml`, `tests/test_balance_simulate.py` | In progress (tylko dane fixtur + asercje, zero zmian w kodzie) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -48,6 +47,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-10 — faza-d-realistic-fixtures (archived) — fixtury balansu wierne regułom (5 celów, 4 oddziały)
+- Przepisanie `tests/fixtures/battles/{demo_skirmish,objective_clash}.yaml` z 1-cel/2-oddziały (niewierne) na **rules-faithful**: 5 celów (pkt 5.a) rozmieszczonych wg pkt 5.b (≥1 w każdej strefie rozstawienia + lewo/prawo planszy) i pkt 5.c (≥12″ od siebie, ≥6″ od krawędzi) na 72″×48″ (pkt 3.b, strefy 24″ apart pkt 3.a); **4 proste oddziały/stronę** (pkt 2.a min. armii — 5 modeli T3 Q4 D5, bez bohatera/zdolności, 2× karabin + 2× miecz). `demo_skirmish` = rozstawienie standardowe (fronty 36″), `objective_clash` = wysunięte (cele domowe osiągalne w 1 ruchu). Tylko dane fixtur + asercje testów — zero zmian w kodzie silnika/agentów/skryptu.
+- Pliki: `tests/fixtures/battles/{demo_skirmish,objective_clash}.yaml` (przepis), `tests/test_balance_simulate.py` (asercje 5 celów / 4 oddziały + `test_fixture_objectives_satisfy_placement_rules` pkt 5.c), `docs/roadmap.md` (D2). Commit na `Faza_A`: `073678d`.
+- Weryfikacja: pytest **1526 passed** (1525 + 1 placement test); both_assert 156/156 (fixtury nie ruszają kosztów). Smoke balansu na 5 celach: demo greedy/random 15-5-20 (greedy maszeruje i trzyma cele), clash greedy/random 4-12-24.
+- **ODKRYCIE (słabość heurystyki depth-1, nie fixtur):** GreedyPlayer **nie trzyma zajętych celów** — gdy oddział kontroluje cel, „stój" ma deltę 0 (cel już w bazie ocen), a dostępny atak daje +obrażenia → bot porzuca cel by atakować i traci kontrolę (pkt 5.d). Widoczne gdy wróg w zasięgu od startu (`objective_clash`). Facet miopii depth-1 obok „nie maszeruje do dalekich celów". **Follow-up (D-stream):** bonus za utrzymanie kontroli lub depth-2 (D4 minimax). Kandydat na nowy wątek.
+- Doc updates: `docs/roadmap.md` (D2 — fixtury wierne regułom + słabość depth-1).
 
 ### 2026-06-10 — faza-d-greedy-objectives (archived) — kontrola celów w heurystyce GreedyPlayer
 - Follow-up z insightu D2 (greedy przegrywał z random, bo punktował tylko obrażenia). `policy_eval.py`: refaktor `evaluate_state` na `_hp_balance`+`_objective_balance` (reuse, zachowanie 1:1) + nowy `objective_balance_with_control` — przelicza kontrolę celów z pozycji (pkt 5.d) reużywając `phases._check_objective_control` (SSOT, [CRITICAL] #3). `greedy_player.py`: atak/manewr punktowane na **wspólnej walucie wartości celów** (przejęcie/utrata kontroli, pkt 5.f), nie tylko obrażeniach — atak `mean×WOUND_VALUE` (HP fine-grained) + Δ kontroli na hipotetycznym stanie z wymiecionymi modelami (`round(expected_models_killed())`); manewr = Δ kontroli (ruch nie zmienia HP). Brak double-count. `_replace_blob` helper wspólny. **Warstwa agentów — zero zmian w `engine/*`** → brak kolizji z `faza-b-order-interrupts`.
