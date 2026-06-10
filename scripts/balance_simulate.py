@@ -53,6 +53,7 @@ from app.services.agents import (  # noqa: E402
     GreedyPlayer,
     Player,
     PriorityPlayer,
+    PriorityV2Player,
     RandomPlayer,
     simulate_from_rosters,
 )
@@ -66,7 +67,7 @@ from app.services.engine.state import (  # noqa: E402
 #: Domyślna fixtura gdy `--fixture` nie podane.
 DEFAULT_FIXTURE = _repo_root / "tests" / "fixtures" / "battles" / "demo_skirmish.yaml"
 
-PLAYER_KINDS = ("random", "greedy", "priority")
+PLAYER_KINDS = ("random", "greedy", "priority", "priority2")
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +155,8 @@ def make_player(kind: str, seed: int) -> Player:
         return GreedyPlayer()
     if kind == "priority":
         return PriorityPlayer()
+    if kind == "priority2":
+        return PriorityV2Player()
     raise ValueError(f"Nieznany typ gracza: {kind!r} (oczekiwano {PLAYER_KINDS})")
 
 
