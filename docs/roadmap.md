@@ -77,7 +77,6 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [x] A4.5: `Makefile` cel `rules-check` (orchestracja 5 skryptów; drift LAST żeby exit 2 WARN nie zatrzymał wcześniejszych artefaktów). + AGENTS.md/docs/testing.md udokumentowane.
 - [x] A4.6: `.github/workflows/rules_drift.yml` — CI gate path-filtered (PR+push), exit code semantics (0=pass, 1=fail, 2=warn-pass), artifact upload + step summary z raportów.
 - [x] A4.7: ADR-0006 promocja `Proposed → Accepted` — 8 punktów rewizji rozstrzygnięte empirycznie po A4.1–A4.6. **Faza A4 done. Strumień B0 odblokowany.**
-- [ ] A4.7: ADR-0006 promocja `Proposed → Accepted` (8 punktów rewizji w sekcji "Do rewizji")
 
 ### A5. Wydajność ✅
 - [x] `tests/test_quote_performance_regression.py` — `min(yaml_time/proc_time)` ≤ 1.30 (3 attempts × min, headroom 0.10 na Windows noise; bare-metal Linux median ~1.10×)
