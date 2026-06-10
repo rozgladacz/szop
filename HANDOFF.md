@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
-| [HANDOFF_faza-d-priority-v2](docs/handoffs/HANDOFF_faza-d-priority-v2.md) | `PriorityV2Player` — rozbudowany bot (selekcja po stanie wroga + ruch przechwytujący + wybór celu przez prediction); prosty `PriorityPlayer` zachowany. | `app/services/agents/priority_v2_player.py` (NEW), `scripts/balance_simulate.py` | In progress (nowy bot, zero zmian w prostej wersji/silniku) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -48,6 +47,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-10 — faza-d-priority-v2 (archived) — rozbudowany bot PriorityV2Player (porównanie)
+- Nowy `app/services/agents/priority_v2_player.py` (`PriorityV2Player`, `--players priority2`); prosty `PriorityPlayer` zachowany do porównań. Selekcja aktywacji 4-kryterialna (zdrowy → najbliżej nieaktywowanego/zdrowego/dowolnego wroga); akcja 1–8 z ruchem przechwytującym (obrona własnego celu przed zbliżającym się wrogiem); wybór celu ataku przez `prediction` (zdrowy → nieaktywowany → `p_full_kill` → `mean` → najbliżej, ADR-0044). Reuse helperów `base`+`priority_player`, `_check_objective_control` (SSOT pkt 5.d). Zero zmian w prostym bocie i rdzeniu silnika.
+- Pliki: `app/services/agents/priority_v2_player.py` (NEW), `__init__.py` (eksport), `scripts/balance_simulate.py` (`priority2`), `tests/test_agents_priority_v2.py` (NEW 12), `docs/roadmap.md`. Commit na `Faza_A`: `<this>`.
+- Weryfikacja: pytest **1571** (1559 + 12); `/simplify` inline.
+- **WYNIK PORÓWNANIA (60 gier):** v2 bije random (67–70%) i greedy (78–98%), ale **PRZEGRYWA głową w głowę z prostym `PriorityPlayer`** (demo 1:47, clash 10:42). **Wniosek: złożoność ≠ siła.** „Preferuj zdrowy/nieaktywowany cel" rozprasza ogień na świeże oddziały zamiast dobijać ranne; prosty (strzel najbliższego) koncentruje ogień → więcej eliminacji. Ruch przechwytujący cofa od naporu na cele. Prosty pozostaje baseline. **Follow-up (jeśli iteracja v2):** target-priorytet „dobij rannego / skup ogień" (min `models_alive` lub max `expected_models_killed`) zamiast „preferuj zdrowego".
+- Doc updates: roadmap D1 (`priority_v2_player` + wynik porównania).
 
 ### 2026-06-10 — faza-b-multi-action (archived) — aktywacja wieloakcyjna (pkt 11.b.iv, ADR-0051)
 - Silnik wspiera **do 2 akcji/aktywację** zamiast 1 (luka MVP wykryta przy ocenie botów; user poprawił źródło pkt 11.b.iv — Manewr liczy się do limitu, punkt „akcja różna" usunięty; Ostrzał/Szarża raz z definicji pkt 14.c.v/14.d.vi). **Decyzja (ADR-0051):** postęp aktywacji LOKALNY w orkiestratorze `resolver.apply_activation` (nie w `BattleState`) → zero zmian schematu/replay, brak nowych typów eventów, brak kolizji z lockiem `state.py`. Split `phases.activation_phase` na `_begin_activation` (zdejmij Ufortyfikowany RAZ pkt 22.c.iv) + `_apply_single_action` (akcja + Przegrupowanie per akcja pkt 11.b.iii) + `_finalize_activation` (Aktywowany + wygaśnięcie override'ów); wrapper zachowuje zachowanie 1:1. `apply` (1 akcja) zostaje dla B4 per-action API. Boty: `Player.continue_activation` (default None — wsteczna kompat) + override Random/Greedy/Priority; `base.legal_followup_actions` reużywa `_can_take_followup` (SSOT). `match.run_match` → `apply_activation`.
