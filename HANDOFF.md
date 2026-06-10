@@ -48,6 +48,13 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
+### 2026-06-10 — faza-d-balance-report (archived) — D2 generator raportu balansu
+- `scripts/balance_report.py` (NEW) — round-robin turniej botów: każda fixtura × każda para typów (kombinacje z powtórzeniem; mirror P0↔P1 w `win_rate_p0/p1`) reużywa `balance_simulate.simulate_balance` (SSOT, ADR-0032; zero re-implementacji pętli gry) → raport markdown `reports/balance/YYYY-MM-DD.md` z tabelą win-rate i **tekstowymi (unicode `█`/`░`) wykresami słupkowymi**. CLI `--fixtures/--players/-n/--seed/--out`; headless/deterministyczny per `--seed`. **Wykresy tekstowe, nie obrazowe** — świadomie dependency-free (matplotlib NIE w `requirements*`; obrazy = follow-up gdy user zechce zależności). Skrypt-liść — zero zmian w `engine/*`/`agents/*`. `reports/` gitignored (artefakt generowany, spójnie z `build/`).
+- Pliki: `scripts/balance_report.py` (NEW), `tests/test_balance_report.py` (NEW, 19), `.gitignore` (`reports/`), `docs/roadmap.md` (D2 `balance_report.py` ✓), `scripts/README.md` (wpis). Commit na `Faza_A`: `<this>`.
+- Weryfikacja: pytest **1593 passed** (1574 baseline + 19); both_assert **156/156** (skrypt nie rusza kosztów); smoke realny raport `-n 12` → 360 gier (3 fixtury × 10 par) OK. `/simplify` inline 4 kąty — 0 zmian (kod czysty); `/review`+`/security-review` N/A (izolowany liść, brak hot-path/SSOT/auth/DB).
+- **Dane z raportu (sanity, nie deliverable):** `priority` najsilniejszy (vs random 92%, vs greedy 83%); `greedy/greedy` 100% remisów (symetria deterministyczna); potwierdza wcześniejsze obserwacje D-stream.
+- Doc updates: `docs/roadmap.md` (D2 `balance_report.py` ✓), `scripts/README.md` (sekcja „Inne skrypty" — wpis `balance_report.py`).
+
 ### 2026-06-10 — faza-d-priority-v2 (archived) — rozbudowany bot PriorityV2Player (porównanie)
 - Nowy `app/services/agents/priority_v2_player.py` (`PriorityV2Player`, `--players priority2`); prosty `PriorityPlayer` zachowany do porównań. Selekcja aktywacji 4-kryterialna (zdrowy → najbliżej nieaktywowanego/zdrowego/dowolnego wroga); akcja 1–8 z ruchem przechwytującym (obrona własnego celu przed zbliżającym się wrogiem); wybór celu ataku przez `prediction` (zdrowy → nieaktywowany → `p_full_kill` → `mean` → najbliżej, ADR-0044). Reuse helperów `base`+`priority_player`, `_check_objective_control` (SSOT pkt 5.d). Zero zmian w prostym bocie i rdzeniu silnika.
 - Pliki: `app/services/agents/priority_v2_player.py` (NEW), `__init__.py` (eksport), `scripts/balance_simulate.py` (`priority2`), `tests/test_agents_priority_v2.py` (NEW 12), `docs/roadmap.md`. Commit na `Faza_A`: `<this>`.

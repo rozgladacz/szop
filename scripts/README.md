@@ -244,6 +244,20 @@ python scripts/balance_simulate.py -n 200 --players greedy,random    # 200 gier,
 python scripts/balance_simulate.py --fixture <PATH> --out build/balance.csv
 ```
 
+### `balance_report.py` (D2)
+
+Round-robin turniej botów (każda fixtura × każda para typów — kombinacje
+z powtórzeniem) reużywający `balance_simulate.simulate_balance` (SSOT) →
+raport markdown `reports/balance/YYYY-MM-DD.md` z tabelą win-rate i tekstowymi
+(unicode) wykresami słupkowymi. Wykresy są **tekstowe, nie obrazowe** (bez
+matplotlib — dependency-free). `reports/` jest gitignored (artefakt generowany).
+
+```powershell
+python scripts/balance_report.py                                     # wszystkie fixtury + boty
+python scripts/balance_report.py -n 50 --players random,greedy,priority
+python scripts/balance_report.py --fixtures <A.yaml>,<B.yaml> --out reports/balance/custom.md
+```
+
 ### `reflect_and_improve.py`
 
 Analiza ostatnich 10 transkryptów Claude Code, generuje
