@@ -52,6 +52,7 @@ if str(_repo_root) not in sys.path:
 from app.services.agents import (  # noqa: E402
     GreedyPlayer,
     Player,
+    PriorityPlayer,
     RandomPlayer,
     simulate_from_rosters,
 )
@@ -65,7 +66,7 @@ from app.services.engine.state import (  # noqa: E402
 #: Domyślna fixtura gdy `--fixture` nie podane.
 DEFAULT_FIXTURE = _repo_root / "tests" / "fixtures" / "battles" / "demo_skirmish.yaml"
 
-PLAYER_KINDS = ("random", "greedy")
+PLAYER_KINDS = ("random", "greedy", "priority")
 
 
 # ---------------------------------------------------------------------------
@@ -145,12 +146,14 @@ def load_battle_fixture(path: str | os.PathLike) -> BattleFixture:
 
 
 def make_player(kind: str, seed: int) -> Player:
-    """Buduje gracza D1 z nazwy. `greedy` ignoruje seed (deterministyczny)."""
+    """Buduje gracza z nazwy. `greedy`/`priority` ignorują seed (deterministyczne)."""
     kind = kind.lower()
     if kind == "random":
         return RandomPlayer(seed=seed)
     if kind == "greedy":
         return GreedyPlayer()
+    if kind == "priority":
+        return PriorityPlayer()
     raise ValueError(f"Nieznany typ gracza: {kind!r} (oczekiwano {PLAYER_KINDS})")
 
 

@@ -5,6 +5,7 @@ Public API:
 - `legal_actions(state, perspective)` — enumerator kandydatów na akcję.
 - `RandomPlayer(seed)` — baseline, losuje uniform.
 - `GreedyPlayer()` — depth-1 maksymalizacja wartości akcji.
+- `PriorityPlayer()` — pół-deterministyczny: selekcja po koszcie + priorytet akcji 1–7.
 - `evaluate_state(state, perspective)` — skalarna ocena stanu.
 - `run_match(state, players, dice)` / `simulate_from_rosters(...)` — headless
   pętla bitwy (orkiestrator pełnej gry) → `MatchResult`.
@@ -21,6 +22,7 @@ from app.services.agents.match import (
     simulate_from_rosters,
 )
 from app.services.agents.policy_eval import evaluate_state
+from app.services.agents.priority_player import PriorityPlayer
 from app.services.agents.random_player import RandomPlayer
 
 __all__ = [
@@ -28,6 +30,7 @@ __all__ = [
     "legal_actions",
     "RandomPlayer",
     "GreedyPlayer",
+    "PriorityPlayer",
     "evaluate_state",
     "MatchResult",
     "run_match",
