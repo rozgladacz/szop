@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from app.services.agents.priority_player import PriorityPlayer
+from app.services.engine.geometry import distance
 from app.services.engine.actions import (
     ChargeAction,
     DefendAction,
@@ -183,10 +184,25 @@ def test_continue_activation_shoots_after_maneuver():
     assert isinstance(nxt, ShootAction) and nxt.target_id == 2
 
 
-def test_continue_activation_none_when_shoot_used_and_no_melee():
-    # Ostrzał już wykonany (pkt 14.c.v) + brak broni wręcz → brak kontynuacji.
-    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+def test_continue_activation_moves_to_objective_after_shoot():
+    # KLUCZOWA poprawka: po Ostrzale (zużyty, pkt 14.c.v) bot NIE marnuje akcji —
+    # schodzi do celu (priorytet 6), zamiast stać w miejscu.
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))  # brak broni wręcz
     enemy = _blob(2, 1, 8, 0)
-    state = _state((own, enemy))
+    obj = Objective(id=1, position=Position(20, 0), controller=None)  # nie na celu
+    state = _state((own, enemy), (obj,))
     taken = (ShootAction(1, 2, RIFLE),)
-    assert PriorityPlayer().continue_activation(state, 0, 1, taken) is None
+    nxt = PriorityPlayer().continue_activation(state, 0, 1, taken)
+    assert isinstance(nxt, ManeuverAction)
+    # Ruch zbliża do celu (maleje dystans do (20,0)).
+    assert distance(nxt.target_position, obj.position) < distance(own.position, obj.position)
+
+
+def test_continue_activation_defends_on_objective_after_shoot():
+    # Po Ostrzale, już na celu, brak wroga w zasięgu → priorytet 7 Obrona (trzyma cel).
+    own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
+    obj = Objective(id=1, position=Position(1, 0), controller=None)  # na celu (gap≤3)
+    far_enemy = _blob(2, 1, 60, 0)
+    state = _state((own, far_enemy), (obj,))
+    taken = (ShootAction(1, 2, RIFLE),)
+    assert isinstance(PriorityPlayer().continue_activation(state, 0, 1, taken), DefendAction)

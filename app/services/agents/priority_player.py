@@ -34,7 +34,6 @@ from app.services.agents.base import (
     _move_inches,
     _move_toward,
     enemy_units,
-    legal_followup_actions,
     own_active_units,
 )
 from app.services.engine.actions import (
@@ -147,28 +146,16 @@ class PriorityPlayer(Player):
     def continue_activation(
         self, state: BattleState, perspective: int, unit_id, actions_taken
     ) -> Action | None:
-        """2. akcja (pkt 11.b.iv) wg priorytetu: Ostrzał, potem Szarża na
-        najbliższego (jeśli legalne, tj. niewykorzystane — pkt 14.c.v/14.d.vi);
-        inaczej None. Kanoniczne combo: Manewr→Ostrzał, Ostrzał→Szarża."""
-        followups = legal_followup_actions(state, perspective, unit_id, actions_taken)
+        """2. akcja (pkt 11.b.iv): kolejna akcja wg PEŁNEGO priorytetu 1–7,
+        pomijając już wykorzystany Ostrzał/Szarżę (pkt 14.c.v/14.d.vi). Dzięki
+        temu po strzale (Ostrzał zużyty) bot schodzi do celu (priorytet 6) lub
+        broni go (7) — „najpierw strzela, potem idzie do celu" — zamiast marnować
+        akcję. Zawsze zwraca dostępną akcję (oddział żywy); None tylko gdy oddział
+        zniknął."""
         unit = _blob_by_id(state, unit_id)
         if unit is None:
             return None
-
-        def _nearest(acts: list[Action]) -> Action | None:
-            targeted = [
-                (a, _blob_by_id(state, a.target_id))
-                for a in acts
-            ]
-            targeted = [(a, t) for a, t in targeted if t is not None]
-            if not targeted:
-                return None
-            return min(targeted, key=lambda at: distance(unit.position, at[1].position))[0]
-
-        shoot = _nearest([a for a in followups if isinstance(a, ShootAction)])
-        if shoot is not None:
-            return shoot
-        return _nearest([a for a in followups if isinstance(a, ChargeAction)])
+        return self._act(state, perspective, unit, actions_taken)
 
     def _select_unit(self, state: BattleState, units: list[UnitBlob]) -> UnitBlob:
         """Najdroższy oddział z celem w zasięgu; fallback: najdroższy aktywny.
@@ -180,18 +167,32 @@ class PriorityPlayer(Player):
         pool = with_objective or units
         return min(pool, key=lambda u: (-_unit_cost(u), u.id))
 
-    def _act(self, state: BattleState, perspective: int, unit: UnitBlob) -> Action:
+    def _act(
+        self,
+        state: BattleState,
+        perspective: int,
+        unit: UnitBlob,
+        actions_taken: tuple[Action, ...] = (),
+    ) -> Action:
+        """Wybiera akcję wg priorytetu 1–7, pomijając Ostrzał/Szarżę już
+        wykonane w tej aktywacji (pkt 14.c.v/14.d.vi). `actions_taken` puste dla
+        1. akcji; niepuste dla kontynuacji (2. akcja) → bot „przechodzi listę
+        ponownie" i wybiera następną DOSTĘPNĄ akcję, nie marnując slotu."""
         move = _move_inches()
         enemies = enemy_units(state, perspective)
+        shoot_used = any(isinstance(a, ShootAction) for a in actions_taken)
+        charge_used = any(isinstance(a, ChargeAction) for a in actions_taken)
 
-        # 1. Strzelaj do najbliższego.
-        shoot = _nearest_enemy_shoot(unit, enemies, state.terrain)
-        if shoot is not None:
-            return shoot
-        # 2. Szarżuj na najbliższego.
-        charge = _nearest_enemy_charge(unit, enemies, move)
-        if charge is not None:
-            return charge
+        # 1. Strzelaj do najbliższego (o ile Ostrzał nie wykonany — pkt 14.c.v).
+        if not shoot_used:
+            shoot = _nearest_enemy_shoot(unit, enemies, state.terrain)
+            if shoot is not None:
+                return shoot
+        # 2. Szarżuj na najbliższego (o ile Szarża nie wykonana — pkt 14.d.vi).
+        if not charge_used:
+            charge = _nearest_enemy_charge(unit, enemies, move)
+            if charge is not None:
+                return charge
         # 3. Zdejmij Wyczerpany.
         if STATUS_WYCZERPANY in unit.status_flags:
             return SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
