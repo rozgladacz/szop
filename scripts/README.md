@@ -234,7 +234,9 @@ make profile ROSTER=10 BACKEND=yaml                        # convenience wrapper
 
 Agreguje N headless gier (`app.services.agents.simulate_from_rosters`,
 ADR-0032) → win-rate per rozpiska + draw-rate + śr. rund. Inicjatywa
-naprzemienna usuwa bias 1. gracza. Para rosterów z fixtury YAML
+naprzemienna usuwa bias 1. gracza; gracze P0/P1 seedowani rozłącznie
+(`PLAYER_SEED_OFFSET`) — bez tego mirror random-vs-random zawyżałby remisy
+(F2). Para rosterów z fixtury YAML
 (`tests/fixtures/battles/*.yaml`, format engine-dict). Headless,
 deterministyczny per `--seed`. Zero zmian w rdzeniu silnika.
 
