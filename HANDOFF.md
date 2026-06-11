@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-b-order-interrupts](docs/handoffs/HANDOFF_faza-b-order-interrupts.md) | Klątwa(X)/Rozkaz(X)/Oznaczenie(X) (id 45/49/50) — przerwanie BEFORE_ACTION nadające/odbierające pasywkę X do końca aktywacji. | `app/services/engine/{state,effects,events,reducers,interrupts,phases}.py` | MVP mechanizmu DONE (Fazy 1-3 ✅, ADR-0049, 28 testów); follow-up: Oznaczenie trigger + auto-orkiestracja (B4) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-11 — faza-b-order-interrupts (archived) — Klątwa/Rozkaz/Oznaczenie MVP + F1 fix
+- Wątek zamknięty: mechanizm przerwań Rozkaz(X)/Klątwa(X)/Oznaczenie(X) (id 45/49/50) — substrat `ability_overrides` + `effective_passives`, handlery `BEFORE_ACTION` (zasięg 12″, ally/enemy, `rozkaz_tak`, raz-na-rundę), wygaśnięcie na końcu aktywacji (Fazy 1-4 ✅, ADR-0049, 28 testów). **H1 ZAMKNIĘTE** (user 2026-06-11): kierunek `granted = rozkaz_tak XOR (typ=="klatwa")`. **H2 DEFERRED**: auto-orkiestracja (kto/kiedy wywołuje + wybór celu) → przyszły wątek B4. Domknięcie: code-review **F1 NAPRAWIONE** — `_apply_order_like` guard `source.models_alive == 0` (pokonany nosiciel nie wyda przerwania gdy B4 wywoła `trigger_interrupt` z pominięciem `get_eligible_interrupts`).
+- Pliki: `app/services/engine/interrupts.py` (F1 guard). Commit na `Faza_A`: `056e334`.
+- Weryfikacja: pytest **1607 passed** (1 pre-existing fail `test_real_source_hashes_match` — stale `source_hashes.yaml` po lokalnej edycji pkt 20, orthogonalne); order-abilities+interrupts 45/45 zielone.
+- **Follow-upy (osobne wątki, NOT blocking):** `Oznaczenie-trigger` (precyzyjny trigger ataku w 12″ od nosiciela); `B4-auto-orkiestracja` (wpięcie deklaracji przerwań w pętlę aktywacji). F3/F4 z code-review odnotowane jako warunkowe obserwacje (niereproducowalne dziś).
+- Doc updates: brak/N/A (ADR-0049 + roadmap R4.Klątwa + ADR index 0049 ✓ zrobione w trakcie wątku).
 
 ### 2026-06-11 — faza-b-regroup-choice (archived) — pkt 20.f.i wybór konsekwencji Przegrupowania
 - Źródło (edycja usera) pkt 20.f.i: przy 1 porażce Przegrupowania **kontrolujący wybiera** Wyczerpany albo Przyszpilony (2/3 bez wyboru). Silnik hardcodował Wyczerpany. **Zmiana:** callback `regroup_choice(state, blob) -> "exhausted"|"pinned"` przeprowadzony przez `phases._regroup_test`/`_apply_single_action`/`activation_phase` + `resolver.apply`/`apply_activation`; `match.run_match` dispatchuje do `players[blob.owner_player].choose_regroup_consequence` (decyzję podejmuje **kontrolujący** oddział — może być przeciwnik aktywnego gracza). Default None → Wyczerpany (wsteczna kompat). **Replay-safe minimalnie:** `MoraleTestPassed.result_status="pinned"` + reducer JUŻ istniały (zero zmian w events/reducers/state). Boty: `Player.choose_regroup_consequence` (default "exhausted"); **v3 drzewo usera** (Przyszpilony→pinned; Wyczerpany→exhausted; Ufortyfikowany→pinned; 3″ od celu→exhausted; inaczej pinned).
