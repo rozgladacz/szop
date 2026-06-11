@@ -140,6 +140,11 @@ def run_match(
                 continuation=lambda s, uid, taken, _p=player, _a=active: _p.continue_activation(
                     s, _a, uid, taken
                 ),
+                # Pkt 20.f.i: konsekwencję 1-porażki Przegrupowania wybiera
+                # KONTROLUJĄCY oddział (może być przeciwnik aktywnego gracza).
+                regroup_choice=lambda s, blob, _ps=players: _ps[
+                    blob.owner_player
+                ].choose_regroup_consequence(s, blob),
             )
             state = result.state
             seq = result.next_sequence

@@ -283,3 +283,13 @@ class Player(ABC):
         `base.legal_followup_actions(state, perspective, unit_id, actions_taken)`.
         """
         return None
+
+    def choose_regroup_consequence(self, state: BattleState, unit: UnitBlob) -> str:
+        """Wybór konsekwencji nieudanego Przegrupowania przy JEDNEJ porażce
+        (pkt 20.f.i): `"exhausted"` (Wyczerpany) lub `"pinned"` (Przyszpilony).
+
+        Decyzję podejmuje **kontrolujący** `unit` (przy 2/3 porażkach brak
+        wyboru). Default `"exhausted"` (zachowanie sprzed pkt 20.f.i). Boty
+        objective-aware override.
+        """
+        return "exhausted"

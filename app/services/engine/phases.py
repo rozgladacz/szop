@@ -525,6 +525,7 @@ def _regroup_test(
     context: ActivationContext,
     dice: DeterministicDice,
     sequence: int,
+    regroup_choice=None,
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Pkt 20 Przegrupowanie (post-B3.9.c — delta-based per ADR-0045).
 
@@ -598,12 +599,19 @@ def _regroup_test(
     roll_result = dice.roll_with_threshold(count=n_tests, threshold=4)
     failures = n_tests - roll_result.successes
 
-    # Mapping per pkt 20.e
+    # Mapping per pkt 20.f
     new_blob = blob
     if failures == 1:
-        # MVP: default Wyczerpany (gracz wybiera w pkt 20.e.i, ale tu deterministyczny)
-        new_blob = _add_status(new_blob, STATUS_WYCZERPANY)
-        result_status = "exhausted"
+        # Pkt 20.f.i: kontrolujący wybiera Wyczerpany albo Przyszpilony.
+        # `regroup_choice(state, blob) -> "exhausted"|"pinned"`; brak callbacku
+        # (np. `apply`/testy) → default Wyczerpany (wsteczna kompat).
+        choice = regroup_choice(state, blob) if regroup_choice is not None else "exhausted"
+        if choice == "pinned":
+            new_blob = _add_status(new_blob, STATUS_PRZYSZPILONY)
+            result_status = "pinned"
+        else:
+            new_blob = _add_status(new_blob, STATUS_WYCZERPANY)
+            result_status = "exhausted"
     elif failures == 2:
         new_blob = _add_status(new_blob, STATUS_WYCZERPANY)
         new_blob = _add_status(new_blob, STATUS_PRZYSZPILONY)
@@ -696,6 +704,7 @@ def activation_phase(
     dice: DeterministicDice,
     sequence: int = 1,
     initial_toughness_totals: dict[int, int] | None = None,  # deprecated, B3.9.c
+    regroup_choice=None,
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Pkt 11.b — Zwykła aktywacja (wrapper 1-akcji): akcja → Przegrupowanie →
     status Aktywowany. Składa `_begin_activation` + `_apply_single_action` +
@@ -732,7 +741,7 @@ def activation_phase(
     # (pkt 11.b.iv) jest w `resolver.apply_activation`, który składa te same
     # 3 kroki, wielokrotnie wywołując `_apply_single_action`.
     state, begin_events, seq = _begin_activation(state, action.unit_id, sequence)
-    state, action_events, seq = _apply_single_action(state, action, dice, seq)
+    state, action_events, seq = _apply_single_action(state, action, dice, seq, regroup_choice)
     state, final_events, seq = _finalize_activation(state, action.unit_id, seq)
     return state, begin_events + action_events + final_events
 
@@ -768,6 +777,7 @@ def _apply_single_action(
     action,  # Action union
     dice: DeterministicDice,
     sequence: int,
+    regroup_choice=None,
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Jedna akcja w aktywacji (pkt 11.b.ii–iii): akcja → ActivationContext →
     Przegrupowanie (per akcja, pkt 20) → mutex statusów (pkt 22.b/c) → reset
@@ -821,7 +831,7 @@ def _apply_single_action(
         if subject is None or subject.models_alive == 0:
             continue
         state, regroup_events, seq = _regroup_test(
-            state, subject_id, context, dice, seq
+            state, subject_id, context, dice, seq, regroup_choice
         )
         events.extend(regroup_events)
 

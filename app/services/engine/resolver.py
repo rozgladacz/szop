@@ -154,6 +154,7 @@ def apply(
     action: Action,
     dice: DeterministicDice,
     sequence: int = 1,
+    regroup_choice=None,
 ) -> ResolverResult:
     """Pure resolver per ADR-0011 — dispatcher dla pojedynczej aktywacji.
 
@@ -170,7 +171,9 @@ def apply(
         IllegalActionError: akcja niedozwolona (zob. `_validate_action`).
     """
     _validate_action(state, action)
-    new_state, activation_events = activation_phase(state, action, dice, sequence)
+    new_state, activation_events = activation_phase(
+        state, action, dice, sequence, regroup_choice=regroup_choice
+    )
     # CR-fix B: InitiativePassed event emit (gdy inicjatywa się zmienia)
     new_state, switch_events = _switch_active_player(
         new_state, sequence=sequence + len(activation_events)
@@ -212,6 +215,7 @@ def apply_activation(
     sequence: int = 1,
     *,
     continuation: ActionProvider | None = None,
+    regroup_choice=None,
 ) -> ResolverResult:
     """Pełna aktywacja (pkt 11.b) — do 2 akcji jednego oddziału, potem switch.
 
@@ -239,7 +243,7 @@ def apply_activation(
     actions_taken: list[Action] = []
     action: Action | None = first_action
     while action is not None:
-        state, action_events, seq = _apply_single_action(state, action, dice, seq)
+        state, action_events, seq = _apply_single_action(state, action, dice, seq, regroup_choice)
         events.extend(action_events)
         actions_taken.append(action)
 
