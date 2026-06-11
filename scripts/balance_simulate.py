@@ -69,6 +69,14 @@ DEFAULT_FIXTURE = _repo_root / "tests" / "fixtures" / "battles" / "demo_skirmish
 
 PLAYER_KINDS = ("random", "greedy", "priority", "priority2")
 
+#: Offset seeda decyzji P1 względem P0. Bez niego oba `RandomPlayer` dostają
+#: ten sam seed → na symetrycznej fixturze produkują **lustrzane** strumienie
+#: decyzji, co daje systematyczny bias pozycyjny zamiast ~50/50 (finding F2,
+#: REVIEW_2026-06-11). Duża liczba pierwsza: rozłączna od seeda kości kolejnych
+#: gier (`base_seed + i`, i << OFFSET) i względnie pierwsza, więc strumienie
+#: P0/P1 się nie pokrywają. Seed bazowy nadal w pełni determinuje przebieg.
+PLAYER_SEED_OFFSET = 1_000_003
+
 
 # ---------------------------------------------------------------------------
 # Fixtura
@@ -239,9 +247,12 @@ def simulate_balance(
     """Rozgrywa N gier i agreguje zwycięzców per owner_player.
 
     Każda gra: seed kości = `base_seed + i`, inicjatywa = `i % 2`. Gracze
-    budowani świeżo per grę z seedem pochodnym (`base_seed + i`) — dla
-    `RandomPlayer` daje wariację decyzji niezależnie od kości; `GreedyPlayer`
-    seed ignoruje. Zwycięzca z `MatchResult.winner ∈ {0,1,None}` (pkt 5.f).
+    budowani świeżo per grę z **rozłącznych** seedów — P0 = `base_seed + i`,
+    P1 = `base_seed + i + PLAYER_SEED_OFFSET`. Rozłączność usuwa bias mirror-
+    matchu: dwa `RandomPlayer` z tym samym seedem na symetrycznej fixturze
+    grałyby lustrzanie (finding F2). `GreedyPlayer`/`PriorityPlayer` seed
+    ignorują (deterministyczne) — offset jest dla nich nieszkodliwy. Zwycięzca
+    z `MatchResult.winner ∈ {0,1,None}` (pkt 5.f).
     """
     if n <= 0:
         raise ValueError(f"n musi być > 0, jest {n}")
@@ -250,7 +261,10 @@ def simulate_balance(
     total_rounds = 0
     for i in range(n):
         seed = base_seed + i
-        players = [make_player(player_kinds[0], seed), make_player(player_kinds[1], seed)]
+        players = [
+            make_player(player_kinds[0], seed),
+            make_player(player_kinds[1], seed + PLAYER_SEED_OFFSET),
+        ]
         result = simulate_from_rosters(
             fixture.rosters,
             players,
