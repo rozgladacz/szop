@@ -165,7 +165,7 @@ Pełna semantyka SZOP_Rozjemca pkt 1, 5, 7-22 + 28 zdolności (3 passive + 5 wea
 - [x] ADR-0015a Accepted: reactive jednorazowy/atomowy/no nested.
 
 **Effects + Interrupts (`app/services/engine/{effects,interrupts}.py`):**
-- [x] `EffectContext` frozen + 4 per-hook registries (defense/attack/morale/weapon modifiers). `aggregate_*_modifier` aggregators. MVP passive: Cierpliwy/Tarcza/Nieustraszony.
+- [x] `EffectContext` frozen + per-hook registries (defense/attack/weapon modifiers; morale-modifier usunięty 2026-06 — drift pkt 20.e, Nieustraszony binarny). `aggregate_*_modifier` aggregators. MVP passive: Cierpliwy/Tarcza.
 - [x] `InterruptPoint` enum (1 punkt `BEFORE_ACTION` pkt 11.b.i per ADR-0015, korekta 2026-06-09 z 4 punktów), `register_interrupt_handler(point, slug)`, `get_eligible_interrupts`, `trigger_interrupt`. Strażnik (id 31) MVP stub.
 - [x] 38 testów (21 effects + 17 interrupts).
 - [x] ADR-0015 Accepted (korekta 2026-06-09): 1 punkt `BEFORE_ACTION` per pkt 11.b.i (≤2 okna/aktywację via pętla 11.b.iv), no nested.
