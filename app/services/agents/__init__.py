@@ -25,6 +25,7 @@ from app.services.agents.match import (
 from app.services.agents.policy_eval import evaluate_state
 from app.services.agents.priority_player import PriorityPlayer
 from app.services.agents.priority_v2_player import PriorityV2Player
+from app.services.agents.priority_v3_player import PriorityV3Player
 from app.services.agents.random_player import RandomPlayer
 
 __all__ = [
@@ -34,6 +35,7 @@ __all__ = [
     "GreedyPlayer",
     "PriorityPlayer",
     "PriorityV2Player",
+    "PriorityV3Player",
     "evaluate_state",
     "MatchResult",
     "run_match",
