@@ -257,8 +257,10 @@ def _apply_order_like(
     state = context.state
     source_id = context.source_unit_id
     source = next((b for b in state.blobs if b.id == source_id), None)
-    if source is None:
-        raise InvalidInterruptError(f"{slug}: source unit {source_id} not found")
+    if source is None or source.models_alive == 0:
+        raise InvalidInterruptError(
+            f"{slug}: source unit {source_id} not found or defeated"
+        )
 
     if "target_id" not in payload or "ability" not in payload:
         raise InvalidInterruptError(

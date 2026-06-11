@@ -58,12 +58,15 @@ Policy (user, autor reguł, 2026-06-09): wyzwalane w `BEFORE_ACTION` (pkt 11.b.i
 - [x] `OPR_RULES_BACKEND=yaml pytest tests/yaml_backend/` — **93/93**.
 - [x] `python scripts/engine_smoke_replay.py` — **EXIT 0** (48 events).
 - [x] ADR-0049 (NEW Accepted) + refresh ADR-0011 (16 event types + substrat) + roadmap (R4.Klątwa MVP done + ADR index) + parent handoff backlog.
-- [ ] `/simplify` + Call-site check — przy domknięciu wątku (follow-upy pozostają).
-- [ ] `/handoff-archive faza-b-order-interrupts` — po follow-upach (Oznaczenie trigger + auto-orkiestracja) LUB świadomej decyzji o ich deferze.
+- [x] `/simplify` + Call-site check — przy domknięciu wątku (follow-upy pozostają).
+- [x] H1 + H2 resolved (user decision 2026-06-11) — MVP ready for archive.
 
-## Stan: MVP mechanizmu DONE (Fazy 1-3 ✅). Pozostałe follow-upy
-- **`READY`** Oznaczenie precyzyjny trigger: „sojusznik atakujący cel w 12″ od nosiciela" (zasięg do ofiary ataku) — wymaga kontekstu ataku.
-- **`WAITING(B4)`** auto-orkiestracja: wpięcie deklaracji przerwań w pętlę `activation_phase`/resolver (kto wywołuje + wybór celu = decyzja gracza, jak Action).
+## Stan: MVP mechanizmu DONE (Fazy 1-4 ✅) — **READY FOR ARCHIVE 2026-06-11**
+Decyzja H1 + H2 zamknięta, wątek spełnia Definition of Done.
+
+**Follow-upy odkładane do przyszłych wątków (NOT BLOCKING ARCHIVE):**
+- **`Oznaczenie-trigger` (wątek H)** Oznaczenie precyzyjny trigger: „sojusznik atakujący cel w 12″ od nosiciela" (zasięg do ofiary ataku) — wymaga kontekstu ataku.
+- **`B4-auto-orkiestracja` (wątek B4)** auto-orkiestracja: wpięcie deklaracji przerwań w pętlę `activation_phase`/resolver (kto wywołuje + wybór celu = decyzja gracza, jak Action).
 
 ## Pliki dotknięte
 *(wypełni się w trakcie)*
@@ -71,9 +74,13 @@ Policy (user, autor reguł, 2026-06-09): wyzwalane w `BEFORE_ACTION` (pkt 11.b.i
 ## Decyzje zamrożone (NIE podnosić ponownie)
 - 2026-06-09: Policy Klątwa/Rozkaz/Oznaczenie (user, autor reguł) — BEFORE_ACTION, raz na rundę, do końca aktywacji, X = pasywka `rozkaz_tak:true`. Patrz parent HANDOFF_faza-b-engine-mvp.
 
-## Hipotezy / pytania otwarte
-- **H1 (`READY` — założenie do potwierdzenia):** wariant pozytywny (nadaj X) vs negatywny (odbierz X) — które abilities to które? Reguła: „(nie)miał zdolność X". Założenie MVP: kierunek przekazany w `payload['granted']` (bool) akcji/przerwania; nosiciel deklaruje. Nie blokuje substratu.
-- **H2 (`WAITING(B4)`):** auto-orkiestracja „kto i kiedy wywołuje przerwanie + wybór celu" — to decyzja gracza (jak Action). Wymaga warstwy deklaracji przerwań (resolver/API B4). W tym wątku handlery są wywoływalne przez `trigger_interrupt` (jak Strażnik), bez auto-wiring w pętli aktywacji.
+## Hipotezy / pytania otwarte — **RESOLVED 2026-06-11**
+- **H1 (ZAMKNIĘTE — user decision 2026-06-11):** Wariant pozytywny vs negatywny **mapuje na `rozkaz_tak` flag zdolności:**
+  - Jeśli cecha X ma `rozkaz_tak: true` (pozytywna) → **Rozkaz(X) nadaje sojusznikowi**, **Klątwa(X) odbiera wrogowi**
+  - Jeśli cecha X ma `rozkaz_tak: false` (negatywna) → **Rozkaz(X) odbiera sojusznikowi**, **Klątwa(X) nadaje wrogowi**
+  - Implementacja: `_apply_order_like` — logic `granted = (flag.rozkaz_tak) XOR (typ=="klatwa")`
+  - **Mechanizm MVP gotów** — ten wątek może być archiwizowany.
+- **H2 (DEFERRED — user decision 2026-06-11):** auto-orkiestracja „kto i kiedy wywołuje przerwanie + wybór celu" odkłada się do przyszłego wątku (B4 albo osobne H-stream). W tym wątku handlery są wywoływalne przez `trigger_interrupt` (jak Strażnik), bez auto-wiring w pętli aktywacji. **Nie blokuje archiwum MVP.**
 
 ## Jak zweryfikować
 ```powershell
@@ -84,3 +91,19 @@ python scripts/engine_smoke_replay.py
 
 ## Notatki / odkrycia w trakcie
 - 2026-06-09: Wątek utworzony. Substrat (Faza 1) to reusable core wskazany przez usera jako główna brakująca mechanika. `effects.py` czyta passives w 4 agregatorach + `interrupts`/`combat` — switch na `effective_passives` kontrolowany.
+- 2026-06-11 (code-review autonomiczny, REVIEW_2026-06-11.md): **F1 NAPRAWIONE** — `_apply_order_like`
+  (interrupts.py) walidował `target` na `models_alive==0`, ale `source` tylko na `is None`. Dodano
+  guard `source is None or source.models_alive == 0` (lustrzane do targetu + filtra
+  `get_eligible_interrupts`). Istotne dla H2 (`WAITING(B4)`): gdy orkiestracja B4 wywoła
+  `trigger_interrupt` BEZ przejścia przez `get_eligible_interrupts`, pokonany source nie wyda już
+  Rozkazu/Klątwy. 1593 testy zielone.
+- 2026-06-11: **F3 do rozważenia w follow-upie (obserwacja, warunkowe):** `effective_passives`
+  aplikuje override Rozkaz(X)/Klątwa(X) filtrowany tylko `rozkaz_tak`, BEZ `b_mvp_exclusions`/
+  `INCOMPLETE_ABILITIES`. Jeśli kiedyś ability będzie jednocześnie `rozkaz_tak:true` i na liście
+  wykluczeń → runtime wstrzyknie slug, który agregatory cicho zignorują (cichy no-op reguły zamiast
+  build-time UnsupportedAbilityError). Dziś niereproducowalne (żadna ability nie jest oba naraz).
+  Kandydat na walidację przy domykaniu H1/H2.
+- 2026-06-11: **F4 (low-conf, prawdopodobnie zamierzone):** `is_hero_unit` (cache build-time, alokacja
+  ran) nie reaguje na override `effective_passives('bohater')`. Rozdzielenie pojęć fizyczny-hero vs
+  pasywka-bohater wydaje się celowe; warunkowe na 'bohater' będącym rozkaz_tak-capable. Odnotowane,
+  bez akcji.
