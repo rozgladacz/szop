@@ -74,13 +74,15 @@ class EffectContext:
 # Hook function types
 DefenseModifierFn = Callable[[EffectContext], int]
 AttackModifierFn = Callable[[EffectContext], int]
-MoraleModifierFn = Callable[[EffectContext], int]
 WeaponModifierFn = Callable[[WeaponProfile, UnitBlob], WeaponProfile]
 
 # Per-hook registries (slug → fn)
+# Brak rejestru morale modifiers: po drift 2026-06 (R5.c + pkt 20.e) pkt 20 nie
+# ma już ADDYTYWNYCH modyfikatorów liczby testów Przegrupowania — Nieustraszony
+# jest binarny (powyżej połowy → skip wszystkich, obsługiwane w `phases._regroup_test`),
+# a modyfikatory statusów (Przyszpilony/Ufortyfikowany) usunięte z reguł.
 _DEFENSE_MODIFIERS: dict[str, DefenseModifierFn] = {}
 _ATTACK_MODIFIERS: dict[str, AttackModifierFn] = {}
-_MORALE_MODIFIERS: dict[str, MoraleModifierFn] = {}
 _WEAPON_MODIFIERS: dict[str, WeaponModifierFn] = {}
 
 
@@ -104,16 +106,6 @@ def register_attack_modifier(slug: str) -> Callable[[AttackModifierFn], AttackMo
         if slug in _ATTACK_MODIFIERS:
             raise RuntimeError(f"attack_modifier for {slug!r} already registered")
         _ATTACK_MODIFIERS[slug] = fn
-        return fn
-
-    return decorator
-
-
-def register_morale_modifier(slug: str) -> Callable[[MoraleModifierFn], MoraleModifierFn]:
-    def decorator(fn: MoraleModifierFn) -> MoraleModifierFn:
-        if slug in _MORALE_MODIFIERS:
-            raise RuntimeError(f"morale_modifier for {slug!r} already registered")
-        _MORALE_MODIFIERS[slug] = fn
         return fn
 
     return decorator
@@ -158,19 +150,6 @@ def aggregate_attack_modifier(context: EffectContext) -> int:
     return total
 
 
-def aggregate_morale_modifier(context: EffectContext) -> int:
-    """Sum morale modifiers (`+/-` do liczby testów Przegrupowania pkt 20.d).
-
-    Wartość ujemna = mniej testów (lepiej dla oddziału, np. Nieustraszony -1).
-    """
-    total = 0
-    for slug in effective_passives(context.blob):
-        fn = _MORALE_MODIFIERS.get(slug)
-        if fn is not None:
-            total += fn(context)
-    return total
-
-
 def apply_weapon_modifiers(weapon: WeaponProfile, blob: UnitBlob) -> WeaponProfile:
     """Pipe weapon przez wszystkie weapon modifiers z passive abilities bloba.
 
@@ -210,10 +189,11 @@ def _tarcza_defense(context: EffectContext) -> int:
     return 1
 
 
-@register_morale_modifier("nieustraszony")
-def _nieustraszony_morale(context: EffectContext) -> int:
-    """Nieustraszony (id 16): wykonuje jeden test Przegrupowania mniej (pkt 20.d)."""
-    return -1
+# Nieustraszony (id 16): pkt 20.e (drift 2026-06) — oddział POWYŻEJ połowy
+# początkowej wytrzymałości NIE wykonuje testów Przegrupowania (skip wszystkich).
+# To efekt binarny zależny od stanu (wytrzymałość), nie addytywny modyfikator —
+# obsługiwany w `phases._regroup_test`, nie jako morale modifier. Pre-drift
+# modelowanie jako −1 test usunięte wraz z mechanizmem morale modifiers.
 
 
 # ---------------------------------------------------------------------------

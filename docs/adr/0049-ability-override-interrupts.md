@@ -25,10 +25,16 @@ override'y w kolejności (ostatni wygrywa), zachowując kolejność bazowych pas
 (identity, zero alokacji — hot path combat).
 
 **Wszystkie konsumenci pasywów czytają `effective_passives`**, nie surowe
-`passives`: 4 agregatory w `effects.py` (defense/attack/morale/weapon),
-`interrupts.get_eligible_interrupts`, `combat` (check Bastion). Dzięki temu nadana
-przez Rozkaz pasywka faktycznie działa (np. Nieustraszony → morale −1), a Klątwa
+`passives`: agregatory w `effects.py` (defense/attack/weapon),
+`interrupts.get_eligible_interrupts`, `combat` (check Bastion), `phases._regroup_test`
+(pkt 20.e Nieustraszony). Dzięki temu nadana przez Rozkaz pasywka faktycznie działa
+(np. Nieustraszony → skip testów Przegrupowania powyżej połowy, pkt 20.e), a Klątwa
 realnie odbiera (np. zdejmuje Bastion).
+
+> **Nota (drift pkt 20.e 2026-06):** pierwotny przykład „Nieustraszony → morale −1"
+> jest nieaktualny — addytywny morale modifier usunięty; Nieustraszony jest binarny
+> (powyżej połowy → 0 testów). Mechanizm override bez zmian: grant/suppress nadal
+> wstrzykuje/odbiera slug w `effective_passives`, który `_regroup_test` konsumuje.
 
 ### 2. Eventy + reducery (event-sourced, ADR-0010/0046)
 
@@ -98,7 +104,9 @@ bit-perfect; limit per-runda event-sourced; walidacja deterministyczna i testowa
 ## Inwarianty (testy)
 
 1. `effective_passives` order-sensitive, fast-path identity (8 testów).
-2. Grant/suppress realnie zmienia `aggregate_morale_modifier` (Nieustraszony).
+2. Grant/suppress realnie zmienia `effective_passives` (Nieustraszony — pkt 20.e
+   konsumowane w `phases._regroup_test`; pierwotnie probowane przez usunięty
+   `aggregate_morale_modifier`).
 3. Walidacja: ally/enemy, zasięg 12″, `rozkaz_tak`, raz-na-rundę, defeated target.
 4. Replay: `AbilityOverrideApplied`/`Cleared`/`InterruptTriggered` rekonstruują
    `ability_overrides` + `used_interrupts_this_round` bit-perfect.

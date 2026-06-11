@@ -1,7 +1,8 @@
 """B3.5 — testy `app/services/engine/effects.py`.
 
-Pokrywa: EffectContext frozen, register/aggregate framework, 3 concrete passives
-(Cierpliwy/Tarcza/Nieustraszony), duplicate registration raises.
+Pokrywa: EffectContext frozen, register/aggregate framework, 2 concrete defense
+passives (Cierpliwy/Tarcza). Nieustraszony jest binarny (pkt 20.e — skip testów
+Przegrupowania w `phases._regroup_test`), nie addytywny modifier.
 """
 
 from __future__ import annotations
@@ -16,11 +17,9 @@ from app.services.engine.effects import (
     STATUS_PRZYSZPILONY,
     _ATTACK_MODIFIERS,
     _DEFENSE_MODIFIERS,
-    _MORALE_MODIFIERS,
     _WEAPON_MODIFIERS,
     aggregate_attack_modifier,
     aggregate_defense_modifier,
-    aggregate_morale_modifier,
     apply_weapon_modifiers,
     register_defense_modifier,
 )
@@ -127,14 +126,8 @@ def test_multiple_defense_modifiers_partial_conditions():
 
 
 # ---------------------------------------------------------------------------
-# Nieustraszony (id 16) — morale modifier
+# Nieustraszony (id 16) — pkt 20.e binarny skip (NIE addytywny morale modifier)
 # ---------------------------------------------------------------------------
-
-
-def test_nieustraszony_reduces_morale_tests():
-    blob = make_blob(passives=("nieustraszony",))
-    ctx = EffectContext(blob=blob)
-    assert aggregate_morale_modifier(ctx) == -1
 
 
 def test_nieustraszony_does_not_affect_defense():
@@ -155,15 +148,9 @@ def test_aggregate_defense_empty_passives():
 
 
 def test_aggregate_attack_empty():
-    blob = make_blob(passives=("nieustraszony",))  # tylko morale
+    blob = make_blob(passives=("nieustraszony",))  # nie rejestruje modyfikatora ataku
     ctx = EffectContext(blob=blob)
     assert aggregate_attack_modifier(ctx) == 0
-
-
-def test_aggregate_morale_empty():
-    blob = make_blob(passives=("cierpliwy",))  # tylko defense
-    ctx = EffectContext(blob=blob)
-    assert aggregate_morale_modifier(ctx) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -206,13 +193,13 @@ def test_tarcza_in_defense_registry():
     assert "tarcza" in _DEFENSE_MODIFIERS
 
 
-def test_nieustraszony_in_morale_registry():
-    assert "nieustraszony" in _MORALE_MODIFIERS
-
-
-def test_nieustraszony_not_in_defense_registry():
-    """Cross-check: morale ability nie ma defense entry."""
+def test_nieustraszony_not_in_additive_registries():
+    """Pkt 20.e (drift 2026-06): Nieustraszony jest binarny (skip w
+    `phases._regroup_test`), NIE addytywny modyfikator — nie ma wpisu w żadnym
+    z registrów effects (defense/attack/weapon)."""
     assert "nieustraszony" not in _DEFENSE_MODIFIERS
+    assert "nieustraszony" not in _ATTACK_MODIFIERS
+    assert "nieustraszony" not in _WEAPON_MODIFIERS
 
 
 def test_no_weapon_modifiers_yet_in_mvp():

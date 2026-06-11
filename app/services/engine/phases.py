@@ -14,9 +14,9 @@ MVP scope:
   Engine wyżej (resolver B3.7) może wywołać 2× dla 2 akcji.
 - Aktywne abilities (pkt 14.e) ograniczone do `discard_exhausted` (uniwersalny).
   Konkretne aktywne zdolności (Łatanie/Mag/etc.) dorzucane stopniowo.
-- Przegrupowanie pkt 20: prosty test — jeśli wounds_received > 0 w aktywacji,
-  test z bazą 1 + modifiers (np. Nieustraszony -1). Pkt 20.b (<=½ wytrzymałości)
-  i pkt 20.c (bilans wręcz) zaimplementowane.
+- Przegrupowanie pkt 20: test gdy oddział otrzymał > zadał ran w aktywacji
+  (pkt 20.a); baza 1 + pkt 20.b (≤½ wytrzymałości) + pkt 20.c (walczył wręcz).
+  Pkt 20.e: Nieustraszony powyżej połowy → skip wszystkich testów (binarny).
 - Odzyskiwanie ran (pkt 21): MVP placeholder — pusty step (Regeneracja/Odrodzenie
   dorzucane w B3.5+ effects).
 
@@ -66,6 +66,7 @@ from app.services.engine.state import (
     TerrainLine,
     UnitBlob,
     build_initial_state,
+    effective_passives,
     initial_toughness_for,
 )
 from app.services.engine.status import (
@@ -539,12 +540,13 @@ def _regroup_test(
     - +1 jeśli wytrzymałość ≤ ½ początkowej (pkt 20.b — initial z
       `state.initial_toughness_snapshot`, fallback do current models gdy brak
       snapshot dla test fixtures)
-    - +1/-1 z bilansu wręcz (pkt 20.c)
-    - +modifiers ze statusów (Przyszpilony +1, Ufortyfikowany -1) (pkt 20.d)
-    - +morale_modifiers z passive abilities (Nieustraszony -1) (pkt 20.d)
-    - Minimum 0
+    - +1 jeśli walczył wręcz w tej aktywacji (pkt 20.c)
+    - Pkt 20.e (drift 2026-06): Nieustraszony POWYŻEJ połowy → skip wszystkich
+      testów (efekt binarny, NIE addytywny -1; sprawdzane przed liczeniem)
+    - Brak modyfikatorów statusów ani addytywnych morale modifiers (usunięte
+      w R5.c + drift pkt 20.e). n_tests ≥ 1 gdy oddział w ogóle testuje.
 
-    Wyniki (pkt 20.e):
+    Wyniki (pkt 20.f):
     - 0 fail: nic
     - 1 fail: Wyczerpany lub Przyszpilony (default Wyczerpany dla MVP)
     - 2 fail: Wyczerpany + Przyszpilony
@@ -552,8 +554,6 @@ def _regroup_test(
 
     Zwraca (new_state, events, next_sequence).
     """
-    from app.services.engine.effects import EffectContext, aggregate_morale_modifier
-
     blob = _find_blob(state, blob_id)
     delta_received = context.delta_for(blob_id)
     delta_dealt = context.dealt_for(blob_id)
@@ -574,6 +574,12 @@ def _regroup_test(
             blob.models_alive * blob.toughness_per_model + blob.wounds_received
         )
     current_toughness = blob.models_alive * blob.toughness_per_model - blob.wounds_received
+    # Pkt 20.e (drift 2026-06): oddział ze zdolnością Nieustraszony POWYŻEJ połowy
+    # początkowej wytrzymałości NIE wykonuje testów Przegrupowania (skip wszystkich).
+    # `effective_passives` uwzględnia czasowe override'y (Rozkaz/Klątwa). Zastępuje
+    # pre-drift modelowanie jako -1 test (usunięty morale modifier w effects.py).
+    if "nieustraszony" in effective_passives(blob) and current_toughness > initial_tough / 2:
+        return state, (), sequence
     if current_toughness <= initial_tough / 2:
         n_tests += 1
     # R5.d pkt 20.c (drift 2026-06): walczył wręcz (był uczestnikiem starcia
@@ -585,14 +591,8 @@ def _regroup_test(
     # R5.c (faza-b-rules-resync 2026-06): pkt 20.d **status modifiers usunięte**
     # per drift — pkt 22.b.iv (Przyszpilony +1 test) i pkt 22.c.ii (Ufortyfikowany
     # -1 test) **usunięte** z zasad. Status flags pozostają (informacja o stanie),
-    # ale nie wpływają na liczbę testów.
-    # Passive morale modifiers (Nieustraszony -1 etc.) — pozostają (pkt 20.d
-    # poprzez pasywne zdolności, nie statusy).
-    n_tests += aggregate_morale_modifier(EffectContext(blob=blob))
-    n_tests = max(0, n_tests)
-
-    if n_tests == 0:
-        return state, (), sequence
+    # ale nie wpływają na liczbę testów. Brak też addytywnych morale modifiers
+    # (Nieustraszony jest binarny — patrz pkt 20.e wyżej). n_tests >= 1 tutaj.
 
     # Rzuty: każdy test = k6, fail < 4+ (proxy MVP — pkt 20 nie definiuje
     # threshold; używamy 4+ jako commonly understood morale test)

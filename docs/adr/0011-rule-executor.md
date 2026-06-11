@@ -92,7 +92,7 @@
 - `los.{LoSState, check_los}`
 - `prediction.{DamageDistribution, expected_damage, would_see}`
 - `combat.{WeaponProfile, CombatResult, ChargeResult, resolve_ranged_attack, resolve_melee_attack, resolve_charge_attack, effective_attack_quality}` (`WeaponProfile` re-export z state dla wstecznej kompat)
-- `effects.{EffectContext, aggregate_defense_modifier, aggregate_attack_modifier, aggregate_morale_modifier, apply_weapon_modifiers, register_*_modifier, register_active_ability, get_active_ability}` (B3.9.e: ACTIVE_ABILITY_REGISTRY)
+- `effects.{EffectContext, aggregate_defense_modifier, aggregate_attack_modifier, apply_weapon_modifiers, register_defense_modifier, register_attack_modifier, register_weapon_modifier, register_active_ability, get_active_ability}` (B3.9.e: ACTIVE_ABILITY_REGISTRY; morale modifier usunięty — drift pkt 20.e 2026-06, Nieustraszony binarny w `phases._regroup_test`)
 - `interrupts.{InterruptPoint, InterruptContext, register_interrupt_handler, get_eligible_interrupts, trigger_interrupt}`
 - `actions.{DeploymentAction, ManeuverAction, DefendAction, ShootAction, ChargeAction, SpecialAction, Action}`
 - `phases.{setup_phase, deployment_round, activation_phase, round_end_phase, ActivationContext}` (B3.9.c: ActivationContext exported dla unit testów)

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import pytest
 
-from app.services.engine.effects import EffectContext, aggregate_morale_modifier
 from app.services.engine.events import (
     AbilityOverrideApplied,
     AbilityOverridesCleared,
@@ -83,7 +82,6 @@ def test_rozkaz_grants_ability_to_ally_in_range():
     target = next(b for b in new_state.blobs if b.id == 2)
     assert target.ability_overrides == (("nieustraszony", True),)
     assert effective_passives(target) == ("nieustraszony",)
-    assert aggregate_morale_modifier(EffectContext(blob=target)) == -1
     assert (1, "rozkaz") in new_state.used_interrupts_this_round
     assert any(isinstance(e, AbilityOverrideApplied) for e in events)
     assert any(isinstance(e, InterruptTriggered) for e in events)
@@ -101,7 +99,6 @@ def test_rozkaz_suppress_variant_removes_ability():
     )
     target = next(b for b in new_state.blobs if b.id == 2)
     assert effective_passives(target) == ()
-    assert aggregate_morale_modifier(EffectContext(blob=target)) == 0
 
 
 def test_klatwa_targets_enemy():
@@ -339,24 +336,25 @@ def test_effective_passives_preserves_base_order():
 
 
 # ---------------------------------------------------------------------------
-# Integracja z agregatorem effects — grant faktycznie zmienia modyfikator
+# Integracja z effective_passives — grant/suppress faktycznie zmienia pasywki
 # ---------------------------------------------------------------------------
 
 
-def test_grant_nieustraszony_changes_morale_modifier():
-    """Grant pasywki morale (Nieustraszony) → aggregate_morale_modifier widzi -1."""
+def test_grant_nieustraszony_adds_to_effective_passives():
+    """Grant pasywki (Nieustraszony) → effective_passives ją widzi (efekt
+    binarny pkt 20.e konsumowany później w `phases._regroup_test`)."""
     base = _blob(passives=())
-    assert aggregate_morale_modifier(EffectContext(blob=base)) == 0
+    assert "nieustraszony" not in effective_passives(base)
     granted = _blob(passives=(), overrides=(("nieustraszony", True),))
-    assert aggregate_morale_modifier(EffectContext(blob=granted)) == -1
+    assert "nieustraszony" in effective_passives(granted)
 
 
-def test_suppress_nieustraszony_removes_morale_modifier():
-    """Suppress Nieustraszony na oddziale który ją ma → modyfikator znika."""
+def test_suppress_nieustraszony_removes_from_effective_passives():
+    """Suppress Nieustraszony na oddziale który ją ma → znika z effective_passives."""
     has = _blob(passives=("nieustraszony",))
-    assert aggregate_morale_modifier(EffectContext(blob=has)) == -1
+    assert "nieustraszony" in effective_passives(has)
     suppressed = _blob(passives=("nieustraszony",), overrides=(("nieustraszony", False),))
-    assert aggregate_morale_modifier(EffectContext(blob=suppressed)) == 0
+    assert "nieustraszony" not in effective_passives(suppressed)
 
 
 # ---------------------------------------------------------------------------

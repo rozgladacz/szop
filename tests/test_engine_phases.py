@@ -570,37 +570,56 @@ def test_regroup_skipped_for_cumulative_wounds_without_delta():
     assert not any(isinstance(e, MoraleTestPassed) for e in events)
 
 
-def test_regroup_nieustraszony_reduces_test_count():
-    """Nieustraszony (id 16) — -1 test Przegrupowania.
+def test_regroup_nieustraszony_above_half_skips_all_tests():
+    """Pkt 20.e (drift 2026-06): oddział z Nieustraszony POWYŻEJ połowy
+    początkowej wytrzymałości NIE wykonuje testów Przegrupowania (skip
+    wszystkich). Zastępuje pre-drift modelowanie jako -1 test.
 
-    Post-B3.9.c: test używa `_regroup_test` + `ActivationContext` z deltą
-    zamiast pre-stage cumulative wounds + ManeuverAction (buggy proxy).
+    _basic_state: 5 modeli × T3 = 15 wytrzymałości. 2 rany → 13/15 > połowy.
     """
-    state_no = _basic_state()
-    state_n = _basic_state(extra=("nieustraszony",))
+    state = _basic_state(extra=("nieustraszony",))
     from dataclasses import replace
-    state_no = replace(
-        state_no,
-        blobs=tuple(replace(b, wounds_received=2) if b.id == 1 else b for b in state_no.blobs),
-    )
-    state_n = replace(
-        state_n,
-        blobs=tuple(replace(b, wounds_received=2) if b.id == 1 else b for b in state_n.blobs),
+    state = replace(
+        state,
+        blobs=tuple(replace(b, wounds_received=2) if b.id == 1 else b for b in state.blobs),
     )
     context = ActivationContext(
         actor_id=1,
         wounds_received_this_activation=((1, 2),),
         melee_combatants=frozenset(),
     )
-    _, events_no, _ = _regroup_test(state_no, 1, context, DeterministicDice(42), sequence=1)
+    _, events, _ = _regroup_test(state, 1, context, DeterministicDice(42), sequence=1)
+    assert not any(isinstance(e, MoraleTestPassed) for e in events)
+
+
+def test_regroup_nieustraszony_at_or_below_half_tests_normally():
+    """Pkt 20.e: Nieustraszony na/poniżej połowy wytrzymałości testuje NORMALNIE
+    — zdolność nie daje już -1 (pre-drift) ani skip. Identyczna liczba rzutów
+    jak oddział bez Nieustraszony.
+
+    8 ran z 15 → 7/15 ≤ połowy → 2 testy (baza 1 + pkt 20.b ≤½) dla obu.
+    """
+    state_n = _basic_state(extra=("nieustraszony",))
+    state_no = _basic_state()
+    from dataclasses import replace
+
+    def wound(s):
+        return replace(
+            s,
+            blobs=tuple(replace(b, wounds_received=8) if b.id == 1 else b for b in s.blobs),
+        )
+
+    state_n, state_no = wound(state_n), wound(state_no)
+    context = ActivationContext(
+        actor_id=1,
+        wounds_received_this_activation=((1, 8),),
+        melee_combatants=frozenset(),
+    )
     _, events_n, _ = _regroup_test(state_n, 1, context, DeterministicDice(42), sequence=1)
+    _, events_no, _ = _regroup_test(state_no, 1, context, DeterministicDice(42), sequence=1)
+    morale_n = next(e for e in events_n if isinstance(e, MoraleTestPassed))
     morale_no = next(e for e in events_no if isinstance(e, MoraleTestPassed))
-    morale_n_list = [e for e in events_n if isinstance(e, MoraleTestPassed)]
-    if morale_n_list:
-        assert len(morale_n_list[0].rolls) < len(morale_no.rolls)
-    else:
-        # Zero testów — nieustraszony zmniejszył do 0
-        assert True
+    assert len(morale_n.rolls) == len(morale_no.rolls)
 
 
 def test_regroup_broken_sets_location_wycofany():
