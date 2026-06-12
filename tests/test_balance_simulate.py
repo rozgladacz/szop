@@ -69,6 +69,79 @@ def test_unit_profiles_fixture_simulates():
     assert r.wins_p0 + r.wins_p1 + r.draws == 3
 
 
+def _circle_centers(fx):
+    return [(t.center.x, t.center.y) for t in fx.terrain if hasattr(t, "radius_inches")]
+
+
+def _obj_pts(fx):
+    return [(o.position.x, o.position.y) for o in fx.objectives]
+
+
+def test_maps_build_valid_states():
+    from app.services.engine.phases import setup_phase
+    for name in ("standard_a", "lustrzana_a", "symetryczna_a"):
+        fx = bs.build_map(name, 3)
+        st = setup_phase(fx.rosters, terrain=fx.terrain, objectives=fx.objectives)
+        assert len(st.blobs) == 8  # 4 oddziały/stronę
+        assert len(fx.objectives) == 5  # pkt 5.a
+
+
+def test_maps_objectives_satisfy_placement_rules():
+    for name, seed in [("standard_a", 0), ("lustrzana_a", 7), ("symetryczna_a", 7)]:
+        pts = _obj_pts(bs.build_map(name, seed))
+        for x, y in pts:
+            assert 6 <= x <= 66 and 6 <= y <= 42  # pkt 5.c ≥6″ od krawędzi
+        for i in range(len(pts)):
+            for j in range(i + 1, len(pts)):
+                assert _dist(pts[i], pts[j]) >= 12.0 - 1e-6  # pkt 5.c ≥12″ apart
+
+
+def test_random_maps_terrain_feature_counts():
+    # 8 Obronny + 4 Trudny + 2 Niebezpieczny (po symetrii).
+    for name in ("lustrzana_a", "symetryczna_a"):
+        fx = bs.build_map(name, 5)
+        feats: dict = {}
+        for t in fx.terrain:
+            if hasattr(t, "radius_inches"):
+                for f in t.features:
+                    feats[f] = feats.get(f, 0) + 1
+        assert feats.get("Obronny") == 8
+        assert feats.get("Trudny") == 4
+        assert feats.get("Niebezpieczny") == 2
+        lines = [t for t in fx.terrain if hasattr(t, "start")]
+        assert len(lines) == 18  # 9 + symetria
+
+
+def test_standard_a_point_symmetric():
+    fx = bs.build_map("standard_a", 0)
+    centers = set(_circle_centers(fx))
+    assert all((72 - x, 48 - y) in centers for x, y in centers)
+    objs = set(_obj_pts(fx))
+    assert all((72 - x, 48 - y) in objs for x, y in objs)
+
+
+def test_lustrzana_a_mirror_symmetric():
+    fx = bs.build_map("lustrzana_a", 4)
+    centers = set(round_c for round_c in ((round(x, 6), round(y, 6)) for x, y in _circle_centers(fx)))
+    assert all((x, round(48 - y, 6)) in centers for x, y in centers)
+
+
+def test_maps_deterministic_per_seed():
+    for name in ("lustrzana_a", "symetryczna_a"):
+        a, b = bs.build_map(name, 11), bs.build_map(name, 11)
+        assert _obj_pts(a) == _obj_pts(b)
+        assert _circle_centers(a) == _circle_centers(b)
+
+
+def test_build_map_rejects_unknown():
+    with pytest.raises(ValueError):
+        bs.build_map("nieistniejaca", 0)
+
+
+def _dist(a, b):
+    return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+
+
 def test_fixture_objectives_satisfy_placement_rules():
     # pkt 5.c: cele ≥12″ od siebie, ≥6″ od krawędzi (plansza 72×48).
     fx = bs.load_battle_fixture(_FIXTURE)
