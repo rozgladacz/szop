@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 from app.services.agents.greedy_player import GreedyPlayer
-from app.services.engine.actions import ManeuverAction, ShootAction
+from app.services.engine.actions import ChargeAction, ManeuverAction, ShootAction
 from app.services.engine.geometry import distance
 from app.services.engine.state import (
     BattleState,
     Objective,
     Position,
+    TerrainCircle,
     UnitBlob,
     WeaponProfile,
 )
 from app.services.engine.status import STATUS_AKTYWOWANY
 
 RIFLE = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=3)
+SWORD = WeaponProfile(slug="sword", name="Sword", range_inches=0, attacks=3)
 #: Słaby (1 atak) — niskie oczekiwane obrażenia, by kontrola celu przeważyła.
 WEAK = WeaponProfile(slug="pistol", name="Pistol", range_inches=24, attacks=1)
 #: Mocny (6 ataków) — wymiata słaby oddział (expected_models_killed → 1).
@@ -100,6 +102,30 @@ def test_continue_activation_none_when_nothing_beneficial():
     own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
     state = _state((own,))
     assert GreedyPlayer().continue_activation(state, 0, 1, (ManeuverAction(1, Position(0, 0)),)) is None
+
+
+def test_charge_score_ignores_cover_pkt19():
+    """Szarża (melee) nie uwzględnia osłony (pkt 19 = Ostrzał): silnik melee nie
+    liczy `compute_cover`. Score Szarży na cel za zasłoną Obronną == bez zasłony.
+    Kontrola: Ostrzał nadal honoruje osłonę (score z osłoną < bez)."""
+    own = _blob(1, 0, 0, 0)
+    enemy = _blob(2, 1, 4, 0)  # gap 2 — w zasięgu Szarży i Ostrzału
+    cover = (TerrainCircle(center=Position(4, 0), radius_inches=3, features=("Obronny",)),)
+    g = GreedyPlayer()
+
+    def _attack_score(terrain, action):
+        state = BattleState(
+            round=1, active_player=0, activations_remaining=(1, 1),
+            blobs=(own, enemy), terrain=terrain, objectives=(),
+        )
+        return g._attack_score(state, 0, action, 0.0)
+
+    charge = ChargeAction(unit_id=1, target_id=2, weapon=SWORD)
+    shoot = ShootAction(unit_id=1, target_id=2, weapon=RIFLE)
+    # Szarża: osłona ignorowana → identyczny score z/bez terenu.
+    assert _attack_score(cover, charge) == _attack_score((), charge)
+    # Ostrzał: osłona obniża trafienie (pkt 19) → score z osłoną < bez (sanity terenu).
+    assert _attack_score(cover, shoot) < _attack_score((), shoot)
 
 
 def test_attack_prefers_enemy_contesting_my_objective():

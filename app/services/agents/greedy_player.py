@@ -6,7 +6,8 @@ Ocena per akcja (wszystko w jednej skali "spodziewany zysk"):
   hipotetycznym stanie z wymiecionymi modelami defendera. Drugi człon premiuje
   atak czyszczący wroga z celu (pkt 5.d kontrola → 5.f wygrana); pierwszy zostaje
   fine-grained dla obrażeń sub-kill. Szarża (wręcz) używa formuły `expected_damage`
-  jako przybliżenia (melee-specyficzne efekty pominięte, ADR-0031).
+  jako przybliżenia (melee-specyficzne efekty pominięte, ADR-0031); scorowana z
+  pustym terenem — osłona (pkt 19) dotyczy tylko Ostrzału, silnik melee jej nie liczy.
 - **Manewr** — Δ`objective_balance_with_control` (przejęcie/utrata celu, pkt 5.d;
   ruch nie zmienia HP, więc to czysto wartość celów). Z przeliczeniem kontroli
   ruch na cel jest wart `OBJECTIVE_WEIGHT`, nie tylko proximity.
@@ -148,7 +149,11 @@ class GreedyPlayer(Player):
         defender = _blob_by_id(state, action.target_id)
         if attacker is None or defender is None:
             return 0.0
-        dist = expected_damage(attacker, defender, action.weapon, state.terrain)
+        # Osłona (pkt 19) dotyczy tylko Ostrzału — silnik melee
+        # (`resolve_melee_attack`/`resolve_charge_attack`) nie liczy `compute_cover`.
+        # Szarża scorowana z pustym terenem, by prediction był spójny z combatem.
+        terrain = state.terrain if isinstance(action, ShootAction) else ()
+        dist = expected_damage(attacker, defender, action.weapon, terrain)
         # Człon HP (fine-grained, sub-kill) + zmiana wartości celów gdy atak
         # praktycznie wymiata defendera z 3″ celu (pkt 5.d). Bez double-count:
         # obrażenia = HP, objective_balance = tylko cele.

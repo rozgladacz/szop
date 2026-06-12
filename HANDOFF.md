@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
+| [HANDOFF_faza-d-greedy-melee-cover](docs/handoffs/HANDOFF_faza-d-greedy-melee-cover.md) | Strumień D — domknięcie fixu „melee bez osłony" (pkt 19) w GreedyPlayer `_attack_score`. | `app/services/agents/greedy_player.py` | In progress (2026-06-12) |
 
 
 ## Zasoby zablokowane (reverse lookup)
