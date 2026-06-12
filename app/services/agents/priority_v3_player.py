@@ -218,7 +218,9 @@ def _a_shoot(c: _Ctx) -> Action:
 
 
 def _a_charge(c: _Ctx) -> Action:
-    t = _best_target(c.unit, c.charge_targets, c.charge_weapon, c.state.terrain)
+    # Osłona (pkt 19) dotyczy tylko Ostrzału — silnik melee nie liczy `compute_cover`.
+    # Scoring celu Szarży z pustym terenem, by prediction był spójny z combatem.
+    t = _best_target(c.unit, c.charge_targets, c.charge_weapon, ())
     if t is None:
         return _a_defend(c)
     return ChargeAction(unit_id=c.unit.id, target_id=t.id, weapon=c.charge_weapon)
@@ -328,11 +330,17 @@ class PriorityV3Player(Player):
         )
 
     def _best_achievable_target_weight(self, ctx: _Ctx) -> float:
-        """Najwyższa waga celu osiągalnego przez oddział (Ostrzał lub Szarża)."""
+        """Najwyższa waga celu osiągalnego przez oddział (Ostrzał lub Szarża).
+
+        Ostrzał honoruje osłonę (pkt 19); Szarża (melee) nie — silnik melee nie
+        liczy `compute_cover`, więc scoring celów Szarży z pustym terenem."""
         best = _NEG_INF
-        for w, targets in ((ctx.shoot_weapon, ctx.shoot_targets), (ctx.charge_weapon, ctx.charge_targets)):
+        for w, targets, terrain in (
+            (ctx.shoot_weapon, ctx.shoot_targets, ctx.state.terrain),
+            (ctx.charge_weapon, ctx.charge_targets, ()),
+        ):
             for t in targets:
-                best = max(best, _target_weight(ctx.unit, t, w, ctx.state.terrain))
+                best = max(best, _target_weight(ctx.unit, t, w, terrain))
         return best
 
     def _select_unit(self, state, perspective, units):

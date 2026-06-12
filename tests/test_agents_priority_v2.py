@@ -15,6 +15,7 @@ from app.services.engine.state import (
     BattleState,
     Objective,
     Position,
+    TerrainCircle,
     UnitBlob,
     WeaponProfile,
 )
@@ -110,6 +111,24 @@ def test_priority3_charge_when_no_shoot():
     enemy = _blob(2, 1, 3, 0)
     action = PriorityV2Player().choose_action(_state((own, enemy)), 0)
     assert isinstance(action, ChargeAction) and action.target_id == 2
+
+
+def test_charge_target_ignores_cover_pkt19():
+    """Szarża (melee) nie uwzględnia osłony (pkt 19 = Ostrzał): silnik melee nie
+    liczy `compute_cover`. Cel za zasłoną Obronną i identyczny bez zasłony,
+    w równym dystansie, mają równą wagę → tie-break po id (covered = niższe id).
+    Przed fixem osłona zaniżała `mean` covered-celu → wybierany byłby uncovered."""
+    own = _blob(1, 0, 0, 0, melee_weapons=(SWORD,))  # tylko melee → krok 3 Szarża
+    covered = _blob(2, 1, 4, 0)  # niższe id, w terenie Obronnym (osłona)
+    uncovered = _blob(3, 1, 0, 4)  # równy dystans (4), bez osłony
+    terrain = (TerrainCircle(center=Position(4, 0), radius_inches=3, features=("Obronny",)),)
+    state = BattleState(
+        round=1, active_player=0, activations_remaining=(1, 1),
+        blobs=(own, covered, uncovered), terrain=terrain, objectives=(),
+    )
+    action = PriorityV2Player().choose_action(state, 0)
+    assert isinstance(action, ChargeAction)
+    assert action.target_id == 2  # osłona ignorowana → tie-break id → covered (id 2)
 
 
 def test_priority5_moves_to_uncontrolled_objective_it_is_closest_to():

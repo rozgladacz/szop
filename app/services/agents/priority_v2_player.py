@@ -180,7 +180,10 @@ class PriorityV2Player(Player):
         if not charge_used and unit.melee_weapons:
             weapon = unit.melee_weapons[0]
             reachable = [e for e in enemies if _can_charge(unit, e, move)]
-            target = _best_target(unit, reachable, weapon, state.terrain)
+            # Osłona (pkt 19) dotyczy tylko Ostrzału — silnik melee
+            # (`resolve_melee_attack`/`resolve_charge_attack`) nie liczy `compute_cover`.
+            # Scoring celu Szarży z pustym terenem, by prediction był spójny z combatem.
+            target = _best_target(unit, reachable, weapon, ())
             if target is not None:
                 return ChargeAction(unit_id=unit.id, target_id=target.id, weapon=weapon)
         # 4. Zdejmij Przyszpilony (Obrona → Ufortyfikowany odrzuca Przyszpilony, pkt 22.b.v).
