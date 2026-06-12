@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-d-greedy-melee-cover](docs/handoffs/HANDOFF_faza-d-greedy-melee-cover.md) | Strumień D — domknięcie fixu „melee bez osłony" (pkt 19) w GreedyPlayer `_attack_score`. | `app/services/agents/greedy_player.py` | In progress (2026-06-12) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-12 — faza-d-greedy-melee-cover (archived) — domknięcie fixu „melee bez osłony" w GreedyPlayer
+- Kontynuacja `faza-d-melee-target-cover`: pełny `grep expected_damage app/services/agents/` ujawnił 3 boty z wzorcem skażenia osłoną melee; v2/v3 naprawione wcześniej, `GreedyPlayer._attack_score` (`greedy_player.py:151`) pozostał — scorował też Szarżę (`ChargeAction`) przez `expected_damage(..., state.terrain)`, zaniżając `mean` (HP) + `expected_kills` (Δ kontroli celów) dla celów Szarży za zasłoną. **Fix:** `terrain = state.terrain if isinstance(action, ShootAction) else ()`. Osłona (pkt 19) = tylko Ostrzał; silnik melee jej nie liczy. Wszystkie 3 boty używające `expected_damage` teraz spójne.
+- Pliki: `app/services/agents/greedy_player.py`, `tests/test_agents_greedy.py` (+1 `test_charge_score_ignores_cover_pkt19`), `docs/roadmap.md`. Commit na `Faza_A`: `93e872d`.
+- Weryfikacja: pytest **1608 passed** (1607 baseline + 1; 1 fail = znany tripwire `test_real_source_hashes_match`, blokada pkt 20.f.i, NIE regresja). `/simplify` 4 kąty inline — 0 zmian (call-site to właściwa głębokość; prediction.py MVP ranged-only). `/review`/`/security-review` pominięte warunkowo (izolowana warstwa agentów, ~6 linii prod).
+- **Follow-up (NIE blokujące):** wzorzec „melee → pusty teren" powtarza się w 3 botach — rozważyć centralizację `prediction.expected_melee_damage()` gdy melee-prediction dostanie melee-specyficzne efekty (Furia/Impet/kontratak). Dziś przedwczesne.
+- Doc updates: `docs/roadmap.md` (D1 `greedy_player` — notatka fix 2026-06-12).
 
 ### 2026-06-12 — faza-d-melee-target-cover (archived) — fix scoringu celu Szarży skażonego osłoną
 - Boty `PriorityV2Player`/`PriorityV3Player` skorowały cele Szarży przez `expected_damage(..., state.terrain)`, które modeluje Ostrzał z osłoną (pkt 19, `compute_cover`). Silnik melee (`resolve_melee_attack`/`resolve_charge_attack`) osłony **nie** liczy → cel za zasłoną Obronną dostawał zaniżony `mean`/wagę jako cel Szarży, łamiąc inwariant prediction↔combat (ADR-0044). **Fix:** scoring Szarży przekazuje pusty `terrain` (osłona = tylko Ostrzał, pkt 19). Dotyczy `priority_v2._act` krok 3, `priority_v3._a_charge` + `_best_achievable_target_weight` (Szarża pusty teren, Ostrzał honoruje teren). Zero zmian w rdzeniu silnika/prediction. Pochodzenie: F6 (REVIEW_2026-06-11) + obserwacja `_target_weight` (REVIEW_2026-06-12).
