@@ -14,5 +14,5 @@ sources:
   sha256: 8caf30438b39e4d84f5102457b16a585a5259ee36a1a8648fd5b391596d47090
   role: Curated MD version of abilities — 1:1 quotes from SZOP
 - path: app/static/docs/SZOP_Rozjemca.md
-  sha256: bfa613cbe6d45517a67d4fe80804b081b1c1a0f7d4077275f8b2938cd9784bcc
+  sha256: 99f5cde81229ca4cfec3d9002bbb9721487e20cb465173087592a657289172a4
   role: Game rules narrative (referee version)

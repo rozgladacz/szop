@@ -128,6 +128,23 @@ def test_charge_score_ignores_cover_pkt19():
     assert _attack_score(cover, shoot) < _attack_score((), shoot)
 
 
+def test_attack_score_nonzero_for_low_expected_kills_on_objective():
+    """F5: atak zdejmujący ostatni model obrońcy z celu (E[kills]<0.5) NIE powinien
+    dawać objective_delta=0. Jeden słaby strzał na 1-modelowy oddział na celu —
+    score musi być > score tego samego ataku bez celu w pobliżu."""
+    attacker = _blob(1, 0, 0, 0, ranged_weapons=(WEAK,))
+    defender_on_obj = _blob(2, 1, 5, 0, models_alive=1, toughness_per_model=5)
+    defender_off_obj = _blob(3, 1, 5, 0, models_alive=1, toughness_per_model=5)
+    obj = Objective(id=1, position=Position(5, 0), controller=None)
+    g = GreedyPlayer()
+    state_on = _state((attacker, defender_on_obj), (obj,))
+    state_off = _state((attacker, defender_off_obj), ())
+    score_on = g._attack_score(state_on, 0, ShootAction(1, 2, WEAK), 0.0)
+    score_off = g._attack_score(state_off, 0, ShootAction(1, 3, WEAK), 0.0)
+    # Atak na cel kontrolujący objective powinien być wyżej wyceniany niż w polu.
+    assert score_on > score_off
+
+
 def test_attack_prefers_enemy_contesting_my_objective():
     # Dwa identyczne, wymiataalne wrogie oddziały: A kontestuje mój cel, B w polu.
     # Obrażenia równe → bonus kontroli celu (wymiecenie A → przejęcie) rozstrzyga.

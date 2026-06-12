@@ -297,25 +297,6 @@ class PriorityV3Player(Player):
             return None
         return self._act(state, perspective, unit, actions_taken)
 
-    def choose_regroup_consequence(self, state: BattleState, unit: UnitBlob) -> str:
-        """Drzewo wyboru konsekwencji 1-porażki Przegrupowania (spec usera).
-
-        Przyszpilony→pinned; Wyczerpany→exhausted; Ufortyfikowany→pinned
-        (Przyszpilony+Ufortyfikowany znoszą się, pkt 22.b.iii → bez debuffu);
-        w 3″ od celu→exhausted (Przyszpilony nie kontroluje celów, pkt 22.b.ii);
-        inaczej→pinned (Wyczerpany blokuje atak, pkt 22.a.i)."""
-        if STATUS_PRZYSZPILONY in unit.status_flags:
-            return "pinned"
-        if STATUS_WYCZERPANY in unit.status_flags:
-            return "exhausted"
-        if STATUS_UFORTYFIKOWANY in unit.status_flags:
-            return "pinned"
-        near_objective = any(
-            distance(unit.position, o.position) - unit.radius_inches <= OBJECTIVE_CONTROL_RANGE
-            for o in state.objectives
-        )
-        return "exhausted" if near_objective else "pinned"
-
     def _build_ctx(self, state, perspective, unit, actions_taken) -> _Ctx:
         enemies = enemy_units(state, perspective)
         move = _move_inches()

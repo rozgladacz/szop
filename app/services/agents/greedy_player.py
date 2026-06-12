@@ -157,11 +157,17 @@ class GreedyPlayer(Player):
         # Człon HP (fine-grained, sub-kill) + zmiana wartości celów gdy atak
         # praktycznie wymiata defendera z 3″ celu (pkt 5.d). Bez double-count:
         # obrażenia = HP, objective_balance = tylko cele.
-        expected_kills = round(dist.expected_models_killed())
-        hypothetical = _apply_expected_kills(state, defender.id, expected_kills)
-        objective_delta = (
-            objective_balance_with_control(hypothetical, perspective) - base_objective
-        )
+        #
+        # Zaokrąglenie przez ceil (nie round) — unikamy rzutowania do 0 gdy
+        # expected_kills < 0.5 (F5: atak na 1 model kontrolujący cel). Delta
+        # ważona proporcją: expected_kills / ceil, więc 0.3 expectedkills daje
+        # 0.3× zmiany celu zamiast 0 (co by pominęło wartość przejęcia celu).
+        expected_kills = dist.expected_models_killed()
+        hypothetical_kills = math.ceil(expected_kills) if expected_kills > 0 else 0
+        hypothetical = _apply_expected_kills(state, defender.id, hypothetical_kills)
+        raw_delta = objective_balance_with_control(hypothetical, perspective) - base_objective
+        weight = (expected_kills / hypothetical_kills) if hypothetical_kills > 0 else 0.0
+        objective_delta = weight * raw_delta
         return dist.mean * WOUND_VALUE + objective_delta
 
     def _maneuver_score(

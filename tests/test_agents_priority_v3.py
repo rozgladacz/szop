@@ -129,27 +129,6 @@ def test_deterministic_choice():
     assert PriorityV3Player().choose_action(st, 0) == PriorityV3Player().choose_action(st, 0)
 
 
-# --- drzewo wyboru konsekwencji Przegrupowania (pkt 20.f.i) ---
-
-
-def test_regroup_choice_tree():
-    from app.services.engine.status import STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY
-    bot = PriorityV3Player()
-    st = _state((_blob(1, 0, 0, 0),))
-    # Przyszpilony → pinned
-    assert bot.choose_regroup_consequence(st, _blob(1, 0, 0, 0, status_flags=(STATUS_PRZYSZPILONY,))) == "pinned"
-    # Wyczerpany → exhausted
-    assert bot.choose_regroup_consequence(st, _blob(1, 0, 0, 0, status_flags=(STATUS_WYCZERPANY,))) == "exhausted"
-    # Ufortyfikowany → pinned (znoszą się, pkt 22.b.iii)
-    assert bot.choose_regroup_consequence(st, _blob(1, 0, 0, 0, status_flags=(STATUS_UFORTYFIKOWANY,))) == "pinned"
-    # W 3″ od celu → exhausted (Przyszpilony nie kontroluje, pkt 22.b.ii)
-    st_obj = _state((_blob(1, 0, 0, 0),), (Objective(id=1, position=Position(1, 0)),))
-    assert bot.choose_regroup_consequence(st_obj, _blob(1, 0, 0, 0)) == "exhausted"
-    # Z dala od celu, bez statusów → pinned
-    st_far = _state((_blob(1, 0, 0, 0),), (Objective(id=1, position=Position(60, 0)),))
-    assert bot.choose_regroup_consequence(st_far, _blob(1, 0, 0, 0)) == "pinned"
-
-
 # --- audyt legalności w pełnych grach ---
 
 
