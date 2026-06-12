@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-d-melee-target-cover](docs/handoffs/HANDOFF_faza-d-melee-target-cover.md) | Strumień D — fix skażenia scoringu celu Szarży osłoną (pkt 19 ranged-only) w PriorityV2/V3. | `app/services/agents/priority_v2_player.py`, `priority_v3_player.py` | In progress (2026-06-12) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,12 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-12 — faza-d-melee-target-cover (archived) — fix scoringu celu Szarży skażonego osłoną
+- Boty `PriorityV2Player`/`PriorityV3Player` skorowały cele Szarży przez `expected_damage(..., state.terrain)`, które modeluje Ostrzał z osłoną (pkt 19, `compute_cover`). Silnik melee (`resolve_melee_attack`/`resolve_charge_attack`) osłony **nie** liczy → cel za zasłoną Obronną dostawał zaniżony `mean`/wagę jako cel Szarży, łamiąc inwariant prediction↔combat (ADR-0044). **Fix:** scoring Szarży przekazuje pusty `terrain` (osłona = tylko Ostrzał, pkt 19). Dotyczy `priority_v2._act` krok 3, `priority_v3._a_charge` + `_best_achievable_target_weight` (Szarża pusty teren, Ostrzał honoruje teren). Zero zmian w rdzeniu silnika/prediction. Pochodzenie: F6 (REVIEW_2026-06-11) + obserwacja `_target_weight` (REVIEW_2026-06-12).
+- Pliki: `app/services/agents/{priority_v2_player,priority_v3_player}.py`, `tests/test_agents_priority_{v2,v3}.py` (+2 `test_charge_target_ignores_cover_pkt19`), `docs/roadmap.md`. Commit na `Faza_A`: `8a8154d`.
+- Weryfikacja: pytest **1607 passed** (1605 baseline + 2; 1 fail = znany tripwire `test_real_source_hashes_match`, blokada pkt 20.f.i, NIE regresja). Realność regresji potwierdzona: PRE-fix `_best_target(...terrain)` → id 3 (uncovered), POST-fix `()` → id 2 (covered) w obu botach. `/simplify` 4 kąty inline — 0 zmian (kod czysty; call-site to właściwa głębokość, bo `prediction.py` MVP jest ranged-only). `/review`/`/security-review` pominięte warunkowo (izolowana warstwa agentów, <50 linii prod, brak hot-path/SSOT/auth/DB).
+- Doc updates: `docs/roadmap.md` (D1 `priority_v2_player`/`priority_v3_player` — notatka fix 2026-06-12).
 
 ### 2026-06-11 — faza-b-order-interrupts (archived) — Klątwa/Rozkaz/Oznaczenie MVP + F1 fix
 - Wątek zamknięty: mechanizm przerwań Rozkaz(X)/Klątwa(X)/Oznaczenie(X) (id 45/49/50) — substrat `ability_overrides` + `effective_passives`, handlery `BEFORE_ACTION` (zasięg 12″, ally/enemy, `rozkaz_tak`, raz-na-rundę), wygaśnięcie na końcu aktywacji (Fazy 1-4 ✅, ADR-0049, 28 testów). **H1 ZAMKNIĘTE** (user 2026-06-11): kierunek `granted = rozkaz_tak XOR (typ=="klatwa")`. **H2 DEFERRED**: auto-orkiestracja (kto/kiedy wywołuje + wybór celu) → przyszły wątek B4. Domknięcie: code-review **F1 NAPRAWIONE** — `_apply_order_like` guard `source.models_alive == 0` (pokonany nosiciel nie wyda przerwania gdy B4 wywoła `trigger_interrupt` z pominięciem `get_eligible_interrupts`).
