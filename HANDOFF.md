@@ -47,6 +47,13 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
+### 2026-06-12 — faza-d-test-maps (archived) — generatory map testowych (Standard_A/Lustrzana_A/Symetryczna_A)
+- Nowe mapy w `balance_simulate`: `--map {standard_a, lustrzana_a, symetryczna_a} [--map-seed N]` (rejestr `MAP_BUILDERS` + `build_map`). **Standard_A** deterministyczna, środkowo-symetryczna (reflekcja od (36,24) danych usera) — 9 kół (merge cech same-pos: środek Obronny+Trudny, (30,36) Obronny+Niebezpieczny), 18 linii Niedostępny+Blokujący, 5 celów. **Lustrzana_A** losowa (lustro y=24): cele rejection-sampling wg pkt 5.b/5.c (środkowy na linii środka), 18 linii dł.2–5 (midpoint ≥6″/≥3″ od celów), koła 8 Obronny/4 Trudny/2 Niebezpieczny (⌀3–6, overlap-OK). **Symetryczna_A** losowa, środkowo-sym. (1 cel na środku), strefy = 2 linie 12″ od środka **pod losowym kątem** (`_armies_angled`, P1=reflekcja P0). 4 profile/stronę symetrycznie. Skrypt-liść — zero zmian w silniku/agentach.
+- Pliki: `scripts/balance_simulate.py` (generatory + `--map`/`--map-seed`), `tests/test_balance_simulate.py` (+7), `docs/roadmap.md`. Commit na `Faza_A`: `0903067`.
+- Weryfikacja: pytest **1614**; 3 mapy budują legalne `BattleState` (4v4, 5 celów ≥12″/≥6″, cechy 8/4/2 losowe / 7-3-2 Standard), symetria point/mirror + determinizm/seed testowane; smoke balans priority/random 70–93%.
+- **Stare fixtury ZOSTAJĄ** (test_balance_simulate + `DEFAULT_FIXTURE` zależą) — `--map` to nowa ścieżka; usunięcie starych = osobny krok (repoint testów). **Ograniczenie silnika (flaga):** ruch nie egzekwuje Trudny (½ ruchu pkt 4.c.iv)/Niedostępny (pkt 4.c.i) — brak pathfindingu; działają LoS(Blokujący)/osłona(Obronny)/Niebezpieczny.
+- Doc updates: roadmap D2 (mapy generowane).
+
 ### 2026-06-12 — faza-d-greedy-melee-cover (archived) — domknięcie fixu „melee bez osłony" w GreedyPlayer
 - Kontynuacja `faza-d-melee-target-cover`: pełny `grep expected_damage app/services/agents/` ujawnił 3 boty z wzorcem skażenia osłoną melee; v2/v3 naprawione wcześniej, `GreedyPlayer._attack_score` (`greedy_player.py:151`) pozostał — scorował też Szarżę (`ChargeAction`) przez `expected_damage(..., state.terrain)`, zaniżając `mean` (HP) + `expected_kills` (Δ kontroli celów) dla celów Szarży za zasłoną. **Fix:** `terrain = state.terrain if isinstance(action, ShootAction) else ()`. Osłona (pkt 19) = tylko Ostrzał; silnik melee jej nie liczy. Wszystkie 3 boty używające `expected_damage` teraz spójne.
 - Pliki: `app/services/agents/greedy_player.py`, `tests/test_agents_greedy.py` (+1 `test_charge_score_ignores_cover_pkt19`), `docs/roadmap.md`. Commit na `Faza_A`: `93e872d`.
