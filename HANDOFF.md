@@ -11,8 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ → B2 → B4 → B5 → B6 → B7. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-b-7-test-bed](docs/handoffs/HANDOFF_faza-b-7-test-bed.md) | B7 — golden regression test bed (deterministyczne pełne bitwy, seed + zapieczętowany wynik). | `tests/test_engine_regression.py` (NEW) | In progress (2026-06-13 — capture golden + test bed) |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** → B2 → B4 → B5 → B6. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-13 — faza-b-7-test-bed (archived) — B7 golden regression test bed
+- Domknięty **B7 (Test bed)** z roadmap Strumień B: `tests/test_engine_regression.py` (NEW) — 6 golden battles deterministycznych (param) + 6 reproducible + 2 sanity = **14 testów**. Każdy case = pełna gra (fixtura wierna regułom z D2 + predefiniowany seed + matchup botów) z zapieczętowanym wynikiem: asercje semantyczne (winner/rounds/score/event-count) **+ sha256 digest całego event-logu** (bit-perfect lock). Reuse `scripts/balance_simulate.py` (SSOT ładowania fixtur + budowy graczy) + `simulate_from_rosters` — **zero zmian w rdzeniu silnika/agentów** (warstwa-liść, brak kolizji z równoległymi wątkami engine). Pętla 100% deterministyczna (ADR-0010/0012, potwierdzone podwójnym uruchomieniem). Pokrycie wyników 0/1/None (1 remis priority-mirror, 3× P0, 2× P1). Regen golden po świadomej zmianie: `python tests/test_engine_regression.py` (blok `__main__`) → przenieś wartości + ADR.
+- Pliki: `tests/test_engine_regression.py` (NEW), `docs/roadmap.md` (B7 ✅). Commit na `Faza_A`: `a700b74`.
+- Weryfikacja: pytest **1628 passed** (1614 baseline + 14; tripwire `test_real_source_hashes_match` zielony). `/simplify` 4 kąty inline (test-only) — 1 cleanup (`c[:5]` w 2. parametrize), reszta czysta. `/review`/`/security-review` pominięte warunkowo (0 linii kodu produkcyjnego, brak hot-path/SSOT/auth/DB).
+- **Reguła B7:** zmiana wartości golden = świadoma zmiana rulesetu/silnika/heurystyki bota → wymaga ADR (roadmap B7).
+- Doc updates: `docs/roadmap.md` (B7 DONE 2026-06-13). `docs/testing.md` świadomie nietknięte — nie kataloguje pojedynczych suit silnika (brak nawet smoke replay/replay invariant); dodanie wpisu byłoby niespójne ze strukturą pliku.
 
 ### 2026-06-12 — faza-d-test-maps (archived) — generatory map testowych (Standard_A/Lustrzana_A/Symetryczna_A)
 - Nowe mapy w `balance_simulate`: `--map {standard_a, lustrzana_a, symetryczna_a} [--map-seed N]` (rejestr `MAP_BUILDERS` + `build_map`). **Standard_A** deterministyczna, środkowo-symetryczna (reflekcja od (36,24) danych usera) — 9 kół (merge cech same-pos: środek Obronny+Trudny, (30,36) Obronny+Niebezpieczny), 18 linii Niedostępny+Blokujący, 5 celów. **Lustrzana_A** losowa (lustro y=24): cele rejection-sampling wg pkt 5.b/5.c (środkowy na linii środka), 18 linii dł.2–5 (midpoint ≥6″/≥3″ od celów), koła 8 Obronny/4 Trudny/2 Niebezpieczny (⌀3–6, overlap-OK). **Symetryczna_A** losowa, środkowo-sym. (1 cel na środku), strefy = 2 linie 12″ od środka **pod losowym kątem** (`_armies_angled`, P1=reflekcja P0). 4 profile/stronę symetrycznie. Skrypt-liść — zero zmian w silniku/agentach.
