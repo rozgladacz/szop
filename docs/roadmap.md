@@ -237,9 +237,9 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] `app/static/js/modules/battle_canvas.js` — minimalny 2D canvas (Konva.js lub goły Canvas)
 - [ ] ADR-0013: Engine headless-first, UI opcjonalne
 
-### B7. Test bed (2 tyg)
-- [ ] `tests/fixtures/battles/*.yaml` — golden scenariusze z predefined seed i oczekiwanym wynikiem
-- [ ] `tests/test_engine_regression.py` — golden battles deterministyczne (zmiana golden = świadoma zmiana rulesetu → ADR)
+### B7. Test bed (2 tyg) — **DONE 2026-06-13** (wątek `faza-b-7-test-bed`)
+- [x] `tests/fixtures/battles/*.yaml` — golden scenariusze (reuse 3 fixtur wiernych regułom z D2: `demo_skirmish`/`objective_clash`/`unit_profiles`; predefiniowany seed + matchup botów = przepis na deterministyczny przebieg).
+- [x] `tests/test_engine_regression.py` — 6 golden battles deterministycznych (winner/rounds/score/event-count + sha256 digest event-logu) + 6 reproducible + 2 sanity = 14 testów. **Zmiana golden = świadoma zmiana rulesetu/silnika/heurystyki → ADR.** Regen przez `python tests/test_engine_regression.py` (blok `__main__`). Reuse `balance_simulate` (SSOT ładowania fixtur + budowy graczy) — zero zmian w rdzeniu. Pokrycie wyników 0/1/None; pętla 100% deterministyczna (ADR-0010/0012).
 
 ---
 
