@@ -223,13 +223,16 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] Pydantic schemas w `app/schemas.py` — BattleState, BattleEvent, Action (polimorficzne)
 - [ ] Optimistic locking na `BattleEvent.sequence` — zapobiega race condition
 
-### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg)
-- [ ] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `subscribe_events`, `simulate`
-- [ ] `szop_client/http.py` — `HttpClient(base_url, token)` — wywołuje FastAPI przez httpx
-- [ ] `szop_client/local.py` — `LocalClient(db_session, user_id)` — in-process BattleEngine; szybki batch (1000 bitew/min)
-- [ ] `szop_client/setup.py` — `pip install -e szop_client/`
-- [ ] `tests/test_clients_parity.py` — `HttpClient.simulate(...) == LocalClient.simulate(...)` dla tych samych args + seed
-- [ ] ADR-0016: szop_client jako wydzielony moduł
+### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14** (wątek `faza-b-5-client`, ADR-0016)
+
+> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** `HttpClient` + DB-backed loading + pakowanie odłożone (patrz niżej).
+
+- [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (+ `SimulationSummary`). `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
+- [ ] `szop_client/http.py` — `HttpClient(base_url, token)` — odłożone do B4 (API musi istnieć). Protocol strukturalny → dołączy bez dziedziczenia.
+- [x] `szop_client/local.py` — `LocalClient` in-process (ścieżka **engine-dict**: rostery jako dict 1:1 z `build_initial_state`). DB-backed `LocalClient(db_session, user_id)` odłożony do `faza-d-roster-adapter` (most ORM→engine-dict).
+- [ ] `szop_client/setup.py` — `pip install -e` odłożone (sens dopiero z `HttpClient`; `LocalClient` z natury in-process z `app`).
+- [ ] `tests/test_clients_parity.py` — `HttpClient.simulate == LocalClient.simulate` odłożone do B4.
+- [x] ADR-0016: szop_client jako wydzielony moduł (Accepted)
 
 ### B6. Prezentacja (opcjonalne, 3–4 tyg)
 - [ ] `scripts/battle_replay.py <id>` — CLI terminal output
@@ -301,6 +304,16 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] Leaderboard `reports/leaderboard.md`
 - [ ] ADR-0030: Wielu agentów konkurujących — osobne konta + leaderboard
 
+### D5. Rozstawienie jako decyzja bota (po E4 kolizjach)
+
+> Aktualnie pozycje startowe biorą się z fikstury YAML; `deployment_round` jest wywoływane z pustą listą akcji — boty nie mają wpływu na start.
+
+- [ ] `Player.choose_deployment(state, unit_id) → Position` — nowa metoda ABC (default: pozycja z fikstury = wsteczna kompat)
+- [ ] `simulate_from_rosters` pyta graczy o pozycje przed `deployment_round`; waliduje `position` w strefie rozstawienia gracza (pkt 13.a) przez `IllegalActionError`
+- [ ] Proste strategie deploymentu (nie wymagają E4): grid równomierny w strefie, kopia fikstury ze skalowaniem
+- [ ] Strategie zaawansowane (wymagają E4 kolizji): rozstaw bez nachodzenia; coverage-based (maksymalizuj liczbę pokrytych celów z pozycji startowej)
+- [ ] Testy: pozycja poza strefą rozstawienia odrzucona; gracze mogą dostać różne pozycje na tej samej planszy
+
 ---
 
 ## Strumień E — Wzbogacanie modelu (po B stabilne, tydzień 20+)
@@ -320,6 +333,22 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] Lista priorytetowa z `build/geometry_classification.md`
 - [ ] Zdolność `Zwrot` wprowadza `UnitBlob.facing_deg: float = 0.0`
 - [ ] Każda zdolność = osobny PR + test + ADR
+
+### E4. Ruch — kolizje i pathfinding (po E2, tydzień 28+)
+
+> MVP: ruch deklarowany, brak kolizji jednostka–jednostka (B0 decyzja #5). Oddziały mogą na siebie wchodzić. Poniższe implementują pełny model ruchu po stabilizacji silnika.
+
+**Kolizje jednostka–jednostka:**
+- [ ] Walidacja w `phases._apply_maneuver` — `circle_edge_distance(moved, other) >= 0` dla każdego innego blobu na planszy; rzuć `IllegalActionError` jeśli nachodzenie
+- [ ] `base.legal_actions` / `legal_followup_actions` — filtruj `ManeuverAction` których `target_position` prowadzi do kolizji (boty nie próbują niedozwolonych ruchów)
+- [ ] Testy regresyjne: overlap po manewrze niedozwolony; Szarża dalej ustawia `min_gap`
+
+**Pathfinding:**
+- [ ] `app/services/engine/pathfinding.py` — `find_reachable_positions(state, blob, move_inches) → list[Position]` (siatka hex lub ciągła)
+- [ ] Obsługa terenu `Trudny` (½ ruchu, pkt 4.c.iv) — ważona siatka
+- [ ] Obsługa terenu `Niedostępny` (pkt 4.c.i) — blokada węzłów
+- [ ] Boty (Greedy/Priority/V2/V3) zastępują heurestyczne `_move_toward` wywołaniem `find_reachable_positions`
+- [ ] ADR: model pathfindingu (grid rozdzielczość vs graph nawigacji)
 
 ---
 
@@ -354,7 +383,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0014 | Obrażenia per-oddział (= Stan bitewny) — 4 kategorie ran | ✓ |
 | 0015 | Interrupt point `BEFORE_ACTION` (pkt 11.b.i; korekta 2026-06-09 z 4 punktów) | ✓ |
 | 0015a | Reactive window w akcji ataku (atomowe) | ✓ |
-| 0016 | szop_client jako wydzielony moduł | — |
+| 0016 | szop_client jako wydzielony moduł (Protocol + LocalClient slice) | ✓ |
 | 0017 | Telemetria od dnia 1 | — |
 | 0020 | MCP runtime: Python SDK | — |
 | 0021 | MCP jako klient publicznego API | — |

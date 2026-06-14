@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** → B2 → B4 → B5 → B6. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
+| [HANDOFF_faza-b-5-client](docs/handoffs/HANDOFF_faza-b-5-client.md) | Strumień B5 — `szop_client` (Protocol GameClient + LocalClient in-process, ścieżka engine-dict). | `szop_client/*` (NEW), `tests/test_clients_local.py` (NEW), `docs/adr/0016-szop-client.md` (NEW) | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)
