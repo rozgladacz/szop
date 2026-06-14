@@ -76,7 +76,7 @@ def get_active_ability(slug: str) -> ActiveAbilityHandler | None:
   - `latanie` — heal target (`wounds_received` decrement)
   - `mag` — psychic ranged attack
   - `mobilizacja` — remove Aktywowany na sojuszniku
-  - `presja` — +2 do `melee_balance` przeciwnika
+  - `presja` — +2 do `damage_balance` przeciwnika
   - `przepowiednia` — peek/reroll dice queue
   - `meczennik` — self-sacrifice transfer wounds
 

@@ -178,6 +178,6 @@ def test_replay_invariant_two_action_activation():
     live = {b.id: b for b in res.state.blobs}
     rep = {b.id: b for b in replayed.blobs}
     for uid in live:
-        for f in ("position", "models_alive", "wounds_received", "status_flags", "melee_balance"):
+        for f in ("position", "models_alive", "wounds_received", "status_flags", "damage_balance"):
             assert getattr(live[uid], f) == getattr(rep[uid], f), f"{uid}.{f}"
     assert res.state.active_player == replayed.active_player

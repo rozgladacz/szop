@@ -7,7 +7,7 @@ Pokrywa:
 - compute_defense_modifier (AP + osłona bonus)
 - _allocate_wounds_to_defender (pkt 17.e + 18: model kills, znaczniki, prefer_hero)
 - resolve_ranged_attack (3 fazy + Brutalny + Precyzyjny + AP + Osłona)
-- resolve_melee_attack (analogicznie + melee_balance pkt 20.c)
+- resolve_melee_attack (analogicznie + damage_balance pkt 20.c)
 - ModelKilled events sequenced correctly
 - Pure function — input state nie zmieniony
 """
@@ -585,8 +585,8 @@ def test_resolve_melee_updates_balance():
     # Załóżmy że są wounds. Sprawdź balance.
     melee_event = next(e for e in result.events if isinstance(e, MeleeResolved))
     total_wounds = melee_event.wounds_dealt + melee_event.wounds_precise
-    assert result.new_attacker.melee_balance == attacker.melee_balance + total_wounds
-    assert result.new_defender.melee_balance == defender.melee_balance - total_wounds
+    assert result.new_attacker.damage_balance == attacker.damage_balance + total_wounds
+    assert result.new_defender.damage_balance == defender.damage_balance - total_wounds
 
 
 def test_resolve_melee_no_wounds_no_balance_change():
@@ -600,8 +600,8 @@ def test_resolve_melee_no_wounds_no_balance_change():
     result = resolve_melee_attack(state, attacker, defender, weapon, dice, sequence=1)
     melee = next(e for e in result.events if isinstance(e, MeleeResolved))
     total = melee.wounds_dealt + melee.wounds_precise
-    assert result.new_attacker.melee_balance == total
-    assert result.new_defender.melee_balance == -total
+    assert result.new_attacker.damage_balance == total
+    assert result.new_defender.damage_balance == -total
 
 
 def test_resolve_melee_pure_function():
@@ -640,8 +640,8 @@ def test_resolve_melee_does_not_mutate_input_blobs():
     weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=1)
     dice = DeterministicDice(seed=42)
     resolve_melee_attack(state, attacker, defender, weapon, dice, sequence=1)
-    assert attacker.melee_balance == 0
-    assert defender.melee_balance == 0
+    assert attacker.damage_balance == 0
+    assert defender.damage_balance == 0
 
 
 # ---------------------------------------------------------------------------

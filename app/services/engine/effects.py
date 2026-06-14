@@ -7,16 +7,19 @@ jednej lub wielu kategoriach modifiers:
   Okopany, Parowanie, etc.
 - **attack_modifier** (`+/-` do testu trafienia per pkt 17.a) — Ostrożny,
   Przygotowanie, etc.
-- **morale_modifier** (`+/-` do liczby testów Przegrupowania per pkt 20.d) —
-  Nieustraszony, Stracency, etc.
 - **weapon_modifier** (`WeaponProfile → WeaponProfile`) — Niezawodny, Dobrze
   strzela, Mistrzostwo, etc.
+
+Brak rejestru **morale_modifier**: po drift 2026-06 (R5.c + pkt 20.e) pkt 20 nie
+ma już addytywnych modyfikatorów liczby testów Przegrupowania. Nieustraszony jest
+binarny (powyżej połowy → skip wszystkich) i żyje w `phases._regroup_test`, nie tu.
 
 Engine (B3.6 phases, B3.7 resolver) wywołuje `aggregate_*(blob, context)` żeby
 zebrać sumę modifiers z passive abilities bloba. Każda funkcja jest pure: bierze
 `EffectContext` (read-only state proxy) → zwraca scalar/profile.
 
-MVP scope: 3 representative abilities (Cierpliwy, Tarcza, Nieustraszony).
+MVP scope: 2 representative abilities (Cierpliwy, Tarcza). Nieustraszony
+przeniesiony do `phases._regroup_test` (binarny skip, pkt 20.e — drift 2026-06).
 Reszta passive abilities (44 entries z `abilities.yaml` typ=passive) dodawana
 w przyszłych iteracjach — każda nowa zdolność = nowa funkcja + entry w registry,
 zero zmian w aggregator code.
@@ -315,7 +318,7 @@ def _stub_active_ability(
 
     Konkretna implementacja każdej zdolności w przyszłych iteracjach (Łatanie =
     heal target, Mag = ranged psychic attack, Mobilizacja = remove Aktywowany
-    z innego oddziału, Presja = +2 melee_balance na target przeciwnika,
+    z innego oddziału, Presja = +2 damage_balance na target przeciwnika,
     Przepowiednia = peek dice queue, Męczennik = self-sacrifice).
     """
 
@@ -393,7 +396,7 @@ _ACTIVE_ABILITY_REGISTRY["mobilizacja"] = _stub_active_ability(
     "mobilizacja", "MVP stub — remove Aktywowany na sojuszniku (B3.9.f+)"
 )
 _ACTIVE_ABILITY_REGISTRY["presja"] = _stub_active_ability(
-    "presja", "MVP stub — +2 do melee_balance przeciwnika (B3.9.f+)"
+    "presja", "MVP stub — +2 do damage_balance przeciwnika (B3.9.f+)"
 )
 _ACTIVE_ABILITY_REGISTRY["przepowiednia"] = _stub_active_ability(
     "przepowiednia", "MVP stub — peek/reroll dice queue (B3.9.f+)"

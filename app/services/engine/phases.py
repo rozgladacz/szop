@@ -106,7 +106,7 @@ class ActivationContext:
       pkt 14.d → musi przejść Przegrupowanie w aktywacji chargera, pkt 20.a —
       bug #2).
     - `melee_combatants` — frozenset id-ów uczestników starcia wręcz (actor +
-      defender(s) z ChargeAction). Używany dla reset `melee_balance` na obu
+      defender(s) z ChargeAction). Używany dla reset `damage_balance` na obu
       stronach po regroup (pkt 20.c — bilans wręcz resetowany dla obu stron,
       bug #5).
 
@@ -531,7 +531,7 @@ def _regroup_test(
 
     Per pkt 20.a: test wykonują oddziały które otrzymały rany **w tej
     aktywacji** (delta `wounds_received_this_activation`, nie cumulative
-    `blob.wounds_received`). Dodatkowo: oddział z `melee_balance < 0`
+    `blob.wounds_received`). Dodatkowo: oddział z `damage_balance < 0`
     (przegrał wręcz w tej aktywacji) wykonuje test choćby bez ran (pkt 20.c).
 
     Liczba testów:
@@ -558,7 +558,7 @@ def _regroup_test(
     delta_dealt = context.dealt_for(blob_id)
     # R5.d (faza-b-rules-resync 2026-06): pkt 20.a NEW trigger — oddział testuje
     # gdy ZADAŁ MNIEJ RAN NIŻ OTRZYMAŁ w aktywacji. Pre-drift trigger to było
-    # `delta_received > 0 OR melee_balance < 0` (każdy kto otrzymał ranę).
+    # `delta_received > 0 OR damage_balance < 0` (każdy kto otrzymał ranę).
     # Post-drift: tylko ten kto "przegrał wymianę" wykonuje test.
     if delta_received <= delta_dealt:
         return state, (), sequence
@@ -583,7 +583,7 @@ def _regroup_test(
         n_tests += 1
     # R5.d pkt 20.c (drift 2026-06): walczył wręcz (był uczestnikiem starcia
     # w tej aktywacji — szarża jako actor LUB defender) → +1 test. Pre-drift
-    # różnicowało wygranie (-1) vs przegrane (+1) wręcz przez `melee_balance`;
+    # różnicowało wygranie (-1) vs przegrane (+1) wręcz przez `damage_balance`;
     # drift uproszcza do "walczył = +1 test" (sam udział w starciu = zamieszanie).
     if blob_id in context.melee_combatants:
         n_tests += 1
@@ -713,7 +713,7 @@ def activation_phase(
       "w tej aktywacji" — fix bug #1).
     - Dla `ChargeAction`: defender jest w `melee_combatants` → wykonuje test
       Przegrupowania w aktywacji chargera (pkt 20.a, fix bug #2).
-    - `melee_balance` resetowany na obu uczestnikach starcia wręcz (pkt 20.c,
+    - `damage_balance` resetowany na obu uczestnikach starcia wręcz (pkt 20.c,
       fix bug #5), nie tylko na actorze.
 
     Args:
@@ -771,7 +771,7 @@ def _apply_single_action(
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Jedna akcja w aktywacji (pkt 11.b.ii–iii): akcja → ActivationContext →
     Przegrupowanie (per akcja, pkt 20) → mutex statusów (pkt 22.b/c) → reset
-    melee_balance starcia. BEZ nadania Aktywowany — to `_finalize_activation`.
+    damage_balance starcia. BEZ nadania Aktywowany — to `_finalize_activation`.
     Wywoływana 1× (single-action wrapper) lub do 2× (apply_activation, pkt 11.b.iv).
     """
     events: list[BattleEvent] = []
@@ -838,13 +838,13 @@ def _apply_single_action(
     # NOTE: integration point dla Łatania (cel inny oddział) — gdy w event_chain
     # SpecialAction(latanie) pojawi się tu jako side-effect.
 
-    # Reset `melee_balance` na OBU stronach starcia (bug #5 fix — pkt 20.c bilans
+    # Reset `damage_balance` na OBU stronach starcia (bug #5 fix — pkt 20.c bilans
     # wręcz jest właściwością starcia, nie pojedynczego oddziału). B3.9.d emit
     # `MeleeBalanceReset` event per reset dla replay invariant (ADR-0046).
     for combatant_id in sorted(melee_combatants):
         combatant = next((b for b in state.blobs if b.id == combatant_id), None)
-        if combatant is not None and combatant.models_alive > 0 and combatant.melee_balance != 0:
-            state = _replace_blob(state, replace(combatant, melee_balance=0))
+        if combatant is not None and combatant.models_alive > 0 and combatant.damage_balance != 0:
+            state = _replace_blob(state, replace(combatant, damage_balance=0))
             events.append(MeleeBalanceReset(sequence=seq, target_id=combatant_id))
             seq += 1
 
@@ -857,7 +857,7 @@ def _finalize_activation(
     """Koniec aktywacji (pkt 11.b.v–vi) — RAZ, po ostatniej akcji.
 
     (Odzyskiwanie ran pkt 21 — MVP N/A) + status Aktywowany (pkt 11.b.vi,
-    StatusAdded) + safety reset melee_balance aktora + wygaśnięcie efektów „do
+    StatusAdded) + safety reset damage_balance aktora + wygaśnięcie efektów „do
     końca aktywacji" (czyszczenie `ability_overrides` — Rozkaz/Klątwa/Oznaczenie).
     """
     events: list[BattleEvent] = []
@@ -878,10 +878,10 @@ def _finalize_activation(
                 )
             )
             seq += 1
-        # Safety reset melee_balance aktora (gdy nie był uczestnikiem starcia).
+        # Safety reset damage_balance aktora (gdy nie był uczestnikiem starcia).
         # Idempotent z resetem combatants w `_apply_single_action`. B3.9.d emit.
-        if actor.melee_balance != 0:
-            actor = replace(actor, melee_balance=0)
+        if actor.damage_balance != 0:
+            actor = replace(actor, damage_balance=0)
             events.append(MeleeBalanceReset(sequence=seq, target_id=actor.id))
             seq += 1
         state = _replace_blob(state, actor)

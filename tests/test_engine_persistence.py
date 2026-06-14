@@ -226,7 +226,7 @@ def test_replay_from_db_invariant() -> None:
         "wounds_eliminating",
         "is_hero_unit",
         "status_flags",
-        "melee_balance",
+        "damage_balance",
         "location",
         "ability_overrides",
     )

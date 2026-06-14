@@ -7,7 +7,7 @@ Pokrywa 4 buggi z post-B3 code review:
   `melee_combatants`).
 - **bug #3**: `_regroup_test` pkt 20.b używa `state.initial_toughness_snapshot`,
   nie post-akcji `models_alive * toughness + wounds_received` proxy.
-- **bug #5**: `melee_balance` reset na obu uczestnikach starcia wręcz.
+- **bug #5**: `damage_balance` reset na obu uczestnikach starcia wręcz.
 
 Plus: immutability `ActivationContext`, helper `initial_toughness_for`,
 `_build_activation_context` delta computation.
@@ -376,12 +376,12 @@ def test_bug2_charge_defender_regroups_in_charger_activation():
 
 
 # ---------------------------------------------------------------------------
-# Bug #5 — melee_balance reset na obu stronach starcia
+# Bug #5 — damage_balance reset na obu stronach starcia
 # ---------------------------------------------------------------------------
 
 
-def test_bug5_melee_balance_reset_both_combatants():
-    """Po szarży `melee_balance` resetowany na charger AND defender."""
+def test_bug5_damage_balance_reset_both_combatants():
+    """Po szarży `damage_balance` resetowany na charger AND defender."""
     units = [
         {
             "owner_player": 0,
@@ -420,9 +420,9 @@ def test_bug5_melee_balance_reset_both_combatants():
     new_state, _ = activation_phase(state, action, DeterministicDice(7))
     charger = next(b for b in new_state.blobs if b.id == 1)
     defender = next((b for b in new_state.blobs if b.id == 2), None)
-    assert charger.melee_balance == 0
+    assert charger.damage_balance == 0
     if defender is not None and defender.models_alive > 0:
-        assert defender.melee_balance == 0
+        assert defender.damage_balance == 0
 
 
 def test_bug5_no_reset_for_ranged_action():
@@ -433,6 +433,6 @@ def test_bug5_no_reset_for_ranged_action():
     state = replace(state, active_player=0)
 
     new_state, _ = activation_phase(state, action, DeterministicDice(7))
-    # Test: melee_balance na obu pozostaje 0 (był 0 — pure ostrzał nie zmienia)
+    # Test: damage_balance na obu pozostaje 0 (był 0 — pure ostrzał nie zmienia)
     for b in new_state.blobs:
-        assert b.melee_balance == 0
+        assert b.damage_balance == 0

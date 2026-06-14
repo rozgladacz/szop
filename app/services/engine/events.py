@@ -261,15 +261,21 @@ class InitiativePassed:
 
 @dataclass(frozen=True, slots=True)
 class MeleeBalanceReset:
-    """Reset `melee_balance` na oddziale (pkt 20.c — bilans wręcz po regroup).
+    """Reset `damage_balance` na oddziale (pkt 20.c — bilans wręcz po regroup).
 
     B3.9.d (ADR-0046). Emitowany w `activation_phase` po fazie Przegrupowania
     dla każdego uczestnika starcia wręcz (`melee_combatants`) i dla actora gdy
-    `melee_balance != 0`. Reducer ustawia `blob.melee_balance = 0`.
+    `damage_balance != 0`. Reducer ustawia `blob.damage_balance = 0`.
 
     Powód osobnego eventu (zamiast pakowania w MoraleTestPassed): reset
     następuje DLA WSZYSTKICH combatants, nawet gdy nie wykonali testu (np.
     defender pokonany w aktywacji chargera nie ma morale test).
+
+    Nazwa klasy `MeleeBalanceReset` ZACHOWANA mimo rename pola
+    `melee_balance` → `damage_balance` (H3, 2026-06-14): nazwa eventu jest
+    tagiem serializacji (`type(event).__name__` w `event_to_json`) — częścią
+    zamrożonej schemy `payload_json` (ORM B2) i golden digestów B7. Rename tagu
+    = świadoma zmiana schemy wymagająca ADR + regen digestów.
     """
 
     sequence: int

@@ -7,7 +7,7 @@
   - **Bug #1.** `_regroup_test` triggerował test pkt 20.a gdy cumulative `wounds_received > 0` — oddział z 1 raną z poprzedniej aktywacji + 0 ran w tej musi NIE wykonywać testu, ale proxy zwracał True.
   - **Bug #2.** Defender szarży otrzymuje rany w aktywacji chargera (pkt 14.d), ale `activation_phase` uruchamiał Przegrupowanie tylko na **actorze**. Pkt 20.a wymaga testu od każdego oddziału który otrzymał rany w tej aktywacji — defender tego nie dostawał, dopóki nie odpalił własnej aktywacji.
   - **Bug #3.** `_regroup_test` liczył `initial_toughness_total` jako `models_alive * toughness + wounds_received` post-akcji — buggy proxy. Gdy poprzednia aktywacja pokonała model (decrement `models_alive`, reset `wounds_received` per pkt 18.c), proxy underestymował initial → test pkt 20.b "≤ ½ initial" odpalał się za wcześnie.
-  - **Bug #5.** `melee_balance` resetowane było tylko na actorze na końcu aktywacji. Defender szarży miał `melee_balance < 0` po starcie pkt 14.d, ale reset nigdy się nie wykonywał — bilans przeciekał do następnej aktywacji defendera.
+  - **Bug #5.** `damage_balance` resetowane było tylko na actorze na końcu aktywacji. Defender szarży miał `damage_balance < 0` po starcie pkt 14.d, ale reset nigdy się nie wykonywał — bilans przeciekał do następnej aktywacji defendera.
 
 ## Decyzja
 
@@ -36,7 +36,7 @@ class ActivationContext:
 - **`wounds_received_this_activation`** — frozen mapa `unit_id → delta_wounds` liczona przez `_build_activation_context(pre_wounds, post_state, actor_id, melee_combatants)` jako `post.wounds_received - pre.wounds_received` (klampowane do dodatnich; pokonanie modela reset-uje licznik ale to nie znaczy "nie otrzymał ran"). Pokrywa **wszystkie** oddziały które otrzymały rany w tej aktywacji, nie tylko aktora.
 - **`melee_combatants`** — `frozenset({actor_id, target_id})` dla `ChargeAction`; pusty dla pozostałych akcji. Używany w 2 miejscach:
   1. **regroup subjects** — `{actor_id} ∪ {uids w delta} ∪ melee_combatants` (oddział wciągnięty w starcie wręcz musi przejść test pkt 20.a niezależnie od ran).
-  2. **`melee_balance` reset** — obaj uczestnicy starcia mają reset, nie tylko actor (pkt 20.c bilans wręcz jest właściwością starcia, nie pojedynczego oddziału).
+  2. **`damage_balance` reset** — obaj uczestnicy starcia mają reset, nie tylko actor (pkt 20.c bilans wręcz jest właściwością starcia, nie pojedynczego oddziału).
 
 ## Konsekwencje
 
@@ -45,7 +45,7 @@ class ActivationContext:
 - **Fix bug #1.** `_regroup_test` używa `context.delta_for(blob_id)` zamiast `blob.wounds_received` — cumulative wounds z poprzednich aktywacji NIE triggerują testu. Pkt 20.a semantycznie poprawne.
 - **Fix bug #2.** `activation_phase` iteruje po `regroup_subjects` (actor + delta + melee_combatants), defender szarży dostaje test w aktywacji chargera.
 - **Fix bug #3.** `initial_toughness_for(state, unit_id)` zwraca wartość z setup, niezależnie od pokonań modeli między aktywacjami.
-- **Fix bug #5.** Pętla po `melee_combatants` resetuje `melee_balance` dla obu stron starcia.
+- **Fix bug #5.** Pętla po `melee_combatants` resetuje `damage_balance` dla obu stron starcia.
 - **Determinizm replay.** `regroup_subjects` sortowany przez `sorted(set)` — kolejność testów stała przy danym `BattleState` + `Action`.
 - **Test ergonomia.** `_regroup_test(state, blob_id, context, dice, sequence)` można wywołać bezpośrednio z syntetycznym `ActivationContext` — unit testy regroup math nie wymagają orkiestracji pełnej `activation_phase`.
 

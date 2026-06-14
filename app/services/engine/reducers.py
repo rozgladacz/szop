@@ -13,7 +13,7 @@ zaaplikowaniu odpowiadających akcji przez `resolver.apply`. Test:
 `tests/test_engine_replay_invariant.py`.
 
 **Scope MVP**: per-blob state (position, wounds_received, wounds_pending,
-wounds_pending_precise, models_alive, is_hero_unit, status_flags, melee_balance).
+wounds_pending_precise, models_alive, is_hero_unit, status_flags, damage_balance).
 Orchestration state (active_player, activations_remaining) nie jest derivowane
 z eventów — to wybór resolver-a, ortogonalne do bug #6.
 """
@@ -100,7 +100,7 @@ def _reduce_move_executed(state: BattleState, event: MoveExecuted) -> BattleStat
 # 3. Gdy models_alive == 0 po kill → wounds_received reset do 0 (consistent
 #    z `combat.py` linia 299).
 #
-# Dodatkowo MeleeResolved: attacker.melee_balance += total; defender -= total.
+# Dodatkowo MeleeResolved: attacker.damage_balance += total; defender -= total.
 
 
 def _push_wounds(
@@ -149,7 +149,7 @@ def _reduce_melee_resolved(state: BattleState, event: MeleeResolved) -> BattleSt
         state = _find_and_replace_blob(
             state,
             event.attacker_id,
-            replace(attacker, melee_balance=attacker.melee_balance + total),
+            replace(attacker, damage_balance=attacker.damage_balance + total),
         )
     if defender is not None:
         # Re-fetch po _push_wounds — wounds_received zaktualizowane.
@@ -158,7 +158,7 @@ def _reduce_melee_resolved(state: BattleState, event: MeleeResolved) -> BattleSt
             state = _find_and_replace_blob(
                 state,
                 event.defender_id,
-                replace(defender, melee_balance=defender.melee_balance - total),
+                replace(defender, damage_balance=defender.damage_balance - total),
             )
     return state
 
@@ -219,14 +219,14 @@ def _reduce_status_removed(state: BattleState, event: StatusRemoved) -> BattleSt
 
 
 @register_reducer("MeleeBalanceReset")
-def _reduce_melee_balance_reset(
+def _reduce_damage_balance_reset(
     state: BattleState, event: MeleeBalanceReset
 ) -> BattleState:
     blob = _find_blob_or_none(state, event.target_id)
-    if blob is None or blob.melee_balance == 0:
+    if blob is None or blob.damage_balance == 0:
         return state
     return _find_and_replace_blob(
-        state, event.target_id, replace(blob, melee_balance=0)
+        state, event.target_id, replace(blob, damage_balance=0)
     )
 
 

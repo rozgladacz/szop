@@ -10,7 +10,7 @@ po kontrataku.
 Scope (B3.9.d MVP):
 - Per-blob state: `position`, `models_alive`, `wounds_received`,
   `wounds_pending` (zerowane po alokacji), `wounds_pending_precise`,
-  `is_hero_unit`, `status_flags`, `melee_balance`, `quality`, `defense`,
+  `is_hero_unit`, `status_flags`, `damage_balance`, `quality`, `defense`,
   `toughness_per_model`, `radius_inches`, `owner_player`, `passives`.
 - BattleState orchestration (`active_player`, `activations_remaining`) — NIE
   jest event-derived (decyzja resolver-a). Sprawdzane wyłącznie blob-level.
@@ -73,7 +73,7 @@ _BLOB_REPLAY_FIELDS = (
     "wounds_pending",
     "wounds_pending_precise",
     "wounds_eliminating",  # R4.Zguba (pkt 26.d): event-derived (Shot/MeleeResolved + ModelKilled)
-    "melee_balance",
+    "damage_balance",
     "location",  # R5.a (pkt 27.b): event-derived przez ModelKilled reducer
     "ability_overrides",  # faza-b-order-interrupts: AbilityOverrideApplied/Cleared
 )

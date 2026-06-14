@@ -6,7 +6,7 @@
 
   1. **Brak production reducerów.** `_EVENT_REDUCERS` dispatcher z `register_reducer` był pusty w realnym engine — tylko test fixtures rejestrowały reducery dla pojedynczych typów. `apply_events` w production path zawsze rzucał `NotImplementedError`.
   2. **Silent status mutations.** `combat.resolve_charge_attack` mutował `defender.status_flags` przez `replace(status_flags=...)` po kontrataku (dodanie `Wyczerpany`) bez emit `BattleEvent`. Replay state nie miał tego statusu — **ADR-0010 invariant niezweryfikowalny** dla scenariuszy z Szarżą.
-  3. **Inne ciche mutacje** (`_apply_defend` Ufortyfikowany, `round_end_phase` reset Aktywowany, `activation_phase` reset `melee_balance`) — wszystkie obchodziły event log.
+  3. **Inne ciche mutacje** (`_apply_defend` Ufortyfikowany, `round_end_phase` reset Aktywowany, `activation_phase` reset `damage_balance`) — wszystkie obchodziły event log.
 
   ADR-0010 było formalnie Accepted, ale empirycznie nieosiągnięte. B3.9.d to faza dokończenia.
 
@@ -26,7 +26,7 @@
   - `phases._apply_special` (`Wyczerpany` przy `discard_exhausted`)
   - `phases.round_end_phase` (`Aktywowany` per blob, pkt 8.c.i)
 
-- **`MeleeBalanceReset(target_id)`** — emitowany przez `phases.activation_phase` po fazie Przegrupowania dla każdego uczestnika starcia wręcz z `melee_balance != 0`. Powód osobnego eventu (zamiast pakowania w `MoraleTestPassed`): reset następuje DLA WSZYSTKICH combatants, nawet gdy nie wykonali testu (np. defender pokonany w aktywacji chargera).
+- **`MeleeBalanceReset(target_id)`** — emitowany przez `phases.activation_phase` po fazie Przegrupowania dla każdego uczestnika starcia wręcz z `damage_balance != 0`. Powód osobnego eventu (zamiast pakowania w `MoraleTestPassed`): reset następuje DLA WSZYSTKICH combatants, nawet gdy nie wykonali testu (np. defender pokonany w aktywacji chargera).
 
 ### 2. Production reducery dla wszystkich event types
 
@@ -43,7 +43,7 @@ from app.services.engine import reducers as _reducers  # noqa: F401
 |---|---|
 | `MoveExecuted` | `blob.position = to_pos` |
 | `ShotResolved` | `defender.wounds_received += wounds_dealt + wounds_precise` |
-| `MeleeResolved` | `defender.wounds_received += total`; `attacker.melee_balance += total`; `defender.melee_balance -= total` |
+| `MeleeResolved` | `defender.wounds_received += total`; `attacker.damage_balance += total`; `defender.damage_balance -= total` |
 | `ModelKilled` | `defender.models_alive -= 1`; `defender.wounds_received -= toughness_per_model` (clamp ≥ 0); jeśli `is_hero`: `is_hero_unit=False`; jeśli `models_alive == 0`: `wounds_received = 0` |
 | `MoraleTestPassed` | per `result_status`: `"exhausted"` → +Wyczerpany; `"pinned"` → +Przyszpilony; `"exhausted_pinned"` → +oba; `"broken"` → `models_alive=0, wounds_received=0` |
 | `EffectApplied` | **no-op** (annotation only; status mutacje są w osobnych Status* eventach) |
@@ -51,7 +51,7 @@ from app.services.engine import reducers as _reducers  # noqa: F401
 | `RoundEnded` | `state.round += 1` (lub `is_game_over=True` przy MAX_ROUND); `state.score = event.objectives_held` |
 | `StatusAdded` | `blob.status_flags = add_status(blob, status)` (idempotent) |
 | `StatusRemoved` | `blob.status_flags = remove_status(blob, status)` (idempotent) |
-| `MeleeBalanceReset` | `blob.melee_balance = 0` |
+| `MeleeBalanceReset` | `blob.damage_balance = 0` |
 
 #### Algorytm replay dla wound allocation (ShotResolved/MeleeResolved + ModelKilled)
 

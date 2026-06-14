@@ -42,7 +42,7 @@ Mutex Przyszpilony ↔ Ufortyfikowany (pkt 22.b/c) rozwiązany przez **NOWY even
 
 ### D5. Przegrupowanie: trigger przez `ActivationContext`, nie cumulative state
 
-Pkt 20.a NOWY trigger = `delta_received > delta_dealt` **w tej aktywacji** — liczony z `ActivationContext` (ADR-0045): `dealt_for(uid)` agreguje `wounds_dealt + wounds_precise` z `ShotResolved`/`MeleeResolved` per `attacker_id`. Pkt 20.b = NIE-powyżej-połowy (`initial_toughness_for ÷ 2`); pkt 20.c = walczył wręcz (`blob_id in melee_combatants`, drop melee_balance differentiation). Defender szarży ma wpis w kontekście → regroup-testuje w aktywacji chargera.
+Pkt 20.a NOWY trigger = `delta_received > delta_dealt` **w tej aktywacji** — liczony z `ActivationContext` (ADR-0045): `dealt_for(uid)` agreguje `wounds_dealt + wounds_precise` z `ShotResolved`/`MeleeResolved` per `attacker_id`. Pkt 20.b = NIE-powyżej-połowy (`initial_toughness_for ÷ 2`); pkt 20.c = walczył wręcz (`blob_id in melee_combatants`, drop damage_balance differentiation). Defender szarży ma wpis w kontekście → regroup-testuje w aktywacji chargera.
 
 ### D6. Wszystkie rany przez `_allocate_wounds_to_defender` (SSOT kill-loop) (H6 RESOLVED)
 

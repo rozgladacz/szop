@@ -131,7 +131,8 @@ class UnitBlob:
     - `wounds_received` — znaczniki ran na oddziale (pkt 18.c)
     - `wounds_pending` — pula nadchodzących, obrońca alokuje (pkt 17.d.ii)
     - `wounds_pending_precise` — pula od `Precyzyjny`, atakujący alokuje (pkt 17.d.i + 68)
-    - `melee_balance` — bilans wręcz (zadane − otrzymane, pkt 20.c)
+    - `damage_balance` — bilans obrażeń (zadane − otrzymane); akumuluje wręcz
+      (pkt 20.c), nazwa uogólniona pod przyszłe zdolności (H3, 2026-06-14)
 
     `wounds_eliminating` (R4.Zguba / H5 RESOLVED 2026-06-07) — DODATKOWY licznik
     (NIE trzecia pula alokacji per pkt 17.d). Broń ze zdolnością `Zguba` (pkt 26.d/
@@ -174,7 +175,7 @@ class UnitBlob:
     wounds_pending: int = 0
     wounds_pending_precise: int = 0
     wounds_eliminating: int = 0  # R4.Zguba (pkt 26.d/27.a): licznik ran broni Zguba
-    melee_balance: int = 0
+    damage_balance: int = 0  # bilans obrażeń zadane−otrzymane (pkt 20.c; H3 rename z melee_balance)
     melee_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047
     ranged_weapons: tuple[WeaponProfile, ...] = ()  # B3.9.e / ADR-0047
     location: Lokalizacja = Lokalizacja.FRONT  # R5.a 2026-06 (pkt 26)

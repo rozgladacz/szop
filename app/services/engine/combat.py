@@ -22,7 +22,7 @@ Każdy atak realizuje 3-fazową semantykę pkt 17:
 
 Reactive window (pkt 14.d.iv — kontratak w Szarży) zaplanowany w `resolve_charge_attack`
 (future, B3.4 extension). MVP `resolve_melee_attack` jest pojedynczym atakiem (bez
-Szarży/kontrataku) z `melee_balance` accounting per pkt 20.c.
+Szarży/kontrataku) z `damage_balance` accounting per pkt 20.c.
 
 Weapon abilities w MVP scope:
 - **AP(X)** (id 55) — modyfikator obrony `-X` (effective higher threshold)
@@ -489,7 +489,7 @@ def resolve_melee_attack(
     """Resolves pojedynczy atak wręcz (pkt 17 + 20.c bilans).
 
     Brak Szarży / kontrataku — to integracja w przyszłym `resolve_charge_attack`
-    (B3.4 extension). MVP traktuje jako pojedynczy atak wręcz; `melee_balance`
+    (B3.4 extension). MVP traktuje jako pojedynczy atak wręcz; `damage_balance`
     update per pkt 20.c (Przegrupowanie sprawdzi w `phases.py` B3.6).
 
     Algorithm:
@@ -499,8 +499,8 @@ def resolve_melee_attack(
     2. Faza 2: hit roll (attacker.quality) → defense roll (defender.defense),
        Brutalny / Precyzyjny / AP per ranged.
     3. Faza 3: alokacja per pkt 17.d-e + 18. Bilans wręcz:
-       - `attacker.melee_balance += wounds_dealt`
-       - `defender.melee_balance -= wounds_dealt`
+       - `attacker.damage_balance += wounds_dealt`
+       - `defender.damage_balance -= wounds_dealt`
     """
     del state, terrain  # melee MVP: brak osłony / cover (Parowanie id 24 → B3.5+)
     attack_quality = effective_attack_quality(weapon, attacker)
@@ -589,10 +589,10 @@ def resolve_melee_attack(
         )
         events.extend(killed_b)
 
-    # Pkt 20.c bilans wręcz: attacker.melee_balance += dealt; defender -=
-    new_attacker = replace(attacker, melee_balance=attacker.melee_balance + total_wounds)
+    # Pkt 20.c bilans wręcz: attacker.damage_balance += dealt; defender -=
+    new_attacker = replace(attacker, damage_balance=attacker.damage_balance + total_wounds)
     new_defender = replace(
-        new_defender, melee_balance=new_defender.melee_balance - total_wounds
+        new_defender, damage_balance=new_defender.damage_balance - total_wounds
     )
 
     return CombatResult(

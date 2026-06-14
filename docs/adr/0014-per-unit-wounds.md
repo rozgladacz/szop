@@ -13,7 +13,7 @@
 | `wounds_received` | `int` | Znaczniki ran (rany zaalokowane do oddziału, niezadające jeszcze pokonania modelu) | pkt 18.c |
 | `wounds_pending` | `int` | Pula nadchodzących ran — po teście obrony, przed alokacją do modeli | pkt 17.d.ii |
 | `wounds_pending_precise` | `int` | Pula nadchodzących ran z broni **Precyzyjny** (id 68) — atakujący alokuje | pkt 17.d.i + pkt 68 |
-| `melee_balance` | `int` | Bilans ran wręcz (zadane − otrzymane) w tej aktywacji — używany w teście Przegrupowania | pkt 20.c |
+| `damage_balance` | `int` | Bilans obrażeń (zadane − otrzymane) w tej aktywacji — używany w teście Przegrupowania. **Rename z `melee_balance` (H3, 2026-06-14)** — nazwa uogólniona pod przyszłe zdolności; semantyka bez zmian (akumuluje wręcz, pkt 20.c). Event resetujący zachowuje nazwę `MeleeBalanceReset` (tag serializacji, schema B2/digesty B7). | pkt 20.c |
 
 ### Reguły aktualizacji (pure functions w `app/services/engine/`)
 
@@ -31,9 +31,9 @@
      - Jeśli `wounds_received ≥ max(toughness w oddziale)` → obrońca pokonuje model (decrement).
 
 3. **Bilans wręcz (pkt 20.c):**
-   - Atak wręcz zadający rany: `attacker.melee_balance += N_dealt`; `defender.melee_balance -= N_received`.
-   - Modyfikator dla broni **Porażenie** (id 67): N_dealt mnożone ×2 do `melee_balance` (ale nie do `wounds_received` — Porażenie wpływa tylko na porównanie „kto wygrał walkę").
-   - Reset `melee_balance = 0` na końcu aktywacji (po Przegrupowaniu).
+   - Atak wręcz zadający rany: `attacker.damage_balance += N_dealt`; `defender.damage_balance -= N_received`.
+   - Modyfikator dla broni **Porażenie** (id 67): N_dealt mnożone ×2 do `damage_balance` (ale nie do `wounds_received` — Porażenie wpływa tylko na porównanie „kto wygrał walkę").
+   - Reset `damage_balance = 0` na końcu aktywacji (po Przegrupowaniu).
 
 4. **Reset `wounds_pending` i `wounds_pending_precise`:**
    - Po pełnej alokacji ran (pkt 17.e) — wszystkie pending → received lub do `models_alive` decrement.
@@ -59,7 +59,7 @@ Te zdolności **nie są** w `b_mvp_exclusions.yaml` (zob. ADR-0008) — dopiero 
 Istniejący frontend (`roster_editor.js`) pokazuje rany per oddział (single counter). Mapping:
 - Frontend `wounds` = backend `wounds_received` (znaczniki widoczne dla gracza).
 - `wounds_pending` i `wounds_pending_precise` są wewnętrzne (bufor w trakcie ataku) — nie pokazywane w UI.
-- `melee_balance` jest wewnętrzne — pokazywane w replay/audit jako event metadata.
+- `damage_balance` jest wewnętrzne — pokazywane w replay/audit jako event metadata.
 
 ## Konsekwencje
 
@@ -73,18 +73,18 @@ Istniejący frontend (`roster_editor.js`) pokazuje rany per oddział (single cou
 **Negatywne / koszty:**
 - **4 pola w UnitBlob** zwiększają complexity dataclass (ale niewielki — wszystkie int).
 - **`wounds_pending_precise` osobno** wymaga atakujący-alokuje logic — w MVP: deterministyczny index order (np. „pokonaj index 0 first"). Heterogeniczne oddziały (Bohater) wymagają wyboru atakującego — UI/API musi mieć endpoint do tego wyboru.
-- **Reset `melee_balance` na koniec aktywacji** — engine musi pamiętać który atak był wręcz; flag `is_melee` w event payload.
+- **Reset `damage_balance` na koniec aktywacji** — engine musi pamiętać który atak był wręcz; flag `is_melee` w event payload.
 
 **Co odkładamy:**
 - **`wounds_destroyed`** (Zguba) — po stabilizacji MVP, jeśli zdolność wejdzie do MVP scope.
 - **`wounds_deferred`** (Zemsta) — analogicznie.
 - **Per-model wounds** (Strumień E1) — odłożone do post-stable.
-- **Atak osobno per attacker** (gdy wiele oddziałów atakuje jeden cel) — `wounds_pending` reset między atakami, ale `melee_balance` accumulates jeśli wszystkie ataki wręcz. To **OK** w MVP semantyce (pkt 20.c liczy łączny bilans w aktywacji).
+- **Atak osobno per attacker** (gdy wiele oddziałów atakuje jeden cel) — `wounds_pending` reset między atakami, ale `damage_balance` accumulates jeśli wszystkie ataki wręcz. To **OK** w MVP semantyce (pkt 20.c liczy łączny bilans w aktywacji).
 
 ## Alternatywy rozważone
 
 - **Per-model wounds** (każdy model ma własny `wounds_remaining` counter). Odrzucone — wymaga per-model granularity (E1), heterogeniczne oddziały (Bohater + zwykli) wymagają explicit modeling. Pareto MVP: per-oddział wystarcza dla 90%+ zdolności.
 - **Unified pool** (`wounds_pending` jako pojedyncza pula bez podziału `precise` vs zwykłe). Odrzucone — utrata semantyki **Precyzyjny** (id 68 — atakujący alokuje), niespójność z pkt 17.d.i.
-- **`melee_dealt` + `melee_received` jako dwa pola** zamiast `melee_balance` jako net. Odrzucone — pkt 20.c liczy się przez porównanie `dealt > received`, net wystarcza i jest tańszy w storage. Jeśli kiedyś okaże się że pełne historie są potrzebne (np. dla AI training), wprowadzimy nowy ADR.
-- **Brak `melee_balance`** (liczenie ran wręcz z eventów w `compute_morale_modifiers()`). Odrzucone — O(N events) per Przegrupowanie test, plus events mogą być compacted/filtered. Pole `melee_balance` w UnitBlob daje O(1) lookup.
+- **`melee_dealt` + `melee_received` jako dwa pola** zamiast `damage_balance` jako net. Odrzucone — pkt 20.c liczy się przez porównanie `dealt > received`, net wystarcza i jest tańszy w storage. Jeśli kiedyś okaże się że pełne historie są potrzebne (np. dla AI training), wprowadzimy nowy ADR.
+- **Brak `damage_balance`** (liczenie ran wręcz z eventów w `compute_morale_modifiers()`). Odrzucone — O(N events) per Przegrupowanie test, plus events mogą być compacted/filtered. Pole `damage_balance` w UnitBlob daje O(1) lookup.
 - **`wounds_pending_precise` jako lista per-target index** (`list[int]`) zamiast pojedynczego int. Odrzucone — w MVP oddział atakowany jest jako jeden cel, lista nie daje extra value. Heterogeniczne oddziały: atakujący wybiera index w momencie alokacji, nie pre-stored.

@@ -173,7 +173,7 @@ def main() -> None:
         "wounds_pending_precise",
         "is_hero_unit",
         "status_flags",
-        "melee_balance",
+        "damage_balance",
     )
     live_by_id = {b.id: b for b in state.blobs}
     rep_by_id = {b.id: b for b in replayed.blobs}
