@@ -222,7 +222,18 @@ Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rd
 | `policy_eval.py` | `evaluate_state(state, perspective) -> float` — bilans HP + kontrola/bliskość celów (pkt 5) |
 | `match.py` (ADR-0032) | **Headless pętla bitwy**: `run_match(state, players, dice) -> MatchResult` + `simulate_from_rosters(rosters, players, *, seed, ...)`. Orkiestruje `apply`+`round_end_phase`+alternacja inicjatywy (pkt 8); jedno wywołanie = jedna pełna gra (pkt 5.f winner) |
 
-**Konsumenci (planowane):** D2 `balance_simulate` (agreguje N `simulate_from_rosters` do win-rate), D3 `exploit_hunt`, D4 `minimax_player`. `run_match` to zalążek **B5 `LocalClient.simulate`** (pełen B5 z Protocol GameClient + HttpClient poza zakresem). Boty + runner testowalne headless w izolacji (31 testów: 26 graczy + 5 runner).
+**Konsumenci (planowane):** D2 `balance_simulate` (agreguje N `simulate_from_rosters` do win-rate), D3 `exploit_hunt`, D4 `minimax_player`. `run_match` to rdzeń **B5 `LocalClient.simulate`** (zob. niżej). Boty + runner testowalne headless w izolacji (31 testów: 26 graczy + 5 runner).
+
+## Klient gry — `szop_client/` (Strumień B5, LocalClient slice 2026-06-14, ADR-0016)
+
+Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsumentami (C3 `simulate_engagement` MCP, D-stream, UI) a wewnętrznym silnikiem/runnerem. Konsument programuje wobec Protocolu, nie wobec modułów `engine/`/`agents/`.
+
+| Moduł | Zawartość |
+|---|---|
+| `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate`) + `SimulationSummary` (frozen, win_rate/draw_rate/avg_rounds) |
+| `local.py` | `LocalClient` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); `UnknownBattleError` |
+
+**Slice = ścieżka engine-dict** (rostery jako dict 1:1 z `build_initial_state`). Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia (Ufortyfikowany pkt 13.c) — spójna z `persistence.save_events`. **Odłożone:** `HttpClient` (po B4 API; Protocol strukturalny → dołączy bez dziedziczenia), DB-backed `LocalClient(db_session, user_id)` (po `faza-d-roster-adapter`), pakowanie `pip install -e`. 13 testów (`tests/test_clients_local.py`): determinizm, parity z runnerem i D2, wierność `take_action == apply_activation`.
 
 ## Frontend JS — mapa modułów
 

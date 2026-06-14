@@ -11,8 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** → B2 → B4 → B5 → B6. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-b-5-client](docs/handoffs/HANDOFF_faza-b-5-client.md) | Strumień B5 — `szop_client` (Protocol GameClient + LocalClient in-process, ścieżka engine-dict). | `szop_client/*` (NEW), `tests/test_clients_local.py` (NEW), `docs/adr/0016-szop-client.md` (NEW) | In progress |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** → B2 → B4 → B6. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,14 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-14 — faza-b-5-client (archived) — B5 LocalClient slice (Protocol GameClient + ADR-0016)
+- Domknięty **B5 LocalClient slice** (roadmap Strumień B5): pakiet `szop_client/` — stabilny seam klienta gry nad publicznym API silnika (ADR-0011) + runnerem (ADR-0032). `GameClient` Protocol (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` + `SimulationSummary`) + `LocalClient` in-process (single-step play z rejestrem bitew w pamięci + batch `simulate` deleguje do `simulate_from_rosters`). Ścieżka **engine-dict** (rostery jako dict 1:1 z `build_initial_state`). Implementacja napisana w poprzedniej sesji (2026-06-13, niezacommitowana); ta sesja domknęła: fix 2 testów + ADR-0016 + roadmap/architecture + weryfikacja + commit. **Odblokowuje C3 `simulate_engagement`.**
+- **Fix 2 testów (założenie błędne, nie implementacja):** `test_take_action_matches_resolver` + `test_get_events_since` zakładały „deployment puste → 0 eventów". Rozstawienie emituje `StatusAdded(Ufortyfikowany)` per oddział, który nie ruszył się (**pkt 13.c** — potwierdzone w źródle `SZOP_Rozjemca.md`). Sekwencja eventów kontynuuje monotonicznie (event-sourcing, spójne z `persistence.save_events`) — `create_battle` ustawia `next_sequence = len(deploy_events)+1`. Testy skorygowane (sekwencja referencji + asercja sufiksu logu).
+- Pliki: `szop_client/{__init__,protocol,local}.py` (NEW), `tests/test_clients_local.py` (NEW, 13), `docs/adr/0016-szop-client.md` (NEW Accepted), `docs/roadmap.md` (B5 statusy + ADR index 0016 ✓), `docs/architecture.md` (sekcja „Klient gry — szop_client/"). Commit na `Faza_A`: `<this>`.
+- Weryfikacja: pytest **1641 passed** (1628 baseline + 13). `/simplify` inline 4 kąty — 0 zmian (czysto; `simulate` świadomie nie reużywa `scripts.balance_simulate` by nie odwracać zależności package→script, parity-tested). `/review`/`/security-review` pominięte warunkowo (izolowany nowy pakiet, reads-only API silnika, brak hot-path/SSOT/auth/DB, pełne pokrycie 13 testami incl. parity z runnerem i D2).
+- **Odłożone (przyszłe wątki):** `HttpClient` + `tests/test_clients_parity.py` (po B4 API), DB-backed `LocalClient(db_session, user_id)` (po `faza-d-roster-adapter`), pakowanie `pip install -e`. Doc updates: roadmap B5 + ADR index, architecture (nowa sekcja).
+- **Uwaga higiena:** `app/services/engine/effects.py` (docstring cleanup z wątku morale-removal) + roadmap D5/E4 (planowanie z równoległej sesji) zostały w working tree jako praca innych wątków; D5/E4 dołączone do commita roadmap (additive, brak właściciela), effects.py NIE tknięte.
 
 ### 2026-06-13 — faza-b-7-test-bed (archived) — B7 golden regression test bed
 - Domknięty **B7 (Test bed)** z roadmap Strumień B: `tests/test_engine_regression.py` (NEW) — 6 golden battles deterministycznych (param) + 6 reproducible + 2 sanity = **14 testów**. Każdy case = pełna gra (fixtura wierna regułom z D2 + predefiniowany seed + matchup botów) z zapieczętowanym wynikiem: asercje semantyczne (winner/rounds/score/event-count) **+ sha256 digest całego event-logu** (bit-perfect lock). Reuse `scripts/balance_simulate.py` (SSOT ładowania fixtur + budowy graczy) + `simulate_from_rosters` — **zero zmian w rdzeniu silnika/agentów** (warstwa-liść, brak kolizji z równoległymi wątkami engine). Pętla 100% deterministyczna (ADR-0010/0012, potwierdzone podwójnym uruchomieniem). Pokrycie wyników 0/1/None (1 remis priority-mirror, 3× P0, 2× P1). Regen golden po świadomej zmianie: `python tests/test_engine_regression.py` (blok `__main__`) → przenieś wartości + ADR.
