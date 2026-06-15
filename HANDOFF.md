@@ -11,8 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** → B2 → B4 → B6. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-b-6-replay](docs/handoffs/HANDOFF_faza-b-6-replay.md) | B6 prezentacja — `scripts/battle_replay.py` CLI replay event-logu do czytelnego tekstu (headless, ADR-0013). | `scripts/battle_replay.py`, `tests/test_battle_replay.py`, `docs/adr/0013-headless-first.md` (NEW) | In progress (2026-06-15 — sesja autonomiczna) |
+| [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,13 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+
+### 2026-06-15 — faza-b-6-replay (archived) — B6 CLI replay event-logu bitwy
+- Pierwszy slice Strumienia B6 (prezentacja, roadmap): `scripts/battle_replay.py` — skrypt-liść renderujący event-log bitwy na czytelny tekst w terminalu. Rdzeń = czyste funkcje (`format_event`/`render_battle_log`, bez I/O): narracja PL per 16 typów eventów, grupowanie w rundy (delimiter `RoundEnded`), podsumowanie (cele końcowe pkt 5.f + rozkład typów + zwycięzca). Dwa źródła eventów: `--fixture`/`--map` (reuse `balance_simulate` SSOT + `simulate_from_rosters`, ADR-0032) oraz `--from-db <id>` (`persistence.load_events`, ADR-0050, read-only). Render z samego event-logu (bez rekonstrukcji stanu) → jednolite dla obu trybów. **Domyka ADR-0013** (engine headless-first, prezentacja opcjonalna — Accepted). Zero zmian w rdzeniu silnika/agentów.
+- Pliki: `scripts/battle_replay.py` (NEW), `tests/test_battle_replay.py` (NEW, 16), `docs/adr/0013-headless-first.md` (NEW Accepted), `docs/roadmap.md` (B6 slice ✅ + ADR index 0013 ✓), `docs/architecture.md` (sekcja "Prezentacja"), `scripts/README.md` (wpis). Commit na `Faza_A`: `5c930e8`.
+- Weryfikacja: pytest **1657 passed** (1641 baseline + 16); `/simplify` 4 kąty inline — 1 cleanup (dedup `_fmt_shot`/`_fmt_melee` → `_fmt_attack`); CLI smoke fixtura/mapa/`--from-db` OK; call-site check (0 importów z `app/`). `/review`/`/security-review` pominięte warunkowo (izolowany skrypt-liść, render read-only, brak hot-path/SSOT/auth, pełne pokrycie testami).
+- **Odkrycia (NIE blokujące):** (1) latentny cykl importu w `app.db` (importuje `app.services` przed `Base` → `app.db` zaimportowane PIERWSZE z pary db/models rzuca ImportError; workaround `import app.models` przed `app.db` w `replay_from_db`); (2) tabele `battles`/`battle_events` powstają przez `create_all` przy bootstrapie app — standalone `--from-db` woła idempotentne addytywne `create_all` (`data/szop.db` gitignored). **Odłożone (B6):** bogatszy widok stanu (po N-tym evencie via `apply_events`), SSE stream (po B4), canvas frontend.
+- Doc updates: `docs/roadmap.md` (B6 CLI replay slice DONE + ADR-0013 ✓), `docs/architecture.md` (nowa sekcja "Prezentacja — scripts/battle_replay.py"), `scripts/README.md` (wpis `battle_replay.py` w "Inne skrypty").
 
 ### 2026-06-14 — faza-b-engine-mvp (H3 rename) — `melee_balance` → `damage_balance`
 - Implementacja decyzji usera **H3** (parent `faza-b-engine-mvp`): rename pola `UnitBlob.melee_balance` → `damage_balance` (bilans obrażeń zadane−otrzymane, pkt 20.c) + wewnętrzne nazwy Pythona (reducer `_reduce_damage_balance_reset`, testy). Nazwa uogólniona pod przyszłe zdolności; semantyka bez zmian (akumuluje wręcz). **Scoping (świadome):** event `MeleeBalanceReset` i jego tag JSON ZACHOWANE — tag = `type(event).__name__` (`event_to_json`), część zamrożonej schemy `payload_json` (ORM B2) + golden digestów B7; rename eventu = osobna świadoma zmiana schemy (ADR + regen). Pole NIE występuje w payloadzie żadnego eventu → zero wpływu na serializację/replay.
