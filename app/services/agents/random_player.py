@@ -11,11 +11,16 @@ import random
 
 from app.services.agents.base import (
     Player,
+    blob_by_id,
     legal_actions,
     legal_followup_actions,
 )
+from app.services.agents.deployment import (
+    DeploymentZone,
+    random_position_in_zone,
+)
 from app.services.engine.actions import Action
-from app.services.engine.state import BattleState
+from app.services.engine.state import BattleState, Position
 
 
 class RandomPlayer(Player):
@@ -43,3 +48,10 @@ class RandomPlayer(Player):
         (None w puli) — zachowuje losowy charakter baseline'u."""
         followups = legal_followup_actions(state, perspective, unit_id, actions_taken)
         return self._rng.choice([*followups, None])
+
+    def choose_deployment(
+        self, state: BattleState, unit_id: int, zone: DeploymentZone
+    ) -> Position:
+        """D5 — losowa legalna pozycja w strefie (deterministyczna per seed)."""
+        blob = blob_by_id(state, unit_id)
+        return random_position_in_zone(self._rng, zone, blob.radius_inches)

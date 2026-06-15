@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from functools import lru_cache
+from typing import TYPE_CHECKING
 
 from app.services.engine.actions import (
     Action,
@@ -46,6 +47,9 @@ from app.services.engine.state import (
 )
 from app.services.engine.status import STATUS_AKTYWOWANY, STATUS_WYCZERPANY
 from app.services.rulesets.loader import load_ruleset
+
+if TYPE_CHECKING:
+    from app.services.agents.deployment import DeploymentZone
 
 
 @lru_cache(maxsize=4)
@@ -92,6 +96,11 @@ def enemy_units(state: BattleState, perspective: int) -> list[UnitBlob]:
         and b.models_alive > 0
         and b.location == Lokalizacja.FRONT
     ]
+
+
+def blob_by_id(state: BattleState, unit_id: int) -> UnitBlob:
+    """Oddział o danym `id`. Zakłada istnienie (KeyError-like jak `next`)."""
+    return next(b for b in state.blobs if b.id == unit_id)
 
 
 def _nearest(origin: Position, candidates: list[Position]) -> Position | None:
@@ -283,4 +292,23 @@ class Player(ABC):
         `base.legal_followup_actions(state, perspective, unit_id, actions_taken)`.
         """
         return None
+
+    def choose_deployment(
+        self,
+        state: BattleState,
+        unit_id: int,
+        zone: "DeploymentZone",
+    ) -> Position:
+        """Pozycja rozstawienia oddziału `unit_id` w strefie `zone` (D5, pkt 13).
+
+        Wywoływane przez `simulate_from_rosters`, gdy podano `deployment_zones`.
+        Default: **bieżąca pozycja oddziału** (z roster/fikstury) — wsteczna
+        kompatybilność z grami bez aktywnego deploymentu. Boty override, by
+        wybrać pozycję strategicznie (np. `random_player` losuje w strefie,
+        `deployment.grid_positions` daje równomierny grid).
+
+        Zwrócona pozycja jest walidowana przez runner (`zone.contains_circle`,
+        pkt 13.a MVP) → `IllegalActionError` jeśli koło wykracza poza strefę.
+        """
+        return blob_by_id(state, unit_id).position
 

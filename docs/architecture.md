@@ -220,9 +220,10 @@ Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rd
 | `random_player.py` | `RandomPlayer(seed)` — uniform z `legal_actions`, deterministyczny per seed |
 | `greedy_player.py` | `GreedyPlayer` — depth-1 argmax: `prediction.expected_damage(...).mean` dla ataków, Δ`evaluate_state` dla ruchu |
 | `policy_eval.py` | `evaluate_state(state, perspective) -> float` — bilans HP + kontrola/bliskość celów (pkt 5) |
-| `match.py` (ADR-0032) | **Headless pętla bitwy**: `run_match(state, players, dice) -> MatchResult` + `simulate_from_rosters(rosters, players, *, seed, ...)`. Orkiestruje `apply`+`round_end_phase`+alternacja inicjatywy (pkt 8); jedno wywołanie = jedna pełna gra (pkt 5.f winner) |
+| `match.py` (ADR-0032) | **Headless pętla bitwy**: `run_match(state, players, dice) -> MatchResult` + `simulate_from_rosters(rosters, players, *, seed, deployment_zones=, ...)`. Orkiestruje `apply`+`round_end_phase`+alternacja inicjatywy (pkt 8); jedno wywołanie = jedna pełna gra (pkt 5.f winner). `deployment_zones` (D5) → boty wybierają pozycje startowe |
+| `deployment.py` (D5, 2026-06-15) | **Rozstawienie jako decyzja bota** (pkt 24/13.a): `DeploymentZone` (prostokąt strefy, parametr runnera — nie pole stanu) + `grid_positions`/`random_position_in_zone` (proste strategie) + `Player.choose_deployment(state, unit_id, zone)` (ABC, default=pozycja z roster). Walidacja: całe koło w strefie (MVP; Niedostępny + >1″ → E4) |
 
-**Konsumenci (planowane):** D2 `balance_simulate` (agreguje N `simulate_from_rosters` do win-rate), D3 `exploit_hunt`, D4 `minimax_player`. `run_match` to rdzeń **B5 `LocalClient.simulate`** (zob. niżej). Boty + runner testowalne headless w izolacji (31 testów: 26 graczy + 5 runner).
+**Konsumenci (planowane):** D2 `balance_simulate` (agreguje N `simulate_from_rosters` do win-rate), D3 `exploit_hunt`, D4 `minimax_player`. `run_match` to rdzeń **B5 `LocalClient.simulate`** (zob. niżej). Boty + runner testowalne headless w izolacji (49 testów: 26 graczy + 5 runner + 18 deployment D5).
 
 ## Klient gry — `szop_client/` (Strumień B5, LocalClient slice 2026-06-14, ADR-0016)
 

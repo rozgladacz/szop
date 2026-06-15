@@ -25,6 +25,8 @@ from dataclasses import dataclass, replace
 from typing import Sequence
 
 from app.services.agents.base import Player, own_active_units
+from app.services.agents.deployment import DeploymentZone
+from app.services.engine.actions import DeploymentAction
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
 from app.services.engine.phases import (
@@ -33,12 +35,14 @@ from app.services.engine.phases import (
     setup_phase,
 )
 from app.services.engine.resolver import (
+    IllegalActionError,
     apply_activation,
     is_battle_over,
     should_end_round,
 )
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Objective,
     TerrainCircle,
     TerrainLine,
@@ -163,6 +167,37 @@ def run_match(
     )
 
 
+def _build_deployment_from_players(
+    state: BattleState,
+    players: Sequence[Player],
+    deployment_zones: Sequence[DeploymentZone],
+) -> list[DeploymentAction]:
+    """D5 — pyta każdego gracza o pozycję startową jego oddziałów (pkt 13).
+
+    Iteruje oddziały na Froncie w deterministycznej kolejności (jak w `state.blobs`),
+    pyta `players[owner].choose_deployment(state, unit_id, zone)` i waliduje, że
+    całe koło mieści się w strefie gracza (pkt 13.a MVP: `zone.contains_circle`).
+    Rezerwy Zaplecze (pkt 26) pomijane — rozstawiają się mid-game (poza MVP).
+
+    Raises:
+        IllegalActionError: pozycja poza strefą rozstawienia gracza (pkt 13.a).
+    """
+    actions: list[DeploymentAction] = []
+    for blob in state.blobs:
+        if blob.models_alive <= 0 or blob.location != Lokalizacja.FRONT:
+            continue
+        zone = deployment_zones[blob.owner_player]
+        pos = players[blob.owner_player].choose_deployment(state, blob.id, zone)
+        if not zone.contains_circle(pos, blob.radius_inches):
+            raise IllegalActionError(
+                f"Rozstawienie oddziału {blob.id} (gracz {blob.owner_player}) "
+                f"poza strefą (pkt 13.a): pozycja {pos} koło r={blob.radius_inches} "
+                f"nie mieści się w {zone}"
+            )
+        actions.append(DeploymentAction(unit_id=blob.id, position=pos))
+    return actions
+
+
 def simulate_from_rosters(
     rosters: Sequence[dict],
     players: Sequence[Player],
@@ -172,6 +207,7 @@ def simulate_from_rosters(
     objectives: Sequence[Objective] = (),
     initiative_player: int = 0,
     deployment: Sequence = (),
+    deployment_zones: Sequence[DeploymentZone] | None = None,
     ruleset_version: str = "v1",
     max_activations: int = DEFAULT_MAX_ACTIVATIONS,
 ) -> MatchResult:
@@ -180,6 +216,16 @@ def simulate_from_rosters(
     `deployment` (lista `DeploymentAction`) domyślnie puste — oddziały startują
     na pozycjach z roster (pkt 13: rozstawienie bez ruchu). Eventy rozstawienia
     są pominięte w `MatchResult.events` (runner liczy od startu rundy 1).
+
+    `deployment_zones` (D5) — gdy podane (`(zone_p0, zone_p1)`), boty wybierają
+    pozycje startowe przez `Player.choose_deployment` (walidacja strefy pkt 13.a).
+    Ma pierwszeństwo przed explicit `deployment`; gdy None — zachowanie bez zmian
+    (pozycje z roster). Wzajemnie wykluczające z `deployment` (jawny deployment
+    + auto-deployment botów byłby dwuznaczny).
+
+    Raises:
+        ValueError: podano jednocześnie `deployment` i `deployment_zones`.
+        IllegalActionError: bot zwrócił pozycję poza swoją strefą (pkt 13.a).
     """
     state = setup_phase(
         rosters,
@@ -188,6 +234,13 @@ def simulate_from_rosters(
         initiative_player=initiative_player,
         ruleset_version=ruleset_version,
     )
+    if deployment_zones is not None:
+        if deployment:
+            raise ValueError(
+                "simulate_from_rosters: podaj albo `deployment` (jawne akcje), "
+                "albo `deployment_zones` (auto-deployment botów), nie oba naraz"
+            )
+        deployment = _build_deployment_from_players(state, players, deployment_zones)
     state, _deploy_events = deployment_round(state, deployment)
     dice = DeterministicDice(seed=seed)
     return run_match(state, players, dice, max_activations=max_activations)

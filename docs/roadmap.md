@@ -304,15 +304,15 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] Leaderboard `reports/leaderboard.md`
 - [ ] ADR-0030: Wielu agentów konkurujących — osobne konta + leaderboard
 
-### D5. Rozstawienie jako decyzja bota (po E4 kolizjach)
+### D5. Rozstawienie jako decyzja bota — **Proste strategie DONE 2026-06-15** (wątek `faza-d-deployment`)
 
-> Aktualnie pozycje startowe biorą się z fikstury YAML; `deployment_round` jest wywoływane z pustą listą akcji — boty nie mają wpływu na start.
+> Wcześniej pozycje startowe brały się z fikstury YAML; `deployment_round` było wywoływane z pustą listą akcji — boty nie miały wpływu na start. Slice „proste strategie" (bez E4) zrealizowany: `app/services/agents/deployment.py` (`DeploymentZone` pkt 24 + `grid_positions`/`random_position_in_zone`) + `Player.choose_deployment` (ABC, default=pozycja z roster) + `simulate_from_rosters(deployment_zones=)` (auto-deployment + walidacja strefy). 18 testów. Warstwa-liść agentów, zero zmian w rdzeniu silnika.
 
-- [ ] `Player.choose_deployment(state, unit_id) → Position` — nowa metoda ABC (default: pozycja z fikstury = wsteczna kompat)
-- [ ] `simulate_from_rosters` pyta graczy o pozycje przed `deployment_round`; waliduje `position` w strefie rozstawienia gracza (pkt 13.a) przez `IllegalActionError`
-- [ ] Proste strategie deploymentu (nie wymagają E4): grid równomierny w strefie, kopia fikstury ze skalowaniem
+- [x] `Player.choose_deployment(state, unit_id, zone) → Position` — nowa metoda ABC (default: pozycja z roster/fikstury = wsteczna kompat). `RandomPlayer` override (losowa legalna pozycja w strefie, deterministyczna per seed).
+- [x] `simulate_from_rosters(deployment_zones=(zone_p0, zone_p1))` pyta graczy o pozycje przed `deployment_round`; waliduje całe koło oddziału w strefie (pkt 13.a MVP) przez `IllegalActionError`. Wzajemnie wykluczające z explicit `deployment` (ValueError).
+- [x] Proste strategie deploymentu (nie wymagają E4): grid równomierny w strefie (`grid_positions`), losowa-w-strefie (`random_position_in_zone`). **Uproszczenie pkt 13.a (MVP):** legalność = całe koło w prostokącie strefy; cecha Niedostępny (pkt 4.c.i) + reguła >1″ od innych oddziałów świadomie pominięte (E4 kolizje).
 - [ ] Strategie zaawansowane (wymagają E4 kolizji): rozstaw bez nachodzenia; coverage-based (maksymalizuj liczbę pokrytych celów z pozycji startowej)
-- [ ] Testy: pozycja poza strefą rozstawienia odrzucona; gracze mogą dostać różne pozycje na tej samej planszy
+- [x] Testy: pozycja poza strefą rozstawienia odrzucona; gracze dostają różne pozycje na tej samej planszy; grid deterministyczny + legalny; backward compat (None → pozycje z roster); integracja+determinizm.
 
 ---
 

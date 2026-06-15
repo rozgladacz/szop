@@ -10,12 +10,19 @@ Public API:
 - `evaluate_state(state, perspective)` — skalarna ocena stanu.
 - `run_match(state, players, dice)` / `simulate_from_rosters(...)` — headless
   pętla bitwy (orkiestrator pełnej gry) → `MatchResult`.
+- `DeploymentZone` + `grid_positions` / `random_position_in_zone` — D5: strefa
+  rozstawienia (pkt 24) + proste strategie pozycjonowania botów (`Player.choose_deployment`).
 
 Konsumenci (roadmap): D2 balance_simulate, D3 exploit_hunt, D4 adversarial UI.
 `run_match` to zalążek B5 LocalClient.simulate (pełen B5 z HttpClient poza zakresem).
 """
 
 from app.services.agents.base import Player, legal_actions
+from app.services.agents.deployment import (
+    DeploymentZone,
+    grid_positions,
+    random_position_in_zone,
+)
 from app.services.agents.greedy_player import GreedyPlayer
 from app.services.agents.match import (
     MatchResult,
@@ -40,4 +47,7 @@ __all__ = [
     "MatchResult",
     "run_match",
     "simulate_from_rosters",
+    "DeploymentZone",
+    "grid_positions",
+    "random_position_in_zone",
 ]
