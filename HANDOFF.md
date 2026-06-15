@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** → B2 → B4 → B6. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
+| [HANDOFF_faza-b-6-replay](docs/handoffs/HANDOFF_faza-b-6-replay.md) | B6 prezentacja — `scripts/battle_replay.py` CLI replay event-logu do czytelnego tekstu (headless, ADR-0013). | `scripts/battle_replay.py`, `tests/test_battle_replay.py`, `docs/adr/0013-headless-first.md` (NEW) | In progress (2026-06-15 — sesja autonomiczna) |
 
 
 ## Zasoby zablokowane (reverse lookup)

@@ -260,6 +260,24 @@ python scripts/balance_report.py -n 50 --players random,greedy,priority
 python scripts/balance_report.py --fixtures <A.yaml>,<B.yaml> --out reports/balance/custom.md
 ```
 
+### `battle_replay.py` (B6)
+
+CLI replay event-logu bitwy → czytelny tekst w terminalu (roadmap B6, ADR-0013
+headless-first). Narracja jednolinijkowa PL per event (16 typów), pogrupowana
+w rundy (delimiter `RoundEnded`), z bieżącym wynikiem celów (pkt 5.f) i
+podsumowaniem (rozkład typów + zwycięzca). Rdzeń = czyste funkcje
+(`format_event`/`render_battle_log`, bez I/O — testowalne). Dwa źródła eventów:
+świeża symulacja (`--fixture`/`--map`, reuse `balance_simulate` SSOT +
+`simulate_from_rosters`) albo persystencja (`--from-db <id>`,
+`engine.persistence.load_events`, read-only). Skrypt-liść — zero zmian w rdzeniu.
+
+```powershell
+python scripts/battle_replay.py                                      # demo fixtura, priority vs random
+python scripts/battle_replay.py --fixture <PATH> --players priority,greedy --seed 7
+python scripts/battle_replay.py --map symetryczna_a --map-seed 3 --players priority3,random
+python scripts/battle_replay.py --from-db 12                         # replay zapisanej bitwy z DB
+```
+
 ### `reflect_and_improve.py`
 
 Analiza ostatnich 10 transkryptów Claude Code, generuje

@@ -234,11 +234,11 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] `tests/test_clients_parity.py` — `HttpClient.simulate == LocalClient.simulate` odłożone do B4.
 - [x] ADR-0016: szop_client jako wydzielony moduł (Accepted)
 
-### B6. Prezentacja (opcjonalne, 3–4 tyg)
-- [ ] `scripts/battle_replay.py <id>` — CLI terminal output
-- [ ] SSE stream `GET /battles/{id}/events`
+### B6. Prezentacja (opcjonalne, 3–4 tyg) — **CLI replay slice DONE 2026-06-15** (wątek `faza-b-6-replay`, ADR-0013)
+- [x] `scripts/battle_replay.py` — CLI terminal output: narracja PL per event (16 typów), grupowanie w rundy (delimiter `RoundEnded`), podsumowanie (wynik celów pkt 5.f + rozkład typów + zwycięzca). Rdzeń = czyste funkcje (`format_event`/`render_battle_log`, bez I/O). Dwa źródła: `--fixture`/`--map` (reuse `balance_simulate` SSOT + `simulate_from_rosters`, ADR-0032) oraz `--from-db <id>` (`persistence.load_events`, ADR-0050, read-only). Render z samego event-logu (bez rekonstrukcji stanu — jednolite dla obu trybów). 16 testów. Skrypt-liść (zero zmian w rdzeniu). **Odłożone:** bogatszy widok stanu (po N-tym evencie via `apply_events`) — narracja per-event wystarcza MVP.
+- [ ] SSE stream `GET /battles/{id}/events` — wymaga B4 API
 - [ ] `app/static/js/modules/battle_canvas.js` — minimalny 2D canvas (Konva.js lub goły Canvas)
-- [ ] ADR-0013: Engine headless-first, UI opcjonalne
+- [x] ADR-0013: Engine headless-first, UI opcjonalne (Accepted)
 
 ### B7. Test bed (2 tyg) — **DONE 2026-06-13** (wątek `faza-b-7-test-bed`)
 - [x] `tests/fixtures/battles/*.yaml` — golden scenariusze (reuse 3 fixtur wiernych regułom z D2: `demo_skirmish`/`objective_clash`/`unit_profiles`; predefiniowany seed + matchup botów = przepis na deterministyczny przebieg).
@@ -379,7 +379,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0010b | Eventy + immutable state; ORM tylko persistence | ✓ (scalone w ADR-0010) |
 | 0011 | Rule executor: hardcoded klasy/funkcje na MVP | ✓ |
 | 0012 | Dice: własna biblioteka, deterministyczny seed | ✓ |
-| 0013 | Engine headless-first | — |
+| 0013 | Engine headless-first, prezentacja opcjonalna (B6 CLI replay slice) | ✓ |
 | 0014 | Obrażenia per-oddział (= Stan bitewny) — 4 kategorie ran | ✓ |
 | 0015 | Interrupt point `BEFORE_ACTION` (pkt 11.b.i; korekta 2026-06-09 z 4 punktów) | ✓ |
 | 0015a | Reactive window w akcji ataku (atomowe) | ✓ |

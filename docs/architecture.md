@@ -235,6 +235,18 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 
 **Slice = ścieżka engine-dict** (rostery jako dict 1:1 z `build_initial_state`). Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia (Ufortyfikowany pkt 13.c) — spójna z `persistence.save_events`. **Odłożone:** `HttpClient` (po B4 API; Protocol strukturalny → dołączy bez dziedziczenia), DB-backed `LocalClient(db_session, user_id)` (po `faza-d-roster-adapter`), pakowanie `pip install -e`. 13 testów (`tests/test_clients_local.py`): determinizm, parity z runnerem i D2, wierność `take_action == apply_activation`.
 
+## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
+
+**Headless-first (ADR-0013):** silnik nie zależy od prezentacji; UI/replay to opcjonalni konsumenci publicznego API + strumienia eventów. `battle_replay.py` to **skrypt-liść** renderujący event-log bitwy na czytelny tekst.
+
+| Element | Zawartość |
+|---|---|
+| `format_event(event) -> str` | Jednolinijkowa narracja PL per typ eventu (dispatch `_FORMATTERS` po nazwie klasy + fallback `repr` dla nieznanego typu) |
+| `render_battle_log(events, *, header, winner) -> str` | Pełny log: grupowanie w rundy (delimiter `RoundEnded`), numeracja sekwencją, podsumowanie (cele końcowe pkt 5.f + rozkład typów + zwycięzca) |
+| Źródła eventów | `--fixture`/`--map` (reuse `balance_simulate` SSOT + `simulate_from_rosters`) lub `--from-db <id>` (`persistence.load_events`, read-only) |
+
+Rdzeń renderujący to czyste funkcje (bez I/O) — render **z samego event-logu** (bez rekonstrukcji stanu), więc tryb sim i `--from-db` dzielą ścieżkę (persystencja nie trzyma `initial_state`). **Odłożone (B6):** bogatszy widok stanu (po N-tym evencie via `apply_events`), SSE stream (po B4), canvas frontend. 16 testów (`tests/test_battle_replay.py`).
+
 ## Frontend JS — mapa modułów
 
 Aktualna mapa zależności i lista call sites po podziale `app/static/js/app.js`: `docs/frontend_js_modules.md`.
