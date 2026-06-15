@@ -33,6 +33,7 @@ from app.services.agents.base import (
     legal_actions,
     legal_followup_actions,
 )
+from app.services.agents.deployment import GridDeploymentMixin
 from app.services.agents.policy_eval import objective_balance_with_control
 from app.services.engine.actions import (
     Action,
@@ -84,7 +85,7 @@ def _apply_expected_kills(
     )
 
 
-class GreedyPlayer(Player):
+class GreedyPlayer(GridDeploymentMixin, Player):
     """Bot maksymalizujący wartość pojedynczej akcji (depth-1, bez lookahead)."""
 
     def choose_action(

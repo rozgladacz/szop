@@ -20,6 +20,8 @@ Konsumenci (roadmap): D2 balance_simulate, D3 exploit_hunt, D4 adversarial UI.
 from app.services.agents.base import Player, legal_actions
 from app.services.agents.deployment import (
     DeploymentZone,
+    GridDeploymentMixin,
+    grid_deployment_position,
     grid_positions,
     random_position_in_zone,
 )
@@ -48,6 +50,8 @@ __all__ = [
     "run_match",
     "simulate_from_rosters",
     "DeploymentZone",
+    "GridDeploymentMixin",
     "grid_positions",
+    "grid_deployment_position",
     "random_position_in_zone",
 ]

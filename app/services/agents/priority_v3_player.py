@@ -35,6 +35,7 @@ from app.services.agents.base import (
     enemy_units,
     own_active_units,
 )
+from app.services.agents.deployment import GridDeploymentMixin
 from app.services.agents.priority_player import (
     _blob_by_id,
     _is_closest_own_unit,
@@ -280,7 +281,7 @@ _DECISION_TREE: dict[int, tuple] = {
 }
 
 
-class PriorityV3Player(Player):
+class PriorityV3Player(GridDeploymentMixin, Player):
     """Bot z drzewem decyzyjnym (v3). Patrz docstring modułu."""
 
     def choose_action(self, state: BattleState, perspective: int) -> Action | None:

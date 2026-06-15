@@ -22,7 +22,7 @@ import math
 import random
 from dataclasses import dataclass
 
-from app.services.engine.state import Position
+from app.services.engine.state import BattleState, Lokalizacja, Position
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +108,47 @@ def grid_positions(
                 break
             positions.append(Position(xs[c], ys[r]))
     return positions
+
+
+def grid_deployment_position(
+    state: BattleState, unit_id: int, zone: DeploymentZone
+) -> Position:
+    """Pozycja oddziału `unit_id` w **deterministycznym gridzie** własnej strefy.
+
+    Strategia dla botów deterministycznych: wszystkie własne oddziały na Froncie
+    (sort po `id`) dostają sloty z `grid_positions`. Grid liczony dla największego
+    promienia własnych oddziałów (`max radius`) → każde (mniejsze) koło też mieści
+    się w strefie. Slot per oddział = jego indeks w posortowanej liście.
+    """
+    unit = next(b for b in state.blobs if b.id == unit_id)
+    own = sorted(
+        (
+            b
+            for b in state.blobs
+            if b.owner_player == unit.owner_player
+            and b.models_alive > 0
+            and b.location == Lokalizacja.FRONT
+        ),
+        key=lambda b: b.id,
+    )
+    max_radius = max(b.radius_inches for b in own)
+    positions = grid_positions(zone, len(own), max_radius)
+    idx = next(i for i, b in enumerate(own) if b.id == unit_id)
+    return positions[idx]
+
+
+class GridDeploymentMixin:
+    """Mixin dla botów deterministycznych: rozstawienie na gridzie w strefie (D5).
+
+    Domieszany przed `Player` (`class Bot(GridDeploymentMixin, Player)`) nadpisuje
+    `Player.choose_deployment` deterministycznym gridem (`grid_deployment_position`).
+    `RandomPlayer` świadomie NIE używa — losuje pozycję w strefie.
+    """
+
+    def choose_deployment(
+        self, state: BattleState, unit_id: int, zone: DeploymentZone
+    ) -> Position:
+        return grid_deployment_position(state, unit_id, zone)
 
 
 def random_position_in_zone(

@@ -37,6 +37,7 @@ from app.services.agents.base import (
     enemy_units,
     own_active_units,
 )
+from app.services.agents.deployment import GridDeploymentMixin
 from app.services.engine.actions import (
     Action,
     ChargeAction,
@@ -136,7 +137,7 @@ def _move_to_objective(
     return ManeuverAction(unit_id=unit.id, target_position=dest)
 
 
-class PriorityPlayer(Player):
+class PriorityPlayer(GridDeploymentMixin, Player):
     """Bot pół-deterministyczny: selekcja „najbliżej wroga" + priorytet akcji 1–7."""
 
     def choose_action(self, state: BattleState, perspective: int) -> Action | None:

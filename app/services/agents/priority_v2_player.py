@@ -42,6 +42,7 @@ from app.services.agents.base import (
     enemy_units,
     own_active_units,
 )
+from app.services.agents.deployment import GridDeploymentMixin
 from app.services.agents.priority_player import (
     _blob_by_id,
     _is_closest_own_unit,
@@ -118,7 +119,7 @@ def _best_target(
     return min(candidates, key=_key)
 
 
-class PriorityV2Player(Player):
+class PriorityV2Player(GridDeploymentMixin, Player):
     """Rozbudowany bot priorytetowy (v2). Patrz docstring modułu."""
 
     def choose_action(self, state: BattleState, perspective: int) -> Action | None:

@@ -15,13 +15,18 @@ import pytest
 from app.services.agents.base import Player
 from app.services.agents.deployment import (
     DeploymentZone,
+    grid_deployment_position,
     grid_positions,
     random_position_in_zone,
 )
+from app.services.agents.greedy_player import GreedyPlayer
 from app.services.agents.match import (
     _build_deployment_from_players,
     simulate_from_rosters,
 )
+from app.services.agents.priority_player import PriorityPlayer
+from app.services.agents.priority_v2_player import PriorityV2Player
+from app.services.agents.priority_v3_player import PriorityV3Player
 from app.services.agents.random_player import RandomPlayer
 from app.services.engine.phases import setup_phase
 from app.services.engine.resolver import IllegalActionError
@@ -250,3 +255,52 @@ def test_simulate_without_zones_backward_compat():
         objectives=_objectives(),
     )
     assert result.final_state.is_game_over
+
+
+# --------------------------------------------------------------------------- #
+# grid_deployment_position + boty deterministyczne (D5)
+# --------------------------------------------------------------------------- #
+
+
+def test_grid_deployment_distinct_legal_slots():
+    state = _state()
+    # Oddziały gracza 0: id 1 i 2.
+    p1 = grid_deployment_position(state, 1, ZONE_P0)
+    p2 = grid_deployment_position(state, 2, ZONE_P0)
+    assert p1 != p2  # różne sloty gridu
+    for uid, pos in ((1, p1), (2, p2)):
+        blob = next(b for b in state.blobs if b.id == uid)
+        assert ZONE_P0.contains_circle(pos, blob.radius_inches)
+
+
+def test_grid_deployment_deterministic():
+    state = _state()
+    assert grid_deployment_position(state, 1, ZONE_P0) == grid_deployment_position(
+        state, 1, ZONE_P0
+    )
+
+
+@pytest.mark.parametrize(
+    "factory", [GreedyPlayer, PriorityPlayer, PriorityV2Player, PriorityV3Player]
+)
+def test_deterministic_bots_deploy_on_grid(factory):
+    state = _state()
+    bot = factory()
+    pos1 = bot.choose_deployment(state, 1, ZONE_P0)
+    pos2 = bot.choose_deployment(state, 2, ZONE_P0)
+    # Grid: różne sloty, oba legalne, zgodne z helperem.
+    assert pos1 == grid_deployment_position(state, 1, ZONE_P0)
+    assert pos2 == grid_deployment_position(state, 2, ZONE_P0)
+    assert pos1 != pos2
+
+
+def test_simulate_deterministic_bots_with_zones_completes():
+    result = simulate_from_rosters(
+        _rosters(),
+        [GreedyPlayer(), PriorityPlayer()],
+        seed=3,
+        objectives=_objectives(),
+        deployment_zones=ZONES,
+    )
+    assert result.final_state.is_game_over
+    assert result.winner in (0, 1, None)
