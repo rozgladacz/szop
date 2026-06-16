@@ -287,7 +287,10 @@ rozgrywa round-robin self-play (reuse `simulate_from_rosters` + `deployment_zone
 D5 + mapa z `balance_simulate`; naprzemienna inicjatywa + rozłączne seedy) i
 raportuje top wg `win_rate/points` (sygnał przewagi względem kosztu). Konsumuje
 `agents.roster_to_engine_roster` + `roster_points`. Skrypt-liść — DB tylko odczyt.
-Opcja B (konto `agent_kind` + `AgentToken`) odłożona do B2 auth.
+Opcja B (konto `agent_kind` + `AgentToken`) odłożona do B2 auth. Kandydatami są
+tylko oddziały, których koło mieści się w strefie rozstawienia (pkt 13.a, ≤6″ dla
+strefy 12″) — większe oddziały są filtrowane, by nie crashować turnieju
+`IllegalActionError` w fazie rozstawienia.
 
 ```powershell
 python scripts/exploit_hunt.py                                       # 6 rozpisek, random self-play
