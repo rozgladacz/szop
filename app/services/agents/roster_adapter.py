@@ -60,6 +60,22 @@ class AdaptResult:
     deferred_attached_heroes: list[int] = field(default_factory=list)
 
 
+def roster_points(roster: Any) -> float:
+    """Łączny koszt punktowy rozpiski (metryka D3 `win_rate/points`).
+
+    Reuse SSOT `costs.roster_unit_cost` (per-RosterUnit `selected_total`, read-only —
+    nie zapisuje `cached_cost`). Sumuje **wszystkie** `RosterUnit` (włącznie z
+    attached heroes), bo punkty = pełny koszt zapłacony za rozpiskę.
+
+    **Asymetria MVP (świadoma):** engine-dict z `roster_to_engine_roster` symuluje
+    PODZBIÓR (attached heroes / extra_weapons deferowane), ale `roster_points` liczy
+    PEŁNY koszt — exploit = `win_rate / points` względem całej zapłaconej wartości.
+    """
+    return sum(
+        costs.roster_unit_cost(ru) for ru in getattr(roster, "roster_units", []) or []
+    )
+
+
 def _ability_slugs(unit: Any) -> list[str]:
     """Slugi zdolności oddziału z `unit.abilities` (przez nazwę → SSOT slug)."""
     slugs: list[str] = []

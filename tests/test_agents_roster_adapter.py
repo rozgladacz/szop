@@ -22,9 +22,11 @@ from app import models
 from app.services.agents import (
     AdaptResult,
     RandomPlayer,
+    roster_points,
     roster_to_engine_roster,
     simulate_from_rosters,
 )
+from app.services import costs
 from app.services.engine.state import build_initial_state
 
 
@@ -249,3 +251,24 @@ def test_integration_simulate_runs_a_full_game():
     players = [RandomPlayer(seed=1), RandomPlayer(seed=2)]
     result = simulate_from_rosters([r0.units, r1.units], players, seed=7)
     assert result.rounds_played >= 1
+
+
+def test_roster_points_sums_unit_costs_via_ssot():
+    unit = _unit(quality=3, defense=4, toughness=3)
+    roster = _roster([_ru(unit, count=2), _ru(_unit(), count=1)])
+    expected = sum(costs.roster_unit_cost(ru) for ru in roster.roster_units)
+    assert roster_points(roster) == pytest.approx(expected)
+    assert roster_points(roster) > 0.0
+
+
+def test_roster_points_empty_roster_is_zero():
+    assert roster_points(_roster([])) == 0.0
+
+
+def test_roster_points_includes_attached_heroes():
+    # Punkty = pełny koszt zaplacony (attached hero liczy sie, mimo defer engine-side).
+    leader = _ru(_unit(name="Lider"), position=0)
+    hero = _ru(_unit(name="Bohater"), parent_id=99, position=1)
+    with_hero = roster_points(_roster([leader, hero]))
+    without_hero = roster_points(_roster([_ru(_unit(name="Lider"), position=0)]))
+    assert with_hero > without_hero

@@ -38,6 +38,7 @@ from app.services.agents.priority_v3_player import PriorityV3Player
 from app.services.agents.random_player import RandomPlayer
 from app.services.agents.roster_adapter import (
     AdaptResult,
+    roster_points,
     roster_to_engine_roster,
 )
 
@@ -60,4 +61,5 @@ __all__ = [
     "random_position_in_zone",
     "AdaptResult",
     "roster_to_engine_roster",
+    "roster_points",
 ]

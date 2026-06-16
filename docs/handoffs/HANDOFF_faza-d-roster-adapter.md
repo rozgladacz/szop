@@ -7,7 +7,7 @@
 
 ## W TRAKCIE
 
-- **2026-06-16 — SLICE 1 DONE.** `roster_adapter.py` zaimplementowany + 14 testów zielonych; pełna suita **1696 passed** (1682 baseline + 14). Docs (roadmap D3 prereq, architecture agents) zaktualizowane. Gotowe do commitu + archiwizacji slice 1.
+- **2026-06-16 — SLICE 1 + 2a DONE.** `roster_adapter.py`: `roster_to_engine_roster` (slice 1, commit `6d44b65`) + `roster_points` (slice 2a). 17 testów; pełna suita **1699 passed** (1682 baseline + 17). Docs (roadmap D3, architecture agents) zaktualizowane. D3 ma oba inputy metryki (engine-dict + points); pozostała blokada D3 = B2 auth (konto agenta + generator rozpisek). Wątek może zostać otwarty na slice 2b (auto-deploy/extra_weapons/attached-heroes) lub zarchiwizowany jeśli D3 czeka na B2.
 
 ## Cel
 
@@ -45,9 +45,11 @@ Zbudować czystą funkcję adaptującą ORM `Roster` (z relacjami `RosterUnit`�
 - [x] `tests/test_agents_roster_adapter.py` — 14 testów (transient ORM bez DB): shape, partycja broni, primary-first, filtrowanie wykluczeń (raportowane, dict buildowalny), incomplete inert, models_mode per_copy/aggregate + walidacja, attached-hero defer, pozycje jawne/placeholder, rozłączne id, integracja `build_initial_state` + `simulate_from_rosters`.
 - [x] docs (roadmap D3 prereq, architecture sekcja agentów — tabela +`roster_adapter.py`, licznik 56→70).
 
-### Slice 2+ (NASTĘPNE wątki, NIE w tym oknie)
+### Slice 2a — koszt/punkty (DONE 2026-06-16)
 
-- Koszt/punkty: cienki helper sumujący `calculate_roster_unit_quote` per RosterUnit (SSOT, gotowe — D3 może wołać bezpośrednio).
+- [x] `roster_points(roster) -> float` — suma `costs.roster_unit_cost(ru)` (SSOT, read-only) po wszystkich `RosterUnit`. Metryka D3 `win_rate/points`. Liczy PEŁNY koszt (incl. attached heroes) mimo że engine-dict symuluje podzbiór (świadoma asymetria, udokumentowana). 3 testy. **D3 ma teraz oba inputy metryki:** engine-dict (`roster_to_engine_roster`) + points (`roster_points`).
+
+### Slice 2b+ (NASTĘPNE wątki, NIE w tym oknie)
 - Auto-rozstawienie: integracja z D5 `deployment_zones` (grid w strefie) zamiast placeholder positions.
 - Attached heroes (`parent_roster_unit_id` ≠ None): poprawne dołączenie do oddziału macierzystego (merge radius/buff) — teraz DEFEROWANE i raportowane.
 - DB-backed `LocalClient(db_session, user_id)`.
