@@ -295,7 +295,10 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `scripts/balance_report.py` → `reports/balance/YYYY-MM-DD.md` — **DONE 2026-06-10** (wątek `faza-d-balance-report`): round-robin turniej (fixtura × para botów, kombinacje z powtórzeniem) reużywa `simulate_balance` (SSOT, ADR-0032) → markdown z tabelą win-rate + tekstowymi (unicode) wykresami słupkowymi. CLI `--fixtures/--players/-n/--seed/--out`. Wykresy **tekstowe, nie obrazowe** (bez matplotlib — dependency-free; obrazy = follow-up gdy user zechce zależności). `reports/` gitignored. 19 testów.
 
 ### D3. Exploit hunting (2 tyg)
-- [ ] `scripts/exploit_hunt.py` — generuje losowe rozpiski na koncie `agent_kind=exploit_hunter`, gra vs siebie, raportuje top 10 (win_rate/points)
+
+> **Prereq — adapter ORM→engine-dict slice 1 DONE 2026-06-16** (wątek `faza-d-roster-adapter`): `app/services/agents/roster_adapter.py` — `roster_to_engine_roster(roster, *, owner_player, models_mode, positions=)` konwertuje ORM `Roster` na engine-dict konsumowany przez `build_initial_state`/`simulate_from_rosters`. Reuse SSOT (`normalize_range_value`/`ability_identifier`/`default_weapon_loadout`); filtruje `b_mvp_exclusions` (+ raportuje), oznacza `INCOMPLETE_ABILITIES`. `models_mode` per_copy (default)/aggregate. 14 testów, warstwa-liść (zero zmian w rdzeniu). **Domyka most ORM→engine** wskazany jako blokada D3 (win_rate/**points**). **Odłożone (follow-up):** koszt/punkty (D3 woła `calculate_roster_unit_quote` — SSOT gotowe), auto-rozstawienie (integracja z D5 `deployment_zones`), `extra_weapons_json` override, attached heroes (`parent_roster_unit_id`). **PYTANIE DO USERA (models_mode):** default `per_copy` (count osobnych blobów) — do potwierdzenia jako kanoniczny dla balansu (HANDOFF_faza-d-roster-adapter).
+
+- [ ] `scripts/exploit_hunt.py` — generuje losowe rozpiski na koncie `agent_kind=exploit_hunter`, gra vs siebie, raportuje top 10 (win_rate/points). Most ORM→engine: `roster_adapter` ✓; koszt: `calculate_roster_unit_quote` ✓; auto-rozstawienie pozycji: D5 `deployment_zones`.
 - [ ] Każdy exploit → ADR z propozycją zmiany DOCX
 
 ### D4. Adversarial play (4 tyg, opcjonalne)
