@@ -278,6 +278,27 @@ python scripts/battle_replay.py --map symetryczna_a --map-seed 3 --players prior
 python scripts/battle_replay.py --from-db 12                         # replay zapisanej bitwy z DB
 ```
 
+### `exploit_hunt.py` (D3)
+
+Exploit hunting (roadmap D3, **Opcja A in-memory** — bez DB-write/auth). Czyta
+jednostki z bazy **read-only**, generuje losowe **efemeryczne** rozpiski (transient
+`Roster`) blisko budżetu punktowego (4–8 oddziałów pkt 2.a; `models_mode=per_copy`),
+rozgrywa round-robin self-play (reuse `simulate_from_rosters` + `deployment_zones`
+D5 + mapa z `balance_simulate`; naprzemienna inicjatywa + rozłączne seedy) i
+raportuje top wg `win_rate/points` (sygnał przewagi względem kosztu). Konsumuje
+`agents.roster_to_engine_roster` + `roster_points`. Skrypt-liść — DB tylko odczyt.
+Opcja B (konto `agent_kind` + `AgentToken`) odłożona do B2 auth.
+
+```powershell
+python scripts/exploit_hunt.py                                       # 6 rozpisek, random self-play
+python scripts/exploit_hunt.py --num-rosters 8 --budget 250 --games 12 --seed 3
+python scripts/exploit_hunt.py --bot priority --top 5 --out build/exploit.csv
+```
+
+> **Uwaga:** wymaga niepustej `data/szop.db` (jednostki). Pusta baza → „Brak
+> jednostek-kandydatów" (exit 1). Pełny pipeline self-play/ranking pokryty testami
+> na danych syntetycznych (`tests/test_exploit_hunt.py`, bez DB).
+
 ### `reflect_and_improve.py`
 
 Analiza ostatnich 10 transkryptów Claude Code, generuje

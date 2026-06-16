@@ -66,6 +66,14 @@ Zbudować czystą funkcję adaptującą ORM `Roster` (z relacjami `RosterUnit`�
 - 2026-06-16: Slug `faza-d-roster-adapter` (zarezerwowany w parent `faza-b-engine-mvp` jako anticipated prereq D3).
 - 2026-06-16: Warstwa-liść agentów (czyta tylko ORM + public API silnika) — zero zmian w rdzeniu `engine/*` → brak kolizji z lockami / golden-digestami B7.
 
+## Decyzje zamrożone (NIE podnosić ponownie)
+
+> Rozstrzygnięte przez usera 2026-06-16. NIE są otwartymi pytaniami ani blokadami.
+
+- **`models_mode` = `per_copy` KANONICZNY (LOCKED).** User: „można mieć kilka takich samych oddziałów i każdy z nich rozpatrywany jest niezależnie" (zgodne pkt 2.b/8.a/11). `count` kopii = `count` osobnych blobów po `typical_models`. `aggregate` zostaje tylko jako flaga debugowa (nie kanoniczna).
+- **Attached heroes — POZA MVP (LOCKED).** User: „Bohaterowie czekają na modele i wypadają z MVP". Dołączeni bohaterowie (`parent_roster_unit_id`) deferowani do E1 (per-model granularity). `roster_to_engine_roster` raportuje ich w `deferred_attached_heroes`; `roster_points` liczy ich koszt (pełna wartość rozpiski). Engine-side ignoruje. NIE re-eskalować.
+- **D3 ścieżka — Opcja A (in-memory) NA TERAZ (LOCKED).** User: „A na teraz, potem jedno konto Test z przygotowanymi rozpiskami + gotowymi oddziałami do losowych rozpisek, potem B". D3 generuje efemeryczne rozpiski w pamięci (bez DB-write/auth). Źródło jednostek: **dowolne oddziały z bazy, które nie mają pomijanych cech** (`b_mvp_exclusions`). Konto `Test` (przygotowane rozpiski + pula oddziałów) dojdzie niebawem (user doda usera). Potem B (konto agenta + AgentToken). → wątek `faza-d-exploit-hunt`.
+
 ## Hipotezy / pytania otwarte
 
 - **PYTANIE DO USERA (models_mode) — domyślnie rozstrzygnięte na czas Auto Mode, do potwierdzenia:** `RosterUnit.count` (liczba kopii oddziału) vs `Unit.typical_models` (rozmiar oddziału). Default **`per_copy`**: `count` osobnych blobów, każdy `typical_models` modeli (oddziały aktywują się niezależnie, pkt 11). Alternatywa `aggregate`: 1 blob × (count×typical_models). Parametr `models_mode` eksponuje obie ścieżki; default `per_copy`. **Czy user potwierdza `per_copy` jako kanoniczny dla symulacji balansu?**
