@@ -127,7 +127,14 @@
       "Bash(python -m pytest tests/test_registration_control.py -q --tb=short)",
       "Bash(python -m pytest tests/test_registration_control.py -v --tb=short)",
       "Bash(python -m pytest tests/test_registration_control.py tests/ -q --tb=short --ignore=tests/e2e)",
-      "Bash(python -m pytest tests/test_registration_control.py --tb=long)"
+      "Bash(python -m pytest tests/test_registration_control.py --tb=long)",
+      "Bash(gh run *)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(Get-ChildItem -Path \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(python -m pytest tests/test_roster_unit_quote.py -q)",
+      "Bash(python -m pytest tests/test_roster_unit_quote.py -q -k \"distinguishes_aura_links\")"
     ]
   }
 }

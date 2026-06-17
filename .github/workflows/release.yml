@@ -10,6 +10,9 @@ permissions:
   contents: write     # tworzenie GitHub Release
   packages: write     # push do GHCR
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   test:
     name: Tests

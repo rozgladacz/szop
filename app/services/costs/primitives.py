@@ -199,6 +199,35 @@ def split_traits(text: str | None) -> list[str]:
     return [part.strip() for part in re.split(r"[,;]", text) if part.strip()]
 
 
+def ability_link_loadout_key(ability_id: object, value: object | None = None) -> str:
+    """Disambiguating key for an ability+value pair.
+
+    Abilities like Aura/Rozkaz/Klatwa/Oznaczenie share one generic ``Ability``
+    row across many different ``value`` selections (e.g. "furia|6" vs
+    "zwinny|6"), so the bare ability id is not enough to tell two
+    ``UnitAbility`` links apart. Mirrors the loadout key the frontend
+    round-trips through ``extra_weapons_json`` — keep in sync with any
+    serialization changes there.
+    """
+    if ability_id is None:
+        return ""
+    base = str(ability_id)
+    if value is None:
+        return base
+    if isinstance(value, bool):
+        variant = "1" if value else "0"
+    elif isinstance(value, (int, float)):
+        if isinstance(value, float) and value.is_integer():
+            variant = str(int(value))
+        else:
+            variant = str(value)
+    else:
+        variant = str(value).strip()
+    if not variant:
+        return base
+    return f"{base}:{variant}"
+
+
 def clamp_quality(value: int) -> int:
     return max(2, min(6, int(value)))
 
@@ -294,6 +323,7 @@ __all__ = [
     "_with_role_trait",
     "ability_choices",
     "ability_identifier",
+    "ability_link_loadout_key",
     "clamp_defense",
     "clamp_quality",
     "defense_modifier",

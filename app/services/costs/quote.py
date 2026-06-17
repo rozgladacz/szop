@@ -29,7 +29,12 @@ from .abilities import base_model_cost
 from .passive_state import compute_passive_state, normalize_roster_unit_count
 from .primitives import _strip_role_traits, _with_role_trait, ability_identifier
 from .role_totals import roster_unit_role_totals
-from .unit_helpers import ability_cost, normalize_roster_unit_loadout, unit_default_weapons
+from .unit_helpers import (
+    ability_cost,
+    ability_link_loadout_key,
+    normalize_roster_unit_loadout,
+    unit_default_weapons,
+)
 from .weapons import weapon_cost, weapon_cost_components
 
 
@@ -191,12 +196,16 @@ def calculate_roster_unit_quote(
         2,
     )
 
-    ability_link_by_id: dict[int, Any] = {}
+    # Keyed by the per-link loadout key (ability_id, or "ability_id:value" for
+    # parameterized abilities) — not the bare ability id. Several links (e.g.
+    # multiple "Aura: X" choices) can share one generic ability id, so a
+    # bare-id-keyed dict would collapse them onto the same slot.
+    ability_link_by_key: dict[str, Any] = {}
     for link in getattr(unit, "abilities", []) or []:
         ability_id = getattr(getattr(link, "ability", None), "id", None)
         if ability_id is None:
             continue
-        ability_link_by_id[int(ability_id)] = link
+        ability_link_by_key[ability_link_loadout_key(link)] = link
 
     def _section_total(section: str, ability: bool = False) -> float:
         data = normalized_loadout.get(section)
@@ -207,11 +216,6 @@ def calculate_roster_unit_quote(
             key_str = str(raw_key).strip()
             if not key_str:
                 continue
-            base_id = key_str.split(":", 1)[0]
-            try:
-                item_id = int(base_id)
-            except (TypeError, ValueError):
-                continue
             per_model_count = max(int(raw_count), 0)
             if per_model_count <= 0:
                 continue
@@ -220,12 +224,17 @@ def calculate_roster_unit_quote(
                 multiplier = 1 if mode_total else 1
             selected_count = per_model_count if mode_total else per_model_count * multiplier
             if section == "weapons":
+                base_id = key_str.split(":", 1)[0]
+                try:
+                    item_id = int(base_id)
+                except (TypeError, ValueError):
+                    continue
                 weapon = weapon_by_id.get(item_id)
                 if weapon is None:
                     continue
                 total += weapon_cost(weapon, unit.quality, selected_traits) * selected_count
             else:
-                ability_link = ability_link_by_id.get(item_id)
+                ability_link = ability_link_by_key.get(key_str)
                 if ability_link is None:
                     continue
                 total += ability_cost(
@@ -260,16 +269,16 @@ def calculate_roster_unit_quote(
 
         item_active: dict[str, float] = {}
         item_aura: dict[str, float] = {}
-        for ability_id, link in ability_link_by_id.items():
+        for link_key, link in ability_link_by_key.items():
             ability = getattr(link, "ability", None)
             if ability is None:
                 continue
             cost = round(ability_cost(link, selected_traits, toughness=unit.toughness), 2)
             ability_type = getattr(ability, "type", None)
             if ability_type == "active":
-                item_active[str(ability_id)] = cost
+                item_active[link_key] = cost
             elif ability_type == "aura":
-                item_aura[str(ability_id)] = cost
+                item_aura[link_key] = cost
 
         item_passive_deltas: dict[str, float] = {}
         passive_state_for_deltas = _passive_state_cache

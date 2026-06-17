@@ -132,6 +132,7 @@ from ._engine import (
 
 # Unit-level aggregation ---------------------------------------------------
 from ._engine import (
+    ability_link_loadout_key,
     normalize_roster_unit_loadout,
     unit_default_weapons,
     unit_total_cost,
@@ -206,6 +207,7 @@ __all__ = [
     "ability_cost",
     "ability_cost_components_from_name",
     "ability_cost_from_name",
+    "ability_link_loadout_key",
     "ability_uses_order_like_cost",
     "passive_cost",
     # weapon / base

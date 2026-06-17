@@ -33,6 +33,7 @@ from .passive_state import (
     compute_passive_state,
 )
 from .primitives import ability_identifier, normalize_name
+from .primitives import ability_link_loadout_key as _loadout_key_for_id_value
 from .weapons import weapon_cost
 
 
@@ -113,6 +114,32 @@ def _ability_link_is_default(link: models.UnitAbility) -> bool:
     return bool(default_flag)
 
 
+def _ability_link_value(ability_link: models.UnitAbility) -> Any:
+    params_json = getattr(ability_link, "params_json", None)
+    if not params_json:
+        return None
+    try:
+        data = json.loads(params_json)
+    except json.JSONDecodeError:
+        return None
+    return data.get("value")
+
+
+def ability_link_loadout_key(ability_link: models.UnitAbility) -> str:
+    """Per-link disambiguating key — see ``primitives.ability_link_loadout_key``.
+
+    Needed because several ``UnitAbility`` links (e.g. multiple "Aura: X"
+    selections on one unit) can share the same generic ``ability_id``.
+
+    Reads the id via the ``.ability`` relationship (not the raw ``ability_id``
+    FK column) to match how ``ability_cost`` and the rest of this module
+    resolve a link's ability — and so lightweight test doubles only need to
+    set ``.ability``, not a separate ``ability_id`` attribute.
+    """
+    ability_id = getattr(getattr(ability_link, "ability", None), "id", None)
+    return _loadout_key_for_id_value(ability_id, _ability_link_value(ability_link))
+
+
 def ability_cost(
     ability_link: models.UnitAbility,
     unit_traits: Sequence[str] | None = None,
@@ -124,13 +151,7 @@ def ability_cost(
     if ability.cost_hint is not None and not ability_uses_order_like_cost(ability):
         return float(ability.cost_hint)
     unit = getattr(ability_link, "unit", None)
-    value = None
-    if ability_link.params_json:
-        try:
-            data = json.loads(ability_link.params_json)
-        except json.JSONDecodeError:
-            data = {}
-        value = data.get("value")
+    value = _ability_link_value(ability_link)
     base_toughness = toughness
     if base_toughness is None and unit is not None:
         base_toughness = getattr(unit, "toughness", None)
@@ -365,6 +386,7 @@ __all__ = [
     "_ability_link_is_default",
     "_normalize_loadout_section_ids",
     "ability_cost",
+    "ability_link_loadout_key",
     "ability_uses_order_like_cost",
     "normalize_roster_unit_loadout",
     "unit_default_weapons",

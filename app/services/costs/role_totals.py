@@ -51,7 +51,12 @@ from .primitives import (
     extract_number,
     normalize_name,
 )
-from .unit_helpers import _ability_link_is_default, ability_cost, unit_default_weapons
+from .unit_helpers import (
+    _ability_link_is_default,
+    ability_cost,
+    ability_link_loadout_key,
+    unit_default_weapons,
+)
 from .weapons import weapon_cost_components
 
 
@@ -94,9 +99,14 @@ def roster_unit_role_totals(
         ability_identifier(trait) == "masywny" for trait in base_traits
     )
 
-    def _parse_counts(section: str) -> dict[int, int]:
+    def _parse_counts(section: str, *, full_key: bool = False) -> dict[Any, int]:
+        # ``full_key=True`` keeps the raw "ability_id:value" loadout key intact
+        # instead of truncating to the bare ability id. Several UnitAbility
+        # links (e.g. multiple "Aura: X" selections on one unit) can share the
+        # same generic ability id — truncating would collapse them onto one
+        # dict slot and silently drop all but one selection's count.
         raw_section = raw_data.get(section)
-        result: dict[int, int] = {}
+        result: dict[Any, int] = {}
         if isinstance(raw_section, dict):
             items = raw_section.items()
         elif isinstance(raw_section, list):
@@ -119,14 +129,17 @@ def roster_unit_role_totals(
             items = []
         for raw_id, raw_value in items:
             raw_id_str = str(raw_id)
-            base_id = raw_id_str.split(":", 1)[0]
-            try:
-                parsed_id = int(base_id)
-            except (TypeError, ValueError):
+            if full_key:
+                parsed_id: Any = raw_id_str
+            else:
+                base_id = raw_id_str.split(":", 1)[0]
                 try:
-                    parsed_id = int(float(base_id))
+                    parsed_id = int(base_id)
                 except (TypeError, ValueError):
-                    continue
+                    try:
+                        parsed_id = int(float(base_id))
+                    except (TypeError, ValueError):
+                        continue
             try:
                 parsed_value = int(raw_value)
             except (TypeError, ValueError):
@@ -140,8 +153,8 @@ def roster_unit_role_totals(
         return result
 
     weapons_counts = _parse_counts("weapons")
-    active_counts = _parse_counts("active")
-    aura_counts = _parse_counts("aura")
+    active_counts = _parse_counts("active", full_key=True)
+    aura_counts = _parse_counts("aura", full_key=True)
     passive_counts = passive_state.counts
 
     total_mode = loadout_mode == "total"
@@ -289,17 +302,19 @@ def roster_unit_role_totals(
 
     # Memoized like _passive_entries — same trait-fingerprint key.
     _ability_cost_map_cache: dict[
-        tuple[str, ...], tuple[dict[int, float], float, float]
+        tuple[str, ...], tuple[dict[str, float], float, float]
     ] = {}
 
     def _ability_cost_map(
         current_traits: Sequence[str],
-    ) -> tuple[dict[int, float], float, float]:
+    ) -> tuple[dict[str, float], float, float]:
         key = tuple(sorted(str(t) for t in current_traits))
         cached = _ability_cost_map_cache.get(key)
         if cached is not None:
             return cached
-        ability_map: dict[int, float] = {}
+        # Keyed by the per-link loadout key (not the bare ability id) — several
+        # links (e.g. multiple "Aura: X" choices) can share one ability id.
+        ability_map: dict[str, float] = {}
         passive_total = 0.0
         active_total = 0.0
         for link in _sorted_ability_links:
@@ -314,7 +329,7 @@ def roster_unit_role_totals(
                 if default_flag is None or default_flag > 0:
                     passive_total += cost_value
             else:
-                ability_map[ability.id] = cost_value
+                ability_map[ability_link_loadout_key(link)] = cost_value
                 active_total += cost_value
         result = (ability_map, passive_total, active_total)
         _ability_cost_map_cache[key] = result
@@ -325,9 +340,13 @@ def roster_unit_role_totals(
 
     # Selected_active_set is also role-independent (depends only on
     # active_counts/aura_counts which are part of the loadout, not the role).
+    # active_counts/aura_counts are now keyed by the full "ability_id:value"
+    # loadout key (see _parse_counts); non-parameterized abilities degrade to
+    # the bare ability id as a string, so str(_aid) still matches.
     _selected_active_set_precomputed: set[str] = set()
     for _aid, _ident in _ability_id_to_ident.items():
-        if active_counts.get(_aid, 0) > 0 or aura_counts.get(_aid, 0) > 0:
+        _aid_key = str(_aid)
+        if active_counts.get(_aid_key, 0) > 0 or aura_counts.get(_aid_key, 0) > 0:
             _selected_active_set_precomputed.add(_ident)
 
     def _compute_total(current_traits: Sequence[str], selected_role: str) -> float:

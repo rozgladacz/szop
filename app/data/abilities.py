@@ -141,11 +141,12 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Samolot",
         type="passive",
         description=(
-            "Nie możesz aktywować oddziału bez tej zdolności, jeżeli masz nieaktywowany oddział z nią."
-            "Jako pierwszą akcję musi wykonać ruch i musi przemieścić się 30–36” w jednej linii. "
-            "Nie może być przyszpilony, kontrolować punktów, szarżować, ani być celem szarży. "
-            "Nie blokuje ruchu ani widzenia innych jednostek."
-            "Ma osłonę, a jednostki strzelające do niego mają -12” zasięgu. Wysoki, Latający, Zwinny"
+            "Nie możesz aktywować oddziału bez tej zdolności, jeżeli masz nieaktywowany oddział z nią. "
+            "Jako pierwszą akcję musi wykonać ruch i przemieścić się 30–36” w jednej linii. "
+            "Nie może kontrolować punktów, szarżować, ani być celem szarży. "
+            "Nie blokuje ruchu, ani widzenia innych jednostek. "
+            "Ma osłonę, a jednostki strzelające do niego mają -12” zasięgu. Wysoki, Latający, Zwinny. "
+            "Jeżeli jest Przyszpilony, odrzuca ten stan i wykonuje test trudnego terenu."
         ),
     ),
     AbilityDefinition(

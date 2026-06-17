@@ -115,11 +115,6 @@ def _legacy_section_total(
         key_str = str(raw_key).strip()
         if not key_str:
             continue
-        base_id = key_str.split(":", 1)[0]
-        try:
-            item_id = int(base_id)
-        except (TypeError, ValueError):
-            continue
         per_model_count = max(int(raw_count), 0)
         if per_model_count <= 0:
             continue
@@ -128,6 +123,11 @@ def _legacy_section_total(
             multiplier = 1
         selected_count = per_model_count if mode_total else per_model_count * multiplier
         if section == "weapons":
+            base_id = key_str.split(":", 1)[0]
+            try:
+                item_id = int(base_id)
+            except (TypeError, ValueError):
+                continue
             link = next(
                 (
                     item
@@ -144,11 +144,14 @@ def _legacy_section_total(
                 continue
             total += costs.weapon_cost(weapon, unit.quality, selected_traits) * selected_count
         else:
+            # Matched by the full "ability_id:value" loadout key — several
+            # links (e.g. multiple "Aura: X" choices) can share one ability
+            # id, so the bare id alone cannot tell them apart.
             ability_link = next(
                 (
                     item
                     for item in getattr(unit, "abilities", []) or []
-                    if getattr(getattr(item, "ability", None), "id", None) == item_id
+                    if costs.ability_link_loadout_key(item) == key_str
                 ),
                 None,
             )
@@ -173,8 +176,8 @@ def test_calculate_roster_unit_quote_preserves_totals_for_suffixed_loadout_keys(
         flags="Wojownik",
         army=None,
         abilities=[
-            SimpleNamespace(ability=active_ability, params_json=None, unit=None),
-            SimpleNamespace(ability=aura_ability, params_json=None, unit=None),
+            SimpleNamespace(ability=active_ability, params_json='{"value": "banner"}', unit=None),
+            SimpleNamespace(ability=aura_ability, params_json='{"value": "fearful"}', unit=None),
         ],
         weapon_links=[
             SimpleNamespace(weapon_id=101, weapon=default_weapon, is_default=True, default_count=1),
@@ -241,8 +244,8 @@ def test_calculate_roster_unit_quote_matches_legacy_section_totals_regression(mo
         flags="Wojownik,Masywny",
         army=None,
         abilities=[
-            SimpleNamespace(ability=active_ability, params_json=None, unit=None),
-            SimpleNamespace(ability=aura_ability, params_json=None, unit=None),
+            SimpleNamespace(ability=active_ability, params_json='{"value": "banner"}', unit=None),
+            SimpleNamespace(ability=aura_ability, params_json='{"value": "fearful"}', unit=None),
         ],
         weapon_links=[
             SimpleNamespace(weapon_id=101, weapon=default_weapon, is_default=True, default_count=1),
@@ -293,6 +296,46 @@ def test_calculate_roster_unit_quote_matches_legacy_section_totals_regression(mo
     assert quote["components"]["weapon"] == expected_weapon
     assert quote["components"]["active"] == expected_active
     assert quote["components"]["aura"] == expected_aura
+
+
+def test_calculate_roster_unit_quote_distinguishes_aura_links_sharing_one_ability_id() -> None:
+    """Regression test for a unit with several "Aura: X" choices.
+
+    All "Aura: X" selections share one generic ``Ability`` row (slug
+    "aura"), differentiated only by each link's own ``params_json`` value.
+    A bare-ability-id-keyed lookup would collapse them onto one dict slot,
+    so toggling one choice silently affected (or failed to affect) a
+    different one — reported as "adding Aura: Furia doesn't change the cost".
+    """
+    aura_ability = SimpleNamespace(id=50, name="Aura: Zdolnosc", type="aura", cost_hint=None, config_json=None)
+    furia_link = SimpleNamespace(ability=aura_ability, params_json='{"value": "furia|6"}', unit=None)
+    zwinny_link = SimpleNamespace(ability=aura_ability, params_json='{"value": "zwinny|6"}', unit=None)
+    unit = SimpleNamespace(
+        quality=4,
+        defense=4,
+        toughness=6,
+        flags="Wojownik",
+        army=None,
+        abilities=[furia_link, zwinny_link],
+        weapon_links=[],
+        default_weapon=None,
+        default_weapon_id=None,
+    )
+
+    only_zwinny = costs.calculate_roster_unit_quote(
+        unit, loadout={"aura": {"50:furia|6": 0, "50:zwinny|6": 1}}, count=1
+    )
+    only_furia = costs.calculate_roster_unit_quote(
+        unit, loadout={"aura": {"50:furia|6": 1, "50:zwinny|6": 0}}, count=1
+    )
+    both_off = costs.calculate_roster_unit_quote(
+        unit, loadout={"aura": {"50:furia|6": 0, "50:zwinny|6": 0}}, count=1
+    )
+
+    assert only_zwinny["item_costs"]["aura"]["50:furia|6"] == only_furia["item_costs"]["aura"]["50:furia|6"]
+    assert only_zwinny["components"]["aura"] != only_furia["components"]["aura"]
+    assert only_furia["components"]["aura"] > both_off["components"]["aura"]
+    assert only_zwinny["components"]["aura"] > both_off["components"]["aura"]
 
 
 @pytest.mark.parametrize("count", [0, -1, -5, "abc"])

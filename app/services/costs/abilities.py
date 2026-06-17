@@ -114,7 +114,7 @@ def passive_cost(
         if slug == "bastion":
             return 3.0
         if slug == "niestrudzony":
-            return 8.0
+            return 8.0 * tou
         if slug in {"nieustraszony", "ucieczka", "stracency"}:
             return 1.5 * tou
         if slug == "delikatny":
