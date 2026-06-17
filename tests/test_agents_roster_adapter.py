@@ -253,12 +253,43 @@ def test_integration_simulate_runs_a_full_game():
     assert result.rounds_played >= 1
 
 
-def test_roster_points_sums_unit_costs_via_ssot():
-    unit = _unit(quality=3, defense=4, toughness=3)
-    roster = _roster([_ru(unit, count=2), _ru(_unit(), count=1)])
-    expected = sum(costs.roster_unit_cost(ru) for ru in roster.roster_units)
+def test_roster_points_per_copy_matches_simulated_force():
+    # per_copy: `count` = liczba KOPII (jak roster_to_engine_roster), nie modeli.
+    # Koszt = Σ copies × quote(typical_models) — spójny z symulowaną siłą.
+    from types import SimpleNamespace
+
+    unit = _unit(quality=3, defense=4, toughness=3, typical_models=5)
+    plain = _unit(typical_models=5)
+    roster = _roster([_ru(unit, count=2), _ru(plain, count=1)])
+
+    def _cost_typical(u):
+        return costs.roster_unit_cost(
+            SimpleNamespace(unit=u, count=u.typical_model_count, extra_weapons_json=None)
+        )
+
+    expected = 2 * _cost_typical(unit) + 1 * _cost_typical(plain)
     assert roster_points(roster) == pytest.approx(expected)
     assert roster_points(roster) > 0.0
+    # 2 kopie kosztują dokładnie 2× jedną kopię (liniowość po kopiach).
+    one_copy = roster_points(_roster([_ru(unit, count=1)]))
+    two_copies = roster_points(_roster([_ru(unit, count=2)]))
+    assert two_copies == pytest.approx(2 * one_copy)
+
+
+def test_roster_points_aggregate_scales_with_total_models():
+    unit = _unit(quality=3, defense=4, toughness=3, typical_models=5)
+    roster = _roster([_ru(unit, count=2)])
+    from types import SimpleNamespace
+
+    expected = costs.roster_unit_cost(
+        SimpleNamespace(unit=unit, count=2 * unit.typical_model_count, extra_weapons_json=None)
+    )
+    assert roster_points(roster, models_mode="aggregate") == pytest.approx(expected)
+
+
+def test_roster_points_rejects_bad_models_mode():
+    with pytest.raises(ValueError):
+        roster_points(_simple_roster(), models_mode="nope")
 
 
 def test_roster_points_empty_roster_is_zero():

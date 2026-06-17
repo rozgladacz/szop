@@ -285,22 +285,29 @@ jednostki z bazy **read-only**, generuje losowe **efemeryczne** rozpiski (transi
 `Roster`) blisko budżetu punktowego (4–8 oddziałów pkt 2.a; `models_mode=per_copy`),
 rozgrywa round-robin self-play (reuse `simulate_from_rosters` + `deployment_zones`
 D5 + mapa z `balance_simulate`; naprzemienna inicjatywa + rozłączne seedy) i
-raportuje top wg `win_rate/points` (sygnał przewagi względem kosztu). Konsumuje
-`agents.roster_to_engine_roster` + `roster_points`. Skrypt-liść — DB tylko odczyt.
-Opcja B (konto `agent_kind` + `AgentToken`) odłożona do B2 auth. Kandydatami są
-tylko oddziały, których koło mieści się w strefie rozstawienia (pkt 13.a, ≤6″ dla
-strefy 12″) — większe oddziały są filtrowane, by nie crashować turnieju
-`IllegalActionError` w fazie rozstawienia.
+raportuje top wg `win_rate/points` (sygnał przewagi względem kosztu) **oraz analizę
+różnicy całkowitego kosztu vs wynik** (head-to-head: koszty obu stron + jak często
+wygrywa droższa rozpiska). Konsumuje `agents.roster_to_engine_roster` +
+`roster_points` (per_copy: koszt = `Σ kopie × quote(typical)`, spójny z symulowaną
+siłą). Skrypt-liść — DB tylko odczyt. Opcja B (konto `agent_kind` + `AgentToken`)
+odłożona do B2 auth. Kandydatami są tylko oddziały, których koło mieści się w strefie
+rozstawienia (pkt 13.a, ≤6″ dla strefy 12″) — większe oddziały są filtrowane, by nie
+crashować turnieju `IllegalActionError` w fazie rozstawienia.
+
+Flagi: `--army NAZWA` (pula z jednej armii, np. `Testowa`), `--vary-size` (rozpiski
+o różnej liczbie oddziałów → różny koszt, do badania wpływu kosztu na wynik;
+ignoruje `--budget`), `--pairs-out PLIK.csv` (head-to-head koszt↔wynik).
 
 ```powershell
 python scripts/exploit_hunt.py                                       # 6 rozpisek, random self-play
-python scripts/exploit_hunt.py --num-rosters 8 --budget 250 --games 12 --seed 3
-python scripts/exploit_hunt.py --bot priority --top 5 --out build/exploit.csv
+python scripts/exploit_hunt.py --army Testowa --vary-size --num-rosters 5 --games 8 --bot priority
+python scripts/exploit_hunt.py --bot priority --top 5 --out build/exploit.csv --pairs-out build/pairs.csv
 ```
 
 > **Uwaga:** wymaga niepustej `data/szop.db` (jednostki). Pusta baza → „Brak
-> jednostek-kandydatów" (exit 1). Pełny pipeline self-play/ranking pokryty testami
-> na danych syntetycznych (`tests/test_exploit_hunt.py`, bez DB).
+> jednostek-kandydatów" (exit 1). Pełny pipeline self-play/ranking + ścieżka DB-read
+> + `main()` pokryte testami (`tests/test_exploit_hunt.py` syntetyczne,
+> `tests/test_exploit_hunt_db.py` na seeded in-memory DB).
 
 ### `reflect_and_improve.py`
 

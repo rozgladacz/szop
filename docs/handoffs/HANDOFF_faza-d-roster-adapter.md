@@ -7,6 +7,8 @@
 
 ## W TRAKCIE
 
+- **2026-06-17 (interaktywna) — BUGFIX `roster_points` (niespójność z per_copy).** User dodał dane (admin/`Testowa`) i poprosił o rzetelne notowanie sumy armii. Odkryte: `roster_points` liczył `Σ roster_unit_cost(ru)` = `quote(count=ru.count MODELI)`, ale `roster_to_engine_roster(per_copy)` symuluje `count` KOPII × `typical_models` modeli. Repro (Testowa „Wzorcowy piechur" typ=6, 2 kopie): symulacja 12 modeli, koszt zapisany **26.88** vs faktyczny **161.24** (≈6× za mało). Fix: `roster_points(roster, *, models_mode="per_copy")` mirroruje adapter — per_copy: `Σ copies × quote(typical)`, aggregate: `Σ quote(copies×typical)`. Spójne z LOCKED per_copy. Aktualizacja 3 testów `roster_points` (per_copy semantyka). **Plik:** `app/services/agents/roster_adapter.py`, `tests/test_agents_roster_adapter.py`.
+
 - **2026-06-16 — SLICE 1 + 2a DONE.** `roster_adapter.py`: `roster_to_engine_roster` (slice 1, commit `6d44b65`) + `roster_points` (slice 2a). 17 testów; pełna suita **1699 passed** (1682 baseline + 17). Docs (roadmap D3, architecture agents) zaktualizowane. D3 ma oba inputy metryki (engine-dict + points); pozostała blokada D3 = B2 auth (konto agenta + generator rozpisek). Wątek może zostać otwarty na slice 2b (auto-deploy/extra_weapons/attached-heroes) lub zarchiwizowany jeśli D3 czeka na B2.
 
 ## Cel

@@ -31,6 +31,7 @@ publiczne SSOT (zero zmian w rdzeniu `engine/*`).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 from typing import Any
 
 from app.services import costs
@@ -60,20 +61,49 @@ class AdaptResult:
     deferred_attached_heroes: list[int] = field(default_factory=list)
 
 
-def roster_points(roster: Any) -> float:
+def _unit_cost_at(unit: Any, model_count: int, extra_weapons_json: Any) -> float:
+    """Koszt jednego oddziału `unit` przy `model_count` modelach (SSOT, read-only).
+
+    Reuse `costs.roster_unit_cost` przez syntetyczny RosterUnit-like (`SimpleNamespace`,
+    precedens w `quote.py`/`armies.py`) — `roster_unit_cost` czyta tylko `unit`/`count`/
+    `extra_weapons_json`. Nie zapisuje `cached_cost`.
+    """
+    return costs.roster_unit_cost(
+        SimpleNamespace(unit=unit, count=max(int(model_count), 0), extra_weapons_json=extra_weapons_json)
+    )
+
+
+def roster_points(roster: Any, *, models_mode: str = "per_copy") -> float:
     """Łączny koszt punktowy rozpiski (metryka D3 `win_rate/points`).
 
-    Reuse SSOT `costs.roster_unit_cost` (per-RosterUnit `selected_total`, read-only —
-    nie zapisuje `cached_cost`). Sumuje **wszystkie** `RosterUnit` (włącznie z
-    attached heroes), bo punkty = pełny koszt zapłacony za rozpiskę.
+    **Spójność z `roster_to_engine_roster` (KLUCZOWE):** koszt musi liczyć to, co
+    silnik faktycznie wystawia. `RosterUnit.count` w transientnych rozpiskach D3 =
+    liczba KOPII (nie modeli), a `per_copy` symuluje `count` blobów po
+    `typical_model_count` modeli. Dlatego:
+    - ``"per_copy"`` (default, kanon LOCKED): ``Σ count × quote(typical_models)`` —
+      każda kopia to pełny oddział typowej wielkości.
+    - ``"aggregate"`` (debug): ``Σ quote(count × typical_models)`` — 1 oddział scalony.
 
-    **Asymetria MVP (świadoma):** engine-dict z `roster_to_engine_roster` symuluje
+    Sumuje **wszystkie** `RosterUnit` (włącznie z attached heroes), bo punkty = pełny
+    koszt zapłacony za rozpiskę. **Asymetria MVP (świadoma):** engine-dict symuluje
     PODZBIÓR (attached heroes / extra_weapons deferowane), ale `roster_points` liczy
     PEŁNY koszt — exploit = `win_rate / points` względem całej zapłaconej wartości.
     """
-    return sum(
-        costs.roster_unit_cost(ru) for ru in getattr(roster, "roster_units", []) or []
-    )
+    if models_mode not in ("per_copy", "aggregate"):
+        raise ValueError(f"models_mode must be 'per_copy' or 'aggregate', got {models_mode!r}")
+    total = 0.0
+    for ru in getattr(roster, "roster_units", []) or []:
+        unit = getattr(ru, "unit", None)
+        if unit is None:
+            continue
+        typical = max(int(getattr(unit, "typical_model_count", 1) or 1), 1)
+        copies = max(int(getattr(ru, "count", 1) or 1), 1)
+        extra = getattr(ru, "extra_weapons_json", None)
+        if models_mode == "aggregate":
+            total += _unit_cost_at(unit, copies * typical, extra)
+        else:
+            total += copies * _unit_cost_at(unit, typical, extra)
+    return total
 
 
 def _ability_slugs(unit: Any) -> list[str]:
