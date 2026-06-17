@@ -61,16 +61,42 @@ class AdaptResult:
     deferred_attached_heroes: list[int] = field(default_factory=list)
 
 
-def _unit_cost_at(unit: Any, model_count: int, extra_weapons_json: Any) -> float:
-    """Koszt jednego oddziału `unit` przy `model_count` modelach (SSOT, read-only).
+def _default_loadout_payload(unit: Any) -> dict[str, Any]:
+    """Sekcja `weapons` domyślnego loadoutu oddziału (SSOT: `Unit.default_weapon_loadout`).
 
-    Reuse `costs.roster_unit_cost` przez syntetyczny RosterUnit-like (`SimpleNamespace`,
-    precedens w `quote.py`/`armies.py`) — `roster_unit_cost` czyta tylko `unit`/`count`/
-    `extra_weapons_json`. Nie zapisuje `cached_cost`.
+    Kalkulator rozpisek liczy koszt oddziału Z domyślnym uzbrojeniem (broń dokłada
+    koszt). Pusty loadout `{}` pomija broń → koszt zaniżony (np. „Wzorcowy piechur"
+    przy 6 modelach: 80.62 bez broni vs **182.98** z domyślną — wartość z edytora).
+    Mapujemy `default_weapon_loadout` → `{str(weapon_id): default_count}` (format
+    konsumowany przez `calculate_roster_unit_quote._parse_counts("weapons")`).
     """
-    return costs.roster_unit_cost(
-        SimpleNamespace(unit=unit, count=max(int(model_count), 0), extra_weapons_json=extra_weapons_json)
+    weapons: dict[str, int] = {}
+    for weapon, wcount in getattr(unit, "default_weapon_loadout", []) or []:
+        wid = getattr(weapon, "id", None)
+        if wid is None:  # transient ORM bez flush — brak FK; koszt bez broni (test path)
+            continue
+        weapons[str(wid)] = int(wcount)
+    return {"weapons": weapons}
+
+
+def _unit_cost_at(unit: Any, model_count: int, extra_weapons_json: Any) -> float:
+    """Koszt jednego oddziału `unit` przy `model_count` modelach wg **SSOT kalkulatora**.
+
+    `calculate_roster_unit_quote` (Strumień A SSOT, read-only — nie zapisuje
+    `cached_cost`). Loadout:
+    - explicit `extra_weapons_json` (override rozpiski) → honorowany (`roster_unit_cost`),
+    - brak → DOMYŚLNY loadout oddziału (`_default_loadout_payload`), inaczej koszt
+      pomija broń i rozjeżdża się z edytorem rozpiski.
+    """
+    count = max(int(model_count), 0)
+    if extra_weapons_json:
+        return costs.roster_unit_cost(
+            SimpleNamespace(unit=unit, count=count, extra_weapons_json=extra_weapons_json)
+        )
+    quote = costs.calculate_roster_unit_quote(
+        unit, _default_loadout_payload(unit), count, include_item_costs=False
     )
+    return float(quote.get("selected_total") or 0.0)
 
 
 def roster_points(roster: Any, *, models_mode: str = "per_copy") -> float:

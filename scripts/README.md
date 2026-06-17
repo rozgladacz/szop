@@ -286,10 +286,11 @@ jednostki z bazy **read-only**, generuje losowe **efemeryczne** rozpiski (transi
 rozgrywa round-robin self-play (reuse `simulate_from_rosters` + `deployment_zones`
 D5 + mapa z `balance_simulate`; naprzemienna inicjatywa + rozłączne seedy) i
 raportuje top wg `win_rate/points` (sygnał przewagi względem kosztu) **oraz analizę
-różnicy całkowitego kosztu vs wynik** (head-to-head: koszty obu stron + jak często
-wygrywa droższa rozpiska). Konsumuje `agents.roster_to_engine_roster` +
-`roster_points` (per_copy: koszt = `Σ kopie × quote(typical)`, spójny z symulowaną
-siłą). Skrypt-liść — DB tylko odczyt. Opcja B (konto `agent_kind` + `AgentToken`)
+różnicy kosztu vs wynik w binach %** (różnica = % wahnięcie od średniej kosztów dwóch
+armii: `<1% / 1–3% / 3–5% / 5–10% / >10%`; per bin win-rate droższej rozpiski).
+Konsumuje `agents.roster_to_engine_roster` + `roster_points` (per_copy: `Σ kopie ×
+quote(typical)` z **domyślnym loadoutem** — SSOT kalkulatora rozpisek, koszt z bronią).
+Skrypt-liść — DB tylko odczyt. Opcja B (konto `agent_kind` + `AgentToken`)
 odłożona do B2 auth. Kandydatami są tylko oddziały, których koło mieści się w strefie
 rozstawienia (pkt 13.a, ≤6″ dla strefy 12″) — większe oddziały są filtrowane, by nie
 crashować turnieju `IllegalActionError` w fazie rozstawienia.
