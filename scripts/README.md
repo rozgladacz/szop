@@ -300,7 +300,10 @@ o różnej liczbie oddziałów → różny koszt, do badania wpływu kosztu na w
 ignoruje `--budget`), `--max-imbalance PCT` (odrzuca pary różniące się kosztem
 o >PCT% od średniej — izoluje wpływ składu/strategii od przewagi droższej armii;
 porównuje tylko ~równo wycenione rozpiski = właściwy exploit-hunt), `--pairs-out
-PLIK.csv` (head-to-head koszt↔wynik).
+PLIK.csv` (head-to-head koszt↔wynik), `--min-distinct N` (minimalna liczba RÓŻNYCH
+typów oddziałów; różnorodność składu zwiększa szansę na outliera koszt/skuteczność —
+jednorodne `8×U0` rzadziej go ujawniają. Capped do puli/rozmiaru. **Default 2**;
+`1` = bez wymuszania. Efekt widoczny przy małej puli, np. `--army Testowa`).
 
 ```powershell
 python scripts/exploit_hunt.py                                       # 6 rozpisek, random self-play
