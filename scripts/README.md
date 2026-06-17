@@ -297,7 +297,10 @@ crashować turnieju `IllegalActionError` w fazie rozstawienia.
 
 Flagi: `--army NAZWA` (pula z jednej armii, np. `Testowa`), `--vary-size` (rozpiski
 o różnej liczbie oddziałów → różny koszt, do badania wpływu kosztu na wynik;
-ignoruje `--budget`), `--pairs-out PLIK.csv` (head-to-head koszt↔wynik).
+ignoruje `--budget`), `--max-imbalance PCT` (odrzuca pary różniące się kosztem
+o >PCT% od średniej — izoluje wpływ składu/strategii od przewagi droższej armii;
+porównuje tylko ~równo wycenione rozpiski = właściwy exploit-hunt), `--pairs-out
+PLIK.csv` (head-to-head koszt↔wynik).
 
 ```powershell
 python scripts/exploit_hunt.py                                       # 6 rozpisek, random self-play
