@@ -255,6 +255,7 @@ from .unit_helpers import (  # noqa: E402, F401
     _ability_link_is_default,
     _normalize_loadout_section_ids,
     ability_cost,
+    ability_link_loadout_key,
     ability_uses_order_like_cost,
     normalize_roster_unit_loadout,
     unit_default_weapons,
