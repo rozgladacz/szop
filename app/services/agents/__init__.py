@@ -7,6 +7,7 @@ Public API:
 - `GreedyPlayer()` — depth-1 maksymalizacja wartości akcji.
 - `PriorityPlayer()` — pół-deterministyczny (prosty): selekcja „najbliżej wroga" + priorytet 1–7.
 - `PriorityV2Player()` — rozbudowany: selekcja po stanie wroga + ruch przechwytujący + wybór celu przez prediction.
+- `MinimaxPlayer(seed)` — D4: lookahead depth-2 (maximin nad `evaluate_state`).
 - `evaluate_state(state, perspective)` — skalarna ocena stanu.
 - `run_match(state, players, dice)` / `simulate_from_rosters(...)` — headless
   pętla bitwy (orkiestrator pełnej gry) → `MatchResult`.
@@ -31,6 +32,7 @@ from app.services.agents.match import (
     run_match,
     simulate_from_rosters,
 )
+from app.services.agents.minimax_player import MinimaxPlayer
 from app.services.agents.policy_eval import evaluate_state
 from app.services.agents.priority_player import PriorityPlayer
 from app.services.agents.priority_v2_player import PriorityV2Player
@@ -50,6 +52,7 @@ __all__ = [
     "PriorityPlayer",
     "PriorityV2Player",
     "PriorityV3Player",
+    "MinimaxPlayer",
     "evaluate_state",
     "MatchResult",
     "run_match",

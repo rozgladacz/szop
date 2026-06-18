@@ -167,8 +167,9 @@ def test_fixture_rejects_non_pair(tmp_path):
 def test_make_player_kinds():
     assert type(bs.make_player("random", 1)).__name__ == "RandomPlayer"
     assert type(bs.make_player("greedy", 1)).__name__ == "GreedyPlayer"
+    assert type(bs.make_player("minimax", 1)).__name__ == "MinimaxPlayer"
     with pytest.raises(ValueError):
-        bs.make_player("minimax", 1)
+        bs.make_player("nieistniejacy_bot", 1)
 
 
 # --- inicjatywa --------------------------------------------------------------
@@ -311,4 +312,4 @@ def test_cli_writes_csv(tmp_path, capsys):
 
 def test_cli_rejects_bad_player():
     with pytest.raises(SystemExit):
-        bs.main(["-n", "2", "--players", "random,minimax"])
+        bs.main(["-n", "2", "--players", "random,nieistniejacy_bot"])

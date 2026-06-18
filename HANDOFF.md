@@ -14,6 +14,7 @@
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-d-roster-adapter](docs/handoffs/HANDOFF_faza-d-roster-adapter.md) | Most ORM `Roster`→engine-dict (prereq D3 exploit-hunt) — warstwa-liść agentów. | `app/services/agents/roster_adapter.py`, `__init__.py` | In progress (slice 1+2a DONE; slice 2b follow-up) |
 | [HANDOFF_faza-d-exploit-hunt](docs/handoffs/HANDOFF_faza-d-exploit-hunt.md) | D3 `scripts/exploit_hunt.py` — generator rozpisek in-memory + self-play + ranking win_rate/points (Opcja A). | `scripts/exploit_hunt.py`, `tests/test_exploit_hunt.py`, `tests/test_exploit_hunt_db.py` (NEW) | In progress (slice 1+1b+1c DONE; real-run czeka na dane usera) |
+| [HANDOFF_faza-d-minimax](docs/handoffs/HANDOFF_faza-d-minimax.md) | D4 `app/services/agents/minimax_player.py` — bot lookahead depth-2 (maximin nad `evaluate_state`), adresuje miopię depth-1. | `app/services/agents/minimax_player.py` (NEW), `tests/test_agents_minimax.py` (NEW), `scripts/balance_simulate.py` (MOD) | In progress (start 2026-06-18) |
 
 
 ## Zasoby zablokowane (reverse lookup)

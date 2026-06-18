@@ -303,7 +303,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### D4. Adversarial play (4 tyg, opcjonalne)
 - [ ] Frontend UI "Play vs AI" — wybór agenta z listy
-- [ ] `minimax_player.py` — depth-2 (dla testów, ~100 ms/action)
+- [x] `minimax_player.py` — **DONE 2026-06-18** (wątek `faza-d-minimax`): `MinimaxPlayer(seed)` lookahead depth-2 (maximin: moja akcja → najlepsza odpowiedź wroga 1-ply → ocena `evaluate_state` po przeliczeniu kontroli `_check_objective_control`, SSOT pkt 5.d). Reużywa `resolver.apply` (rzeczywista semantyka + przekazanie inicjatywy pkt 8.a) zamiast heurystycznych hipotetycznych stanów (różnica jakościowa vs depth-1 greedy). **Deterministyczny rollout** (`DeterministicDice(seed)` świeży per aplikacja — silnik stochastyczny → czysty minimax niemożliwy; pełny expectiminimax odłożony). `--players minimax`. ~30 ms/akcja (cap niepotrzebny). 8 testów. **Wynik balansu (lustrzana_a):** bije greedy 100%, random 67%, ale **przegrywa z `priority` 0:6** — spójne z udokumentowanym „złożoność ≠ siła" (prosty marsz-na-cele bije taktyczny lookahead; cele rozstrzygają się na końcu rundy poza horyzontem 1-ply). Warstwa-liść, zero zmian w rdzeniu.
 - [ ] Leaderboard `reports/leaderboard.md`
 - [ ] ADR-0030: Wielu agentów konkurujących — osobne konta + leaderboard
 

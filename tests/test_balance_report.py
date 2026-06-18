@@ -172,7 +172,7 @@ def test_cli_smoke_writes_report(tmp_path, capsys):
 
 def test_cli_rejects_bad_player():
     with pytest.raises(SystemExit):
-        br.main(["-n", "2", "--players", "random,minimax"])
+        br.main(["-n", "2", "--players", "random,nieistniejacy_bot"])
 
 
 def test_cli_rejects_single_player():
