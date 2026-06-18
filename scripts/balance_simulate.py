@@ -50,6 +50,7 @@ if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
 from app.services.agents import (  # noqa: E402
+    ClaudeV1Player,
     GreedyPlayer,
     MinimaxPlayer,
     Player,
@@ -69,7 +70,7 @@ from app.services.engine.state import (  # noqa: E402
 #: Domyślna fixtura gdy `--fixture` nie podane.
 DEFAULT_FIXTURE = _repo_root / "tests" / "fixtures" / "battles" / "demo_skirmish.yaml"
 
-PLAYER_KINDS = ("random", "greedy", "priority", "priority2", "priority3", "minimax")
+PLAYER_KINDS = ("random", "greedy", "priority", "priority2", "priority3", "minimax", "claude", "claude_v1")
 
 #: Offset seeda decyzji P1 względem P0. Bez niego oba `RandomPlayer` dostają
 #: ten sam seed → na symetrycznej fixturze produkują **lustrzane** strumienie
@@ -171,6 +172,8 @@ def make_player(kind: str, seed: int) -> Player:
         return PriorityV3Player()
     if kind == "minimax":
         return MinimaxPlayer(seed=seed)
+    if kind in ("claude", "claude_v1"):
+        return ClaudeV1Player()
     raise ValueError(f"Nieznany typ gracza: {kind!r} (oczekiwano {PLAYER_KINDS})")
 
 
