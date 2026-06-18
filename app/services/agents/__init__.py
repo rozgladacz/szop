@@ -12,6 +12,10 @@ Public API:
   akcja `priority3`, nie maximin) + expectimax-lite + ocena ability-aware (slugi statusów).
   35%/28% vs priority/priority3 (znacznie lepiej niż v1/minimax ~4–8%), wciąż nie bije ich;
   ~100–130× koszt priority. Patrz roadmap D4.
+- `ClaudeV3Player()` — dziedziczy szkielet `PriorityPlayer`, nadpisuje TYLKO wybór celu:
+  „dobij/koncentruj" (`p_full_kill`+`expected_kills`, ability-aware) zamiast „najbliższy".
+  Najlepszy z botów Claude vs priority (~42%/33%) przy ~2× koszcie priority; bije
+  priority2/greedy/v1/v2. Wciąż nie bije priority/priority3 (sufit heurystyki). Roadmap D4.
 - `PriorityPlayer()` — pół-deterministyczny (prosty): selekcja „najbliżej wroga" + priorytet 1–7.
 - `PriorityV2Player()` — rozbudowany: selekcja po stanie wroga + ruch przechwytujący + wybór celu przez prediction.
 - `MinimaxPlayer(seed)` — D4: lookahead depth-2 (maximin nad `evaluate_state`).
@@ -28,6 +32,7 @@ Konsumenci (roadmap): D2 balance_simulate, D3 exploit_hunt, D4 adversarial UI.
 from app.services.agents.base import Player, legal_actions
 from app.services.agents.claude_v1_player import ClaudeV1Player
 from app.services.agents.claude_v2_player import ClaudeV2Player
+from app.services.agents.claude_v3_player import ClaudeV3Player
 from app.services.agents.deployment import (
     DeploymentZone,
     GridDeploymentMixin,
@@ -60,6 +65,7 @@ __all__ = [
     "GreedyPlayer",
     "ClaudeV1Player",
     "ClaudeV2Player",
+    "ClaudeV3Player",
     "PriorityPlayer",
     "PriorityV2Player",
     "PriorityV3Player",
