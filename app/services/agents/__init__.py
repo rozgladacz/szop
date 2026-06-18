@@ -8,6 +8,10 @@ Public API:
 - `ClaudeV1Player()` — depth-1 ogólny (value-maximizer): gradient marszu ku celom
   (anty-miopia) + dobijanie (`p_full_kill`) + świadomość zdolności przez `expected_damage`.
   Bije `GreedyPlayer`, ale słabszy od `PriorityPlayer`/v3 (luka strukturalna depth-1, nie wag).
+- `ClaudeV2Player(seed, samples)` — depth-2 z modelowaniem przeciwnika (riposta = jedna
+  akcja `priority3`, nie maximin) + expectimax-lite + ocena ability-aware (slugi statusów).
+  35%/28% vs priority/priority3 (znacznie lepiej niż v1/minimax ~4–8%), wciąż nie bije ich;
+  ~100–130× koszt priority. Patrz roadmap D4.
 - `PriorityPlayer()` — pół-deterministyczny (prosty): selekcja „najbliżej wroga" + priorytet 1–7.
 - `PriorityV2Player()` — rozbudowany: selekcja po stanie wroga + ruch przechwytujący + wybór celu przez prediction.
 - `MinimaxPlayer(seed)` — D4: lookahead depth-2 (maximin nad `evaluate_state`).
@@ -23,6 +27,7 @@ Konsumenci (roadmap): D2 balance_simulate, D3 exploit_hunt, D4 adversarial UI.
 
 from app.services.agents.base import Player, legal_actions
 from app.services.agents.claude_v1_player import ClaudeV1Player
+from app.services.agents.claude_v2_player import ClaudeV2Player
 from app.services.agents.deployment import (
     DeploymentZone,
     GridDeploymentMixin,
@@ -54,6 +59,7 @@ __all__ = [
     "RandomPlayer",
     "GreedyPlayer",
     "ClaudeV1Player",
+    "ClaudeV2Player",
     "PriorityPlayer",
     "PriorityV2Player",
     "PriorityV3Player",
