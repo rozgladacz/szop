@@ -12,8 +12,8 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-d-roster-adapter](docs/handoffs/HANDOFF_faza-d-roster-adapter.md) | Most ORM `Roster`→engine-dict (prereq D3 exploit-hunt) — warstwa-liść agentów. | `app/services/agents/roster_adapter.py`, `__init__.py` | In progress (slice 1+2a DONE; slice 2b follow-up) |
-| [HANDOFF_faza-d-exploit-hunt](docs/handoffs/HANDOFF_faza-d-exploit-hunt.md) | D3 `scripts/exploit_hunt.py` — generator rozpisek in-memory + self-play + ranking win_rate/points (Opcja A). | `scripts/exploit_hunt.py`, `tests/test_exploit_hunt.py`, `tests/test_exploit_hunt_db.py` (NEW) | In progress (slice 1+1b+1c DONE; real-run czeka na dane usera) |
+| [HANDOFF_faza-d-roster-adapter](docs/handoffs/HANDOFF_faza-d-roster-adapter.md) | Most ORM `Roster`→engine-dict (prereq D3 exploit-hunt) — warstwa-liść agentów. | `app/services/agents/roster_adapter.py`, `__init__.py` | In progress (slice 1+2a DONE; **slice 2b DONE 2026-06-19** w `faza-b-5-db-client` — `LocalClient(session, user_id)` + `simulate_roster_ids`; **gotowy do archiwizacji**) |
+| [HANDOFF_faza-d-exploit-hunt](docs/handoffs/HANDOFF_faza-d-exploit-hunt.md) | D3 `scripts/exploit_hunt.py` — generator rozpisek in-memory + self-play + ranking win_rate/points (Opcja A). | `scripts/exploit_hunt.py`, `tests/test_exploit_hunt.py`, `tests/test_exploit_hunt_db.py` (NEW) | In progress (slice 1–1f DONE; **real-run na danych usera DONE 2026-06-19** — sygnał exploitu kompozycyjny; czeka na 1 decyzję usera: ADR DOCX vs akcept artefaktu MVP → potem archiwizacja) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -39,9 +39,9 @@
 
 *(Krótkie alerty istotne dla wielu wątków. Coś, co nie pasuje jeszcze do `docs/`, ale dotyczy więcej niż jednego wątku. Sprzątaj regularnie — przenoś do `docs/*` jeśli reguła stała się trwała.)*
 
-- **2026-06-07:** **Faza_A → main MERGED** (PR #455, commit `418b0ff`). 83 commity: B0+B3+B3.9+rules-resync R0-R6. **B2/B4/B5 ODBLOKOWANE** — engine schema stabilna (`BattleEvent.payload_json` event types 1-13 locked per ADR-0046+0047). Sub-wątki startują na bazie `main`. Faza_B branch otwieramy gdy B2/B4/B5 startują. **Rules-resync ZAMKNIĘTY 2026-06-09** (R0–R7 + RW ✅, ADR-0048; backlog przyrostowych zdolności Klątwa/Rozkaz/Oznaczenie + Dywersant + H7 w parent `faza-b-engine-mvp`). 3 commity `Faza_A` ahead of origin (`5967193`/`9a3ac96`/`bbf4538` R4.Zguba+R7) — do push/merge.
-- **2026-05-20:** Lokalny runtime na Windows — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
-- **2026-05-12:** Merge conflicts gałęzi Klasyfikacja nadal nierozwiązane — blokują SSOT Phase 5. Patrz [docs/roadmap.md](docs/roadmap.md).
+- **2026-06-07:** **Faza_A → main MERGED** (PR #455, commit `418b0ff`). 83 commity: B0+B3+B3.9+rules-resync R0-R6. **B2/B4/B5 ODBLOKOWANE** — engine schema stabilna (`BattleEvent.payload_json` event types 1-13 locked per ADR-0046+0047). Sub-wątki startują na bazie `main`. Faza_B branch otwieramy gdy B2/B4/B5 startują. **Rules-resync ZAMKNIĘTY 2026-06-09** (R0–R7 + RW ✅, ADR-0048; backlog przyrostowych zdolności Klątwa/Rozkaz/Oznaczenie + Dywersant + H7 w parent `faza-b-engine-mvp`).
+- **2026-06-19:** `faza-d-roster-adapter` slice 2b domknięty jako część `faza-b-5-db-client` — DB-backed `LocalClient(session, user_id)` + `simulate_roster_ids` + ownership scoping. Wątek gotowy do archiwizacji. **exploit-hunt** (D3) — **real-run na danych usera WYKONANY** (64 jednostki/7 armii): sygnał exploitu KOMPOZYCYJNY (tania piechota/mobilne biją drogi pancerz; sterownik pkt 5.f cele-po-4-rundach), ale to balans MVP nie potwierdzony exploit reguł. Czeka na decyzję usera (ADR DOCX vs akcept artefaktu MVP).
+- **2026-05-20:** Lokalny runtime na Windows — `python -m pytest` bezpośrednio (`.venv\Scripts\python` / `make` mogą nie działać w PATH).
 
 ---
 
