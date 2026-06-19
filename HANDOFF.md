@@ -14,7 +14,6 @@
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-d-roster-adapter](docs/handoffs/HANDOFF_faza-d-roster-adapter.md) | Most ORM `Roster`→engine-dict (prereq D3 exploit-hunt) — warstwa-liść agentów. | `app/services/agents/roster_adapter.py`, `__init__.py` | In progress (slice 1+2a DONE; slice 2b follow-up) |
 | [HANDOFF_faza-d-exploit-hunt](docs/handoffs/HANDOFF_faza-d-exploit-hunt.md) | D3 `scripts/exploit_hunt.py` — generator rozpisek in-memory + self-play + ranking win_rate/points (Opcja A). | `scripts/exploit_hunt.py`, `tests/test_exploit_hunt.py`, `tests/test_exploit_hunt_db.py` (NEW) | In progress (slice 1+1b+1c DONE; real-run czeka na dane usera) |
-| [HANDOFF_faza-d-leaderboard](docs/handoffs/HANDOFF_faza-d-leaderboard.md) | D4 `scripts/leaderboard.py` — round-robin wszystkich botów → kanoniczny ranking ogólny (win-rate per bot) + ADR-0030. | `scripts/leaderboard.py`, `tests/test_leaderboard.py`, `docs/adr/0030-multi-agent-leaderboard.md` (NEW) | In progress (slice 1) |
 | [HANDOFF_faza-b-5-db-client](docs/handoffs/HANDOFF_faza-b-5-db-client.md) | B5 — DB-backed `LocalClient`: wczytuje `Roster` z sesji DB, adaptuje (`roster_to_engine_roster`) i rozgrywa; odblokowuje C3 `simulate_engagement`. | `szop_client/local.py`, `tests/test_clients_local.py` | In progress (2026-06-19 — implementacja) |
 
 
@@ -48,6 +47,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-06-19 — faza-d-leaderboard (archived) — D4 leaderboard botów (ranking ogólny) + ADR-0030
+- Domknięty deliverable D4 „Leaderboard": `scripts/leaderboard.py` — round-robin **różnych** botów (mirror self-play wykluczony) ponad fixturami, agregacja **ponad parami** w jeden standing per bot (gry/wygrane/porażki/remisy/win-rate) → markdown z tabelą rankingową + tekstowe (unicode) słupki. Różni się od `balance_report` (macierz pairwise) jednowymiarowym rankingiem. Reuse `simulate_balance` (SSOT, ADR-0032) + wzorzec `balance_report` (module-loader/`_bar`). Skrypt-liść — zero zmian w rdzeniu silnika/agentów. ADR-0030: część 1 (ranking botów) DONE; część 2 (osobne konta agentów + leaderboard międzykontowy) odłożona do B2 auth.
+- Pliki: `scripts/leaderboard.py` (NEW), `tests/test_leaderboard.py` (NEW 20), `docs/adr/0030-multi-agent-leaderboard.md` (NEW Accepted), `scripts/README.md`, `docs/roadmap.md`. Commit na `Faza_A`: `56a95ed`.
+- Weryfikacja: pytest **1782 passed** (1762 baseline + 20). `/simplify` 4 kąty inline — 0 zmian (duplikacja module-loadera/`_bar`/parserów CLI = konwencja skryptów-liści). `/review`/`/security-review` pominięte warunkowo (skrypt-liść, read-only, brak hot-path/SSOT-mutacji/auth/DB; pełne pokrycie testami). Real-run (5 botów × 3 fixtury, n=8): **priority3 66.7% > claude_v3 62.5% > priority 46.9% > random 26% > greedy 12.5%** — potwierdza udokumentowany wniosek D4 (priority/priority3 najsilniejsze; żaden bot heurystyczny ich nie bije). `reports/` gitignored.
+- Doc updates: `docs/roadmap.md` (D4 Leaderboard ✅ + ADR-0030 ✓ w indeksie), `scripts/README.md` (wpis `leaderboard.py`).
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
 
