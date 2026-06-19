@@ -266,3 +266,177 @@ def test_unknown_battle_id_raises():
         client.take_action(999, DefendAction(unit_id=1))
     with pytest.raises(KeyError):  # UnknownBattleError dziedziczy po KeyError
         client.get_events(999)
+
+
+# --- DB-backed (rozpiski ORM po id) --------------------------------------
+#
+# Seeded in-memory SQLite (StaticPool — jeden wspólny connection, by sesja
+# klienta widziała seed), wzorzec jak `test_exploit_hunt_db` / `test_engine_persistence`.
+# NIE dotyka prod `data/szop.db` ([CRITICAL] #5).
+
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
+
+from app import models  # noqa: E402
+from app.db import Base  # noqa: E402
+from app.services.agents.deployment import DeploymentZone  # noqa: E402
+from szop_client import RosterNotFoundError  # noqa: E402
+
+_DEPLOY_ZONES = (
+    DeploymentZone(0.0, 0.0, 72.0, 12.0),
+    DeploymentZone(0.0, 36.0, 72.0, 48.0),
+)
+
+
+def _sessionmaker():
+    engine = create_engine(
+        "sqlite://",
+        future=True,
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+
+def _seed_two_rosters(session, *, owner_id_a=None, owner_id_b=None):
+    """Dwie minimalne rozpiski (1 oddział wręcz/stronę) z persystowanych ORM.
+
+    Zwraca (roster_a_id, roster_b_id). `owner_id_*` — gdy podane, ustawia
+    `Roster.owner_id` (test scopingu po `user_id`).
+    """
+    user = models.User(username="db-client-tester", password_hash="x")
+    ruleset = models.RuleSet(name="Rules")
+    armory = models.Armory(name="Armory", owner=user)
+    session.add_all([user, ruleset, armory])
+    session.flush()
+    army = models.Army(name="Army", owner=user, ruleset=ruleset, armory=armory)
+    session.add(army)
+    session.flush()
+    blade = models.Weapon(armory=armory, name="Ostrze", range="Walka wręcz", attacks=1, ap=0)
+    session.add(blade)
+    session.flush()
+
+    def _unit(name):
+        unit = models.Unit(
+            army=army, name=name, quality=4, defense=5, toughness=3,
+            typical_models=5, position=0, default_weapon=blade,
+        )
+        session.add(unit)
+        session.flush()
+        session.add(models.UnitWeapon(
+            unit=unit, weapon=blade, is_default=True, default_count=1,
+            is_primary=True, position=0,
+        ))
+        session.flush()
+        return unit
+
+    unit_a, unit_b = _unit("Piechota A"), _unit("Piechota B")
+
+    def _roster(name, unit, owner_id):
+        roster = models.Roster(name=name, army_id=army.id, owner_id=owner_id)
+        session.add(roster)
+        session.flush()
+        session.add(models.RosterUnit(roster_id=roster.id, unit_id=unit.id, count=2, position=0))
+        session.flush()
+        return roster.id
+
+    rid_a = _roster("Rozpiska A", unit_a, owner_id_a)
+    rid_b = _roster("Rozpiska B", unit_b, owner_id_b)
+    session.commit()
+    return rid_a, rid_b
+
+
+def test_simulate_roster_ids_returns_summary():
+    with _sessionmaker()() as session:
+        rid_a, rid_b = _seed_two_rosters(session)
+        client = LocalClient(session=session)
+        summary = client.simulate_roster_ids(
+            rid_a, rid_b, _random_factory(0), n=4, seed=1,
+            objectives=_OBJECTIVES, deployment_zones=_DEPLOY_ZONES,
+        )
+    assert isinstance(summary, SimulationSummary)
+    assert summary.n_games == 4
+    assert summary.wins_p0 + summary.wins_p1 + summary.draws == 4
+    assert summary.avg_rounds > 0
+
+
+def test_simulate_roster_ids_deterministic():
+    with _sessionmaker()() as session:
+        rid_a, rid_b = _seed_two_rosters(session)
+        a = LocalClient(session=session).simulate_roster_ids(
+            rid_a, rid_b, _random_factory(0), n=5, seed=2,
+            objectives=_OBJECTIVES, deployment_zones=_DEPLOY_ZONES,
+        )
+        b = LocalClient(session=session).simulate_roster_ids(
+            rid_a, rid_b, _random_factory(0), n=5, seed=2,
+            objectives=_OBJECTIVES, deployment_zones=_DEPLOY_ZONES,
+        )
+    assert a == b
+
+
+def test_simulate_roster_ids_matches_engine_dict_path():
+    """Ścieżka DB == ścieżka engine-dict dla tej samej (zaadaptowanej) rozpiski."""
+    from app.services.agents.roster_adapter import roster_to_engine_roster
+
+    with _sessionmaker()() as session:
+        rid_a, rid_b = _seed_two_rosters(session)
+        client = LocalClient(session=session)
+        via_db = client.simulate_roster_ids(
+            rid_a, rid_b, _random_factory(0), n=4, seed=5,
+            objectives=_OBJECTIVES, deployment_zones=_DEPLOY_ZONES,
+        )
+        roster_a = session.get(models.Roster, rid_a)
+        roster_b = session.get(models.Roster, rid_b)
+        rosters = [
+            roster_to_engine_roster(roster_a, owner_player=0).units,
+            roster_to_engine_roster(roster_b, owner_player=1).units,
+        ]
+        via_dict = LocalClient().simulate(
+            rosters, _random_factory(0), n=4, seed=5,
+            objectives=_OBJECTIVES, deployment_zones=_DEPLOY_ZONES,
+        )
+    assert via_db == via_dict
+
+
+def test_create_battle_from_roster_ids_has_both_sides():
+    with _sessionmaker()() as session:
+        rid_a, rid_b = _seed_two_rosters(session)
+        client = LocalClient(session=session)
+        bid = client.create_battle_from_roster_ids(rid_a, rid_b, seed=1, objectives=_OBJECTIVES)
+        state = client.get_state(bid)
+    assert state.round == 1
+    # per_copy: count=2 → 2 bloby/stronę; rozłączne przestrzenie id (owner*10000).
+    owners = {b.owner_player for b in state.blobs}
+    assert owners == {0, 1}
+    assert len(state.blobs) == 4
+
+
+def test_roster_ids_unknown_raises():
+    with _sessionmaker()() as session:
+        rid_a, _rid_b = _seed_two_rosters(session)
+        client = LocalClient(session=session)
+        with pytest.raises(RosterNotFoundError):
+            client.simulate_roster_ids(rid_a, 99999, _random_factory(0), n=1)
+
+
+def test_roster_ids_ownership_scoping():
+    """`user_id` filtruje cudze rozpiski (RosterNotFoundError, nie wyciek)."""
+    with _sessionmaker()() as session:
+        # Rozpiski należą do owner_id=1; klient związany z user_id=2.
+        rid_a, rid_b = _seed_two_rosters(session, owner_id_a=1, owner_id_b=1)
+        client = LocalClient(session=session, user_id=2)
+        with pytest.raises(RosterNotFoundError):
+            client.create_battle_from_roster_ids(rid_a, rid_b, objectives=_OBJECTIVES)
+        # Właściciel (user_id=1) ma dostęp.
+        ok = LocalClient(session=session, user_id=1)
+        bid = ok.create_battle_from_roster_ids(rid_a, rid_b, objectives=_OBJECTIVES)
+        assert ok.get_state(bid).round == 1
+
+
+def test_db_path_without_session_raises():
+    """Metody DB bez sesji → RuntimeError (jasny komunikat)."""
+    client = LocalClient()  # bez session
+    with pytest.raises(RuntimeError):
+        client.simulate_roster_ids(1, 2, _random_factory(0), n=1)

@@ -223,13 +223,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] Pydantic schemas w `app/schemas.py` — BattleState, BattleEvent, Action (polimorficzne)
 - [ ] Optimistic locking na `BattleEvent.sequence` — zapobiega race condition
 
-### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14** (wątek `faza-b-5-client`, ADR-0016)
+### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
 
-> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** `HttpClient` + DB-backed loading + pakowanie odłożone (patrz niżej).
+> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). `HttpClient` + pakowanie nadal odłożone.
 
-- [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (+ `SimulationSummary`). `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
+- [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (+ `SimulationSummary`; `simulate` ma `deployment_zones` D5). `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
 - [ ] `szop_client/http.py` — `HttpClient(base_url, token)` — odłożone do B4 (API musi istnieć). Protocol strukturalny → dołączy bez dziedziczenia.
-- [x] `szop_client/local.py` — `LocalClient` in-process (ścieżka **engine-dict**: rostery jako dict 1:1 z `build_initial_state`). DB-backed `LocalClient(db_session, user_id)` odłożony do `faza-d-roster-adapter` (most ORM→engine-dict).
+- [x] `szop_client/local.py` — `LocalClient` in-process. Ścieżka **engine-dict** (rostery dict 1:1 z `build_initial_state`) + **ścieżka DB** (`LocalClient(session, user_id)` + `*_roster_ids`, most ORM→engine przez `roster_adapter`, read-only, ownership-scoped). DONE 2026-06-19.
 - [ ] `szop_client/setup.py` — `pip install -e` odłożone (sens dopiero z `HttpClient`; `LocalClient` z natury in-process z `app`).
 - [ ] `tests/test_clients_parity.py` — `HttpClient.simulate == LocalClient.simulate` odłożone do B4.
 - [x] ADR-0016: szop_client jako wydzielony moduł (Accepted)

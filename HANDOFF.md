@@ -15,6 +15,7 @@
 | [HANDOFF_faza-d-roster-adapter](docs/handoffs/HANDOFF_faza-d-roster-adapter.md) | Most ORM `Roster`→engine-dict (prereq D3 exploit-hunt) — warstwa-liść agentów. | `app/services/agents/roster_adapter.py`, `__init__.py` | In progress (slice 1+2a DONE; slice 2b follow-up) |
 | [HANDOFF_faza-d-exploit-hunt](docs/handoffs/HANDOFF_faza-d-exploit-hunt.md) | D3 `scripts/exploit_hunt.py` — generator rozpisek in-memory + self-play + ranking win_rate/points (Opcja A). | `scripts/exploit_hunt.py`, `tests/test_exploit_hunt.py`, `tests/test_exploit_hunt_db.py` (NEW) | In progress (slice 1+1b+1c DONE; real-run czeka na dane usera) |
 | [HANDOFF_faza-b-5-db-client](docs/handoffs/HANDOFF_faza-b-5-db-client.md) | B5 — DB-backed `LocalClient`: wczytuje `Roster` z sesji DB, adaptuje (`roster_to_engine_roster`) i rozgrywa; odblokowuje C3 `simulate_engagement`. | `szop_client/local.py`, `tests/test_clients_local.py` | In progress (2026-06-19 — implementacja) |
+| [HANDOFF_faza-d-report-maps](docs/handoffs/HANDOFF_faza-d-report-maps.md) | D2/D4 — `--map`/`--map-seed` (mapy generowane) w `balance_report.py` + `leaderboard.py`. | `scripts/balance_report.py`, `scripts/leaderboard.py`, `tests/test_balance_report.py`, `tests/test_leaderboard.py` | In progress (slice 1) |
 
 
 ## Zasoby zablokowane (reverse lookup)

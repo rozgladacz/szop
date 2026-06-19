@@ -8,18 +8,22 @@ Determinizm: `seed` → `DeterministicDice` (ADR-0010/0012). Te same argumenty +
 seed = bit-perfect ten sam przebieg (replay-safe). To czyni klienta testowalnym
 i odblokowuje przyszły test parity `HttpClient == LocalClient` (po B4).
 
-Zakres slice (HANDOFF_faza-b-5-client): ścieżka **engine-dict** (rostery jako
-dict 1:1 z `build_initial_state`). DB-backed konstruktor `LocalClient(db_session,
-user_id)` z roadmap wymaga mostu ORM→engine-dict (`faza-d-roster-adapter`) —
-odłożony.
+Ścieżka **engine-dict** (rostery jako dict 1:1 z `build_initial_state`) +
+**ścieżka DB** (rozpiski ORM `Roster` po id). Konstruktor `LocalClient(session,
+user_id)` wiąże opcjonalną sesję SQLAlchemy (read-only); metody `*_roster_ids`
+wczytują `Roster`, adaptują przez most ORM→engine-dict (`roster_adapter`,
+`faza-d-roster-adapter`) i delegują do istniejących ścieżek engine-dict. Bez
+sesji klient działa jak dotąd (wsteczna kompat z B5-slice).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Sequence
+from typing import Any, Sequence
 
+from app.services.agents.deployment import DeploymentZone
 from app.services.agents.match import simulate_from_rosters
+from app.services.agents.roster_adapter import roster_to_engine_roster
 from app.services.engine.actions import Action, DeploymentAction
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent
@@ -38,6 +42,10 @@ class UnknownBattleError(KeyError):
     """Podano `battle_id` nieobecny w rejestrze `LocalClient`."""
 
 
+class RosterNotFoundError(LookupError):
+    """`roster_id` nie istnieje w bazie (lub nie należy do `user_id`)."""
+
+
 @dataclass(slots=True)
 class _BattleRecord:
     """Stan jednej bitwy single-step w rejestrze (mutowalny uchwyt na immutable state)."""
@@ -51,9 +59,18 @@ class _BattleRecord:
 class LocalClient:
     """In-process `GameClient` (ADR-0016). Patrz `protocol.GameClient`."""
 
-    def __init__(self) -> None:
+    def __init__(self, session: Any = None, user_id: int | None = None) -> None:
+        """`session` — opcjonalna sesja SQLAlchemy (read-only) do ścieżki DB.
+
+        `user_id` — gdy podane, metody `*_roster_ids` wymagają by `Roster.owner_id`
+        był równy `user_id` (scoping: nie symuluj cudzych rozpisek). `None` =
+        bez ograniczenia własności (np. narzędzia balansu na puli publicznej).
+        Bez `session` klient działa wyłącznie na engine-dict (wsteczna kompat).
+        """
         self._battles: dict[int, _BattleRecord] = {}
         self._next_id: int = 1
+        self._session = session
+        self._user_id = user_id
 
     # -- single-step play -------------------------------------------------
 
@@ -128,6 +145,7 @@ class LocalClient:
         objectives: Sequence[Objective] = (),
         alternate_initiative: bool = True,
         initiative_player: int = 0,
+        deployment_zones: Sequence[DeploymentZone] | None = None,
     ) -> SimulationSummary:
         if n <= 0:
             raise ValueError(f"n musi być > 0, jest {n}")
@@ -144,6 +162,7 @@ class LocalClient:
                 terrain=terrain,
                 objectives=objectives,
                 initiative_player=init,
+                deployment_zones=deployment_zones,
             )
             if result.winner is None:
                 draws += 1
@@ -158,7 +177,104 @@ class LocalClient:
             total_rounds=total_rounds,
         )
 
+    # -- DB-backed (rozpiski ORM po id) -----------------------------------
+
+    def create_battle_from_roster_ids(
+        self,
+        roster_id_p0: int,
+        roster_id_p1: int,
+        *,
+        seed: int = 0,
+        terrain: Sequence[Terrain] = (),
+        objectives: Sequence[Objective] = (),
+        initiative_player: int = 0,
+        models_mode: str = "per_copy",
+        deployment: Sequence[DeploymentAction] = (),
+    ) -> int:
+        """Tworzy bitwę single-step z dwóch rozpisek ORM (po id) i zwraca jej id.
+
+        Wczytuje `Roster` z sesji DB (read-only), adaptuje przez
+        `roster_to_engine_roster` (most ORM→engine-dict; `models_mode=per_copy`
+        kanoniczny — `RosterUnit.count` osobnych blobów) i deleguje do
+        `create_battle`. Pozycje startowe: placeholder z adaptera (realne
+        rozstawienie w strefie to ścieżka batch przez `deployment_zones`).
+        """
+        return self.create_battle(
+            self._load_engine_rosters(roster_id_p0, roster_id_p1, models_mode),
+            seed=seed,
+            terrain=terrain,
+            objectives=objectives,
+            initiative_player=initiative_player,
+            deployment=deployment,
+        )
+
+    def simulate_roster_ids(
+        self,
+        roster_id_p0: int,
+        roster_id_p1: int,
+        player_factory: PlayerFactory,
+        *,
+        n: int = 1,
+        seed: int = 0,
+        terrain: Sequence[Terrain] = (),
+        objectives: Sequence[Objective] = (),
+        alternate_initiative: bool = True,
+        initiative_player: int = 0,
+        deployment_zones: Sequence[DeploymentZone] | None = None,
+        models_mode: str = "per_copy",
+    ) -> SimulationSummary:
+        """Rozgrywa N gier między dwiema rozpiskami ORM (po id) i agreguje (pkt 5.f).
+
+        Enabler C3 `simulate_engagement(roster_a, roster_b, n)`. Wczytuje rozpiski
+        z sesji DB (read-only), adaptuje (SSOT `roster_to_engine_roster`) i deleguje
+        do `simulate`. `deployment_zones` (D5) — gdy podane, boty rozstawiają się
+        w strefach (realne pozycje); gdy None — pozycje placeholder z adaptera.
+        """
+        return self.simulate(
+            self._load_engine_rosters(roster_id_p0, roster_id_p1, models_mode),
+            player_factory,
+            n=n,
+            seed=seed,
+            terrain=terrain,
+            objectives=objectives,
+            alternate_initiative=alternate_initiative,
+            initiative_player=initiative_player,
+            deployment_zones=deployment_zones,
+        )
+
     # -- internal ---------------------------------------------------------
+
+    def _load_engine_rosters(
+        self, roster_id_p0: int, roster_id_p1: int, models_mode: str
+    ) -> list[dict]:
+        """Wczytuje obie rozpiski po id i adaptuje na engine-dict (SSOT adapter).
+
+        Rozłączne przestrzenie id blobów per gracz (owner_player 0/1) gwarantuje
+        `roster_to_engine_roster` (`_PLAYER_ID_STRIDE`).
+        """
+        return [
+            roster_to_engine_roster(
+                self._load_roster(rid), owner_player=owner, models_mode=models_mode
+            ).units
+            for owner, rid in ((0, roster_id_p0), (1, roster_id_p1))
+        ]
+
+    def _load_roster(self, roster_id: int) -> Any:
+        """Pobiera `Roster` z sesji DB; waliduje istnienie i (opcjonalnie) własność."""
+        if self._session is None:
+            raise RuntimeError(
+                "Ścieżka DB wymaga LocalClient(session=...); klient utworzony bez sesji."
+            )
+        from app.models import Roster  # lazy — unika importu ORM gdy ścieżka DB nieużywana
+
+        roster = self._session.get(Roster, roster_id)
+        if roster is None:
+            raise RosterNotFoundError(f"Roster id={roster_id} nie istnieje")
+        if self._user_id is not None and getattr(roster, "owner_id", None) != self._user_id:
+            raise RosterNotFoundError(
+                f"Roster id={roster_id} nie należy do user_id={self._user_id}"
+            )
+        return roster
 
     def _record(self, battle_id: int) -> _BattleRecord:
         try:

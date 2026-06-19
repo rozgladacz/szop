@@ -227,16 +227,16 @@ Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rd
 
 **Konsumenci (planowane):** D2 `balance_simulate` (agreguje N `simulate_from_rosters` do win-rate), D3 `exploit_hunt` (przez `roster_adapter` + `roster_points`), D4 `minimax_player` (DONE). `run_match` to rdzeń **B5 `LocalClient.simulate`** (zob. niżej). Boty + runner testowalne headless w izolacji (81 testów: 26 graczy + 8 minimax D4 + 5 runner + 25 deployment D5 + 17 roster-adapter).
 
-## Klient gry — `szop_client/` (Strumień B5, LocalClient slice 2026-06-14, ADR-0016)
+## Klient gry — `szop_client/` (Strumień B5, LocalClient 2026-06-14 + DB-backed 2026-06-19, ADR-0016)
 
 Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsumentami (C3 `simulate_engagement` MCP, D-stream, UI) a wewnętrznym silnikiem/runnerem. Konsument programuje wobec Protocolu, nie wobec modułów `engine/`/`agents/`.
 
 | Moduł | Zawartość |
 |---|---|
-| `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate`) + `SimulationSummary` (frozen, win_rate/draw_rate/avg_rounds) |
-| `local.py` | `LocalClient` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); `UnknownBattleError` |
+| `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` z `deployment_zones` D5) + `SimulationSummary` (frozen, win_rate/draw_rate/avg_rounds) |
+| `local.py` | `LocalClient(session=None, user_id=None)` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); **ścieżka DB** `simulate_roster_ids`/`create_battle_from_roster_ids` (wczytuje `Roster` po id, adapter ORM→engine, ownership-scoped); `UnknownBattleError`/`RosterNotFoundError` |
 
-**Slice = ścieżka engine-dict** (rostery jako dict 1:1 z `build_initial_state`). Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia (Ufortyfikowany pkt 13.c) — spójna z `persistence.save_events`. **Odłożone:** `HttpClient` (po B4 API; Protocol strukturalny → dołączy bez dziedziczenia), DB-backed `LocalClient(db_session, user_id)` (po `faza-d-roster-adapter`), pakowanie `pip install -e`. 13 testów (`tests/test_clients_local.py`): determinizm, parity z runnerem i D2, wierność `take_action == apply_activation`.
+**Dwie ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle). Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia (Ufortyfikowany pkt 13.c) — spójna z `persistence.save_events`. **Odłożone:** `HttpClient` (po B4 API; Protocol strukturalny → dołączy bez dziedziczenia), pakowanie `pip install -e`. 20 testów (`tests/test_clients_local.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, wierność `take_action == apply_activation`, DB-path (seeded in-memory SQLite, ownership scoping).
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 

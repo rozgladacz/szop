@@ -22,6 +22,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, Sequence, runtime_checkable
 
 from app.services.agents.base import Player
+from app.services.agents.deployment import DeploymentZone
 from app.services.engine.actions import Action, DeploymentAction
 from app.services.engine.events import BattleEvent
 from app.services.engine.state import (
@@ -127,6 +128,11 @@ class GameClient(Protocol):
         objectives: Sequence[Objective] = (),
         alternate_initiative: bool = True,
         initiative_player: int = 0,
+        deployment_zones: Sequence[DeploymentZone] | None = None,
     ) -> SimulationSummary:
-        """Rozgrywa N pełnych gier headless i agreguje wyniki (pkt 5.f)."""
+        """Rozgrywa N pełnych gier headless i agreguje wyniki (pkt 5.f).
+
+        `deployment_zones` (D5) — gdy podane, boty rozstawiają się w strefach
+        (pkt 13.a); gdy None — pozycje z roster/adaptera (wsteczna kompat).
+        """
         ...
