@@ -14,7 +14,6 @@
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 | [HANDOFF_faza-d-roster-adapter](docs/handoffs/HANDOFF_faza-d-roster-adapter.md) | Most ORM `Roster`→engine-dict (prereq D3 exploit-hunt) — warstwa-liść agentów. | `app/services/agents/roster_adapter.py`, `__init__.py` | In progress (slice 1+2a DONE; slice 2b follow-up) |
 | [HANDOFF_faza-d-exploit-hunt](docs/handoffs/HANDOFF_faza-d-exploit-hunt.md) | D3 `scripts/exploit_hunt.py` — generator rozpisek in-memory + self-play + ranking win_rate/points (Opcja A). | `scripts/exploit_hunt.py`, `tests/test_exploit_hunt.py`, `tests/test_exploit_hunt_db.py` (NEW) | In progress (slice 1+1b+1c DONE; real-run czeka na dane usera) |
-| [HANDOFF_faza-d-report-maps](docs/handoffs/HANDOFF_faza-d-report-maps.md) | D2/D4 — `--map`/`--map-seed` (mapy generowane) w `balance_report.py` + `leaderboard.py`. | `scripts/balance_report.py`, `scripts/leaderboard.py`, `tests/test_balance_report.py`, `tests/test_leaderboard.py` | In progress (slice 1) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-06-19 — faza-d-report-maps (archived) — `--map`/`--map-seed` w warstwie raportowej D2/D4
+- `balance_report.py` (D2) + `leaderboard.py` (D4) wspierają teraz **mapy generowane** (`standard_a`/`lustrzana_a`/`symetryczna_a`, reuse `balance_simulate.build_map`/`MAP_BUILDERS` SSOT) obok fixtur YAML. Nowy helper `resolve_fixtures(config)` łączy fixtury + mapy w listę `BattleFixture`; `ReportConfig`/`LeaderboardConfig` +`maps`+`map_seed`. CLI `--map name[,name] --map-seed N` (dodatkowe do `--fixtures`; samo `--map` pomija domyślne fixtury; brak źródła → błąd). Mapy symetryczne usuwają bias konkretnej fixtury z rankingu. Skrypty-liście — zero zmian w rdzeniu silnika/agentów. Spójna luka domknięta (`battle_replay`/`balance_simulate` miały `--map`, raporty nie).
+- Pliki: `scripts/{balance_report,leaderboard}.py`, `tests/test_{balance_report,leaderboard}.py` (+16), `scripts/README.md`. Commit na `Faza_A`: `deb6910`.
+- Weryfikacja: pytest **1805 passed** (+16 moich map-testów; reszta delta = równoległy `faza-b-5-db-client`). `/simplify` 4 kąty inline — 0 zmian (duplikacja `resolve_fixtures`/`_parse_map_list`/resolucji między 2 skryptami = konwencja liści). `/review`+`/security-review` pominięte warunkowo (addytywny feature, read-only, brak hot-path/SSOT-mutacji/auth/DB; pełne pokrycie incl. determinizm per map-seed + backward-compat + walidacja CLI). Real-run (leaderboard, lustrzana_a+symetryczna_a seed 3, n=6): priority3 77.8% > priority 61.1% > random 22.2% > greedy 11.1%.
+- Doc updates: `scripts/README.md` (wzmianka `--map` w `balance_report`/`leaderboard`). Roadmap bez zmian (tooling enhancement istniejących skryptów D2/D4, brak nowego checkboxa).
 
 ### 2026-06-19 — faza-b-5-db-client (archived) — B5 DB-backed LocalClient (most ORM→engine, ownership-scoped)
 - Domknięty odłożony slice B5 (roadmap) + slice 2b `faza-d-roster-adapter`: `szop_client/local.py` — `LocalClient(session=None, user_id=None)` (opcjonalne wiązanie sesji DB; bez sesji = wsteczna kompat z B5-slice) + `simulate_roster_ids`/`create_battle_from_roster_ids` (wczytują `Roster` po id read-only, adaptują przez `roster_to_engine_roster` — SSOT most ORM→engine, `models_mode=per_copy` LOCKED — i delegują do istniejących metod engine-dict). `simulate` + Protocol zyskały passthrough `deployment_zones` (D5). Scoping własności: `_load_roster` odrzuca cudze rozpiski gdy `user_id` ustawione; **wspólny `RosterNotFoundError`** dla „nie istnieje"/„nie twój" → brak oracle ujawniającego cudze rozpiski. Warstwa-liść `szop_client` — zero zmian w `engine/*`/`agents/*` → brak kolizji z lockami/golden-digestami B7. **Odblokowuje C3 `simulate_engagement(roster_a, roster_b, n)`** na realnych rozpiskach z DB (druga fala planu — Strumień C).
