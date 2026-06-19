@@ -72,8 +72,11 @@ DEFAULT_FIXTURES: tuple[str, ...] = tuple(
     for stem in ("demo_skirmish", "objective_clash", "unit_profiles")
 )
 
-#: Domyślny zestaw botów do round-robin.
-DEFAULT_PLAYERS: tuple[str, ...] = tuple(bsim.PLAYER_KINDS)
+from app.services.agents import registry as _bot_registry  # noqa: E402
+
+#: Domyślny zestaw botów do round-robin = boty oznaczone `useful` (rejestr SSOT).
+#: Lista zmienia się przez tagi w `app/services/agents/registry.py`, nie tutaj.
+DEFAULT_PLAYERS: tuple[str, ...] = _bot_registry.USEFUL_KINDS
 
 _BAR_WIDTH = 24
 
@@ -250,17 +253,30 @@ def _parse_map_list(spec: str) -> tuple[str, ...]:
 
 
 def _parse_player_list(spec: str) -> tuple[str, ...]:
-    parts = [p.strip().lower() for p in spec.split(",") if p.strip()]
-    for p in parts:
-        if p not in bsim.PLAYER_KINDS:
-            raise argparse.ArgumentTypeError(
-                f"Nieznany gracz {p!r}; dozwolone: {', '.join(bsim.PLAYER_KINDS)}"
-            )
-    # Dedup zachowując kolejność (round-robin nie potrzebuje duplikatów kolumn).
+    """Lista botów. Tokeny: konkretny bot (`priority`), TAG (`useful`/`fast`/…) który
+    rozwija się do botów z tym tagiem, albo `all` (wszystkie kanoniczne). Tagi pozwalają
+    `--players useful` lub `--players useful,reference` — rozszerzalne (nowe tagi działają
+    automatycznie, SSOT = `registry`)."""
+    tags = _bot_registry.all_tags()
     out: list[str] = []
-    for p in parts:
-        if p not in out:
-            out.append(p)
+    for raw in spec.split(","):
+        p = raw.strip().lower()
+        if not p:
+            continue
+        if p == "all":
+            expanded: tuple[str, ...] = _bot_registry.ALL_KINDS
+        elif p in tags:
+            expanded = _bot_registry.bot_kinds(p)
+        elif p in bsim.PLAYER_KINDS:
+            expanded = (p,)
+        else:
+            raise argparse.ArgumentTypeError(
+                f"Nieznany gracz/tag {p!r}; boty: {', '.join(bsim.PLAYER_KINDS)}; "
+                f"tagi: {', '.join(sorted(tags))}, all"
+            )
+        for kind in expanded:  # dedup zachowując kolejność
+            if kind not in out:
+                out.append(kind)
     if len(out) < 2:
         raise argparse.ArgumentTypeError(
             "--players: oczekiwano ≥2 różnych typów do round-robin"
@@ -309,7 +325,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--players",
         type=_parse_player_list,
         default=DEFAULT_PLAYERS,
-        help=f"Boty do round-robin (domyślnie wszystkie: {', '.join(DEFAULT_PLAYERS)}).",
+        help=(
+            f"Boty do round-robin: nazwy, TAGI (useful/fast/reference/…) lub 'all'. "
+            f"Domyślnie 'useful' = {', '.join(DEFAULT_PLAYERS)}."
+        ),
     )
     parser.add_argument(
         "--out",

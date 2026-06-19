@@ -48,6 +48,14 @@ from app.services.agents.match import (
 )
 from app.services.agents.minimax_player import MinimaxPlayer
 from app.services.agents.policy_eval import evaluate_state
+from app.services.agents.registry import (
+    BOT_SPECS,
+    BotSpec,
+    REFERENCE_KINDS,
+    USEFUL_KINDS,
+    bot_kinds,
+    has_tag,
+)
 from app.services.agents.priority_player import PriorityPlayer
 from app.services.agents.priority_v2_player import PriorityV2Player
 from app.services.agents.priority_v3_player import PriorityV3Player
@@ -82,4 +90,10 @@ __all__ = [
     "AdaptResult",
     "roster_to_engine_roster",
     "roster_points",
+    "BotSpec",
+    "BOT_SPECS",
+    "USEFUL_KINDS",
+    "REFERENCE_KINDS",
+    "bot_kinds",
+    "has_tag",
 ]
