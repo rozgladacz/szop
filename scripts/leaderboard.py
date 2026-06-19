@@ -95,6 +95,8 @@ class LeaderboardConfig:
     fixtures: tuple[str, ...]
     player_kinds: tuple[str, ...]
     generated_at: str  # ISO date (YYYY-MM-DD)
+    maps: tuple[str, ...] = ()  # generowane mapy (MAP_BUILDERS), dodatkowo do fixtur
+    map_seed: int = 0
 
 
 def player_matchups(player_kinds: Sequence[str]) -> list[tuple[str, str]]:
@@ -108,11 +110,21 @@ def player_matchups(player_kinds: Sequence[str]) -> list[tuple[str, str]]:
     return list(combinations(player_kinds, 2))
 
 
+def resolve_fixtures(config: LeaderboardConfig) -> list:
+    """Buduje listę `BattleFixture` ze źródeł: fixtury YAML + mapy generowane.
+
+    Mapy reużywają `bsim.build_map` (SSOT generatorów, `MAP_BUILDERS`) z
+    `config.map_seed`. Kolejność: fixtury (jak w `config.fixtures`) → mapy.
+    """
+    fixtures = [bsim.load_battle_fixture(p) for p in config.fixtures]
+    fixtures += [bsim.build_map(m, config.map_seed) for m in config.maps]
+    return fixtures
+
+
 def run_leaderboard(config: LeaderboardConfig) -> list:
-    """Rozgrywa round-robin: fixtura × para różnych botów → lista `BalanceResult`."""
+    """Rozgrywa round-robin: bitwa (fixtura/mapa) × para różnych botów → `BalanceResult`."""
     results = []
-    for fx_path in config.fixtures:
-        fixture = bsim.load_battle_fixture(fx_path)
+    for fixture in resolve_fixtures(config):
         for kinds in player_matchups(config.player_kinds):
             results.append(
                 bsim.simulate_balance(
@@ -232,8 +244,11 @@ def format_leaderboard(
         "zajmujący więcej celów)",
         f"- Boty: {', '.join(f'`{p}`' for p in config.player_kinds)}",
     ]
+    if config.maps:
+        out.append(f"- Mapy generowane (seed `{config.map_seed}`): "
+                   f"{', '.join(f'`{m}`' for m in config.maps)}")
     if fixtures:
-        out.append(f"- Fixtury: {', '.join(f'`{f}`' for f in fixtures)}")
+        out.append(f"- Bitwy: {', '.join(f'`{f}`' for f in fixtures)}")
     out.append("")
     out.append("## Ranking")
     out.append("")
@@ -288,6 +303,23 @@ def _parse_fixtures(spec: str) -> tuple[str, ...]:
     return parts
 
 
+def _parse_map_list(spec: str) -> tuple[str, ...]:
+    parts = [p.strip().lower() for p in spec.split(",") if p.strip()]
+    for p in parts:
+        if p not in bsim.MAP_BUILDERS:
+            raise argparse.ArgumentTypeError(
+                f"Nieznana mapa {p!r}; dostępne: {', '.join(sorted(bsim.MAP_BUILDERS))}"
+            )
+    # Dedup zachowując kolejność.
+    out: list[str] = []
+    for p in parts:
+        if p not in out:
+            out.append(p)
+    if not out:
+        raise argparse.ArgumentTypeError("--map: oczekiwano ≥1 nazwy mapy")
+    return tuple(out)
+
+
 def _parse_player_list(spec: str) -> tuple[str, ...]:
     parts = [p.strip().lower() for p in spec.split(",") if p.strip()]
     for p in parts:
@@ -314,8 +346,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--fixtures",
         type=_parse_fixtures,
-        default=DEFAULT_FIXTURES,
-        help="Lista fixtur 'a.yaml,b.yaml' (domyślnie: demo_skirmish, objective_clash, unit_profiles).",
+        default=None,
+        help="Lista fixtur 'a.yaml,b.yaml' (domyślnie: demo_skirmish, objective_clash, "
+        "unit_profiles — pomijane gdy podano tylko --map).",
+    )
+    parser.add_argument(
+        "--map",
+        dest="maps",
+        type=_parse_map_list,
+        default=(),
+        help=f"Mapy generowane (dodatkowo do fixtur): {', '.join(sorted(bsim.MAP_BUILDERS))}.",
+    )
+    parser.add_argument(
+        "--map-seed",
+        type=int,
+        default=0,
+        help="Seed dla generowanych map (domyślnie 0).",
     )
     parser.add_argument(
         "-n",
@@ -347,12 +393,23 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    # --fixtures jawne → użyj; inaczej default fixtury, chyba że podano tylko --map.
+    if args.fixtures is not None:
+        fixtures = tuple(args.fixtures)
+    elif args.maps:
+        fixtures = ()
+    else:
+        fixtures = DEFAULT_FIXTURES
+    if not fixtures and not args.maps:
+        raise SystemExit("Brak źródła bitew: podaj --fixtures lub --map.")
     config = LeaderboardConfig(
         n_games=args.games,
         base_seed=args.seed,
-        fixtures=tuple(args.fixtures),
+        fixtures=fixtures,
         player_kinds=tuple(args.players),
         generated_at=_today(),
+        maps=tuple(args.maps),
+        map_seed=args.map_seed,
     )
     if config.n_games <= 0:
         raise SystemExit(f"-n musi być > 0, jest {config.n_games}")
@@ -362,9 +419,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     out_path = pathlib.Path(args.out) if args.out else default_report_path()
     write_report(text, out_path)
     n_pairs = len(player_matchups(config.player_kinds))
+    n_battles = len(config.fixtures) + len(config.maps)
     print(f"Leaderboard zapisany: {out_path}")
     print(
-        f"  fixtury: {len(config.fixtures)}  pary botów: {n_pairs}  "
+        f"  bitwy: {n_battles}  pary botów: {n_pairs}  "
         f"gier/para: {config.n_games}  (łącznie {len(results) * config.n_games} gier)"
     )
     if standings:

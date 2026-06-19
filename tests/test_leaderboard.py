@@ -86,6 +86,65 @@ def test_run_leaderboard_two_fixtures():
     assert len(results) == 3 * 2  # 2 fixtury × 3 pary
 
 
+# --- mapy generowane (--map) --------------------------------------------------
+
+
+def test_resolve_fixtures_fixtures_only():
+    cfg = _config(player_kinds=("random", "greedy"))
+    fixtures = lb.resolve_fixtures(cfg)
+    assert len(fixtures) == 1  # 1 fixtura, brak map
+
+
+def test_resolve_fixtures_combines_fixtures_and_maps():
+    cfg = _config(maps=("lustrzana_a",), map_seed=1)
+    fixtures = lb.resolve_fixtures(cfg)
+    assert len(fixtures) == 2  # 1 fixtura + 1 mapa
+    # mapa ma nazwę (BattleFixture.name) różną od fixtury
+    assert all(f.name for f in fixtures)
+
+
+def test_resolve_fixtures_maps_only():
+    cfg = _config(fixtures=(), maps=("symetryczna_a",))
+    fixtures = lb.resolve_fixtures(cfg)
+    assert len(fixtures) == 1
+
+
+def test_run_leaderboard_with_map():
+    cfg = _config(fixtures=(), maps=("lustrzana_a",), player_kinds=("random", "greedy"))
+    results = lb.run_leaderboard(cfg)
+    assert len(results) == 1  # 1 mapa × 1 para
+    assert results[0].wins_p0 + results[0].wins_p1 + results[0].draws == 2
+
+
+def test_run_leaderboard_map_deterministic_per_seed():
+    cfg = _config(fixtures=(), maps=("lustrzana_a",), map_seed=5)
+    r1 = lb.run_leaderboard(cfg)
+    r2 = lb.run_leaderboard(cfg)
+    assert [(r.wins_p0, r.wins_p1, r.draws) for r in r1] == [
+        (r.wins_p0, r.wins_p1, r.draws) for r in r2
+    ]
+
+
+def test_parse_map_list_rejects_unknown():
+    with pytest.raises(Exception):
+        lb._parse_map_list("nieistniejaca_mapa")
+
+
+def test_main_map_only_skips_default_fixtures(tmp_path):
+    out = tmp_path / "lb.md"
+    rc = lb.main(
+        ["--map", "lustrzana_a", "-n", "2", "--players", "random,greedy", "--out", str(out)]
+    )
+    assert rc == 0
+    text = out.read_text(encoding="utf-8")
+    assert "Mapy generowane" in text
+
+
+def test_main_rejects_unknown_map():
+    with pytest.raises(SystemExit):
+        lb.main(["--map", "nieistniejaca", "-n", "1"])
+
+
 # --- standings ----------------------------------------------------------------
 
 

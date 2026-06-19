@@ -81,6 +81,60 @@ def test_run_round_robin_deterministic():
     assert r1 == r2
 
 
+# --- mapy generowane (--map) --------------------------------------------------
+
+
+def test_resolve_fixtures_fixtures_only():
+    cfg = _config()
+    assert len(br.resolve_fixtures(cfg)) == 1
+
+
+def test_resolve_fixtures_combines_fixtures_and_maps():
+    cfg = _config(maps=("lustrzana_a",), map_seed=2)
+    fixtures = br.resolve_fixtures(cfg)
+    assert len(fixtures) == 2  # 1 fixtura + 1 mapa
+    assert all(f.name for f in fixtures)
+
+
+def test_run_round_robin_with_map():
+    cfg = _config(fixtures=(), maps=("lustrzana_a",), player_kinds=("random", "greedy"))
+    results = br.run_round_robin(cfg)
+    assert len(results) == 3  # 1 mapa × 3 pary (rr, rg, gg — with replacement)
+    for r in results:
+        assert r.wins_p0 + r.wins_p1 + r.draws == 2
+
+
+def test_run_round_robin_map_deterministic_per_seed():
+    cfg = _config(fixtures=(), maps=("lustrzana_a",), map_seed=9)
+    assert br.run_round_robin(cfg) == br.run_round_robin(cfg)
+
+
+def test_format_report_lists_maps_in_metadata():
+    cfg = _config(fixtures=(), maps=("symetryczna_a",), map_seed=3)
+    md = br.format_markdown_report(br.run_round_robin(cfg), cfg)
+    assert "Mapy generowane (seed `3`)" in md
+    assert "`symetryczna_a`" in md
+
+
+def test_parse_map_list_rejects_unknown():
+    with pytest.raises(Exception):
+        br._parse_map_list("nieistniejaca_mapa")
+
+
+def test_main_map_only_skips_default_fixtures(tmp_path):
+    out = tmp_path / "rep.md"
+    rc = br.main(
+        ["--map", "lustrzana_a", "-n", "2", "--players", "random,greedy", "--out", str(out)]
+    )
+    assert rc == 0
+    assert "Mapy generowane" in out.read_text(encoding="utf-8")
+
+
+def test_main_rejects_unknown_map():
+    with pytest.raises(SystemExit):
+        br.main(["--map", "nieistniejaca", "-n", "1"])
+
+
 # --- _bar --------------------------------------------------------------------
 
 

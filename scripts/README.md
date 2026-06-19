@@ -254,10 +254,15 @@ raport markdown `reports/balance/YYYY-MM-DD.md` z tabelą win-rate i tekstowymi
 (unicode) wykresami słupkowymi. Wykresy są **tekstowe, nie obrazowe** (bez
 matplotlib — dependency-free). `reports/` jest gitignored (artefakt generowany).
 
+Wspiera też **mapy generowane** (`--map name[,name] [--map-seed N]`, reuse
+`balance_simulate.build_map`/`MAP_BUILDERS`) — dodatkowo do fixtur; samo `--map`
+pomija domyślne fixtury.
+
 ```powershell
 python scripts/balance_report.py                                     # wszystkie fixtury + boty
 python scripts/balance_report.py -n 50 --players random,greedy,priority
 python scripts/balance_report.py --fixtures <A.yaml>,<B.yaml> --out reports/balance/custom.md
+python scripts/balance_report.py --map lustrzana_a,symetryczna_a --map-seed 3
 ```
 
 ### `leaderboard.py` (D4)
@@ -271,9 +276,13 @@ Różni się od `balance_report.py` (macierz pairwise) jednowymiarowym rankingie
 Wykresy **tekstowe** (dependency-free); `reports/` gitignored. Skrypt-liść —
 zero zmian w rdzeniu.
 
+Wspiera **mapy generowane** (`--map name[,name] [--map-seed N]`) — mapy
+symetryczne (lustrzana_a/symetryczna_a) usuwają bias konkretnej fixtury z rankingu.
+
 ```powershell
 python scripts/leaderboard.py                                        # wszystkie fixtury + boty
 python scripts/leaderboard.py -n 20 --players random,greedy,priority,priority3
+python scripts/leaderboard.py --map lustrzana_a,symetryczna_a --map-seed 3
 python scripts/leaderboard.py --out reports/leaderboard.md
 ```
 
