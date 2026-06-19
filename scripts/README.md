@@ -260,6 +260,23 @@ python scripts/balance_report.py -n 50 --players random,greedy,priority
 python scripts/balance_report.py --fixtures <A.yaml>,<B.yaml> --out reports/balance/custom.md
 ```
 
+### `leaderboard.py` (D4)
+
+Kanoniczny **ranking ogólny** botów (roadmap D4, ADR-0030). Round-robin
+**różnych** botów (mirror self-play wykluczony) ponad fixturami przez
+`balance_simulate.simulate_balance` (SSOT), agregowany **ponad parami** w jeden
+standing per bot (gry/wygrane/porażki/remisy/win-rate) → markdown
+`reports/leaderboard.md` z tabelą rankingową i tekstowymi (unicode) słupkami.
+Różni się od `balance_report.py` (macierz pairwise) jednowymiarowym rankingiem.
+Wykresy **tekstowe** (dependency-free); `reports/` gitignored. Skrypt-liść —
+zero zmian w rdzeniu.
+
+```powershell
+python scripts/leaderboard.py                                        # wszystkie fixtury + boty
+python scripts/leaderboard.py -n 20 --players random,greedy,priority,priority3
+python scripts/leaderboard.py --out reports/leaderboard.md
+```
+
 ### `battle_replay.py` (B6)
 
 CLI replay event-logu bitwy → czytelny tekst w terminalu (roadmap B6, ADR-0013

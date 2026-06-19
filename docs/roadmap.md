@@ -310,8 +310,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   - **Koszt obliczeniowy / decyzję (mediana, self-play, względem priority=1.0):** `priority` 1.0 · `claude_v3` ~1.8 · `priority3` 5.7 · `greedy` 7.0 · `claude_v1` 8.6 · `minimax` ~185 · `claude_v2` ~100–130.
 - [x] `claude_v3_player.py` — **`ClaudeV3Player` 2026-06-17** (`--players claude_v3`): **najlepsze podejście** — zamiast walczyć z polityką priority, DZIEDZICZY szkielet `PriorityPlayer` (selekcja oddziału + kolejność 1–7 + ruch na cele) i nadpisuje TYLKO wybór celu (krok 2/3): „dobij/koncentruj" (`mean + p_full_kill·30 + expected_kills·14`, ability-aware przez `expected_damage`) zamiast „najbliższy". Naprawia udokumentowaną słabość (priority strzela najbliższego — rozprasza; priority3 `x(4-x)` nie premiuje dobijania). **Depth-1, ~1.8× koszt priority** (zgodnie z „ten sam rząd"). **Wynik (3 fixtury, 120 gier/matchup):** bije priority2 60%, greedy 88%, claude_v1 75%, ~remis claude_v2 52% — **najlepszy z botów Claude vs priority (~42%) i priority3 (~33%)**. **Nadal NIE bije priority/priority3.** Sweep 10+ konfiguracji wag (finish/kill/deny/proximity): wszystkie 30–43% — sufit STRUKTURALNY: „strzel najbliższego" to mocne lokalne optimum (proximity-anchoring i odcięcie celów sprawdzone, nie pomogły; czysty focus-fire najlepszy). 5 testów.
   - **Wniosek finalny D4 (3 podejścia × ~15 wariantów):** żaden bot heurystyczny — depth-1 value-max (v1), depth-2 z modelem przeciwnika (v2), ani priority+smart-targeting (v3) — nie bije `priority`/`priority3` przy 2–130× ich kosztu. **Sufit to jakość polityki, nie głębokość ani wybór celu.** `priority` (depth-1, ~6× `priority3`... a sam priority bazowy 1×) pozostaje najlepszym stosunkiem siła/koszt. Realna droga do pobicia: nauczona polityka (imitation/RL) lub ocena kalibrowana do pkt 5.f — poza zakresem botów heurystycznych.
-- [ ] Leaderboard `reports/leaderboard.md`
-- [ ] ADR-0030: Wielu agentów konkurujących — osobne konta + leaderboard
+- [x] Leaderboard `reports/leaderboard.md` — **DONE 2026-06-19** (wątek `faza-d-leaderboard`, ADR-0030): `scripts/leaderboard.py` — round-robin **różnych** botów (mirror self-play wykluczony) ponad fixturami, agregacja **ponad parami** w jeden standing per bot (gry/wygrane/porażki/remisy/win-rate) → markdown z tabelą rankingową + tekstowymi (unicode) słupkami. Reuse `simulate_balance` (SSOT, ADR-0032) + wzorzec `balance_report` (module-loader/`_bar`). Skrypt-liść, 20 testów. Real-run (5 botów × 3 fixtury, n=8): **priority3 66.7% > claude_v3 62.5% > priority 46.9% > random 26% > greedy 12.5%** — potwierdza udokumentowany wniosek D4 (priority/priority3 najsilniejsze). `reports/` gitignored.
+- [x] ADR-0030: Wielu agentów konkurujących — **część 1 (ranking botów) DONE; część 2 (osobne konta + leaderboard międzykontowy) ODŁOŻONA do B2 auth.** (Accepted)
 
 ### D5. Rozstawienie jako decyzja bota — **Proste strategie DONE 2026-06-15** (wątek `faza-d-deployment`)
 
@@ -400,7 +400,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0023 | Embeddings: sentence-transformers offline | — |
 | 0024 | Consent-gated agent writes | — |
 | 0025 | Rola agent + scoped tokens | — |
-| 0030 | Wielu agentów: osobne konta + leaderboard | — |
+| 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
 | 0032 | Headless match runner (orkiestrator pełnej gry dla botów) | ✓ |
 | 0040 | Migration blob → per-model | — |
