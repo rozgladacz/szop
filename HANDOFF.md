@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-d-exploit-hunt](docs/handoffs/HANDOFF_faza-d-exploit-hunt.md) | D3 `scripts/exploit_hunt.py` — generator rozpisek in-memory + self-play + ranking win_rate/points (Opcja A). | `scripts/exploit_hunt.py`, `tests/test_exploit_hunt.py`, `tests/test_exploit_hunt_db.py` (NEW) | In progress (slice 1–1f DONE; **real-run na danych usera DONE 2026-06-19** — sygnał exploitu kompozycyjny; czeka na 1 decyzję usera: ADR DOCX vs akcept artefaktu MVP → potem archiwizacja) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -39,12 +38,19 @@
 *(Krótkie alerty istotne dla wielu wątków. Coś, co nie pasuje jeszcze do `docs/`, ale dotyczy więcej niż jednego wątku. Sprzątaj regularnie — przenoś do `docs/*` jeśli reguła stała się trwała.)*
 
 - **2026-06-07:** **Faza_A → main MERGED** (PR #455, commit `418b0ff`). 83 commity: B0+B3+B3.9+rules-resync R0-R6. **B2/B4/B5 ODBLOKOWANE** — engine schema stabilna (`BattleEvent.payload_json` event types 1-13 locked per ADR-0046+0047). Sub-wątki startują na bazie `main`. Faza_B branch otwieramy gdy B2/B4/B5 startują. **Rules-resync ZAMKNIĘTY 2026-06-09** (R0–R7 + RW ✅, ADR-0048; backlog przyrostowych zdolności Klątwa/Rozkaz/Oznaczenie + Dywersant + H7 w parent `faza-b-engine-mvp`).
-- **2026-06-19:** `faza-d-roster-adapter` slice 2b domknięty jako część `faza-b-5-db-client` — DB-backed `LocalClient(session, user_id)` + `simulate_roster_ids` + ownership scoping. Wątek gotowy do archiwizacji. **exploit-hunt** (D3) — **real-run na danych usera WYKONANY** (64 jednostki/7 armii): sygnał exploitu KOMPOZYCYJNY (tania piechota/mobilne biją drogi pancerz; sterownik pkt 5.f cele-po-4-rundach), ale to balans MVP nie potwierdzony exploit reguł. Czeka na decyzję usera (ADR DOCX vs akcept artefaktu MVP).
+- **2026-06-20:** **decyzja usera (B) na D3** — sygnał exploitu = artefakt MVP (cost-model poprawny; luka wierności symulacji ≠ błąd wyceny), ACCEPT bez ADR. Wątek `faza-d-exploit-hunt` **ZARCHIWIZOWANY 2026-06-20** (D3 exploit-hunting domknięty; powrót do tematu po E1/E2/E3). **`faza-d-roster-adapter` slice 2b domknięty** (DB-backed `LocalClient` + `simulate_roster_ids` + ownership scoping, część `faza-b-5-db-client`).
+- **2026-06-19:** exploit-hunt real-run na danych usera (64 jednostki/7 armii): sygnał exploitu KOMPOZYCYJNY (tania piechota/mobilne biją drogi pancerz; sterownik pkt 5.f cele-po-4-rundach).
 - **2026-05-20:** Lokalny runtime na Windows — `python -m pytest` bezpośrednio (`.venv\Scripts\python` / `make` mogą nie działać w PATH).
 
 ---
 
 ## LOG SESJI
+
+### 2026-06-20 — faza-d-exploit-hunt (archived) — D3 exploit-hunting domknięty (decyzja usera B)
+- Wątek zamknięty: `scripts/exploit_hunt.py` (Opcja A in-memory) — generator efemerycznych rozpisek z jednostek bazy bez cech `b_mvp_exclusions` + round-robin self-play (reuse `simulate_from_rosters`+`deployment_zones` D5+mapa lustrzana) + ranking wg `win_rate` i `win_rate/points` (`exploit_score`). Slice 1–1f DONE (2026-06-16…06-19): robustness undeployable units (filtr koło ≤6″ strefy), integracyjny DB-read + `main()` end-to-end (seeded in-memory SQLite), analiza koszt↔wynik w binach %, `--army`/`--vary-size`/`--min-distinct`/`--max-imbalance`, bugfix `roster_points` = SSOT kalkulatora. **Real-run na danych usera DONE 2026-06-19** (64 jednostki/7 armii): sygnał exploitu **kompozycyjny** (tania piechota/mobilne biją drogi pancerz/pojazdy przy ~równym koszcie; win-rate 12–79% przy ~równych pkt; sterownik pkt 5.f — wygrana = kontrola 5 celów po 4 rundach, zweryfikowane w źródle `SZOP_Rozjemca.md`). **Decyzja usera (B) RESOLVED 2026-06-20:** sygnał = świadomy artefakt wierności silnika MVP (pomija per-model/bohaterów/pełne zdolności/teren, kończy na r.4), NIE błąd wyceny — cost-model Strumienia A poprawny; akcept bez ADR, temat do powrotu po E1/E2/E3.
+- Pliki: `scripts/exploit_hunt.py` (NEW), `tests/test_exploit_hunt.py` (NEW), `tests/test_exploit_hunt_db.py` (NEW), `scripts/README.md`, `docs/roadmap.md`. Wszystkie commity w trakcie wątku (główny `f12cb6f`/`6ec31ee`).
+- Weryfikacja: pytest `tests/test_exploit_hunt*.py` **34 passed** (tej sesji); DoD odznaczony w trakcie (`/simplify` inline; `/review`+`/security-review` pominięte warunkowo — skrypt-liść, DB read-only, brak hot-path/SSOT-mutacji/auth/write).
+- Doc updates: `docs/roadmap.md` (D3 ostatni checkbox „ADR exploit" → `[x]` RESOLVED decyzją B, bez ADR). `scripts/README.md` + reszta D3 zaktualizowane w trakcie wątku.
 
 ### 2026-06-19 — faza-d-report-maps (archived) — `--map`/`--map-seed` w warstwie raportowej D2/D4
 - `balance_report.py` (D2) + `leaderboard.py` (D4) wspierają teraz **mapy generowane** (`standard_a`/`lustrzana_a`/`symetryczna_a`, reuse `balance_simulate.build_map`/`MAP_BUILDERS` SSOT) obok fixtur YAML. Nowy helper `resolve_fixtures(config)` łączy fixtury + mapy w listę `BattleFixture`; `ReportConfig`/`LeaderboardConfig` +`maps`+`map_seed`. CLI `--map name[,name] --map-seed N` (dodatkowe do `--fixtures`; samo `--map` pomija domyślne fixtury; brak źródła → błąd). Mapy symetryczne usuwają bias konkretnej fixtury z rankingu. Skrypty-liście — zero zmian w rdzeniu silnika/agentów. Spójna luka domknięta (`battle_replay`/`balance_simulate` miały `--map`, raporty nie).
