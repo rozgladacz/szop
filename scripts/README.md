@@ -258,12 +258,21 @@ Wspiera też **mapy generowane** (`--map name[,name] [--map-seed N]`, reuse
 `balance_simulate.build_map`/`MAP_BUILDERS`) — dodatkowo do fixtur; samo `--map`
 pomija domyślne fixtury.
 
+Domyślny zestaw botów = tag `useful` (rejestr SSOT `agents/registry.py`).
+`--players` przyjmuje nazwy, TAGI (`useful`/`fast`/`reference`/…) lub `all`.
+
 ```powershell
-python scripts/balance_report.py                                     # wszystkie fixtury + boty
+python scripts/balance_report.py                                     # fixtury domyślne + boty `useful`
 python scripts/balance_report.py -n 50 --players random,greedy,priority
+python scripts/balance_report.py --players all                       # wszystkie boty (incl. drogie referencyjne)
 python scripts/balance_report.py --fixtures <A.yaml>,<B.yaml> --out reports/balance/custom.md
 python scripts/balance_report.py --map lustrzana_a,symetryczna_a --map-seed 3
 ```
+
+> **Wspólna infrastruktura:** `balance_report.py` i `leaderboard.py` współdzielą
+> czyste funkcje (loader `balance_simulate`, `resolve_fixtures`, `_bar`, parsery
+> CLI z ekspansją tagów, zapis raportu) w `scripts/balance_common.py`. Oba skrypty
+> różnią się **tylko** pairingiem (round-robin z/bez powtórzeń) i renderem markdown.
 
 ### `leaderboard.py` (D4)
 
@@ -279,9 +288,14 @@ zero zmian w rdzeniu.
 Wspiera **mapy generowane** (`--map name[,name] [--map-seed N]`) — mapy
 symetryczne (lustrzana_a/symetryczna_a) usuwają bias konkretnej fixtury z rankingu.
 
+Domyślny zestaw botów = tag `useful` (jak `balance_report`); `--players` przyjmuje
+nazwy, TAGI (`useful`/`fast`/`reference`/…) lub `all`. `--players all` przywraca
+pełny ranking (wszystkie boty, łącznie z drogimi referencyjnymi minimax/claude_v2).
+
 ```powershell
-python scripts/leaderboard.py                                        # wszystkie fixtury + boty
+python scripts/leaderboard.py                                        # fixtury domyślne + boty `useful`
 python scripts/leaderboard.py -n 20 --players random,greedy,priority,priority3
+python scripts/leaderboard.py --players all                          # pełny ranking (wszystkie boty)
 python scripts/leaderboard.py --map lustrzana_a,symetryczna_a --map-seed 3
 python scripts/leaderboard.py --out reports/leaderboard.md
 ```

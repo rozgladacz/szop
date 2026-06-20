@@ -1,8 +1,9 @@
 """D4 — leaderboard botów: round-robin wszystkich typów → kanoniczny ranking ogólny.
 
 Uruchom:
-    python scripts/leaderboard.py                                   # wszystkie fixtury + boty
+    python scripts/leaderboard.py                                   # fixtury domyślne + boty `useful`
     python scripts/leaderboard.py -n 20 --players random,greedy,priority
+    python scripts/leaderboard.py --players all                     # wszystkie boty (incl. drogie referencyjne)
     python scripts/leaderboard.py --out reports/leaderboard.md
 
 Co robi (roadmap D4, `docs/roadmap.md#d4-adversarial-play`):
@@ -28,38 +29,23 @@ per `--seed` (ADR-0010/0012/0013). Ranking botów teraz; osobne konta agentów
 from __future__ import annotations
 
 import argparse
-import datetime
 import importlib.util
-import os
 import pathlib
 import sys
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Sequence
 
-# UTF-8 stdout (nazwy botów/fixtur PL na Windows cp1250 — jak balance_simulate.py).
-os.environ.setdefault("PYTHONIOENCODING", "utf-8")
-if hasattr(sys.stdout, "reconfigure"):
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
 
-_repo_root = pathlib.Path(__file__).resolve().parent.parent
-if str(_repo_root) not in sys.path:
-    sys.path.insert(0, str(_repo_root))
+def _load_balance_common():
+    """Ładuje sąsiedni `balance_common.py` (wspólna infrastruktura skryptów balansu).
 
-
-def _load_balance_simulate():
-    """Ładuje sąsiedni `balance_simulate.py` jako moduł (scripts/ nie jest pakietem).
-
-    Rejestracja w `sys.modules` PRZED exec — `dataclass(slots=True)` rozwiązuje
-    `cls.__module__` przez `sys.modules.get(...)` (jak w `balance_report.py`).
+    scripts/ nie jest pakietem — spec/exec z cache w `sys.modules` (idempotentne).
     """
-    name = "balance_simulate"
+    name = "balance_common"
     if name in sys.modules:
         return sys.modules[name]
-    script = pathlib.Path(__file__).resolve().parent / "balance_simulate.py"
+    script = pathlib.Path(__file__).resolve().parent / "balance_common.py"
     spec = importlib.util.spec_from_file_location(name, script)
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
@@ -67,18 +53,24 @@ def _load_balance_simulate():
     return mod
 
 
-bsim = _load_balance_simulate()
+bc = _load_balance_common()
+bsim = bc.bsim
 
-#: Domyślne fixtury gdy `--fixtures` nie podane (wszystkie z tests/fixtures/battles/).
-DEFAULT_FIXTURES: tuple[str, ...] = tuple(
-    str(_repo_root / "tests" / "fixtures" / "battles" / f"{stem}.yaml")
-    for stem in ("demo_skirmish", "objective_clash", "unit_profiles")
-)
-
-#: Domyślny zestaw botów do rankingu.
-DEFAULT_PLAYERS: tuple[str, ...] = tuple(bsim.PLAYER_KINDS)
-
-_BAR_WIDTH = 24
+# Re-eksport wspólnych helperów jako atrybuty modułu (API testów + użycie lokalne).
+DEFAULT_FIXTURES = bc.DEFAULT_FIXTURES
+#: Domyślny zestaw botów = `useful` (rejestr SSOT) — spójnie z `balance_report`.
+#: Zmiana z „wszystkie boty" (eliminuje drogie referencyjne minimax/claude_v2
+#: z domyślnego rankingu). `--players all` przywraca pełny zestaw.
+DEFAULT_PLAYERS = bc.DEFAULT_PLAYERS
+resolve_fixtures = bc.resolve_fixtures
+_fixture_names_in_order = bc._fixture_names_in_order
+_bar = bc._bar
+_BAR_WIDTH = bc._BAR_WIDTH
+_today = bc._today
+write_report = bc.write_report
+_parse_fixtures = bc._parse_fixtures
+_parse_map_list = bc._parse_map_list
+_parse_player_list = bc._parse_player_list
 
 
 # ---------------------------------------------------------------------------
@@ -108,17 +100,6 @@ def player_matchups(player_kinds: Sequence[str]) -> list[tuple[str, str]]:
     rankingu ogólnego.
     """
     return list(combinations(player_kinds, 2))
-
-
-def resolve_fixtures(config: LeaderboardConfig) -> list:
-    """Buduje listę `BattleFixture` ze źródeł: fixtury YAML + mapy generowane.
-
-    Mapy reużywają `bsim.build_map` (SSOT generatorów, `MAP_BUILDERS`) z
-    `config.map_seed`. Kolejność: fixtury (jak w `config.fixtures`) → mapy.
-    """
-    fixtures = [bsim.load_battle_fixture(p) for p in config.fixtures]
-    fixtures += [bsim.build_map(m, config.map_seed) for m in config.maps]
-    return fixtures
 
 
 def run_leaderboard(config: LeaderboardConfig) -> list:
@@ -210,22 +191,6 @@ def compute_standings(
 # ---------------------------------------------------------------------------
 
 
-def _bar(fraction: float, width: int = _BAR_WIDTH) -> str:
-    """Tekstowy słupek `█`/`░` o długości `width` proporcjonalny do `fraction` (0..1)."""
-    fraction = max(0.0, min(1.0, fraction))
-    filled = round(fraction * width)
-    return "█" * filled + "░" * (width - filled)
-
-
-def _fixture_names_in_order(results: Sequence) -> list[str]:
-    """Unikalne nazwy fixtur zachowując kolejność wystąpienia."""
-    seen: list[str] = []
-    for r in results:
-        if r.fixture_name not in seen:
-            seen.append(r.fixture_name)
-    return seen
-
-
 def format_leaderboard(
     standings: Sequence[BotStanding],
     config: LeaderboardConfig,
@@ -275,68 +240,14 @@ def format_leaderboard(
 # ---------------------------------------------------------------------------
 
 
-def _today() -> str:
-    return datetime.date.today().isoformat()
-
-
 def default_report_path() -> pathlib.Path:
     """Domyślna ścieżka leaderboardu: `reports/leaderboard.md` (repo root)."""
-    return _repo_root / "reports" / "leaderboard.md"
-
-
-def write_report(text: str, path: str | os.PathLike) -> None:
-    """Zapisuje raport (tworzy katalogi nadrzędne jeśli trzeba)."""
-    p = pathlib.Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    return bc._repo_root / "reports" / "leaderboard.md"
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-
-
-def _parse_fixtures(spec: str) -> tuple[str, ...]:
-    parts = tuple(p.strip() for p in spec.split(",") if p.strip())
-    if not parts:
-        raise argparse.ArgumentTypeError("--fixtures: oczekiwano ≥1 ścieżki")
-    return parts
-
-
-def _parse_map_list(spec: str) -> tuple[str, ...]:
-    parts = [p.strip().lower() for p in spec.split(",") if p.strip()]
-    for p in parts:
-        if p not in bsim.MAP_BUILDERS:
-            raise argparse.ArgumentTypeError(
-                f"Nieznana mapa {p!r}; dostępne: {', '.join(sorted(bsim.MAP_BUILDERS))}"
-            )
-    # Dedup zachowując kolejność.
-    out: list[str] = []
-    for p in parts:
-        if p not in out:
-            out.append(p)
-    if not out:
-        raise argparse.ArgumentTypeError("--map: oczekiwano ≥1 nazwy mapy")
-    return tuple(out)
-
-
-def _parse_player_list(spec: str) -> tuple[str, ...]:
-    parts = [p.strip().lower() for p in spec.split(",") if p.strip()]
-    for p in parts:
-        if p not in bsim.PLAYER_KINDS:
-            raise argparse.ArgumentTypeError(
-                f"Nieznany gracz {p!r}; dozwolone: {', '.join(bsim.PLAYER_KINDS)}"
-            )
-    # Dedup zachowując kolejność.
-    out: list[str] = []
-    for p in parts:
-        if p not in out:
-            out.append(p)
-    if len(out) < 2:
-        raise argparse.ArgumentTypeError(
-            "--players: oczekiwano ≥2 różnych typów do round-robin"
-        )
-    return tuple(out)
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -380,7 +291,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--players",
         type=_parse_player_list,
         default=DEFAULT_PLAYERS,
-        help=f"Boty do round-robin (domyślnie wszystkie: {', '.join(DEFAULT_PLAYERS)}).",
+        help=(
+            f"Boty do round-robin: nazwy, TAGI (useful/fast/reference/…) lub 'all'. "
+            f"Domyślnie 'useful' = {', '.join(DEFAULT_PLAYERS)}."
+        ),
     )
     parser.add_argument(
         "--out",
