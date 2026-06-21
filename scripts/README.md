@@ -344,13 +344,22 @@ python scripts/analyze_battle.py                                      # demo fix
 python scripts/analyze_battle.py --map symetryczna_a --map-seed 3 --players priority3,priority --seed 7
 python scripts/analyze_battle.py --players priority,claude_v3 --games 20  # agregat 20 gier
 python scripts/analyze_battle.py --from-db 12                         # analiza zapisanej bitwy z DB
-python scripts/analyze_battle.py --out reports/analyze/battle.md      # zapis do pliku
+python scripts/analyze_battle.py --out reports/analyze/battle.md      # zapis raportu markdown do pliku
+python scripts/analyze_battle.py --json data/battle_metrics/12.jsonl  # + maszynowe metryki JSON (additive)
 ```
 
-> **Scope (slice):** pełny ADR-0017 (structlog w `resolver`/`persistence` + pliki
-> `data/*_metrics/*.jsonl`) odłożony — wymaga zmian w hot-path silnika. Ten skrypt
-> czyta sam event-log. Pokryte `tests/test_analyze_battle.py` (syntetyczne +
-> integracja sim end-to-end; bez DB).
+**Maszynowy eksport `--json PATH`:** dodatkowo (do markdown) zapisuje metryki jako
+JSON — jedna linia = rekord jsonl, schema `szop.battle_metrics/v1` (per-battle
+`kind=battle` lub agregat `kind=aggregate` przy `--games N`). Zawiera pola
+ODZYSKIWALNE z event-logu: rozkład akcji/typów eventów, kości Przegrupowania,
+staty per oddział/strona, kontrola celów. Dla downstream tooling/agregacji
+(`data/battle_metrics/` jest już w `.gitignore` via blankietowy `data/`).
+
+> **Scope (slice):** structlog live-emission w `resolver`/`persistence` + pola
+> czasowe (`time_per_action_ms`, `decision_time_ms`) z pełnego ADR-0017 odłożone —
+> wymagają zmian w hot-path silnika. Ten skrypt czyta sam event-log (post-hoc).
+> Pokryte `tests/test_analyze_battle.py` (syntetyczne + serializery JSON + CLI
+> `--json` + integracja sim end-to-end; bez DB).
 
 ### `exploit_hunt.py` (D3)
 

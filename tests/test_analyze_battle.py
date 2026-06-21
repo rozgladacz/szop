@@ -11,6 +11,7 @@ dotykają DB.
 from __future__ import annotations
 
 import importlib.util
+import json
 import pathlib
 import sys
 
@@ -320,3 +321,80 @@ def test_cli_games_with_from_db_rejected(mod, capsys):
     rc = mod.main(["--from-db", "1", "--games", "2"])
     assert rc == 2
     assert "--games" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Serializacja JSON (telemetria maszynowa, ADR-0017)
+# ---------------------------------------------------------------------------
+
+
+def test_analysis_to_dict_fields_and_serializable(mod):
+    a = mod.analyze_battle_log(_synthetic_events(), owner_map={1: 0, 3: 1})
+    d = mod.analysis_to_dict(a)
+
+    assert d["schema"] == "szop.battle_metrics/v1"
+    assert d["kind"] == "battle"
+    assert d["rounds_played"] == 2
+    assert d["winner"] == 1  # final objectives (1, 2) → P1
+    assert d["final_objectives"] == [1, 2]
+    # Klucze kości to stringi "1".."6" (wymóg JSON object keys).
+    assert list(d["morale_dice"].keys()) == ["1", "2", "3", "4", "5", "6"]
+    # unit_stats jako lista posortowana po id; side_stats per strona "0"/"1".
+    assert [u["unit_id"] for u in d["unit_stats"]] == [1, 3]
+    assert set(d["side_stats"].keys()) == {"0", "1"}
+    assert d["objective_timeline"] == [[1, [1, 0]], [2, [1, 2]]]
+    # Pełny round-trip — żadnych nie-serializowalnych wartości.
+    assert json.loads(json.dumps(d, ensure_ascii=False))["kind"] == "battle"
+
+
+def test_analysis_to_dict_side_stats_none_without_owner_map(mod):
+    a = mod.analyze_battle_log(_synthetic_events())  # brak owner_map (ścieżka --from-db)
+    d = mod.analysis_to_dict(a)
+    assert d["side_stats"] is None
+    # Per-oddział nadal obecne; owner = None.
+    assert all(u["owner"] is None for u in d["unit_stats"])
+    json.dumps(d)  # serializowalne mimo None
+
+
+def test_aggregate_to_dict_fields(mod):
+    a = mod.analyze_battle_log(_synthetic_events(), owner_map={1: 0, 3: 1})
+    agg = mod.aggregate_analyses([a, a])
+    d = mod.aggregate_to_dict(agg)
+
+    assert d["schema"] == "szop.battle_metrics/v1"
+    assert d["kind"] == "aggregate"
+    assert d["games"] == 2
+    assert d["win_p0"] + d["win_p1"] + d["draws"] == 2
+    assert set(d["side_means"].keys()) == {"0", "1"}
+    assert list(d["morale_dice_total"].keys()) == ["1", "2", "3", "4", "5", "6"]
+    json.loads(json.dumps(d, ensure_ascii=False))
+
+
+def test_cli_json_writes_battle_record(mod, tmp_path, capsys):
+    jpath = tmp_path / "metrics" / "b.jsonl"
+    mpath = tmp_path / "b.md"
+    rc = mod.main(
+        ["--players", "priority,random", "--seed", "1",
+         "--json", str(jpath), "--out", str(mpath)]
+    )
+    assert rc == 0
+    assert mpath.exists()  # markdown nadal zapisany (additive)
+    text = jpath.read_text(encoding="utf-8")
+    assert text.endswith("\n")  # jedna linia = rekord jsonl
+    d = json.loads(text)
+    assert d["kind"] == "battle"
+    assert d["side_stats"] is not None  # sim path ma owner_map
+    out = capsys.readouterr().out
+    assert "Zapisano metryki JSON" in out
+
+
+def test_cli_json_aggregate_record(mod, tmp_path):
+    jpath = tmp_path / "agg.jsonl"
+    rc = mod.main(
+        ["--players", "priority,random", "--seed", "1", "--games", "3",
+         "--json", str(jpath)]
+    )
+    assert rc == 0
+    d = json.loads(jpath.read_text(encoding="utf-8"))
+    assert d["kind"] == "aggregate"
+    assert d["games"] == 3

@@ -4,7 +4,8 @@ Uruchom:
     python scripts/analyze_battle.py                                  # demo fixtura, priority vs random
     python scripts/analyze_battle.py --map symetryczna_a --map-seed 3 --players priority3,priority --seed 7
     python scripts/analyze_battle.py --from-db 12                     # analiza zapisanej bitwy z DB (persistence)
-    python scripts/analyze_battle.py --out reports/analyze/battle.md  # zapis do pliku
+    python scripts/analyze_battle.py --out reports/analyze/battle.md  # zapis raportu markdown do pliku
+    python scripts/analyze_battle.py --json data/battle_metrics/1.jsonl  # + maszynowe metryki JSON (telemetria)
 
 Co robi (roadmap "Cross-cutting: telemetria od dnia 1", ADR-0017):
 Z event-logu jednej bitwy liczy analitykę — komplementarną do `battle_replay.py`
@@ -25,21 +26,28 @@ Z event-logu jednej bitwy liczy analitykę — komplementarną do `battle_replay
   Persystencja nie trzyma `initial_state`, więc mapowanie oddział→strona jest
   niedostępne → raport degraduje się łagodnie (per-oddział bez rollupu per strona).
 
-Rdzeń = czyste funkcje (`analyze_battle_log`, `render_analysis`) — bez I/O, w
-pełni testowalne. Headless-first (ADR-0013). **Skrypt-liść — zero zmian w rdzeniu
-silnika/agentów.** Pełny ADR-0017 (structlog w resolver/persistence + pliki
-`data/*_metrics/*.jsonl`) odłożony — wymaga zmian w hot-path silnika.
+Rdzeń = czyste funkcje (`analyze_battle_log`, `render_analysis`,
+`analysis_to_dict`/`aggregate_to_dict`) — bez I/O, w pełni testowalne. Headless-
+first (ADR-0013). **Skrypt-liść — zero zmian w rdzeniu silnika/agentów.**
+
+`--json PATH` zapisuje maszynowe metryki (jedna linia JSON = rekord jsonl,
+schema `szop.battle_metrics/v1`) — tylko pola ODZYSKIWALNE z event-logu (rozkład
+akcji/eventów, kości Przegrupowania, staty per oddział/strona, kontrola celów).
+Pola czasowe pełnego ADR-0017 (`time_per_action_ms`, `decision_time_ms`) +
+structlog live-emission w resolver/persistence wymagają zmian w hot-path silnika
+→ świadomie odłożone.
 """
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
+import json
 import os
 import pathlib
 import sys
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Sequence
 
 # UTF-8 stdout (nazwy broni/rosterów PL na Windows cp1250 — jak balance_simulate.py).
@@ -515,6 +523,68 @@ def render_aggregate(agg: AggregateAnalysis, *, header: str | None = None) -> st
 
 
 # ---------------------------------------------------------------------------
+# Serializacja JSON — telemetria maszynowa (ADR-0017, czyste funkcje)
+# ---------------------------------------------------------------------------
+
+#: Wersjonowana etykieta schematu metryk (downstream tooling rozpoznaje format).
+_METRICS_SCHEMA = "szop.battle_metrics/v1"
+
+
+def analysis_to_dict(analysis: BattleAnalysis) -> dict:
+    """Serializuje `BattleAnalysis` do JSON-owalnego dict (telemetria, ADR-0017).
+
+    Tylko metryki ODZYSKIWALNE z event-logu (rozkład akcji/typów eventów, kości
+    Przegrupowania, staty per oddział/strona, kontrola celów). Pola czasowe
+    ADR-0017 (`time_per_action_ms`, `decision_time_ms`) wymagają live-
+    instrumentacji hot-path silnika → świadomie poza tym slice'em. Klucze
+    słowników kości/stron jako `str` (wymóg JSON object keys).
+    """
+    return {
+        "schema": _METRICS_SCHEMA,
+        "kind": "battle",
+        "events_total": analysis.events_total,
+        "rounds_played": analysis.rounds_played,
+        "winner": analysis.winner,
+        "final_objectives": (
+            list(analysis.final_objectives)
+            if analysis.final_objectives is not None
+            else None
+        ),
+        "objective_changes": analysis.objective_changes,
+        "objective_timeline": [
+            [round_no, list(held)] for round_no, held in analysis.objective_timeline
+        ],
+        "event_type_counts": dict(analysis.event_type_counts),
+        "action_counts": dict(analysis.action_counts),
+        "morale_dice": {str(face): analysis.morale_dice.get(face, 0) for face in range(1, 7)},
+        "unit_stats": [asdict(analysis.unit_stats[uid]) for uid in sorted(analysis.unit_stats)],
+        "side_stats": (
+            {str(p): asdict(analysis.side_stats[p]) for p in (0, 1)}
+            if analysis.side_stats is not None
+            else None
+        ),
+    }
+
+
+def aggregate_to_dict(agg: AggregateAnalysis) -> dict:
+    """Serializuje `AggregateAnalysis` (próba N gier) do JSON-owalnego dict."""
+    return {
+        "schema": _METRICS_SCHEMA,
+        "kind": "aggregate",
+        "games": agg.games,
+        "win_p0": agg.win_p0,
+        "win_p1": agg.win_p1,
+        "draws": agg.draws,
+        "mean_rounds": agg.mean_rounds,
+        "side_means": {str(p): dict(means) for p, means in agg.side_means.items()},
+        "action_means": dict(agg.action_means),
+        "morale_dice_total": {
+            str(face): agg.morale_dice_total.get(face, 0) for face in range(1, 7)
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
 # Źródła event-logu
 # ---------------------------------------------------------------------------
 
@@ -547,6 +617,24 @@ def _simulate_one(
     return analyze_battle_log(result.events, owner_map=owner_map, winner=result.winner)
 
 
+def _fixture_analysis(
+    fixture,
+    *,
+    player_kinds: tuple[str, str],
+    seed: int = 0,
+    initiative_player: int = 0,
+) -> tuple[BattleAnalysis, str]:
+    """Symuluje jedną grę z fixtury → `(BattleAnalysis, header)`. Compute bez renderu."""
+    analysis = _simulate_one(
+        fixture, player_kinds=player_kinds, seed=seed, initiative_player=initiative_player
+    )
+    header = (
+        f"Analiza: {fixture.name}  —  P0={player_kinds[0]} vs P1={player_kinds[1]}  "
+        f"(seed={seed}, rund={analysis.rounds_played})"
+    )
+    return analysis, header
+
+
 def analyze_from_fixture(
     fixture,
     *,
@@ -555,24 +643,20 @@ def analyze_from_fixture(
     initiative_player: int = 0,
 ) -> str:
     """Symuluje jedną grę z fixtury i renderuje raport per-battle."""
-    analysis = _simulate_one(
+    analysis, header = _fixture_analysis(
         fixture, player_kinds=player_kinds, seed=seed, initiative_player=initiative_player
-    )
-    header = (
-        f"Analiza: {fixture.name}  —  P0={player_kinds[0]} vs P1={player_kinds[1]}  "
-        f"(seed={seed}, rund={analysis.rounds_played})"
     )
     return render_analysis(analysis, header=header)
 
 
-def analyze_aggregate_from_fixture(
+def _fixture_aggregate(
     fixture,
     *,
     player_kinds: tuple[str, str],
     seed: int = 0,
     games: int,
-) -> str:
-    """Symuluje N gier (naprzemienna inicjatywa) i renderuje raport agregatu.
+) -> tuple[AggregateAnalysis, str]:
+    """Symuluje N gier (naprzemienna inicjatywa) → `(AggregateAnalysis, header)`.
 
     Metodyka próby = `balance_simulate`: seed kości = `seed + i`, inicjatywa
     = `i % 2`. `owner_player` stały (roster[0]→P0) → staty per strona porównywalne.
@@ -591,13 +675,27 @@ def analyze_aggregate_from_fixture(
         f"Agregat ({games} gier): {fixture.name}  —  "
         f"P0={player_kinds[0]} vs P1={player_kinds[1]}  (seed={seed})"
     )
+    return agg, header
+
+
+def analyze_aggregate_from_fixture(
+    fixture,
+    *,
+    player_kinds: tuple[str, str],
+    seed: int = 0,
+    games: int,
+) -> str:
+    """Symuluje N gier (naprzemienna inicjatywa) i renderuje raport agregatu."""
+    agg, header = _fixture_aggregate(
+        fixture, player_kinds=player_kinds, seed=seed, games=games
+    )
     return render_aggregate(agg, header=header)
 
 
-def analyze_from_db(battle_id: int) -> str:
-    """Ładuje eventy zapisanej bitwy z persystencji i renderuje raport (read-only).
+def _db_analysis(battle_id: int) -> tuple[BattleAnalysis, str]:
+    """Ładuje eventy zapisanej bitwy z persystencji → `(BattleAnalysis, header)` (read-only).
 
-    Persystencja nie trzyma `initial_state` ⇒ `owner_map=None` ⇒ raport bez
+    Persystencja nie trzyma `initial_state` ⇒ `owner_map=None` ⇒ analiza bez
     rollupu per strona (degradacja łagodna, jak `battle_replay.replay_from_db`).
     """
     from app.db import Base, SessionLocal, engine
@@ -609,8 +707,13 @@ def analyze_from_db(battle_id: int) -> str:
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as session:
         events = load_events(session, battle_id)
-    analysis = analyze_battle_log(events)
-    return render_analysis(analysis, header=f"Analiza z DB: battle_id={battle_id}")
+    return analyze_battle_log(events), f"Analiza z DB: battle_id={battle_id}"
+
+
+def analyze_from_db(battle_id: int) -> str:
+    """Ładuje eventy zapisanej bitwy z persystencji i renderuje raport (read-only)."""
+    analysis, header = _db_analysis(battle_id)
+    return render_analysis(analysis, header=header)
 
 
 # ---------------------------------------------------------------------------
@@ -678,7 +781,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--out",
         type=str,
         default=None,
-        help="Zapisz raport do pliku (domyślnie wypis na stdout).",
+        help="Zapisz raport markdown do pliku (domyślnie wypis na stdout).",
+    )
+    parser.add_argument(
+        "--json",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help=(
+            "Dodatkowo zapisz metryki jako JSON (jedna linia = rekord jsonl; "
+            "telemetria ADR-0017, np. data/battle_metrics/<id>.jsonl). "
+            "Additive — markdown nadal trafia na stdout/--out."
+        ),
     )
     return parser
 
@@ -693,7 +807,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 2
-        report = analyze_from_db(args.from_db)
+        obj, header = _db_analysis(args.from_db)
+        report = render_analysis(obj, header=header)
+        payload = analysis_to_dict(obj)
     else:
         if args.map:
             fixture = bsim.build_map(args.map, args.map_seed)
@@ -701,19 +817,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             path = args.fixture or str(bsim.DEFAULT_FIXTURE)
             fixture = bsim.load_battle_fixture(path)
         if args.games > 1:
-            report = analyze_aggregate_from_fixture(
+            obj, header = _fixture_aggregate(
                 fixture,
                 player_kinds=args.players,
                 seed=args.seed,
                 games=args.games,
             )
+            report = render_aggregate(obj, header=header)
+            payload = aggregate_to_dict(obj)
         else:
-            report = analyze_from_fixture(
+            obj, header = _fixture_analysis(
                 fixture,
                 player_kinds=args.players,
                 seed=args.seed,
                 initiative_player=args.initiative,
             )
+            report = render_analysis(obj, header=header)
+            payload = analysis_to_dict(obj)
 
     if args.out:
         p = pathlib.Path(args.out)
@@ -722,6 +842,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Zapisano raport: {args.out}")
     else:
         print(report)
+
+    if args.json:
+        jp = pathlib.Path(args.json)
+        jp.parent.mkdir(parents=True, exist_ok=True)
+        jp.write_text(json.dumps(payload, ensure_ascii=False) + "\n", encoding="utf-8")
+        print(f"Zapisano metryki JSON: {args.json}")
     return 0
 
 
