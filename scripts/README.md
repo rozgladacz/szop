@@ -318,6 +318,32 @@ python scripts/battle_replay.py --map symetryczna_a --map-seed 3 --players prior
 python scripts/battle_replay.py --from-db 12                         # replay zapisanej bitwy z DB
 ```
 
+### `analyze_battle.py` (telemetria, ADR-0017)
+
+Analityczny raport pojedynczej bitwy z event-logu (roadmap "Cross-cutting:
+telemetria od dnia 1", ADR-0017 — **slice z event-logu**). Komplementarny do
+`battle_replay.py` (narracja per-event): tu **agregacja** w markdown — wynik gry
+(zwycięzca pkt 5.f + timeline kontroli celów per runda pkt 5.d/8.c.ii), statystyki
+ataku/obrony per oddział i per strona (obrażenia zadane/otrzymane, trafienia,
+straty modeli w tym ELIMINOWANY pkt 26.d), rozkład akcji + typów eventów, oraz
+szczęście kości Przegrupowania (rozkład rzutów 1–6 + średnia, pkt 20 — jedyne
+surowe rzuty w logu). Te same dwa źródła co `battle_replay`: `--fixture`/`--map`
+(symulacja, mapowanie oddział→strona z `final_state`) oraz `--from-db <id>`
+(`persistence.load_events`, read-only; bez `initial_state` ⇒ raport degraduje się
+łagodnie do per-oddział bez rollupu per strona). Skrypt-liść — zero zmian w rdzeniu.
+
+```powershell
+python scripts/analyze_battle.py                                      # demo fixtura, priority vs random
+python scripts/analyze_battle.py --map symetryczna_a --map-seed 3 --players priority3,priority --seed 7
+python scripts/analyze_battle.py --from-db 12                         # analiza zapisanej bitwy z DB
+python scripts/analyze_battle.py --out reports/analyze/battle.md      # zapis do pliku
+```
+
+> **Scope (slice):** pełny ADR-0017 (structlog w `resolver`/`persistence` + pliki
+> `data/*_metrics/*.jsonl`) odłożony — wymaga zmian w hot-path silnika. Ten skrypt
+> czyta sam event-log. Pokryte `tests/test_analyze_battle.py` (syntetyczne +
+> integracja sim end-to-end; bez DB).
+
 ### `exploit_hunt.py` (D3)
 
 Exploit hunting (roadmap D3, **Opcja A in-memory** — bez DB-write/auth). Czyta

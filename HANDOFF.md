@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
+| [HANDOFF_faza-telemetry-analyze](docs/handoffs/HANDOFF_faza-telemetry-analyze.md) | Cross-cutting telemetria (ADR-0017) — `scripts/analyze_battle.py`: analityczny raport bitwy z event-logu (damage/straty per oddział, timeline celów, akcje, kości). | `scripts/analyze_battle.py` (NEW), `tests/test_analyze_battle.py` (NEW) | In progress (2026-06-21 — Faza 1 rdzeń analityki) |
 
 
 ## Zasoby zablokowane (reverse lookup)

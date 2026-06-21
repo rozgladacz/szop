@@ -366,10 +366,12 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ## Cross-cutting: telemetria od dnia 1 (ADR-0017)
 
+> **Slice analityki z event-logu DONE 2026-06-21** (wątek `faza-telemetry-analyze`): `scripts/analyze_battle.py` — analityczny raport markdown bitwy **z samego event-logu** (komplementarny do `battle_replay.py` narracji): wynik gry (zwycięzca pkt 5.f + timeline kontroli celów per runda pkt 5.d/8.c.ii), statystyki ataku/obrony per oddział i per strona (obrażenia/trafienia/straty/ELIMINOWANY pkt 26.d), rozkład akcji + typów eventów, szczęście kości Przegrupowania (rozkład 1–6 + średnia pkt 20). Dwa źródła (jak `battle_replay`): `--fixture`/`--map` (sim, mapowanie oddział→strona z `final_state`) + `--from-db` (`persistence.load_events`, read-only; bez `initial_state` → degradacja do per-oddział). Skrypt-liść, 14 testów. Emisja structlog/jsonl (poniżej) odłożona — wymaga zmian w hot-path silnika.
+
 - [ ] `structlog` w `app/services/engine/{resolver, persistence}.py` — każdy event: `battle_id, action_id, actor_user_id`
 - [ ] `data/battle_metrics/{battle_id}.jsonl` — `action_count, dice_rolls_total, dice_distribution, time_per_action_ms`
 - [ ] `data/agent_metrics/{agent_user_id}.jsonl` — `decision_time_ms, decision_quality_score`
-- [ ] `scripts/analyze_battle.py <id>` — raport markdown z wykresami
+- [x] `scripts/analyze_battle.py` — raport markdown z (tekstowymi) wykresami z event-logu — **DONE 2026-06-21** (slice; `<id>` przez `--from-db`)
 - [ ] `.gitignore`: `data/{battle,agent}_metrics/`
 
 ---
