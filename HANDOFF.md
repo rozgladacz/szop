@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-import-cycle-db](docs/handoffs/HANDOFF_faza-import-cycle-db.md) | Naprawa latentnego cyklu importu `app.db` (lazy-import w `init_db`) + uproszczenie workaroundów w 3 skryptach + test regresyjny. | `app/db.py`, `scripts/{battle_replay,analyze_battle,exploit_hunt}.py` | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-06-21 — faza-import-cycle-db (archived) — lazy-import rozrywa cykl `app.db→services→models→Base`
+- Naprawa latentnego cyklu importu: `import app.db` jako pierwszy moduł aplikacji rzucał `ImportError: cannot import name 'Base'` (db.py importował `from .services import ability_registry, costs` na poziomie modułu → `ability_registry`→`app.models`→`from .db import Base`, niezdefiniowany). Oba symbole używane wyłącznie w `init_db()` → przeniesione do lazy importu. Usunięto workaroundy `import app.models` (PRZED `app.db`) w 3 standalone-skryptach silnika. Wykryte przy `faza-b-6-replay` (B6), gdzie obchodzono je ręcznie.
+- Pliki: `app/db.py` (lazy import w `init_db`), `scripts/{battle_replay,analyze_battle,exploit_hunt}.py` (−workaround), `tests/test_db_import_cycle.py` (NEW 3 — subprocess pinuje import db-first). Commit na `Faza_A`: `d691cf7`.
+- Weryfikacja: pytest **1837 passed** (1834 baseline + 3). Sanity świeży proces `import app.db; assert Base` OK; `import app.main` + `init_db` OK; smoke `--from-db` (battle_replay/analyze_battle) graceful. Call-site: 0 odwołań do `app.db.costs`/`app.db.ability_registry` jako atrybutu modułu. `/simplify` inline 0 zmian (netto −6 linii kodu); `/review`/`/security-review` pominięte warunkowo (diff <50 linii, kolejność importu, brak hot-path/SSOT/auth).
+- Doc updates: brak/N/A (czysty bug-fix infra — brak nowego pakietu/ADR/ENV/komendy/checkboxa roadmap).
 
 ### 2026-06-21 — faza-telemetry-aggregate (archived) — `analyze_battle --games N` (agregat telemetrii)
 - Tryb agregatu dla `scripts/analyze_battle.py` (kontynuacja `faza-telemetry-analyze`): N gier z naprzemienną inicjatywą (metodyka próby `balance_simulate`) → raport **średnich per strona** (obrażenia zadane/otrzymane, straty/zabicia, miks akcji — na grę) + rozkład wyników (P0/P1/remis + win-rate) + zagregowany rozkład rzutów Przegrupowania. Adresuje otwarte pytanie D4 ("sufit = jakość polityki") na poziomie agregatu: pokazuje CZY silniejszy bot zadaje więcej obrażeń, czy trzyma cele mniejszym kosztem. Reuse rdzenia `analyze_battle_log` per gra; wspólny `_simulate_one` (refaktor — `analyze_from_fixture` też go używa, sygnatura/zachowanie zachowane). `--games N>1` niespójne z `--from-db` (exit 2). **Real-run (priority vs claude_v3, 8 gier): niemal równe obrażenia (P0 39.9 / P1 38.6 zadane), ale claude_v3 50% > priority 12% wygranych → różnica w kontroli celów, nie sile ognia — empirycznie potwierdza wniosek D4.**
