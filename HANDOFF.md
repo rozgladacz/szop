@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_faza-telemetry-json](docs/handoffs/HANDOFF_faza-telemetry-json.md) | Maszynowy eksport telemetrii `--json PATH` w `analyze_battle.py` (ADR-0017, metryki strukturalne z event-logu). | `scripts/analyze_battle.py`, `tests/test_analyze_battle.py` | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -47,6 +46,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-06-21 — faza-telemetry-json (archived) — maszynowy eksport metryk `--json` (ADR-0017 slice)
+- Kontynuacja telemetrii (ADR-0017): `scripts/analyze_battle.py --json PATH` zapisuje metryki bitwy/agregatu jako JSON (jedna linia = rekord jsonl, schema `szop.battle_metrics/v1`) — **additive** do raportu markdown. Adresuje box `data/battle_metrics/*.jsonl` dla pól ODZYSKIWALNYCH z event-logu (rozkład akcji/typów eventów, kości Przegrupowania, staty per oddział/strona, kontrola celów). Serializery `analysis_to_dict`/`aggregate_to_dict` (czyste, JSON round-trip); wydzielone compute-helpery `_fixture_analysis`/`_fixture_aggregate`/`_db_analysis` (`analyze_from_*` delegują, zwroty bez zmian → testy zielone). Pola czasowe (`time_per_action_ms`/`decision_time_ms`) + structlog live-emission w resolver/persistence świadomie odłożone (hot-path silnika). `.gitignore` box spełniony bez zmiany (blankietowy `data/`).
+- Pliki: `scripts/analyze_battle.py` (+serializery/+`--json`/compute-split), `tests/test_analyze_battle.py` (+5 → 27), `scripts/README.md`, `docs/roadmap.md`. Commit na `Faza_A`: `d0b25e1`.
+- Weryfikacja: pytest **1842 passed** (1837 baseline + 5). Smoke CLI 3 tryby (`--json` per-battle kind=battle/side_stats/8 units, `--games 6` kind=aggregate, `--from-db` graceful events=0/side_stats=None). `/simplify` inline 0 zmian; `/review`/`/security-review` pominięte warunkowo (izolowany skrypt-liść read-only, pełne pokrycie incl. JSON round-trip; brak hot-path/SSOT/auth).
+- Doc updates: `scripts/README.md` (sekcja `--json` + scope), `docs/roadmap.md` (box `data/battle_metrics` `[~]` slice + `.gitignore` `[x]` + nota cross-cutting/ADR-0017). Brak nowego ADR (ADR-0017 już w indeksie, status `—` — pełny scope structlog/timing odłożony).
 
 ### 2026-06-21 — faza-import-cycle-db (archived) — lazy-import rozrywa cykl `app.db→services→models→Base`
 - Naprawa latentnego cyklu importu: `import app.db` jako pierwszy moduł aplikacji rzucał `ImportError: cannot import name 'Base'` (db.py importował `from .services import ability_registry, costs` na poziomie modułu → `ability_registry`→`app.models`→`from .db import Base`, niezdefiniowany). Oba symbole używane wyłącznie w `init_db()` → przeniesione do lazy importu. Usunięto workaroundy `import app.models` (PRZED `app.db`) w 3 standalone-skryptach silnika. Wykryte przy `faza-b-6-replay` (B6), gdzie obchodzono je ręcznie.
