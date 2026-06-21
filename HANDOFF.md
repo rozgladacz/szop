@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
+| [HANDOFF_faza-import-cycle-db](docs/handoffs/HANDOFF_faza-import-cycle-db.md) | Naprawa latentnego cyklu importu `app.db` (lazy-import w `init_db`) + uproszczenie workaroundów w 3 skryptach + test regresyjny. | `app/db.py`, `scripts/{battle_replay,analyze_battle,exploit_hunt}.py` | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)

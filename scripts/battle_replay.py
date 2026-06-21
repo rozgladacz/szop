@@ -336,11 +336,6 @@ def replay_from_fixture(
 
 def replay_from_db(battle_id: int) -> str:
     """Ładuje eventy zapisanej bitwy z persystencji i renderuje log (read-only)."""
-    # `app.models` PRZED `app.db`: `app.db` importuje `app.services` zanim
-    # zdefiniuje `Base`, więc zaimportowanie `app.db` jako pierwszego z pary
-    # db/models wpada w cykl (Base jeszcze nie istnieje). Normalny bootstrap
-    # aplikacji importuje `app.models` pierwszy — odtwarzamy tę kolejność.
-    import app.models  # noqa: F401
     from app.db import Base, SessionLocal, engine
     from app.services.engine.persistence import load_events
 

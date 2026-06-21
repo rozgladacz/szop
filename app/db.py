@@ -8,7 +8,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import DB_URL
-from .services import ability_registry, costs
 
 logger = logging.getLogger(__name__)
 
@@ -427,6 +426,11 @@ def init_db() -> None:
 
     from . import models
     from .security import hash_password
+    # Lazy import: `app.services.ability_registry` ładuje `app.models`, które
+    # importuje `Base` z tego modułu. Trzymanie tego importu na poziomie modułu
+    # tworzyłoby cykl, gdy `app.db` zaimportowany jako pierwszy z pary db/models
+    # (standalone skrypty silnika). Oba symbole używane wyłącznie tutaj.
+    from .services import ability_registry, costs
 
     db_path = Path(DB_URL.split("///")[-1]) if DB_URL.startswith("sqlite") else None
     first_start = db_path is not None and not db_path.exists()

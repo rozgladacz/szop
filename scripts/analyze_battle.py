@@ -600,10 +600,6 @@ def analyze_from_db(battle_id: int) -> str:
     Persystencja nie trzyma `initial_state` ⇒ `owner_map=None` ⇒ raport bez
     rollupu per strona (degradacja łagodna, jak `battle_replay.replay_from_db`).
     """
-    # `app.models` PRZED `app.db`: `app.db` importuje `app.services` zanim
-    # zdefiniuje `Base` (cykl, gdy `app.db` zaimportowany pierwszy z pary).
-    # Normalny bootstrap aplikacji importuje `app.models` pierwszy — odtwarzamy.
-    import app.models  # noqa: F401
     from app.db import Base, SessionLocal, engine
     from app.services.engine.persistence import load_events
 
