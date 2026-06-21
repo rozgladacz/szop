@@ -332,9 +332,17 @@ surowe rzuty w logu). Te same dwa źródła co `battle_replay`: `--fixture`/`--m
 (`persistence.load_events`, read-only; bez `initial_state` ⇒ raport degraduje się
 łagodnie do per-oddział bez rollupu per strona). Skrypt-liść — zero zmian w rdzeniu.
 
+Tryb agregatu `--games N` (N>1): N gier z naprzemienną inicjatywą (metodyka próby
+jak `balance_simulate`) → raport **średnich per strona** (obrażenia/straty/akcje na
+grę) + rozkład wyników (P0/P1/remis) + zagregowane kości. Diagnostyka „DLACZEGO bot
+wygrywa" — luka nieobjęta przez `leaderboard`/`balance_report` (tylko win-rate).
+Np. priority vs claude_v3: niemal równe obrażenia, ale claude_v3 wygrywa częściej →
+różnica leży w kontroli celów, nie w sile ognia (potwierdza wniosek D4).
+
 ```powershell
 python scripts/analyze_battle.py                                      # demo fixtura, priority vs random
 python scripts/analyze_battle.py --map symetryczna_a --map-seed 3 --players priority3,priority --seed 7
+python scripts/analyze_battle.py --players priority,claude_v3 --games 20  # agregat 20 gier
 python scripts/analyze_battle.py --from-db 12                         # analiza zapisanej bitwy z DB
 python scripts/analyze_battle.py --out reports/analyze/battle.md      # zapis do pliku
 ```

@@ -385,18 +385,152 @@ def render_analysis(analysis: BattleAnalysis, *, header: str | None = None) -> s
 
 
 # ---------------------------------------------------------------------------
+# Agregacja wielu gier — czyste funkcje (bez I/O)
+# ---------------------------------------------------------------------------
+
+#: Pola `SideStats` agregowane jako średnie per gra (bez `player`/`units`).
+_SIDE_MEAN_FIELDS = (
+    "shots_fired",
+    "melees_fought",
+    "wounds_dealt",
+    "wounds_received",
+    "kills_inflicted",
+    "models_lost",
+    "eliminated_lost",
+    "moves",
+    "morale_failures",
+)
+
+
+@dataclass(slots=True)
+class AggregateAnalysis:
+    """Agregat telemetrii z próby N gier (ten sam matchup, naprzemienna inicjatywa)."""
+
+    games: int = 0
+    win_p0: int = 0
+    win_p1: int = 0
+    draws: int = 0
+    mean_rounds: float = 0.0
+    side_means: dict[int, dict[str, float]] = field(default_factory=dict)
+    action_means: dict[str, float] = field(default_factory=dict)
+    morale_dice_total: dict[int, int] = field(default_factory=dict)
+
+
+def aggregate_analyses(analyses) -> AggregateAnalysis:
+    """Agreguje listę `BattleAnalysis` (po jednej na grę) w `AggregateAnalysis`.
+
+    Wymaga, by każda gra miała `side_stats` (sim path z `owner_map`). Średnie
+    liczone per gra (dzielone przez liczbę gier, nie przez liczbę oddziałów).
+    """
+    analyses = list(analyses)
+    agg = AggregateAnalysis(games=len(analyses))
+    if not analyses:
+        agg.morale_dice_total = {face: 0 for face in range(1, 7)}
+        return agg
+
+    total_rounds = 0
+    side_sums: dict[int, dict[str, int]] = {
+        0: {f: 0 for f in _SIDE_MEAN_FIELDS},
+        1: {f: 0 for f in _SIDE_MEAN_FIELDS},
+    }
+    action_sums: Counter[str] = Counter()
+    dice_sums: Counter[int] = Counter()
+
+    for a in analyses:
+        if a.winner == 0:
+            agg.win_p0 += 1
+        elif a.winner == 1:
+            agg.win_p1 += 1
+        else:
+            agg.draws += 1
+        total_rounds += a.rounds_played
+        if a.side_stats is not None:
+            for p in (0, 1):
+                s = a.side_stats[p]
+                for f in _SIDE_MEAN_FIELDS:
+                    side_sums[p][f] += getattr(s, f)
+        for name, n in a.action_counts.items():
+            action_sums[name] += n
+        for face, n in a.morale_dice.items():
+            dice_sums[face] += n
+
+    n = len(analyses)
+    agg.mean_rounds = total_rounds / n
+    agg.side_means = {
+        p: {f: side_sums[p][f] / n for f in _SIDE_MEAN_FIELDS} for p in (0, 1)
+    }
+    agg.action_means = {name: total / n for name, total in action_sums.items()}
+    agg.morale_dice_total = {face: dice_sums.get(face, 0) for face in range(1, 7)}
+    return agg
+
+
+def render_aggregate(agg: AggregateAnalysis, *, header: str | None = None) -> str:
+    """Renderuje `AggregateAnalysis` jako raport markdown."""
+    lines: list[str] = []
+    if header:
+        lines.append(f"# {header}")
+        lines.append("")
+
+    lines.append("## Rozkład wyników")
+    lines.append("")
+    lines.append(f"- Gier: **{agg.games}**, śr. rund: **{agg.mean_rounds:.2f}**")
+    if agg.games:
+        wr0 = agg.win_p0 / agg.games
+        wr1 = agg.win_p1 / agg.games
+        wrd = agg.draws / agg.games
+        lines.append(f"- P0 wygrane: {agg.win_p0} {_bar(wr0)} {wr0:.0%}")
+        lines.append(f"- P1 wygrane: {agg.win_p1} {_bar(wr1)} {wr1:.0%}")
+        lines.append(f"- Remisy:     {agg.draws} {_bar(wrd)} {wrd:.0%}")
+
+    if agg.side_means:
+        lines.append("")
+        lines.append("## Średnie per strona (na grę)")
+        lines.append("")
+        lines.append(
+            "| Strona | Ostrzał | Walka | Rany zad. | Rany otrz. | Zabite "
+            "| Straty | ELIM | Ruchy | Por. Przegr. |"
+        )
+        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+        for p in (0, 1):
+            m = agg.side_means[p]
+            lines.append(
+                f"| P{p} | {m['shots_fired']:.1f} | {m['melees_fought']:.1f} "
+                f"| {m['wounds_dealt']:.1f} | {m['wounds_received']:.1f} "
+                f"| {m['kills_inflicted']:.1f} | {m['models_lost']:.1f} "
+                f"| {m['eliminated_lost']:.1f} | {m['moves']:.1f} "
+                f"| {m['morale_failures']:.1f} |"
+            )
+
+    if agg.action_means:
+        lines.append("")
+        lines.append("## Średni miks akcji (na grę)")
+        lines.append("")
+        peak = max(agg.action_means.values()) or 1.0
+        for name, mean in sorted(agg.action_means.items(), key=lambda x: (-x[1], x[0])):
+            lines.append(f"- {name:18s} {_bar(mean / peak)} {mean:.1f}")
+
+    lines.append("")
+    lines.extend(_render_dice(agg.morale_dice_total))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Źródła event-logu
 # ---------------------------------------------------------------------------
 
 
-def analyze_from_fixture(
+def _simulate_one(
     fixture,
     *,
     player_kinds: tuple[str, str],
-    seed: int = 0,
-    initiative_player: int = 0,
-) -> str:
-    """Symuluje jedną grę z fixtury i renderuje raport. Reuse `balance_simulate` SSOT."""
+    seed: int,
+    initiative_player: int,
+) -> BattleAnalysis:
+    """Symuluje jedną grę i zwraca jej `BattleAnalysis`. Reuse `balance_simulate` SSOT.
+
+    Gracze z rozłącznych seedów (P1 += `PLAYER_SEED_OFFSET`) — jak `balance_simulate`,
+    usuwa bias mirror-matchu (finding F2). `owner_map` z `final_state` → per strona.
+    """
     players = [
         bsim.make_player(player_kinds[0], seed),
         bsim.make_player(player_kinds[1], seed + bsim.PLAYER_SEED_OFFSET),
@@ -410,12 +544,54 @@ def analyze_from_fixture(
         initiative_player=initiative_player,
     )
     owner_map = {b.id: b.owner_player for b in result.final_state.blobs}
-    analysis = analyze_battle_log(result.events, owner_map=owner_map, winner=result.winner)
+    return analyze_battle_log(result.events, owner_map=owner_map, winner=result.winner)
+
+
+def analyze_from_fixture(
+    fixture,
+    *,
+    player_kinds: tuple[str, str],
+    seed: int = 0,
+    initiative_player: int = 0,
+) -> str:
+    """Symuluje jedną grę z fixtury i renderuje raport per-battle."""
+    analysis = _simulate_one(
+        fixture, player_kinds=player_kinds, seed=seed, initiative_player=initiative_player
+    )
     header = (
         f"Analiza: {fixture.name}  —  P0={player_kinds[0]} vs P1={player_kinds[1]}  "
-        f"(seed={seed}, rund={result.rounds_played})"
+        f"(seed={seed}, rund={analysis.rounds_played})"
     )
     return render_analysis(analysis, header=header)
+
+
+def analyze_aggregate_from_fixture(
+    fixture,
+    *,
+    player_kinds: tuple[str, str],
+    seed: int = 0,
+    games: int,
+) -> str:
+    """Symuluje N gier (naprzemienna inicjatywa) i renderuje raport agregatu.
+
+    Metodyka próby = `balance_simulate`: seed kości = `seed + i`, inicjatywa
+    = `i % 2`. `owner_player` stały (roster[0]→P0) → staty per strona porównywalne.
+    """
+    analyses = [
+        _simulate_one(
+            fixture,
+            player_kinds=player_kinds,
+            seed=seed + i,
+            initiative_player=bsim.initiative_for_game(i),
+        )
+        for i in range(games)
+    ]
+    agg = aggregate_analyses(analyses)
+    header = (
+        f"Agregat ({games} gier): {fixture.name}  —  "
+        f"P0={player_kinds[0]} vs P1={player_kinds[1]}  (seed={seed})"
+    )
+    return render_aggregate(agg, header=header)
 
 
 def analyze_from_db(battle_id: int) -> str:
@@ -493,7 +669,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         choices=(0, 1),
         default=0,
-        help="Gracz z inicjatywą w rundzie 1 (domyślnie 0).",
+        help="Gracz z inicjatywą w rundzie 1 (domyślnie 0; ignorowane dla --games>1).",
+    )
+    parser.add_argument(
+        "--games",
+        type=int,
+        default=1,
+        metavar="N",
+        help="N>1 → raport agregatu z N gier (naprzemienna inicjatywa) zamiast per-battle.",
     )
     parser.add_argument(
         "--out",
@@ -508,6 +691,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
 
     if args.from_db is not None:
+        if args.games > 1:
+            print(
+                "--games>1 dotyczy tylko symulacji (--fixture/--map), nie --from-db",
+                file=sys.stderr,
+            )
+            return 2
         report = analyze_from_db(args.from_db)
     else:
         if args.map:
@@ -515,12 +704,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             path = args.fixture or str(bsim.DEFAULT_FIXTURE)
             fixture = bsim.load_battle_fixture(path)
-        report = analyze_from_fixture(
-            fixture,
-            player_kinds=args.players,
-            seed=args.seed,
-            initiative_player=args.initiative,
-        )
+        if args.games > 1:
+            report = analyze_aggregate_from_fixture(
+                fixture,
+                player_kinds=args.players,
+                seed=args.seed,
+                games=args.games,
+            )
+        else:
+            report = analyze_from_fixture(
+                fixture,
+                player_kinds=args.players,
+                seed=args.seed,
+                initiative_player=args.initiative,
+            )
 
     if args.out:
         p = pathlib.Path(args.out)

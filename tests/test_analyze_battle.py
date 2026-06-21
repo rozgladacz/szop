@@ -232,3 +232,91 @@ def test_cli_main_smoke(mod, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "## Wynik" in out
+
+
+# ---------------------------------------------------------------------------
+# Agregacja wielu gier
+# ---------------------------------------------------------------------------
+
+
+def test_aggregate_sums_and_means(mod):
+    a = mod.analyze_battle_log(_synthetic_events(), owner_map={1: 0, 3: 1})
+    agg = mod.aggregate_analyses([a, a])  # dwie identyczne gry
+
+    assert agg.games == 2
+    assert (agg.win_p0, agg.win_p1, agg.draws) == (0, 2, 0)  # obie wygrał P1
+    assert agg.mean_rounds == 2.0
+    # Średnie identycznych gier == wartości pojedynczej gry.
+    assert agg.side_means[0]["wounds_dealt"] == 3.0
+    assert agg.side_means[0]["shots_fired"] == 1.0
+    assert agg.side_means[0]["eliminated_lost"] == 1.0
+    assert agg.side_means[1]["wounds_dealt"] == 2.0
+    assert agg.side_means[1]["morale_failures"] == 1.0
+    assert agg.action_means["Manewr"] == 1.0
+    # Kości sumowane (nie uśredniane).
+    assert agg.morale_dice_total == {1: 0, 2: 2, 3: 0, 4: 0, 5: 2, 6: 0}
+
+
+def test_aggregate_win_distribution_mixed(mod):
+    win1 = mod.analyze_battle_log(_synthetic_events(), owner_map={1: 0, 3: 1})
+    draw = mod.analyze_battle_log(
+        [RoundEnded(sequence=1, round_number=4, objectives_held=(1, 1))],
+        owner_map={},
+    )
+    agg = mod.aggregate_analyses([win1, draw])
+    assert agg.games == 2
+    assert (agg.win_p0, agg.win_p1, agg.draws) == (0, 1, 1)
+    assert agg.mean_rounds == 3.0  # (2 + 4) / 2
+
+
+def test_aggregate_empty(mod):
+    agg = mod.aggregate_analyses([])
+    assert agg.games == 0
+    assert (agg.win_p0, agg.win_p1, agg.draws) == (0, 0, 0)
+    assert agg.morale_dice_total == {f: 0 for f in range(1, 7)}
+
+
+def test_render_aggregate_sections(mod):
+    a = mod.analyze_battle_log(_synthetic_events(), owner_map={1: 0, 3: 1})
+    text = mod.render_aggregate(mod.aggregate_analyses([a, a]), header="Agg")
+    assert "# Agg" in text
+    assert "## Rozkład wyników" in text
+    assert "## Średnie per strona" in text
+    assert "## Średni miks akcji" in text
+    assert "## Szczęście kości" in text
+    assert "Gier: **2**" in text
+
+
+def test_analyze_aggregate_from_fixture_end_to_end(mod):
+    fixture = mod.bsim.load_battle_fixture(str(_FIXTURE))
+    report = mod.analyze_aggregate_from_fixture(
+        fixture, player_kinds=("priority", "random"), seed=1, games=4
+    )
+    assert "Agregat (4 gier)" in report
+    assert "## Rozkład wyników" in report
+    assert "## Średnie per strona" in report
+
+
+def test_analyze_aggregate_deterministic(mod):
+    fixture = mod.bsim.load_battle_fixture(str(_FIXTURE))
+    r1 = mod.analyze_aggregate_from_fixture(
+        fixture, player_kinds=("priority", "random"), seed=2, games=3
+    )
+    r2 = mod.analyze_aggregate_from_fixture(
+        fixture, player_kinds=("priority", "random"), seed=2, games=3
+    )
+    assert r1 == r2
+
+
+def test_cli_games_aggregate(mod, capsys):
+    rc = mod.main(["--players", "priority,random", "--seed", "1", "--games", "3"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Agregat (3 gier)" in out
+    assert "## Rozkład wyników" in out
+
+
+def test_cli_games_with_from_db_rejected(mod, capsys):
+    rc = mod.main(["--from-db", "1", "--games", "2"])
+    assert rc == 2
+    assert "--games" in capsys.readouterr().err
