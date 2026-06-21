@@ -250,6 +250,18 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 
 Rdzeń renderujący to czyste funkcje (bez I/O) — render **z samego event-logu** (bez rekonstrukcji stanu), więc tryb sim i `--from-db` dzielą ścieżkę (persystencja nie trzyma `initial_state`). **Odłożone (B6):** bogatszy widok stanu (po N-tym evencie via `apply_events`), SSE stream (po B4), canvas frontend. 16 testów (`tests/test_battle_replay.py`).
 
+## Telemetria — `scripts/analyze_battle.py` (ADR-0017, slice z event-logu 2026-06-21)
+
+Siostrzany skrypt-liść do `battle_replay.py`: ten sam event-log, ale zamiast narracji — **analityka** (markdown). Drugi konsument strumienia eventów (headless-first, ADR-0013).
+
+| Element | Zawartość |
+|---|---|
+| `analyze_battle_log(events, *, owner_map, winner) -> BattleAnalysis` | Jednoprzebiegowa agregacja: `UnitStats` per oddział + `SideStats` per strona (gdy `owner_map`), timeline kontroli celów (pkt 5.d/8.c.ii), rozkład akcji + typów eventów, rozkład rzutów Przegrupowania (pkt 20) |
+| `render_analysis(analysis, *, header) -> str` | Raport markdown: wynik (pkt 5.f) + tabele per strona/oddział + tekstowe słupki (`_bar`) |
+| Źródła eventów | `--fixture`/`--map` (`simulate_from_rosters`, `owner_map` z `final_state`) lub `--from-db <id>` (`persistence.load_events`, read-only; bez `owner_map` → degradacja do per-oddział) |
+
+**Scope (slice):** pełny ADR-0017 (structlog w `resolver`/`persistence` + pliki `data/*_metrics/*.jsonl`) odłożony — wymaga zmian w hot-path silnika; ten skrypt czyta sam event-log. 14 testów (`tests/test_analyze_battle.py`).
+
 ## Frontend JS — mapa modułów
 
 Aktualna mapa zależności i lista call sites po podziale `app/static/js/app.js`: `docs/frontend_js_modules.md`.
