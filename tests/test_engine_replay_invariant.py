@@ -524,7 +524,10 @@ def test_gate_full_multi_action_replay():
     initial = live  # reset initial_for_replay po manualnej korekcie pozycji
 
     actions = [
-        ManeuverAction(unit_id=1, target_position=Position(15, 0)),
+        # Manewr w budżecie 6″ (unit 1 @ (6,0) → (12,0)); >6″ jest teraz
+        # nielegalny (resolver._validate_action, pkt 15.a) — dystans incydentalny
+        # dla tego testu (sedno: replay-invariant Manewru, nie zasięg).
+        ManeuverAction(unit_id=1, target_position=Position(12, 0)),
         ShootAction(unit_id=3, target_id=1, weapon=weapon_rifle),
         ChargeAction(unit_id=2, target_id=4, weapon=weapon_sword),
         DefendAction(unit_id=4),

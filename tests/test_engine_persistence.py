@@ -115,7 +115,10 @@ def _play_smoke_battle():
 
     while not is_battle_over(state) and state.round <= 2:
         actions = [
-            (0, ManeuverAction(unit_id=1, target_position=Position(15, 0))),
+            # Manewr w budżecie 6″ (unit 1 @ (6,0) → (12,0)); >6″ jest teraz
+            # nielegalny (resolver._validate_action, pkt 15.a) — wcześniej 15″
+            # przechodziło tylko bo silnik nie walidował dystansu.
+            (0, ManeuverAction(unit_id=1, target_position=Position(12, 0))),
             (1, ShootAction(unit_id=3, target_id=1, weapon=rifle)),
             (0, ChargeAction(unit_id=2, target_id=4, weapon=sword)),
             (1, DefendAction(unit_id=4)),

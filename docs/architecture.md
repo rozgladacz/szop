@@ -141,7 +141,7 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `interrupts.py` | ~150 | `InterruptManager` z 4 zamkniętymi punktami per [ADR-0015](adr/0015-interrupt-points.md), `register_interrupt_handler(point, slug)` decorator. Strażnik (id 31) jako MVP stub |
 | `actions.py` | ~80 | 6 Action types frozen (`DeploymentAction/ManeuverAction/DefendAction/ShootAction/ChargeAction/SpecialAction`) + `Action` Union alias |
 | `phases.py` | ~530 | `setup_phase` (pkt 7+9), `deployment_round` (pkt 13), `activation_phase` (pkt 11.b dispatch). **B3.9.c**: `ActivationContext` frozen dataclass + `_build_activation_context` (delta `wounds_received_this_activation` per blob + `melee_combatants` frozenset) — `_regroup_test` używa delty zamiast cumulative (fix bug #1), defender szarży regroup-testuje w aktywacji chargera (fix #2), `damage_balance` reset na obu combatants (fix #5). **B3.9.d**: emit Status* + MeleeBalanceReset. **B3.9.e**: `_apply_special` redukcja do dispatcher-a `effects.get_active_ability`. |
-| `resolver.py` | ~140 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` z walidacją (5 reguł IllegalActionError) + switch active_player pkt 8.a. Helpers `should_end_round` / `is_battle_over` |
+| `resolver.py` | ~160 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` z walidacją (6 reguł IllegalActionError; m.in. Manewr `dist ≤ effective_move_inches`, pkt 15.a + Szybki/Wolny — Trudny/Niedostępny pkt 4.c → E4) + switch active_player pkt 8.a. Helpers `should_end_round` / `is_battle_over` |
 
 ### Event-sourced data flow
 

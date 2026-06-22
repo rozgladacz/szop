@@ -7,7 +7,8 @@
 
 Resolver wykonuje:
 1. **Walidacja** — gra nie zakończona, aktor nie pokonany, nie Aktywowany,
-   odpowiedni active_player. Przy niezgodności → `IllegalActionError`.
+   odpowiedni active_player, Manewr w budżecie ruchu (dist ≤ efektywny budżet,
+   pkt 15.a + Szybki/Wolny). Przy niezgodności → `IllegalActionError`.
 2. **Dispatch** — delegacja do `phases.activation_phase` (która sama dispatcha
    per Action type → combat.resolve_* + Przegrupowanie + Aktywowany).
 3. **Switch inicjatywy** (pkt 8.a) — po aktywacji active_player przechodzi
@@ -29,20 +30,31 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Callable
 
-from app.services.engine.actions import Action, ChargeAction, ShootAction
+from app.services.engine.actions import (
+    Action,
+    ChargeAction,
+    ManeuverAction,
+    ShootAction,
+)
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
+from app.services.engine.geometry import distance
 from app.services.engine.phases import (
     _apply_single_action,
     _begin_activation,
     _finalize_activation,
     activation_phase,
 )
-from app.services.engine.state import BattleState
+from app.services.engine.state import BattleState, UnitBlob, effective_move_inches
 from app.services.engine.status import STATUS_AKTYWOWANY
 
 #: Maks. liczba akcji w aktywacji (pkt 11.b.iv — Manewr liczy się do limitu).
 MAX_ACTIONS_PER_ACTIVATION = 2
+
+#: Tolerancja float dla walidacji dystansu Manewru (pkt 15.a). Boty skalują ruch
+#: dokładnie do budżetu (`_move_toward` ratio = max_dist/d) → wynik bywa
+#: max_dist ± ~1e-12; epsilon zapobiega fałszywym odrzuceniom legalnych ruchów.
+_MOVE_EPSILON = 1e-6
 
 #: Callback dostarczający kolejną akcję w aktywacji (lub None = koniec).
 #: `(state, unit_id, actions_taken) -> Action | None`.
@@ -54,7 +66,8 @@ class IllegalActionError(Exception):
 
     Powody: gra zakończona (pkt 5.f), aktor pokonany (models_alive=0), aktor
     już Aktywowany w tej rundzie (pkt 22.d.i), aktor należy do innego gracza
-    niż `state.active_player` (pkt 11.a).
+    niż `state.active_player` (pkt 11.a), Manewr przekracza budżet ruchu
+    (`dist > efektywny_budżet`, pkt 15.a + zdolność 33 Szybki/Wolny).
     """
 
 
@@ -75,6 +88,24 @@ class ResolverResult:
 # ---------------------------------------------------------------------------
 # Walidacja
 # ---------------------------------------------------------------------------
+
+
+def _validate_maneuver_distance(actor: UnitBlob, action: ManeuverAction) -> None:
+    """Raise `IllegalActionError` gdy Manewr przekracza budżet ruchu (pkt 15.a).
+
+    Domyka kontrakt deklarowany w `actions.py` (`ManeuverAction` docstring) +
+    `phases._apply_maneuver` docstring — engine egzekwuje legalność dystansu.
+    Budżet = `effective_move_inches(actor)` (pkt 15.a + zdolność 33 Szybki/Wolny).
+    Krytyczne pod B4: klient `POST /battles/{id}/actions` nie może teleportować
+    oddziału. Trudny/Niedostępny (pkt 4.c) świadomie nieegzekwowane → E4.
+    """
+    dist = distance(actor.position, action.target_position)
+    budget = effective_move_inches(actor)
+    if dist > budget + _MOVE_EPSILON:
+        raise IllegalActionError(
+            f"Unit {action.unit_id} maneuver distance {dist:.3f}\" exceeds move "
+            f"budget {budget:.3f}\" (pkt 15.a + zdolność 33 Szybki/Wolny)"
+        )
 
 
 def _validate_action(state: BattleState, action: Action) -> None:
@@ -103,6 +134,8 @@ def _validate_action(state: BattleState, action: Action) -> None:
             f"Unit {action.unit_id} belongs to player {actor.owner_player}, "
             f"but active_player is {state.active_player} (pkt 11.a)"
         )
+    if isinstance(action, ManeuverAction):
+        _validate_maneuver_distance(actor, action)
 
 
 # ---------------------------------------------------------------------------

@@ -394,6 +394,32 @@ def effective_passives(blob: UnitBlob) -> tuple[str, ...]:
     return tuple(result)
 
 
+def effective_move_inches(blob: UnitBlob, ruleset_version: str = "v1") -> float:
+    """Maksymalny dystans Ruchu oddziału w calach (pkt 15.a + zdolność 33).
+
+    Budżet bazowy = `tables.b_mvp.move_inches` (pkt 15.a „każdy model porusza się
+    o maksymalnie 6″"; ADR-0008). Modyfikatory zdolności 33 Szybki/Wolny
+    (`SZOP_Zdolnosci.md`: „maksymalny dystans ruchu modyfikowany o +2″ (Szybki)
+    lub −2″ (Wolny)"; B0 decyzja #3 — stosowane w runtime): `szybki` +2″,
+    `wolny` −2″. Czytane z `effective_passives(blob)` → honoruje czasowe
+    override'y Rozkaz/Klątwa/Oznaczenie (pkt 11.b.i/12). Clamp ≥ 0.
+
+    **POZA zakresem (E4, roadmap „Ruch nie egzekwuje Trudny/Niedostępny"):**
+    pkt 4.c.iv Trudny (½ ruchu przez teren) — budżet NIE zależy od terenu na
+    trasie (brak parametru `terrain`); pkt 4.c.i Niedostępny — brak path-blocking.
+    """
+    config = load_ruleset(ruleset_version).tables.b_mvp
+    if config is None:
+        raise RuntimeError("b_mvp config missing in tables.yaml; cannot compute move")
+    move = float(config.move_inches)
+    passives = effective_passives(blob)
+    if "szybki" in passives:
+        move += 2.0
+    if "wolny" in passives:
+        move -= 2.0
+    return max(0.0, move)
+
+
 def initial_toughness_for(state: BattleState, unit_id: int) -> int:
     """Zwraca initial_toughness_total dla `unit_id` z `state.initial_toughness_snapshot`.
 

@@ -323,7 +323,10 @@ def _apply_maneuver(
     sequence: int,
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Pkt 14.a Manewr — emit MoveExecuted, update position. Walidacja
-    dist ≤ move_inches deferred do resolver/walidacji wyżej.
+    dist ≤ budżet ruchu (pkt 15.a + Szybki/Wolny) egzekwowana w
+    `resolver._validate_action` (brama walidacji publicznego API silnika).
+    Ta funkcja czysto aplikuje ruch — wywołania przez `activation_phase`
+    bezpośrednio (testy jednostkowe) świadomie omijają walidację.
 
     R5.g (faza-b-rules-resync 2026-06): po move, jeśli aktor jest wewnątrz
     TerrainCircle z feature `Niebezpieczny` (pkt 4.c.v) → wykonaj test
