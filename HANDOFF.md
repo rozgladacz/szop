@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
+| [HANDOFF_faza-telemetry-agents](docs/handoffs/HANDOFF_faza-telemetry-agents.md) | Telemetria decyzji bota (ADR-0017): `data/agent_metrics/*.jsonl` — `decision_time_ms`+`decision_quality_score` per agent via skrypt-liść `analyze_agents.py`. | `app/services/agents/match.py` (additive `on_decision`), `scripts/analyze_agents.py` (NEW) | In progress (2026-06-22) |
 
 
 ## Zasoby zablokowane (reverse lookup)

@@ -21,12 +21,13 @@ model: jedno `apply` per oddział per runda.
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass, replace
-from typing import Sequence
+from typing import Callable, Sequence
 
 from app.services.agents.base import Player, own_active_units
 from app.services.agents.deployment import DeploymentZone
-from app.services.engine.actions import DeploymentAction
+from app.services.engine.actions import Action, DeploymentAction
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
 from app.services.engine.phases import (
@@ -52,6 +53,14 @@ from app.services.engine.state import (
 #: ≤ 4 rundy × liczba oddziałów; cap chroni przed custom Player-em, który nigdy
 #: nie kończy (np. zwraca akcję nie zmieniającą stanu w nieskończoność).
 DEFAULT_MAX_ACTIVATIONS: int = 2000
+
+#: Sygnatura opcjonalnego obserwatora decyzji bota (telemetria, ADR-0017).
+#: Wołany RAZ na aktywację, gdy aktywny gracz faktycznie podejmuje akcję
+#: (pomijane przy przekazaniu inicjatywy / braku aktywowalnych oddziałów).
+#: Argumenty: `(perspective, unit_id, action, state_before, state_after, elapsed_ms)`
+#: — `elapsed_ms` to wall-clock głównej decyzji `choose_action` (bez kontynuacji
+#: 2. akcji). Czysto obserwacyjny — nie wpływa na przebieg gry ani event-log.
+OnDecision = Callable[[int, int, "Action", "BattleState", "BattleState", float], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +95,7 @@ def run_match(
     dice: DeterministicDice,
     *,
     max_activations: int = DEFAULT_MAX_ACTIVATIONS,
+    on_decision: OnDecision | None = None,
 ) -> MatchResult:
     """Rozgrywa pełną grę od stanu **po rozstawieniu** (round ≥ 1) do końca.
 
@@ -94,6 +104,10 @@ def run_match(
         players: 2 `Player`-zy indeksowani przez `owner_player` (0, 1).
         dice: `DeterministicDice` — seed determinuje całą grę.
         max_activations: bezpiecznik anty-zapętlenie.
+        on_decision: opcjonalny obserwator telemetrii (ADR-0017). `None` =
+            zachowanie bez zmian (jedynie pomiar `perf_counter` + test
+            `is not None` per decyzja — bez wpływu na stan/event-log).
+            Wołany po każdej aktywacji — patrz `OnDecision`.
 
     Returns:
         `MatchResult(final_state, events, winner, rounds_played)`.
@@ -108,7 +122,9 @@ def run_match(
     while not is_battle_over(state):
         while not should_end_round(state):
             active = state.active_player
+            _t0 = time.perf_counter()
             action = players[active].choose_action(state, active)
+            _elapsed_ms = (time.perf_counter() - _t0) * 1000.0
             if action is None:
                 # Brak własnych aktywowalnych oddziałów (legal_actions zawsze
                 # daje Obronę per oddział → None ⟺ own_active_units pusty).
@@ -136,6 +152,7 @@ def run_match(
             # Aktywacja do 2 akcji (pkt 11.b.iv) — aktywny gracz dostarcza
             # kolejne akcje przez `continue_activation`.
             player = players[active]
+            state_before = state
             result = apply_activation(
                 state,
                 action,
@@ -148,6 +165,10 @@ def run_match(
             state = result.state
             seq = result.next_sequence
             events.extend(result.events)
+            if on_decision is not None:
+                on_decision(
+                    active, action.unit_id, action, state_before, state, _elapsed_ms
+                )
             activations += 1
             if activations >= max_activations:
                 raise RuntimeError(
@@ -210,6 +231,7 @@ def simulate_from_rosters(
     deployment_zones: Sequence[DeploymentZone] | None = None,
     ruleset_version: str = "v1",
     max_activations: int = DEFAULT_MAX_ACTIVATIONS,
+    on_decision: OnDecision | None = None,
 ) -> MatchResult:
     """Wygoda dla D2: `setup_phase` + `deployment_round` + `run_match`.
 
@@ -243,4 +265,10 @@ def simulate_from_rosters(
         deployment = _build_deployment_from_players(state, players, deployment_zones)
     state, _deploy_events = deployment_round(state, deployment)
     dice = DeterministicDice(seed=seed)
-    return run_match(state, players, dice, max_activations=max_activations)
+    return run_match(
+        state,
+        players,
+        dice,
+        max_activations=max_activations,
+        on_decision=on_decision,
+    )

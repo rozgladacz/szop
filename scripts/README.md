@@ -361,6 +361,35 @@ staty per oddział/strona, kontrola celów. Dla downstream tooling/agregacji
 > Pokryte `tests/test_analyze_battle.py` (syntetyczne + serializery JSON + CLI
 > `--json` + integracja sim end-to-end; bez DB).
 
+### `analyze_agents.py` (telemetria decyzji bota, ADR-0017)
+
+Telemetria **per bot** (nie per bitwa — to robi `analyze_battle.py`): z N gier
+zbiera per aktywację `decision_time_ms` (wall-clock `Player.choose_action`) +
+`decision_quality_score` (Δ `evaluate_state`, samoocena bota wg SSOT
+`policy_eval`). Agregat per agent: liczba decyzji, śr./mediana/max czas, śr.
+jakość, odsetek decyzji poprawiających (quality > 0), miks typów akcji.
+Diagnostyka uzupełnia leaderboard/balance twardymi liczbami per-decyzja (np.
+czy bot "myśli drogo a decyduje dobrze"). Źródło: re-symulacja (`simulate_from_rosters`
+z additive hookiem `on_decision` w `match.run_match`, default None → zero zmian
+zachowania, B7 golden bez zmian). Reuse fixtur/graczy/map z `balance_simulate`.
+
+```bash
+python scripts/analyze_agents.py                                      # demo fixtura, priority vs random
+python scripts/analyze_agents.py --players priority,claude_v3 -n 8 --seed 7
+python scripts/analyze_agents.py --map symetryczna_a --map-seed 3 --players priority3,priority
+python scripts/analyze_agents.py --players priority,random -n 6 --json data/agent_metrics/run.jsonl
+python scripts/analyze_agents.py --out reports/agents/run.md          # zapis raportu markdown
+```
+
+**Maszynowy eksport `--json PATH`:** jsonl, jedna linia = jeden agent, schema
+`szop.agent_metrics/v1`. `decision_quality_score` jest deterministyczna (czysta
+funkcja stanów); `decision_time_ms` zależy od maszyny (wall-clock) — **nie do
+golden/regresji**. `agent` = nazwa bota; konta DB (`agent_user_id`) +
+live-emission w produkcyjnym B4 odłożone do B2 auth (ADR-0030 cz. 2).
+`data/agent_metrics/` jest w `.gitignore` (blankietowy `data/`). Pokryte
+`tests/test_analyze_agents.py` (czyste funkcje jakości/agregacji + JSON
+round-trip + driver end-to-end + backward-compat hooka).
+
 ### `exploit_hunt.py` (D3)
 
 Exploit hunting (roadmap D3, **Opcja A in-memory** — bez DB-write/auth). Czyta

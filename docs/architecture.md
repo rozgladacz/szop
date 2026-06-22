@@ -221,7 +221,7 @@ Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rd
 | `greedy_player.py` | `GreedyPlayer` — depth-1 argmax: `prediction.expected_damage(...).mean` dla ataków, Δ`evaluate_state` dla ruchu |
 | `minimax_player.py` (D4, 2026-06-18) | `MinimaxPlayer(seed)` — lookahead depth-2 (maximin): **faktycznie aplikuje** akcję przez `resolver.apply` (vs heurystyka greedy) → symuluje najlepszą odpowiedź wroga (1 ply) → ocenia `evaluate_state` po przeliczeniu kontroli (`_check_objective_control`, pkt 5.d). Deterministyczny rollout (`DeterministicDice(seed)` per aplikacja; pełny expectiminimax odłożony). `--players minimax`. Bije greedy/random, przegrywa z `priority` (cele poza horyzontem 1-ply) |
 | `policy_eval.py` | `evaluate_state(state, perspective) -> float` — bilans HP + kontrola/bliskość celów (pkt 5) |
-| `match.py` (ADR-0032) | **Headless pętla bitwy**: `run_match(state, players, dice) -> MatchResult` + `simulate_from_rosters(rosters, players, *, seed, deployment_zones=, ...)`. Orkiestruje `apply`+`round_end_phase`+alternacja inicjatywy (pkt 8); jedno wywołanie = jedna pełna gra (pkt 5.f winner). `deployment_zones` (D5) → boty wybierają pozycje startowe |
+| `match.py` (ADR-0032) | **Headless pętla bitwy**: `run_match(state, players, dice) -> MatchResult` + `simulate_from_rosters(rosters, players, *, seed, deployment_zones=, ...)`. Orkiestruje `apply`+`round_end_phase`+alternacja inicjatywy (pkt 8); jedno wywołanie = jedna pełna gra (pkt 5.f winner). `deployment_zones` (D5) → boty wybierają pozycje startowe. Additive `on_decision` hook (telemetria ADR-0017, default None → zero zmian) |
 | `deployment.py` (D5, 2026-06-15) | **Rozstawienie jako decyzja bota** (pkt 24/13.a): `DeploymentZone` (prostokąt strefy, parametr runnera — nie pole stanu) + `grid_positions`/`random_position_in_zone`/`grid_deployment_position` (proste strategie) + `GridDeploymentMixin` (boty deterministyczne) + `Player.choose_deployment(state, unit_id, zone)` (ABC, default=pozycja z roster; `RandomPlayer`=losowa-w-strefie). Walidacja: całe koło w strefie (MVP; Niedostępny + >1″ → E4) |
 | `roster_adapter.py` (2026-06-16, prereq D3) | **Most ORM `Roster`→engine-dict**: `roster_to_engine_roster(roster, *, owner_player, models_mode, positions=) -> AdaptResult`. Reuse SSOT: `costs.normalize_range_value` (zasięg→cale), `costs.ability_identifier` (nazwa→slug), `default_weapon_loadout`. Filtruje `b_mvp_exclusions` (→`dropped_excluded`, inaczej `UnsupportedAbilityError`), oznacza `INCOMPLETE_ABILITIES` (→`inert_incomplete`). `models_mode`: `per_copy` (count blobów × typical_models) \| `aggregate`. Plus `roster_points(roster) -> float` (metryka D3 `win_rate/points`, reuse `costs.roster_unit_cost`). **Slice 1:** broń = domyślny loadout; auto-deploy/extra_weapons/attached-heroes deferowane |
 
@@ -260,7 +260,13 @@ Siostrzany skrypt-liść do `battle_replay.py`: ten sam event-log, ale zamiast n
 | `render_analysis(analysis, *, header) -> str` | Raport markdown: wynik (pkt 5.f) + tabele per strona/oddział + tekstowe słupki (`_bar`) |
 | Źródła eventów | `--fixture`/`--map` (`simulate_from_rosters`, `owner_map` z `final_state`) lub `--from-db <id>` (`persistence.load_events`, read-only; bez `owner_map` → degradacja do per-oddział) |
 
-**Scope (slice):** pełny ADR-0017 (structlog w `resolver`/`persistence` + pliki `data/*_metrics/*.jsonl`) odłożony — wymaga zmian w hot-path silnika; ten skrypt czyta sam event-log. 14 testów (`tests/test_analyze_battle.py`).
+**Scope (slice):** pełny ADR-0017 (structlog w `resolver`/`persistence` + pliki `data/*_metrics/*.jsonl`) odłożony — wymaga zmian w hot-path silnika; ten skrypt czyta sam event-log. 27 testów (`tests/test_analyze_battle.py`, incl. `--games` agregat + `--json`).
+
+### Telemetria decyzji bota — `scripts/analyze_agents.py` (slice `data/agent_metrics`, 2026-06-22)
+
+Trzeci skrypt-liść telemetrii — metryki **per bot** (nie per bitwa). Mierzy KOSZT i JAKOŚĆ decyzji: `decision_time_ms` (wall-clock `Player.choose_action`) + `decision_quality_score` (Δ `evaluate_state`, samoocena bota wg SSOT `policy_eval`). Agregat per agent (śr./mediana/max czas, śr. jakość, % decyzji poprawiających, miks akcji; schema `szop.agent_metrics/v1`).
+
+Instrumentacja przez **additive hook `on_decision`** w `match.run_match`/`simulate_from_rosters` (`OnDecision = Callable[[perspective, unit_id, action, state_before, state_after, elapsed_ms], None]`, default `None` → zero zmian zachowania, B7 golden bez zmian). To pierwszy szew telemetrii czasowej — gotowy też pod live-instrumentację B4. `agent` = nazwa bota (konta DB `agent_user_id` + live-emission produkcyjna odłożone do B2 auth, ADR-0030 cz. 2). 16 testów (`tests/test_analyze_agents.py`).
 
 ## Frontend JS — mapa modułów
 
