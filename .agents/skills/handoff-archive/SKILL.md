@@ -55,7 +55,12 @@ Kroki:
       - Weryfikacja: <stan>
       - Doc updates: <co zaktualizowane w `docs/` z kroku 4, lub "brak/N/A">
       ```
-6. Pokaż userowi diff `HANDOFF.md` + dowolne zmiany w `docs/`/`AGENTS.md` przed dalszym krokiem.
+   d. **Higiena LOG SESJI — zapobiegaj puchnięciu `HANDOFF.md`.** `HANDOFF.md` jest ładowany **w całości co sesję** przez `/load-context`, więc LOG SESJI nie może rosnąć bez końca (znany przypadek: ~50k tokenów / 385 linii, 2026-06-23). Po dodaniu wpisu sprawdź długość sekcji LOG SESJI:
+      - **Reguła:** HANDOFF.md trzyma tylko ostatnie **~2 tygodnie** pracy (orientacyjnie ~12–16 wpisów). Starsze → archiwum.
+      - Jeśli najstarsze wpisy wykraczają poza to okno — przenieś je (od najstarszych) do `docs/handoffs/LOG_ARCHIVE.md`: zachowaj kolejność „najnowsze na górze", dopisuj pod istniejącym nagłówkiem, **nic nie usuwaj** (archiwum = pełna historia).
+      - W HANDOFF.md zostaw na końcu LOG SESJI wskaźnik do archiwum (jeśli go jeszcze nie ma).
+      - `LOG_ARCHIVE.md` celowo **bez prefiksu `HANDOFF_`** — nie może być liczony jako aktywny wątek przez SessionStart hook ani skille `handoff-status`/`handoff-sync`. Format wpisu identyczny jak w HANDOFF.md.
+6. Pokaż userowi diff `HANDOFF.md` + dowolne zmiany w `docs/`/`AGENTS.md` (w tym `LOG_ARCHIVE.md`, jeśli archiwizowano) przed dalszym krokiem.
 7. Po potwierdzeniu — usuń `docs/handoffs/HANDOFF_<slug>.md` (`git rm` jeśli pod kontrolą git, inaczej `rm`).
 8. NIE commituj samodzielnie — czekaj na potwierdzenie usera, że chce commit.
 
