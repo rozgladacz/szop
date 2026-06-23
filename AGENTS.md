@@ -22,7 +22,7 @@
 
 ## Skille operacyjne — kanon agent-niezależny
 
-Treść skilli (`load-context`, `handoff-start/status/sync/archive`, `rule-update`, `reflect-and-improve`) żyje **wyłącznie** w `.agents/skills/<name>/SKILL.md` — ogólne, agent-niezależne procedury (jedyne źródło prawdy). Katalogi konkretnych agentów trzymają tylko cienkie **stuby** wskazujące na kanon: `.claude/skills/<name>/SKILL.md` (Claude Code wymaga pliku do rejestracji slash-command + opisu do triggerowania); inne agenty (`.codex/` itp.) czytają kanon wprost lub dodają własne stuby wg potrzeby. **Edytuj procedurę w `.agents/skills/`; nie duplikuj jej do stubów.**
+Treść skilli (`load-context`, `handoff-start/status/sync/archive`, `reflect-and-improve`) żyje **wyłącznie** w `.agents/skills/<name>/SKILL.md` — ogólne, agent-niezależne procedury (jedyne źródło prawdy). Katalogi konkretnych agentów trzymają tylko cienkie **stuby** wskazujące na kanon: `.claude/skills/<name>/SKILL.md` (Claude Code wymaga pliku do rejestracji slash-command + opisu do triggerowania); inne agenty (`.codex/` itp.) czytają kanon wprost lub dodają własne stuby wg potrzeby. **Edytuj procedurę w `.agents/skills/`; nie duplikuj jej do stubów.**
 
 ## [CRITICAL] — nigdy nie łamać
 
