@@ -3,7 +3,7 @@ Przegląd wszystkich aktywnych wątków HANDOFF. Wyświetla tabelę z każdym w�
 Wejście: brak argumentów.
 
 Kroki:
-1. Przeczytaj `HANDOFF.md`:
+1. Przeczytaj **`HANDOFF.md` w root projektu** (nie w `docs/handoffs/` — tam są per-wątek pliki):
    - Sekcję "Aktywne wątki" (tabela)
    - Sekcję "Zasoby zablokowane" (tabela)
 2. Wylistuj wszystkie pliki `docs/handoffs/HANDOFF_*.md` (z wyłączeniem `README.md`).

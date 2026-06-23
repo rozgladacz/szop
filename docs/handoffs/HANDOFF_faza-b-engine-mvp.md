@@ -109,7 +109,7 @@ ADR-0010 (event-sourced) + ADR-0014 (per-unit wounds) + ADR-0045 (activation con
 
 Sub-wątek `faza-b-3-executor` zarchiwizowany. 8 commitów B3.0-B3.8 na `Faza_A`. Pytest 1244/1244 (962 baseline + 282 nowych). 10 ADR-ów Accepted (0008/0010/0010a/0011/0012/0014/0015/0015a/0043/0044). Pakiet `app/services/engine/` ~2400 LOC, 12 modułów. Public API udokumentowane w ADR-0011. Smoke replay 2v2 przeszedł (21 events, 7 typów reprezentowanych). LOG SESJI w `HANDOFF.md`.
 
-### B3.9 — Architecture hardening (~3-5 sesji, sub-wątek `faza-b-3-hardening`) — **PLANNED, runs BEFORE B2**
+### B3.9 — Architecture hardening (~3-5 sesji, sub-wątek `faza-b-3-hardening`) — **READY TO START (user: 2026-06-19)**
 
 **Cel:** rozstrzygnąć 5 dziur architektonicznych wykrytych w post-B3 code review zanim B2 ORM / B4 API zaczną konsumować engine. Stabilizacja API engine + naprawienie 7 bugów + 1 cleanup w jednym spójnym refactor zamiast rozsiać po przyszłych ticketach.
 
@@ -154,6 +154,10 @@ Golden battles `tests/fixtures/battles/*.yaml` + `tests/test_engine_regression.p
 ## Pliki dotknięte
 
 *(wypełni się w trakcie B0)*
+
+## Pytania użytkownika i odpowiedzi (2026-06-19)
+
+- **B3.9 readiness:** User: „Jak reszta wymagań gotowa, to można realizować". Interpretacja: B3.9 startuje gdy brak blokerów wejściowych (wszystkie są OK). **Status: ✅ READY TO START** — sub-wątek `faza-b-3-hardening` może być otworzony w następnej sesji.
 
 ## Hipotezy / pytania otwarte
 

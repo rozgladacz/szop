@@ -5,7 +5,7 @@ Wejście: brak argumentów (skill samodzielnie wykrywa stan).
 Kroki:
 1. Wykonaj `git branch --show-current` — zapamiętaj nazwę aktualnej gałęzi.
 2. Wylistuj pliki `docs/handoffs/HANDOFF_*.md` (z wyłączeniem `README.md`). Dla każdego odczytaj sekcję "Gałąź git" → Branch.
-3. Przeczytaj tabelę "Aktywne wątki" z `HANDOFF.md` — zbierz slugi z linków.
+3. Przeczytaj tabelę "Aktywne wątki" z **`HANDOFF.md` w root projektu** (nie z `docs/handoffs/` — tam są per-wątek pliki) — zbierz slugi z linków.
 4. Porównaj trzy zbiory:
    a. **Pliki osierocone** — istnieje `HANDOFF_<slug>.md`, brak wpisu w tabeli HANDOFF.md.
    b. **Wpisy osierocone** — slug w tabeli, brak pliku.
