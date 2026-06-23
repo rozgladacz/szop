@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-06-19
+- **Aktualizacja:** 2026-06-20 — `faza-d-leaderboard-cleanup`: wspólne helpery przeniesione do `scripts/balance_common.py`; default `--players` zmieniony na tag `useful` z `agents/registry.py`, a `--players all` zachowuje pełny ranking.
 - **Kontekst:** Strumień D4 (wątek `faza-d-leaderboard`). Strumień D dał rodzinę botów heurystycznych (D1 random/greedy/priority/priority2/priority3, D4 minimax + claude_v1/v2/v3) napędzanych headless runnerem (ADR-0032) i agregowanych przez `balance_simulate` (D2). `balance_report.py` (D2) produkuje **macierz pairwise** (per para botów × fixtura → win-rate P0/P1), ale nie ma kanonicznego, jednowymiarowego rankingu „który bot jest najsilniejszy ogólnie". Roadmap D4 wymienia deliverable „Leaderboard `reports/leaderboard.md`" oraz „wielu agentów konkurujących — osobne konta + leaderboard".
 
 ## Decyzja
@@ -10,7 +11,7 @@ Rozdzielić deliverable D4 na **dwie części** o różnej gotowości:
 
 ### Część 1 — leaderboard botów (TERAZ, ten wątek)
 
-**`scripts/leaderboard.py`** — skrypt-liść reużywający `balance_simulate.simulate_balance` (SSOT, ADR-0032) + wzorzec module-loader/`_bar` z `balance_report.py`. Zero zmian w rdzeniu silnika/agentów.
+**`scripts/leaderboard.py`** — skrypt-liść reużywający `balance_simulate.simulate_balance` (SSOT, ADR-0032) + wspólne helpery z `scripts/balance_common.py` (`balance_report.py` używa tej samej infrastruktury). Zero zmian w rdzeniu silnika/agentów.
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -30,7 +31,7 @@ def format_leaderboard(standings, config, results) -> str    # markdown + teksto
 2. **Mirror self-play (A vs A) wykluczony** — `combinations` (różne pary), nie `combinations_with_replacement`. Dla botów deterministycznych mirror to gwarantowany remis (np. greedy/greedy 100% remisów, udokumentowane w D-stream), nieinformatywny dla rankingu; dodatkowo zawyżałby `draws`/`games` jednakowo, rozcieńczając win-rate.
 3. **Ranking po win-rate** (`wins/games`); tiebreak deterministyczny: więcej wygranych → mniej porażek → nazwa. Determinizm per `--seed` (ADR-0010/0012/0013).
 4. **Wykresy tekstowe** (unicode `█`/`░`), dependency-free — spójnie z `balance_report` (matplotlib NIE w `requirements*`). `reports/` gitignored (artefakt generowany).
-5. **CLI** `--fixtures/-n/--seed/--players/--out`, default out `reports/leaderboard.md`. Default boty = wszystkie `PLAYER_KINDS`.
+5. **CLI** `--fixtures/-n/--seed/--players/--out`, default out `reports/leaderboard.md`. Default boty = tag `useful` z `agents/registry.py` (`priority`, `priority3`, `claude_v3`); `--players all` przywraca wszystkie kanoniczne boty.
 
 ### Część 2 — wielu agentów: osobne konta + leaderboard międzykontowy (ODŁOŻONE → B2 auth)
 
@@ -46,7 +47,7 @@ Pierwotny zamysł D4 (osobne konta `agent_kind` rywalizujące, persystowany lead
 **Negatywne / koszty:**
 - **Mirror self-play poza rankingiem** — świadome (deterministyczny remis nieinformatywny). Kto chce macierz pełną (z mirrorami) używa `balance_report.py`.
 - **Część 2 (osobne konta) niezrealizowana** — czeka na B2 auth. Leaderboard botów nie persystuje wyników między uruchomieniami (regeneruje per run).
-- **Koszt obliczeniowy** rośnie z liczbą botów: C(n,2) par × fixtury × n gier. Domyślnie `claude_v2`/`minimax` (~100–185× priority) — dla pełnego zestawu używaj małego `-n`.
+- **Koszt obliczeniowy** rośnie z liczbą botów: C(n,2) par × fixtury × n gier. Domyślny tag `useful` pomija drogie boty referencyjne; dla pełnego zestawu (`--players all`, w tym `claude_v2`/`minimax` ~100–185× priority) używaj małego `-n`.
 
 ## Alternatywy rozważone
 

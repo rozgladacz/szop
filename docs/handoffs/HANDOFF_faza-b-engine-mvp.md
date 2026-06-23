@@ -11,6 +11,44 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## W TRAKCIE — 2026-06-23T21:01:17+02:00 — roadmap/ADR sync po leaderboard-cleanup
+
+**Zakres pracy:** domknąć niespójność dokumentacji po zarchiwizowanym `faza-d-leaderboard-cleanup`: kod i `HANDOFF.md` wskazują, że `scripts/balance_common.py` + `registry.USEFUL_KINDS` są już wdrożone, ale `docs/roadmap.md` i ADR-0030 nadal opisują stary dług/default.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A.
+- Backend payload: N/A.
+- JS render / CSS / template: N/A.
+- Dokumentacja: `docs/roadmap.md`, `docs/adr/0030-multi-agent-leaderboard.md`.
+- Testy/weryfikacja: grep spójności, call-site/doc reference check, pytest fallback mimo doc-only.
+
+**Performance gate:** brak hot path (`/quote`, `/rosters/{id}`), zero nowych DB queries, zero zmian runtime.
+
+**Plan:**
+- [x] 1. Potwierdzić kodowy stan `leaderboard.py`/`balance_common.py`/`registry.py` i znaleźć stale wpisy w docs.
+- [x] 2. Zaktualizować roadmapę i ADR-0030 do stanu po cleanupie.
+- [x] 3. Weryfikacja: grep spójności, pytest, manual `/simplify` + diff review. Pytest działa przez lokalną `.venv`, ale wymaga uruchomienia poza sandboxiem, bo Store Python bazowy jest blokowany błędem `Odmowa dostępu`.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`; Dywersant pozostaje `LOCKED` i nie jest dotykany.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-23T21:07: `scripts/leaderboard.py` już re-eksportuje `DEFAULT_PLAYERS = bc.DEFAULT_PLAYERS`, a `scripts/balance_common.py` ustawia `DEFAULT_PLAYERS = registry.USEFUL_KINDS`; `HANDOFF.md` ma wpis archiwalny `faza-d-leaderboard-cleanup`. Stale były tylko `docs/roadmap.md` i ADR-0030.
+- 2026-06-23T21:10: `docs/roadmap.md` i `docs/adr/0030-multi-agent-leaderboard.md` zsynchronizowane: `balance_common.py`, default `useful`, `--players all` dla pełnego rankingu.
+- 2026-06-23T21:16: grep spójności w dotkniętych docs nie znajduje już starych fraz (`Default boty = wszystkie`, `Dług techniczny`, `Plan domigracji`). `git diff --check` OK poza standardowymi ostrzeżeniami CRLF. Manual `/simplify`: zmiana zostaje doc-only; nie ma kodu do upraszczania, call-site code N/A. Manual `/review`: diff jest spójny z `scripts/README.md` i `HANDOFF.md`; brak `/security-review` (brak auth/user input/DB).
+- 2026-06-23T21:45: po diagnozie runtime utworzono lokalną `.venv` w `szop_a` przez działający Store Python dostępny poza sandboxiem (`OPR\.venv\Scripts\python.exe -m venv .venv`), zainstalowano `requirements-dev.txt`, a następnie uruchomiono `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` poza sandboxiem. Wynik: **1884 passed**, 1573 warnings, 0 failed.
+
+**Następne kroki:** dla kolejnych sesji Codex w tym sandboxie używać `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` z eskalacją poza sandbox, jeśli pojawi się `Odmowa dostępu` do `WindowsApps`/Store Pythona. Brak decyzji użytkownika wymaganej dla tego slice.
+
+**Dopisek 2026-06-23T21:50 — testing.md runtime notes:**
+- [x] Użytkownik poprosił o przeniesienie wniosków z diagnozy testów do `docs/testing.md`.
+- Warstwy: dokumentacja/test workflow only; brak data model/backend payload/JS/CSS; performance gate N/A.
+- Wykonano: `docs/testing.md` opisuje lokalną `.venv`, Store Python/WindowsApps, eskalację poza sandboxiem i zweryfikowaną komendę `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` (1884 passed). Weryfikacja po dopisku: `rg` nowych fraz + `git diff --check` OK poza standardowymi ostrzeżeniami CRLF.
+
+**Pliki dotknięte w tym slice:**
+- `docs/roadmap.md` — usunięty nieaktualny opis długu leaderboard-cleanup; dodany stan po cleanupie.
+- `docs/adr/0030-multi-agent-leaderboard.md` — aktualizacja decyzji CLI/defaultów po cleanupie 2026-06-20.
+- `docs/handoffs/HANDOFF_faza-b-engine-mvp.md` — bieżący zapis pracy automatyzacji.
+
 ## Zablokowane pliki / katalogi
 
 **Sesja B0 (ta):**

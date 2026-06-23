@@ -32,7 +32,25 @@ python -X utf8 -m pytest --tb=short -q
 
 **Uruchamiaj z roota repo.** Nie ma pliku konfiguracyjnego pytest (`pytest.ini`/`pyproject.toml`/`conftest.py`), więc `rootdir` = bieżący katalog — `import app.*` rozwiązuje się **tylko** gdy CWD = root repo.
 
-**Interpreter:** globalny `python` (Python 3.13; zależności z `requirements-dev.txt`). **Brak `.venv`** w repo — nie używaj `.venv\Scripts\python`.
+**Interpreter:** preferuj globalny `python` (Python 3.13; zależności z `requirements-dev.txt`) lub lokalne `.venv`, jeśli globalny alias nie działa w danej powłoce/agencie. W Codex sandbox alias `python` może nie istnieć, mimo że Claude/Codex hooki mają komendę `python -X utf8 -m pytest ...`.
+
+Jeśli `python`/`make` nie są w PATH albo pojawia się `Odmowa dostępu` do `WindowsApps` / Store Pythona, użyj lokalnego venv w repo:
+
+```powershell
+# jednorazowo, gdy .venv nie istnieje
+<działający-python> -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+
+# testy
+.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q
+```
+
+W sesjach Codex lokalna `.venv` bywa oparta o Store Pythona i może wymagać uruchomienia poza sandboxiem (escalation) z powodu `WindowsApps`/`Odmowa dostępu`. To nie jest błąd testów projektu. Zweryfikowany fallback z 2026-06-23:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q
+# 1884 passed
+```
 
 **[CRITICAL] Kodowanie — prefiksuj `-X utf8`.** W trybie nieinterakcyjnym (output przechwytywany przez agenta / hook / pipe) `python` ustawia `sys.stdout.encoding = cp1250` (locale Windows-PL) **nawet gdy `chcp` = 65001**. Pierwszy polski znak / strzałka / `INCH` (U+201D) w tracebacku → `UnicodeEncodeError`, co wygląda jak „testy nie działają" (typowy problem agenta uruchamiającego pytest bez `make`, np. Codex). Flaga `-X utf8` (UTF-8 mode, PEP 540) wymusza UTF-8 na stdio niezależnie od powłoki i code page:
 
@@ -98,6 +116,7 @@ Przed analizą backendu **ustal pełną ścieżkę wywołania:** JS event → fe
 - Test (szybki, stop na pierwszym błędzie): `make test-fast`
 - Lint: `make lint`
 - Windows fallback: `python -X utf8 -m pytest -x --tb=short -q`
+- Windows/Codex fallback gdy `python` nie jest w PATH: `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`
 
 ## A4 drift pipeline — `make rules-check`
 
