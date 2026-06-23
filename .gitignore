@@ -25,3 +25,8 @@ reports/
 
 # Documentation
 app/static/docs/
+
+# Scratch diff/audit dumps w root projektu (np. _b39_diff.txt, _drift_*.diff)
+# — jednorazowe zrzuty z sesji, odtwarzalne z historii git. NIE dotyczy scripts/_*.py.
+/_*.txt
+/_*.diff
