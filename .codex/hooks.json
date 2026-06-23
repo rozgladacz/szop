@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python -m pytest -x --tb=short -q"
+            "command": "python -X utf8 -m pytest -x --tb=short -q"
           }
         ]
       }

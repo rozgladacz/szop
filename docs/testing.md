@@ -11,7 +11,7 @@ PostToolUse hook wymusza pytest po edycjach `.py` — **nie suppressuj jego outp
 ### 1. Natychmiast po zmianie — tylko dotknięty plik lub moduł
 
 ```bash
-python -m pytest tests/test_roster_classification.py -x --tb=short -q
+python -X utf8 -m pytest tests/test_roster_classification.py -x --tb=short -q
 ```
 
 Szybki feedback zanim pójdziesz dalej. Jeśli tu nie przejdzie — nie ma sensu uruchamiać reszty.
@@ -19,23 +19,29 @@ Szybki feedback zanim pójdziesz dalej. Jeśli tu nie przejdzie — nie ma sensu
 ### 2. Przed deklaracją "gotowe" — filtruj po obszarze
 
 ```bash
-python -m pytest -k "roster or cost or classification" -x --tb=short
+python -X utf8 -m pytest -k "roster or cost or classification" -x --tb=short
 ```
 
 ### 3. Przed commitem — pełna suita, obowiązkowo
 
 ```bash
-python -m pytest --tb=short -q
+python -X utf8 -m pytest --tb=short -q
 ```
 
-## Środowisko Windows
+## Środowisko i uruchamianie (Windows / agenci)
 
-`make` może być poza PATH (znany problem — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu). Używaj bezpośrednio:
+**Uruchamiaj z roota repo.** Nie ma pliku konfiguracyjnego pytest (`pytest.ini`/`pyproject.toml`/`conftest.py`), więc `rootdir` = bieżący katalog — `import app.*` rozwiązuje się **tylko** gdy CWD = root repo.
+
+**Interpreter:** globalny `python` (Python 3.13; zależności z `requirements-dev.txt`). **Brak `.venv`** w repo — nie używaj `.venv\Scripts\python`.
+
+**[CRITICAL] Kodowanie — prefiksuj `-X utf8`.** W trybie nieinterakcyjnym (output przechwytywany przez agenta / hook / pipe) `python` ustawia `sys.stdout.encoding = cp1250` (locale Windows-PL) **nawet gdy `chcp` = 65001**. Pierwszy polski znak / strzałka / `INCH` (U+201D) w tracebacku → `UnicodeEncodeError`, co wygląda jak „testy nie działają" (typowy problem agenta uruchamiającego pytest bez `make`, np. Codex). Flaga `-X utf8` (UTF-8 mode, PEP 540) wymusza UTF-8 na stdio niezależnie od powłoki i code page:
 
 ```bash
-python -m pytest -x --tb=short -q          # szybki, stop na pierwszym błędzie
-python -m pytest -x --tb=short -q <plik>   # fokusowany na jeden plik
+python -X utf8 -m pytest -q --tb=short            # pełna suita
+python -X utf8 -m pytest tests/test_x.py -x -q    # jeden plik
 ```
+
+Alternatywa gdy nie chcesz flagi: `$env:PYTHONIOENCODING="utf-8"` (PowerShell) / `set PYTHONIOENCODING=utf-8` (cmd) przed komendą. `make` ustawia to globalnie (`export PYTHONIOENCODING=utf-8`), więc `make test` problemu nie ma — ale `make` bywa poza PATH, stąd preferuj `python -X utf8 -m pytest`.
 
 ## Przydatne flagi pytest
 
@@ -91,7 +97,7 @@ Przed analizą backendu **ustal pełną ścieżkę wywołania:** JS event → fe
 - Test (wszystkie): `make test`
 - Test (szybki, stop na pierwszym błędzie): `make test-fast`
 - Lint: `make lint`
-- Windows fallback: `python -m pytest -x --tb=short -q`
+- Windows fallback: `python -X utf8 -m pytest -x --tb=short -q`
 
 ## A4 drift pipeline — `make rules-check`
 

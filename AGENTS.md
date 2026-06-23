@@ -70,7 +70,7 @@ Treść skilli (`load-context`, `handoff-start/status/sync/archive`, `reflect-an
 - Lint: `make lint`
 - Profile cost engine: `make profile ROSTER=10 BACKEND=procedural|yaml|both_assert`
 - **A4 drift pipeline**: `make rules-check` (orchestrator 5 skryptów: sources-check + extract DOCX + extract MD + classify geometry + drift). Subcele selektywne: `rules-extract`, `rules-extract-md`, `rules-drift`, `rules-classify`, `rules-sources-check`. Detale: [scripts/README.md](scripts/README.md) + [docs/adr/0006-pipeline-drift.md](docs/adr/0006-pipeline-drift.md).
-- Windows fallback (gdy `make` poza PATH): `python -m pytest -x --tb=short -q` / `python scripts/rules_*.py` bezpośrednio.
+- Windows fallback (gdy `make` poza PATH): `python -X utf8 -m pytest -x --tb=short -q` / `python -X utf8 scripts/rules_*.py`. **Flaga `-X utf8` wymagana** — w trybie nieinterakcyjnym stdout=cp1250 → `UnicodeEncodeError` na polskich znakach (detale: [docs/testing.md](docs/testing.md#środowisko-i-uruchamianie-windows--agenci)).
 
 ## Workflow oczekiwany
 
