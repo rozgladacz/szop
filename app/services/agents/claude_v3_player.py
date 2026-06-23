@@ -24,7 +24,7 @@ od celów sprawdzone, nie pomogły). Najtańszy z botów Claude i najbliżej pri
 
 from __future__ import annotations
 
-from app.services.agents.base import _can_charge, _can_shoot, _move_inches, enemy_units
+from app.services.agents.base import _can_charge, _can_shoot, enemy_units
 from app.services.agents.priority_player import PriorityPlayer
 from app.services.engine.actions import (
     Action,
@@ -34,7 +34,7 @@ from app.services.engine.actions import (
     SpecialAction,
 )
 from app.services.engine.prediction import expected_damage
-from app.services.engine.state import BattleState, UnitBlob
+from app.services.engine.state import BattleState, UnitBlob, effective_move_inches
 from app.services.engine.status import STATUS_PRZYSZPILONY, STATUS_WYCZERPANY
 
 #: Waga oczekiwanych ran (HP fine-grained) — skuteczność strzału.
@@ -102,7 +102,7 @@ class ClaudeV3Player(PriorityPlayer):
         delegowane do `PriorityPlayer._act` (reuse, zero duplikacji) po oznaczeniu
         Ostrzału/Szarży jako wykorzystanych.
         """
-        move = _move_inches()
+        move = effective_move_inches(unit)  # pkt 15.a ± Szybki/Wolny (zdolność 33)
         enemies = enemy_units(state, perspective)
         shoot_used = any(isinstance(a, ShootAction) for a in actions_taken)
         charge_used = any(isinstance(a, ChargeAction) for a in actions_taken)

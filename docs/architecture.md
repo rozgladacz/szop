@@ -216,7 +216,7 @@ Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rd
 
 | Moduł | Zawartość |
 |---|---|
-| `base.py` | `Player(ABC)` (`choose_action(state, perspective) -> Action \| None`) + `legal_actions(state, perspective)` (enumerator kandydatów z `actions.Action`, pkt 14) + selektory `own_active_units`/`enemy_units` |
+| `base.py` | `Player(ABC)` (`choose_action(state, perspective) -> Action \| None`) + `legal_actions(state, perspective)` (enumerator kandydatów z `actions.Action`, pkt 14; Manewr/Szarża clampowane per-oddział przez `state.effective_move_inches` — pkt 15.a ± Szybki/Wolny, spójnie z walidacją resolvera) + selektory `own_active_units`/`enemy_units` |
 | `random_player.py` | `RandomPlayer(seed)` — uniform z `legal_actions`, deterministyczny per seed |
 | `greedy_player.py` | `GreedyPlayer` — depth-1 argmax: `prediction.expected_damage(...).mean` dla ataków, Δ`evaluate_state` dla ruchu |
 | `minimax_player.py` (D4, 2026-06-18) | `MinimaxPlayer(seed)` — lookahead depth-2 (maximin): **faktycznie aplikuje** akcję przez `resolver.apply` (vs heurystyka greedy) → symuluje najlepszą odpowiedź wroga (1 ply) → ocenia `evaluate_state` po przeliczeniu kontroli (`_check_objective_control`, pkt 5.d). Deterministyczny rollout (`DeterministicDice(seed)` per aplikacja; pełny expectiminimax odłożony). `--players minimax`. Bije greedy/random, przegrywa z `priority` (cele poza horyzontem 1-ply) |

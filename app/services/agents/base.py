@@ -17,8 +17,9 @@ Decyzje projektowe (ADR-0031):
 - **Dyskretyzacja ManeuverAction** — pozycja docelowa jest ciągła; MVP daje
   kandydatów {stój, ruch ku najbliższemu wrogowi, ruch ku najbliższemu celowi},
   clamp do `move_inches` (b_mvp=6, pkt 15.a).
-- **Zasięg ruchu** = `tables.b_mvp.move_inches`; modyfikatory Szybki/Wolny
-  pominięte w MVP (przyszła iteracja).
+- **Zasięg ruchu** = `state.effective_move_inches(blob)` — bazowy
+  `tables.b_mvp.move_inches` (pkt 15.a) ± zdolność 33 Szybki/Wolny (+2/−2,
+  per-oddział). Spójne z walidacją Manewru w `resolver` (ta sama funkcja).
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from app.services.engine.state import (
     Position,
     UnitBlob,
     WeaponProfile,
+    effective_move_inches,
 )
 from app.services.engine.status import STATUS_AKTYWOWANY, STATUS_WYCZERPANY
 from app.services.rulesets.loader import load_ruleset
@@ -54,10 +56,11 @@ if TYPE_CHECKING:
 
 @lru_cache(maxsize=4)
 def _move_inches(ruleset_version: str = "v1") -> float:
-    """Zasięg Ruchu z `tables.b_mvp.move_inches` (pkt 15.a; ADR-0008).
+    """Bazowy zasięg Ruchu z `tables.b_mvp.move_inches` (pkt 15.a; ADR-0008).
 
-    Cache'owane — `load_ruleset` ma własny lru_cache, ale ekstrakcja pola jest
-    na hot-path enumeratora (per oddział per akcja).
+    Stała bazowa BEZ modyfikatorów Szybki/Wolny — enumeracja akcji i boty używają
+    teraz per-oddziałowego `state.effective_move_inches(blob)` (pkt 15.a ± zdolność
+    33). Zachowane jako referencja zasięgu bazowego (m.in. testy reachability).
     """
     config = load_ruleset(ruleset_version).tables.b_mvp
     if config is None:
@@ -223,10 +226,10 @@ def legal_actions(state: BattleState, perspective: int) -> list[Action]:
     `choose_action` → None). NIE waliduje pełnej legalności (limit akcji,
     blokada Ostrzału w zwarciu) — to robi resolver.
     """
-    move = _move_inches()
     enemies = enemy_units(state, perspective)
     actions: list[Action] = []
     for unit in own_active_units(state, perspective):
+        move = effective_move_inches(unit)  # per-oddział: pkt 15.a ± Szybki/Wolny
         actions.append(DefendAction(unit_id=unit.id))
         if STATUS_WYCZERPANY in unit.status_flags:
             actions.append(

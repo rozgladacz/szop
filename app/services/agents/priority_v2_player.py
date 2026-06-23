@@ -37,7 +37,6 @@ from app.services.agents.base import (
     Player,
     _can_charge,
     _can_shoot,
-    _move_inches,
     _move_toward,
     enemy_units,
     own_active_units,
@@ -60,7 +59,12 @@ from app.services.engine.actions import (
 from app.services.engine.geometry import distance
 from app.services.engine.phases import _check_objective_control
 from app.services.engine.prediction import expected_damage
-from app.services.engine.state import BattleState, Objective, UnitBlob
+from app.services.engine.state import (
+    BattleState,
+    Objective,
+    UnitBlob,
+    effective_move_inches,
+)
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYSZPILONY,
@@ -162,7 +166,7 @@ class PriorityV2Player(GridDeploymentMixin, Player):
         unit: UnitBlob,
         actions_taken: tuple[Action, ...] = (),
     ) -> Action:
-        move = _move_inches()
+        move = effective_move_inches(unit)  # pkt 15.a ± Szybki/Wolny (zdolność 33)
         enemies = enemy_units(state, perspective)
         shoot_used = any(isinstance(a, ShootAction) for a in actions_taken)
         charge_used = any(isinstance(a, ChargeAction) for a in actions_taken)

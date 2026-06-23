@@ -30,7 +30,6 @@ from app.services.agents.base import (
     Player,
     _can_charge,
     _can_shoot,
-    _move_inches,
     _move_toward,
     enemy_units,
     own_active_units,
@@ -58,7 +57,12 @@ from app.services.engine.actions import (
 from app.services.engine.geometry import distance
 from app.services.engine.phases import OBJECTIVE_CONTROL_RANGE
 from app.services.engine.prediction import expected_damage
-from app.services.engine.state import BattleState, Objective, UnitBlob
+from app.services.engine.state import (
+    BattleState,
+    Objective,
+    UnitBlob,
+    effective_move_inches,
+)
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYSZPILONY,
@@ -300,7 +304,7 @@ class PriorityV3Player(GridDeploymentMixin, Player):
 
     def _build_ctx(self, state, perspective, unit, actions_taken) -> _Ctx:
         enemies = enemy_units(state, perspective)
-        move = _move_inches()
+        move = effective_move_inches(unit)  # pkt 15.a ± Szybki/Wolny (zdolność 33)
         mine, not_mine = _split_objectives_by_control(state, perspective)
         sw, st = _shoot_candidates(unit, enemies, state.terrain)
         cw, ct = _charge_candidates(unit, enemies, move)
