@@ -137,7 +137,12 @@
       "Bash(.venv/Scripts/python -m py_compile app/data/abilities.py)",
       "Bash(python -m pytest tests/test_abilities_migration.py -q)",
       "PowerShell(python -m pytest tests/test_abilities_migration.py -q 2>&1)",
-      "Bash(python scripts/_inspect_geometry.py)"
+      "Bash(python scripts/_inspect_geometry.py)",
+      "Bash(python -m pytest -q --tb=no)",
+      "Bash(Get-ChildItem -Path \"docs\\\\handoffs\\\\HANDOFF_*.md\")",
+      "Bash(Select-Object Name, LastWriteTime)",
+      "Bash(python -m pytest tests/test_engine_regroup_choice.py tests/test_agents_priority_v3.py tests/test_agents_greedy.py -x -q)",
+      "Bash(python scripts/rules_sources_check.py)"
     ]
   }
 }
