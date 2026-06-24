@@ -428,6 +428,43 @@ python scripts/exploit_hunt.py --bot priority --top 5 --out build/exploit.csv --
 > + `main()` pokryte testami (`tests/test_exploit_hunt.py` syntetyczne,
 > `tests/test_exploit_hunt_db.py` na seeded in-memory DB).
 
+### `simulate_engagement.py` (C3)
+
+Head-to-head dwóch konkretnych rozpisek z bazy (`Roster.id`) przez
+`LocalClient.simulate_roster_ids` (GameClient seam) → win-rate A/B/remis,
+średnia liczba rund, koszt punktowy i skład. To leaf-CLI dla roadmap C3; pełny
+MCP-tool/HTTP wrapper czeka na C1/B4. Skrypt jest read-only względem DB, używa
+tego samego bota po obu stronach, naprzemiennej inicjatywy i rozłącznych seedów
+graczy jak narzędzia D2/D3.
+
+```powershell
+python scripts/simulate_engagement.py --list
+python scripts/simulate_engagement.py 1 2 -n 20 --bot priority --seed 3
+python scripts/simulate_engagement.py 1 2 --map symetryczna_a --bot claude_v3
+```
+
+> **Uwaga:** wymaga istniejących rozpisek w `data/szop.db`. Testy używają seeded
+> in-memory SQLite i pokrywają listowanie, render, determinizm, parity z
+> `LocalClient` oraz błędy CLI (`tests/test_simulate_engagement.py`).
+
+### `explain_ability.py` (C3)
+
+Strukturalny lookup zdolności po slug albo nazwie PL z katalogu SSOT
+`app.data.abilities` (ten sam katalog konsumowany przez koszty i UI). Zwraca
+nazwę, typ, opis, parametr `X`, dozwolone wartości i flagę `blocked`; nie
+parsuje ręcznie YAML i nie dotyka DB. To leaf-CLI dla roadmap C3; pełny
+MCP-tool/HTTP wrapper czeka na C1/B4.
+
+```powershell
+python scripts/explain_ability.py --list
+python scripts/explain_ability.py --type weapon
+python scripts/explain_ability.py furia
+python scripts/explain_ability.py "Podwójny" --json
+```
+
+> Testy pokrywają lookup po slug/nazwie, render parametru, flagę `blocked`,
+> filtry listy i JSON round-trip (`tests/test_explain_ability.py`).
+
 ### `reflect_and_improve.py`
 
 Analiza ostatnich 10 transkryptów Claude Code, generuje

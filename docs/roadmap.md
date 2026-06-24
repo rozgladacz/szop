@@ -267,11 +267,11 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### C3. Narzędzia MCP (3 tyg)
 - [ ] `lookup_rule(query)` — RAG nad SZOP.docx + YAML
-- [ ] `explain_ability(slug)` — strukturalny lookup z `abilities.yaml`
+- [x] `explain_ability(slug)` — **leaf-CLI DONE 2026-06-24** (`scripts/explain_ability.py`): strukturalny lookup po slug/nazwie PL z katalogu SSOT `app.data.abilities`, `--list`, `--type`, `--json`, testy bez DB. Wrapper MCP/HTTP pozostaje gated na C1/B4.
 - [ ] `validate_loadout(payload)` — `POST /rosters/.../quote`
 - [ ] `find_exploit_candidates(army_id)` — heurystyka cost/effectiveness
 - [ ] `score_list(roster_id)` — quick heuristic
-- [ ] `simulate_engagement(roster_a, roster_b, n)` — LocalClient batch
+- [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
 
 ---
 
