@@ -65,6 +65,10 @@ Kod + testy DONE i zacommitowane (izolowane nowe pliki, path-scoped). Pozostała
 ## Hipotezy / pytania otwarte
 - `READY` — pełna specyfikacja; SSOT katalog gotowy. Brak pytań do usera.
 
+## Notatki / odkrycia w trakcie
+- 2026-06-24: diligence read-only — katalogi SSOT zdolności **spójne**: `app/data/abilities.py` (88) == `app/rulesets/v1/abilities.yaml` (88), identyczne slugi/nazwy/typy, zero driftu. (Stąd `explain_ability` może bezpiecznie czytać sam katalog Python — autorytatywny dla in-app.)
+- 2026-06-24: kandydat na kolejny leaf C3 (przyszła sesja): `score_list(roster_id)` — szybka heurystyka oceny rozpiski bez symulacji. Wymaga uzgodnienia formuły heurystyki (obecnie „quick heuristic" w roadmap jest niedoprecyzowane — NIE jest blokadą usera, ale wymaga decyzji projektowej przed implementacją, by nie była arbitralna).
+
 ## Jak zweryfikować
 ```bash
 python scripts/explain_ability.py --list
