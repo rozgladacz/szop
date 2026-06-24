@@ -25,21 +25,26 @@ Constraint per ADR-0015: **interrupt nie generuje nowego punktu przerwania**.
 Wewnątrz handler-a interrupta nie wywołujemy `trigger_at_point` rekurencyjnie —
 inaczej pętle nieskończone.
 
-Per-rundowe limity (np. "Raz na rundę" w Rozkaz) tracked przez engine higher-level
-(np. `BattleState.used_interrupts_this_round: tuple[int, ...]` — TODO B3.6). MVP:
-limit nie jest enforce'owany w manager — handler sprawdza sam (jeśli ma per-round
-state, użyje payload `InterruptEvent`).
+Per-rundowe limity ("Raz na rundę", pkt 12 — Rozkaz/Klątwa/Oznaczenie) SĄ
+enforce'owane (ADR-0049): `BattleState.used_interrupts_this_round:
+tuple[tuple[int, str], ...]` trzyma pary `(source_id, slug)` zużyte w tej rundzie;
+`_apply_order_like` odrzuca ponowne wywołanie (`InvalidInterruptError`),
+`phases.round_end_phase` resetuje pole do `()`, a reducer `InterruptTriggered`
+(gdy `consumes_round_limit`) odtwarza je przy replay. Strażnik (id 31) NIE ma
+limitu raz-na-rundę (brak w regułach).
 
-MVP scope:
-- `InterruptPoint` enum (4 wartości)
+Zawartość:
+- `InterruptPoint` enum (1 wartość — `BEFORE_ACTION`, pkt 11.b.i; korekta
+  2026-06-09 z 4 punktów, zob. niżej + ADR-0015)
 - `register_interrupt_handler(point, slug)` decorator
 - `get_eligible_interrupts(state, point)` — lista (blob, slug) which CAN trigger
 - `trigger_interrupt(...)` — wywołuje konkretny handler
-- 1 example handler: Strażnik (id 31) stub — emit `InterruptTriggered` event tylko
-  (faktyczny Ostrzał wywoła się przez `resolve_ranged_attack` w B3.6 phases)
+- Handlery: Strażnik (id 31) stub (emit `InterruptTriggered` tylko — faktyczny
+  Ostrzał + Wyczerpany czeka na integrację w `phases.py`, H2/B4) oraz Rozkaz/
+  Klątwa/Oznaczenie (id 50/45/49, ADR-0049 — pełna mechanika override + limit).
 
-Konkretne interrupt handlers (z faktycznym engine-impact) idą do B3.6+ wraz z
-integracją w `phases.py`.
+Auto-orkiestracja przerwań w pętli aktywacji (`phases.activation_phase` woła
+handlery sama) wciąż czeka na integrację (H2/B4); dziś handlery wywoływane jawnie.
 """
 
 from __future__ import annotations
@@ -73,10 +78,10 @@ class InterruptPoint(Enum):
 class InterruptContext:
     """Context dla interrupt handler.
 
-    `state` = aktualny BattleState (read-only). `point` = w którym z 4 punktów.
-    `active_unit_id` = oddział obecnie aktywowany (jeśli applicable; None dla
-    między-rundowych). `source_unit_id` = oddział wywołujący interrupt (with
-    eligible passive ability).
+    `state` = aktualny BattleState (read-only). `point` = punkt przerwania
+    (`BEFORE_ACTION` — jedyny w MVP). `active_unit_id` = oddział obecnie
+    aktywowany (jeśli applicable; None dla między-rundowych). `source_unit_id` =
+    oddział wywołujący interrupt (with eligible passive ability).
     """
 
     state: BattleState
@@ -102,7 +107,7 @@ def register_interrupt_handler(
 
     Użycie::
 
-        @register_interrupt_handler(InterruptPoint.ACTIVATION_START, "straznik")
+        @register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "straznik")
         def _straznik_handler(context, payload):
             ...
     """
@@ -126,8 +131,9 @@ def get_eligible_interrupts(
     """Zwraca listę (blob, slug) — oddziały z aktywnymi interrupt abilities w tym punkcie.
 
     Filtr: tylko `models_alive > 0` (pokonane oddziały nie mogą wywoływać interruptów).
-    Per-rundowe limity (np. "Raz na rundę") sprawdzane wewnątrz handler-ów (MVP)
-    lub przez engine higher-level (B3.6 phases poprzez `used_interrupts_this_round`).
+    To eligibility (KTO ma zdolność), nie dozwolenie: per-rundowy limit ("Raz na
+    rundę", pkt 12), zasięg 12″ i ally/enemy waliduje dopiero handler
+    (`_apply_order_like` przez `state.used_interrupts_this_round`).
     """
     eligible: list[tuple[UnitBlob, str]] = []
     for blob in state.blobs:
