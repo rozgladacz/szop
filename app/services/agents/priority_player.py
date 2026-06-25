@@ -31,6 +31,7 @@ from __future__ import annotations
 from app.services.agents.base import (
     Player,
     _can_charge,
+    _can_maneuver_to,
     _can_shoot,
     _move_toward,
     enemy_units,
@@ -124,7 +125,7 @@ def _nearest_enemy_charge(
 
 
 def _move_to_objective(
-    unit: UnitBlob, objectives: list[Objective], move: float
+    state: BattleState, unit: UnitBlob, objectives: list[Objective], move: float
 ) -> ManeuverAction | None:
     """Manewr ku najbliższemu celowi z listy (clamp move_inches). None gdy lista
     pusta lub oddział już na pozycji (brak no-op ruchu)."""
@@ -132,7 +133,7 @@ def _move_to_objective(
         return None
     target = min(objectives, key=lambda o: distance(unit.position, o.position))
     dest = _move_toward(unit.position, target.position, move)
-    if dest == unit.position:
+    if dest == unit.position or not _can_maneuver_to(state, unit, dest):
         return None
     return ManeuverAction(unit_id=unit.id, target_position=dest)
 
@@ -199,11 +200,11 @@ class PriorityPlayer(GridDeploymentMixin, Player):
         # 5. ...dla którego jestem najbliższym własnym oddziałem (anty-klastrowanie).
         own_field = _own_field_units(state, perspective)
         my_objectives = [o for o in not_mine if _is_closest_own_unit(unit, o, own_field)]
-        mv = _move_to_objective(unit, my_objectives, move)
+        mv = _move_to_objective(state, unit, my_objectives, move)
         if mv is not None:
             return mv
         # 6. ...dowolnego niezajętego.
-        mv = _move_to_objective(unit, not_mine, move)
+        mv = _move_to_objective(state, unit, not_mine, move)
         if mv is not None:
             return mv
 
@@ -213,7 +214,7 @@ class PriorityPlayer(GridDeploymentMixin, Player):
                 enemies, key=lambda e: (distance(unit.position, e.position), e.id)
             )
             dest = _move_toward(unit.position, target.position, move)
-            if dest != unit.position:
+            if dest != unit.position and _can_maneuver_to(state, unit, dest):
                 return ManeuverAction(unit_id=unit.id, target_position=dest)
 
         # Bezpiecznik (poza specem): brak wrogów i niezajętych celów → Obrona.

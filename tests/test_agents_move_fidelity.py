@@ -163,3 +163,29 @@ def test_wolny_bot_action_accepted_by_resolver(player):
     if isinstance(action, ManeuverAction):
         # Manewr respektuje budżet Wolny (≤4″), nie bazowe 6″.
         assert distance(own.position, action.target_position) <= 4.0 + EPS
+
+
+@pytest.mark.parametrize(
+    "player",
+    [
+        PriorityPlayer(),
+        PriorityV2Player(),
+        PriorityV3Player(),
+        ClaudeV3Player(),
+        RandomPlayer(seed=5),
+    ],
+    ids=["priority", "priority2", "priority3", "claude_v3", "random"],
+)
+def test_bot_action_accepted_when_enemy_is_too_close_for_maneuver(player):
+    # Enemy is within the 6" movement budget, but ending on it would violate
+    # pkt 15.b.iii (>1" from models of other units). Bots must not return that
+    # illegal ManeuverAction.
+    own = _blob(1, 0, 0, 0)
+    enemy = _blob(2, 1, 5, 0)
+    state = _state((own, enemy))
+    action = player.choose_action(state, perspective=0)
+    assert action is not None
+    res = apply(state, action, DeterministicDice(13))
+    assert isinstance(res, ResolverResult)
+    if isinstance(action, ManeuverAction):
+        assert action.target_position != enemy.position

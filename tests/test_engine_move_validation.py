@@ -22,6 +22,7 @@ from app.services.engine.events import MoveExecuted
 from app.services.engine.resolver import IllegalActionError, ResolverResult, apply
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Position,
     TerrainCircle,
     UnitBlob,
@@ -152,6 +153,67 @@ def test_trudny_terrain_on_path_does_not_reduce_budget():
     result = apply(
         _state(blob, terrain=(trudny,)),
         ManeuverAction(unit_id=blob.id, target_position=Position(6.0, 0.0)),
+        DeterministicDice(42),
+    )
+    assert any(isinstance(e, MoveExecuted) for e in result.events)
+
+
+def test_maneuver_too_close_to_other_unit_raises():
+    actor = _blob()
+    blocker = _blob(id=2, owner_player=1, position=Position(6.0, 0.0))
+    state = BattleState(
+        round=1,
+        active_player=0,
+        activations_remaining=(1, 1),
+        blobs=(actor, blocker),
+        terrain=(),
+    )
+    # target center at x=3.0 gives edge gap 1.0" to blocker: not "dalej niz 1".
+    with pytest.raises(IllegalActionError, match="too close"):
+        apply(
+            state,
+            ManeuverAction(unit_id=1, target_position=Position(3.0, 0.0)),
+            DeterministicDice(42),
+        )
+
+
+def test_maneuver_more_than_one_inch_from_other_unit_accepted():
+    actor = _blob()
+    blocker = _blob(id=2, owner_player=1, position=Position(6.2, 0.0))
+    state = BattleState(
+        round=1,
+        active_player=0,
+        activations_remaining=(1, 1),
+        blobs=(actor, blocker),
+        terrain=(),
+    )
+    result = apply(
+        state,
+        ManeuverAction(unit_id=1, target_position=Position(3.0, 0.0)),
+        DeterministicDice(42),
+    )
+    assert any(isinstance(e, MoveExecuted) for e in result.events)
+
+
+def test_maneuver_ignores_defeated_and_non_front_units_for_clearance():
+    actor = _blob()
+    defeated = _blob(id=2, owner_player=1, position=Position(3.5, 0.0), models_alive=0)
+    reserve = _blob(
+        id=3,
+        owner_player=1,
+        position=Position(3.5, 0.0),
+        location=Lokalizacja.ZAPLECZE,
+    )
+    state = BattleState(
+        round=1,
+        active_player=0,
+        activations_remaining=(1, 1),
+        blobs=(actor, defeated, reserve),
+        terrain=(),
+    )
+    result = apply(
+        state,
+        ManeuverAction(unit_id=1, target_position=Position(3.0, 0.0)),
         DeterministicDice(42),
     )
     assert any(isinstance(e, MoveExecuted) for e in result.events)

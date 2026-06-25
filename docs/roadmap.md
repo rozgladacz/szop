@@ -349,11 +349,14 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 ### E4. Ruch — kolizje i pathfinding (po E2, tydzień 28+)
 
 > MVP: ruch deklarowany, brak kolizji jednostka–jednostka (B0 decyzja #5). Oddziały mogą na siebie wchodzić. Poniższe implementują pełny model ruchu po stabilizacji silnika.
+>
+> **Slice 2026-06-25 DONE (ADR-0052):** końcowa pozycja `ManeuverAction` musi być dalej niż 1″ od innych żywych oddziałów na Froncie (Pareto MVP: gap obwód-obwód między kołami oddziałów). Boty filtrują Manewry tym samym helperem. Pełny pathfinding i ruch po trasie przez `Niedostępny`/`Trudny` nadal otwarte.
 
 **Kolizje jednostka–jednostka:**
-- [ ] Walidacja w `phases._apply_maneuver` — `circle_edge_distance(moved, other) >= 0` dla każdego innego blobu na planszy; rzuć `IllegalActionError` jeśli nachodzenie
-- [ ] `base.legal_actions` / `legal_followup_actions` — filtruj `ManeuverAction` których `target_position` prowadzi do kolizji (boty nie próbują niedozwolonych ruchów)
-- [ ] Testy regresyjne: overlap po manewrze niedozwolony; Szarża dalej ustawia `min_gap`
+- [x] Walidacja końcowej pozycji `ManeuverAction` w `resolver._validate_action` przez `movement.maneuver_destination_blocker`: gap obwód-obwód do innego żywego oddziału na Froncie musi być `> 1″` (pkt 15.b.iii).
+- [x] `base.legal_actions` / `legal_followup_actions` oraz boty Priority/V2/V3 filtrują `ManeuverAction`, których `target_position` narusza końcowy odstęp.
+- [x] Testy regresyjne: overlap / dokładnie 1″ po Manewrze niedozwolone; pokonani i Zaplecze nie blokują; boty nie zwracają nielegalnego Manewru; B7 goldeny odświeżone.
+- [ ] Pełny ruch przez modele jako teren `Niedostępny` (pkt 2.d/4.c.i) po trasie — wymaga pathfindingu.
 
 **Pathfinding:**
 - [ ] `app/services/engine/pathfinding.py` — `find_reachable_positions(state, blob, move_inches) → list[Position]` (siatka hex lub ciągła)
@@ -421,6 +424,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0049 | Czasowy ability-override + przerwania Rozkaz/Klątwa/Oznaczenie (BEFORE_ACTION) | ✓ |
 | 0050 | Persystencja event-store: Battle + BattleEvent + persistence.py (B2 slice) | ✓ |
 | 0051 | Aktywacja wieloakcyjna (pkt 11.b.iv): orkiestrator `apply_activation` + `continue_activation` | ✓ |
+| 0052 | Końcowy odstęp Manewru od innych oddziałów | ✓ |
 
 ---
 

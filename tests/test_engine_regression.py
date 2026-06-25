@@ -92,43 +92,43 @@ def _run(fixture_file: str, kinds: tuple[str, str], seed: int, initiative: int):
 # --- GOLDEN ------------------------------------------------------------------
 # Pola: id, fixtura, (P0_kind, P1_kind), seed, initiative,
 #       winner, rounds, score (P0, P1), n_events, digest sha256.
-# Wartości zapieczętowane 2026-06-13 przez `build/_probe_golden.py`.
+# Wartości zapieczętowane 2026-06-25 po ADR-0052 (final-position Maneuver clearance).
 GOLDEN_CASES = [
     (
         "demo_priority_mirror",
         "demo_skirmish.yaml", ("priority", "priority"), 0, 0,
-        None, 4, (2, 2), 238,
-        "801415b2d781aaaed0d0cd9869f68c37786f92ec80631ff1a556920be955fe49",
+        1, 4, (2, 3), 272,
+        "0f5be2dcb7374558995ce61420ef1e6919618374d05d4533581b23fbfa0c91dc",
     ),
     (
         "demo_greedy_vs_random",
         "demo_skirmish.yaml", ("greedy", "random"), 7, 1,
-        0, 4, (3, 2), 214,
-        "f4eb2fc4a2d6cc8a477215647bdd284980beb19661d636cc3be254befa49991d",
+        1, 4, (2, 3), 208,
+        "f66d5dd584a017b7dfddf98d24ba6e13afbcb3ff0d1378e89b76095d81e49f33",
     ),
     (
         "clash_priority_vs_greedy",
         "objective_clash.yaml", ("priority", "greedy"), 0, 0,
         0, 4, (3, 0), 213,
-        "b779aa07cb4fe25d257299c7aba25748820f65ca857cfff6bf95d74afe5a0cf6",
+        "b4c003e3ceb9c2bd50a59e953910a76fde29dc3275f1d900629b6575c19e9844",
     ),
     (
         "clash_random_mirror",
         "objective_clash.yaml", ("random", "random"), 42, 0,
-        1, 4, (0, 1), 237,
-        "5e9145bf89c8ab30e74e25b69c85672a98428dfd1e5740d396620309e177e6f9",
+        0, 4, (1, 0), 201,
+        "ae88f17535f754fb1b737def9d8db105bd7fbe95e6542dccfe1f21b173117b19",
     ),
     (
         "profiles_v3_vs_v2",
         "unit_profiles.yaml", ("priority3", "priority2"), 0, 0,
-        0, 4, (3, 2), 247,
-        "4c6fdb355673cfa65027d7264ccc2a4af3c56d0652cb92e66b3b75c9a970808a",
+        0, 4, (3, 2), 253,
+        "ae1ad8fea8c6dc42e1c5ab1870dc072c8ca634671f907b4e5b840b2d389a03bc",
     ),
     (
         "profiles_v2_vs_priority",
         "unit_profiles.yaml", ("priority2", "priority"), 3, 1,
-        1, 4, (2, 3), 235,
-        "66a279bcfd56388398abc23ef82170f71dbba554381f79c1be7c8fb27c96afe8",
+        None, 4, (2, 2), 245,
+        "5d7d01396453610e7b607bc51db74ea75d2fe8200db86c1c5e9ee25292ee52ed",
     ),
 ]
 

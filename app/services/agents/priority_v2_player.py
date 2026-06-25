@@ -36,6 +36,7 @@ from __future__ import annotations
 from app.services.agents.base import (
     Player,
     _can_charge,
+    _can_maneuver_to,
     _can_shoot,
     _move_toward,
     enemy_units,
@@ -200,23 +201,23 @@ class PriorityV2Player(GridDeploymentMixin, Player):
 
         # 5. Ruch do niezajętego celu, dla którego jestem najbliższym oddziałem.
         my_unclaimed = [o for o in not_mine if _is_closest_own_unit(unit, o, own_field)]
-        mv = _move_to_objective(unit, my_unclaimed, move)
+        mv = _move_to_objective(state, unit, my_unclaimed, move)
         if mv is not None:
             return mv
         # 6. Przechwyt: ruch do najbliższego wroga, który jest bliżej niż ja celu
         #    ZAJĘTEGO przez nas, dla którego jestem najbliższym obrońcą.
-        intercept = self._intercept_move(unit, enemies, mine, own_field, move)
+        intercept = self._intercept_move(state, unit, enemies, mine, own_field, move)
         if intercept is not None:
             return intercept
         # 7. Ruch do dowolnego niezajętego celu.
-        mv = _move_to_objective(unit, not_mine, move)
+        mv = _move_to_objective(state, unit, not_mine, move)
         if mv is not None:
             return mv
         # 8. Ruch do najbliższego wroga.
         if enemies:
             target = min(enemies, key=lambda e: (distance(unit.position, e.position), e.id))
             dest = _move_toward(unit.position, target.position, move)
-            if dest != unit.position:
+            if dest != unit.position and _can_maneuver_to(state, unit, dest):
                 return ManeuverAction(unit_id=unit.id, target_position=dest)
 
         # Bezpiecznik (poza specem): brak wrogów i niezajętych celów → Obrona.
@@ -224,6 +225,7 @@ class PriorityV2Player(GridDeploymentMixin, Player):
 
     def _intercept_move(
         self,
+        state: BattleState,
         unit: UnitBlob,
         enemies: list[UnitBlob],
         mine: list[Objective],
@@ -241,6 +243,6 @@ class PriorityV2Player(GridDeploymentMixin, Player):
             return None
         target = min(threats, key=lambda e: (distance(unit.position, e.position), e.id))
         dest = _move_toward(unit.position, target.position, move)
-        if dest == unit.position:
+        if dest == unit.position or not _can_maneuver_to(state, unit, dest):
             return None
         return ManeuverAction(unit_id=unit.id, target_position=dest)

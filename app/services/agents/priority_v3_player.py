@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from app.services.agents.base import (
     Player,
     _can_charge,
+    _can_maneuver_to,
     _can_shoot,
     _move_toward,
     enemy_units,
@@ -233,7 +234,7 @@ def _a_charge(c: _Ctx) -> Action:
 
 def _a_move_closest_friend_objective(c: _Ctx) -> Action:
     mine_closest = [o for o in c.not_mine if _is_closest_own_unit(c.unit, o, c.own_field)]
-    return _move_to_objective(c.unit, mine_closest, c.move) or _a_defend(c)
+    return _move_to_objective(c.state, c.unit, mine_closest, c.move) or _a_defend(c)
 
 
 def _a_move_to_enemy(c: _Ctx) -> Action:
@@ -241,13 +242,13 @@ def _a_move_to_enemy(c: _Ctx) -> Action:
         return _a_defend(c)
     target = min(c.enemies, key=lambda e: (distance(c.unit.position, e.position), e.id))
     dest = _move_toward(c.unit.position, target.position, c.move)
-    if dest == c.unit.position:
+    if dest == c.unit.position or not _can_maneuver_to(c.state, c.unit, dest):
         return _a_defend(c)
     return ManeuverAction(unit_id=c.unit.id, target_position=dest)
 
 
 def _a_move_to_not_mine_objective(c: _Ctx) -> Action:
-    return _move_to_objective(c.unit, c.not_mine, c.move) or _a_defend(c)
+    return _move_to_objective(c.state, c.unit, c.not_mine, c.move) or _a_defend(c)
 
 
 #: Drzewo decyzyjne (spec usera 2026-06-11). Węzeł: ("cond", pred, true, false)

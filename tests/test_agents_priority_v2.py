@@ -142,9 +142,9 @@ def test_priority5_moves_to_uncontrolled_objective_it_is_closest_to():
 
 def test_priority6_intercept_enemy_threatening_held_objective():
     # Cel O zajęty przez nas; wróg bliżej O niż my (i nie na O) → ruch przechwytujący.
-    own = _blob(1, 0, 20, 0)
+    own = _blob(1, 0, 25, 0)
     obj = Objective(id=1, position=Position(10, 0), controller=0)  # nasz
-    enemy = _blob(2, 1, 15, 0)  # bliżej O (5<10), edge 4>3 (nie zajmuje), brak broni → nie strzelamy
+    enemy = _blob(2, 1, 15, 0)  # bliżej O (5<15), edge 4>3 (nie zajmuje), brak broni → nie strzelamy
     state = _state((own, enemy), (obj,))
     action = PriorityV2Player().choose_action(state, 0)
     assert isinstance(action, ManeuverAction)
@@ -165,7 +165,7 @@ def test_priority8_moves_to_nearest_enemy_when_no_objective():
 
 def test_continue_activation_after_shoot_moves():
     own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
-    enemy = _blob(2, 1, 8, 0)
+    enemy = _blob(2, 1, 30, 0)
     obj = Objective(id=1, position=Position(20, 0), controller=None)
     taken = (ShootAction(1, 2, RIFLE),)
     nxt = PriorityV2Player().continue_activation(_state((own, enemy), (obj,)), 0, 1, taken)

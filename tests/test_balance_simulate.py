@@ -11,6 +11,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -213,40 +214,37 @@ def test_simulate_balance_rejects_zero_games():
         bs.simulate_balance(fx, n=0, player_kinds=("random", "random"))
 
 
-def test_players_seeded_disjointly_decorrelates_streams():
-    # Regresja F2 (REVIEW_2026-06-11): P0 i P1 NIE mogą dostać identycznego
-    # seeda. Gdy oba `RandomPlayer` startują z tym samym seedem, na symetrycznej
-    # fixturze (demo_skirmish — odbicie względem y=24) ich strumienie decyzji są
-    # lustrzane → symetryczne przebiegi = sztucznie zawyżone remisy, co skaża
-    # metrykę balansu. `simulate_balance` daje P1 offset `PLAYER_SEED_OFFSET`.
-    from app.services.agents import RandomPlayer, simulate_from_rosters
-
+def test_players_seeded_disjointly_decorrelates_streams(monkeypatch):
+    # Regresja F2: kontrakt `simulate_balance` to P0 seed=base+i,
+    # P1 seed=base+i+PLAYER_SEED_OFFSET. Testujemy kontrakt bez opierania się
+    # na kruchym empirycznym marginesie remisów, który zmienia się z fizyką ruchu.
     fx = bs.load_battle_fixture(_FIXTURE)
-    n, base_seed = 40, 0
-    fixed = bs.simulate_balance(fx, n=n, player_kinds=("random", "random"), base_seed=base_seed)
+    seen: list[tuple[str, int]] = []
 
-    # Replikacja starego buga: oba seedy identyczne (mirror) — przez to samo
-    # publiczne API, którego używa `simulate_balance` (ten sam seed kości/inicjatywa).
-    mirror_draws = 0
-    for i in range(n):
-        seed = base_seed + i
-        players = [RandomPlayer(seed=seed), RandomPlayer(seed=seed)]
-        res = simulate_from_rosters(
-            fx.rosters,
-            players,
-            seed=seed,
-            terrain=fx.terrain,
-            objectives=fx.objectives,
-            initiative_player=bs.initiative_for_game(i),
-        )
-        if res.winner is None:
-            mirror_draws += 1
+    def fake_make_player(kind: str, seed: int):
+        seen.append((kind, seed))
+        return object()
 
-    # Artefakt F2 + gwarancja regresji w jednym: mirror zawyża remisy na
-    # symetrycznej fixturze (skorelowane strumienie → symetryczne przebiegi).
-    # Cofnięcie offsetu (P0==P1) → fixed.draws == mirror_draws → asercja padnie.
-    # Zmierzone @ n=40/seed=0: fix=12 vs mirror=20 remisów (margines stabilny).
-    assert fixed.draws < mirror_draws
+    def fake_simulate_from_rosters(*_args, **_kwargs):
+        return SimpleNamespace(winner=None, rounds_played=4)
+
+    monkeypatch.setattr(bs, "make_player", fake_make_player)
+    monkeypatch.setattr(bs, "simulate_from_rosters", fake_simulate_from_rosters)
+
+    result = bs.simulate_balance(
+        fx, n=3, player_kinds=("random", "random"), base_seed=11
+    )
+
+    assert seen == [
+        ("random", 11),
+        ("random", 11 + bs.PLAYER_SEED_OFFSET),
+        ("random", 12),
+        ("random", 12 + bs.PLAYER_SEED_OFFSET),
+        ("random", 13),
+        ("random", 13 + bs.PLAYER_SEED_OFFSET),
+    ]
+    assert result.draws == 3
+    assert result.total_rounds == 12
 
 
 # --- CSV / output ------------------------------------------------------------

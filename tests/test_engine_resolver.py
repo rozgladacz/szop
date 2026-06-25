@@ -87,7 +87,7 @@ def _basic_state() -> BattleState:
 
 def test_apply_maneuver_returns_result():
     state = _basic_state()
-    action = ManeuverAction(unit_id=1, target_position=Position(3, 0))
+    action = ManeuverAction(unit_id=1, target_position=Position(-3, 0))
     result = apply(state, action, DeterministicDice(42))
     assert isinstance(result, ResolverResult)
     assert any(isinstance(e, MoveExecuted) for e in result.events)
@@ -111,7 +111,7 @@ def test_apply_shoot_emits_shot_resolved():
 def test_apply_returns_next_sequence():
     state = _basic_state()
     result = apply(
-        state, ManeuverAction(unit_id=1, target_position=Position(1, 0)),
+        state, ManeuverAction(unit_id=1, target_position=Position(-1, 0)),
         DeterministicDice(42), sequence=10,
     )
     assert result.next_sequence == 10 + len(result.events)

@@ -8,7 +8,8 @@
 Resolver wykonuje:
 1. **Walidacja** — gra nie zakończona, aktor nie pokonany, nie Aktywowany,
    odpowiedni active_player, Manewr w budżecie ruchu (dist ≤ efektywny budżet,
-   pkt 15.a + Szybki/Wolny). Przy niezgodności → `IllegalActionError`.
+   pkt 15.a + Szybki/Wolny) i z końcowym odstępem >1″ od innych oddziałów
+   (pkt 15.b.iii). Przy niezgodności → `IllegalActionError`.
 2. **Dispatch** — delegacja do `phases.activation_phase` (która sama dispatcha
    per Action type → combat.resolve_* + Przegrupowanie + Aktywowany).
 3. **Switch inicjatywy** (pkt 8.a) — po aktywacji active_player przechodzi
@@ -39,6 +40,10 @@ from app.services.engine.actions import (
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
 from app.services.engine.geometry import distance
+from app.services.engine.movement import (
+    MIN_MANEUVER_UNIT_GAP,
+    maneuver_destination_blocker,
+)
 from app.services.engine.phases import (
     _apply_single_action,
     _begin_activation,
@@ -67,7 +72,8 @@ class IllegalActionError(Exception):
     Powody: gra zakończona (pkt 5.f), aktor pokonany (models_alive=0), aktor
     już Aktywowany w tej rundzie (pkt 22.d.i), aktor należy do innego gracza
     niż `state.active_player` (pkt 11.a), Manewr przekracza budżet ruchu
-    (`dist > efektywny_budżet`, pkt 15.a + zdolność 33 Szybki/Wolny).
+    (`dist > efektywny_budżet`, pkt 15.a + zdolność 33 Szybki/Wolny), albo
+    kończy się zbyt blisko innego oddziału (pkt 15.b.iii).
     """
 
 
@@ -108,6 +114,19 @@ def _validate_maneuver_distance(actor: UnitBlob, action: ManeuverAction) -> None
         )
 
 
+def _validate_maneuver_clearance(
+    state: BattleState, actor: UnitBlob, action: ManeuverAction
+) -> None:
+    """Raise `IllegalActionError` when Maneuver ends too close to another unit."""
+    blocker = maneuver_destination_blocker(state, actor, action.target_position)
+    if blocker is not None:
+        raise IllegalActionError(
+            f"Unit {action.unit_id} maneuver target is too close to unit "
+            f"{blocker.unit_id}: gap {blocker.gap_inches:.3f}\" <= required "
+            f"{MIN_MANEUVER_UNIT_GAP:.3f}\" (pkt 15.b.iii)"
+        )
+
+
 def _validate_action(state: BattleState, action: Action) -> None:
     """Raise `IllegalActionError` gdy akcja niedozwolona w obecnym state."""
     if state.is_game_over:
@@ -136,6 +155,7 @@ def _validate_action(state: BattleState, action: Action) -> None:
         )
     if isinstance(action, ManeuverAction):
         _validate_maneuver_distance(actor, action)
+        _validate_maneuver_clearance(state, actor, action)
 
 
 # ---------------------------------------------------------------------------

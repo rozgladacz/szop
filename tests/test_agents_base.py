@@ -21,7 +21,9 @@ from app.services.engine.actions import (
     ShootAction,
     SpecialAction,
 )
+from app.services.engine.dice import DeterministicDice
 from app.services.engine.geometry import distance
+from app.services.engine.resolver import apply
 from app.services.engine.state import (
     BattleState,
     Lokalizacja,
@@ -102,6 +104,17 @@ def test_maneuver_targets_clamped_to_move():
     for m in maneuvers:
         moved = distance(own.position, m.target_position)
         assert moved <= 6.0 + 1e-9
+
+
+def test_maneuver_targets_skip_destinations_too_close_to_other_units():
+    own = _blob(1, 0, 0, 0)
+    enemy = _blob(2, 1, 5, 0)  # moving to enemy.position would overlap.
+    state = _state((own, enemy))
+    maneuvers = [a for a in legal_actions(state, perspective=0) if isinstance(a, ManeuverAction)]
+    assert maneuvers
+    assert all(a.target_position != enemy.position for a in maneuvers)
+    for action in maneuvers:
+        apply(state, action, DeterministicDice(3))
 
 
 def test_shoot_when_in_range_and_clear_los():

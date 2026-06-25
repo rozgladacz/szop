@@ -142,9 +142,9 @@ def test_priority6_falls_back_to_nearest_uncontrolled_when_not_closest():
     # A nie jest najbliższy do żadnego niezajętego celu (B bliżej obu) → priorytet 6:
     # i tak rusza do najbliższego niezajętego (nie stoi).
     a = _blob(1, 0, 0, 0)
-    b = _blob(2, 0, 7, 0)  # bliżej obu celów
-    obj1 = Objective(id=1, position=Position(10, 0), controller=None)
-    obj2 = Objective(id=2, position=Position(12, 0), controller=None)
+    b = _blob(2, 0, 15, 0)  # bliżej obu celów, ale poza kontrolą i clampem A
+    obj1 = Objective(id=1, position=Position(20, 0), controller=None)
+    obj2 = Objective(id=2, position=Position(24, 0), controller=None)
     state = _state((a, b), (obj1, obj2))
     mv_a = PriorityPlayer()._act(state, 0, a)
     assert isinstance(mv_a, ManeuverAction)  # rusza (priorytet 6), nie stoi
@@ -173,7 +173,7 @@ def test_continue_activation_shoots_after_maneuver():
 def test_continue_activation_moves_to_objective_after_shoot():
     # Po Ostrzale (zużyty, pkt 14.c.v) bot schodzi do niezajętego celu — nie marnuje akcji.
     own = _blob(1, 0, 0, 0, ranged_weapons=(RIFLE,))
-    enemy = _blob(2, 1, 8, 0)
+    enemy = _blob(2, 1, 30, 0)
     obj = Objective(id=1, position=Position(20, 0), controller=None)
     taken = (ShootAction(1, 2, RIFLE),)
     nxt = PriorityPlayer().continue_activation(_state((own, enemy), (obj,)), 0, 1, taken)

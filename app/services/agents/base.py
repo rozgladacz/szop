@@ -11,7 +11,9 @@ współdzielonym rdzeniem: buduje kandydatów z `actions.Action` typów dla każ
 nie-Aktywowanego własnego oddziału. Egzekwowanie pełnej legalności (limit 2
 akcji/aktywację pkt 11.b.iv, blokada Ostrzału w zwarciu pkt 14.c.iv) należy do
 warstwy `phases`/`resolver`; enumerator produkuje rozsądnych kandydatów, a
-nielegalne odrzuci resolver (ADR-0031, H3 w HANDOFF).
+nielegalne odrzuci resolver (ADR-0031, H3 w HANDOFF). Wyjątek: final-position
+clearance Manewru (pkt 15.b.iii, ADR-0052) filtrujemy już tutaj, żeby boty nie
+wybierały akcji, które resolver natychmiast odrzuci.
 
 Decyzje projektowe (ADR-0031):
 - **Dyskretyzacja ManeuverAction** — pozycja docelowa jest ciągła; MVP daje
@@ -37,6 +39,7 @@ from app.services.engine.actions import (
     SpecialAction,
 )
 from app.services.engine.geometry import circle_edge_distance, distance
+from app.services.engine.movement import maneuver_destination_is_clear
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
     BattleState,
@@ -125,7 +128,13 @@ def _move_toward(origin: Position, dest: Position, max_dist: float) -> Position:
     )
 
 
+def _can_maneuver_to(state: BattleState, unit: UnitBlob, target: Position) -> bool:
+    """Shared agent-side guard matching resolver Maneuver clearance."""
+    return maneuver_destination_is_clear(state, unit, target)
+
+
 def _maneuver_targets(
+    state: BattleState,
     unit: UnitBlob,
     enemies: list[UnitBlob],
     objectives: tuple[Objective, ...],
@@ -149,7 +158,7 @@ def _maneuver_targets(
     deduped: list[Position] = []
     for p in targets:
         key = (round(p.x, 2), round(p.y, 2))
-        if key not in seen:
+        if key not in seen and _can_maneuver_to(state, unit, p):
             seen.add(key)
             deduped.append(p)
     return deduped
@@ -223,8 +232,10 @@ def legal_actions(state: BattleState, perspective: int) -> list[Action]:
     - Szarża (14.d) — per broń wręcz × wrogi oddział w zasięgu Związania.
 
     Zwraca pustą listę gdy gracz nie ma aktywowalnych oddziałów (sygnał dla
-    `choose_action` → None). NIE waliduje pełnej legalności (limit akcji,
-    blokada Ostrzału w zwarciu) — to robi resolver.
+    `choose_action` → None). Nie waliduje pełnej legalności (limit akcji,
+    blokada Ostrzału w zwarciu) — to robi resolver. Filtruje tylko końcowy
+    odstęp Manewru (ADR-0052), żeby kandydaci botów byli spójni z publicznym
+    resolverem.
     """
     enemies = enemy_units(state, perspective)
     actions: list[Action] = []
@@ -236,7 +247,7 @@ def legal_actions(state: BattleState, perspective: int) -> list[Action]:
                 SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
             )
         for target_pos in _maneuver_targets(
-            unit, enemies, state.objectives, move
+            state, unit, enemies, state.objectives, move
         ):
             actions.append(
                 ManeuverAction(unit_id=unit.id, target_position=target_pos)
@@ -314,4 +325,3 @@ class Player(ABC):
         pkt 13.a MVP) → `IllegalActionError` jeśli koło wykracza poza strefę.
         """
         return blob_by_id(state, unit_id).position
-

@@ -3,13 +3,110 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-06-02 (B3.9 hardening zamknięty — sub-wątek `faza-b-3-hardening` ready for archive)
+> **Ostatnia aktualizacja:** 2026-06-25 (E4 slice: końcowa kolizja Manewru)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## W TRAKCIE — 2026-06-25T21:04:50+02:00 — E4 final-position collision for Maneuver
+
+**Zakres pracy:** mały slice z roadmapy E4: walidować końcową pozycję `ManeuverAction`
+tak, żeby oddział w Pareto MVP (koło) kończył Manewr dalej niż 1″ od innych żywych
+oddziałów na Froncie. Ten slice NIE implementuje pathfindingu ani ruchu przez teren
+`Niedostępny`/`Trudny`.
+
+**Źródło reguł odczytane w tej sesji:**
+- `app/static/docs/SZOP_Rozjemca.md` pkt 2.d: modele są terenem `Niedostępny` i
+  `Blokujący`.
+- `app/static/docs/SZOP_Rozjemca.md` pkt 4.c.i: na terenie `Niedostępny` nie można
+  się zatrzymać ani przez niego przemieszczać.
+- `app/static/docs/SZOP_Rozjemca.md` pkt 14.a: Manewr wykonuje Ruch.
+- `app/static/docs/SZOP_Rozjemca.md` pkt 15.b.iii: po ruchu modele muszą być dalej
+  niż 1″ od modeli innych oddziałów.
+- `app/static/docs/SZOP_Rozjemca.md` pkt 16.d: Związanie jest wyjątkiem dla celów
+  Związania; dlatego ten slice dotyczy tylko `ManeuverAction`, nie `ChargeAction`.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A.
+- Backend payload/API: publiczny resolver engine (`app/services/engine/resolver.py`)
+  i helper pure-engine (`app/services/engine/movement.py`).
+- JS render / CSS / template: N/A.
+- Agenci: enumeracja/priorytety Manewru w `app/services/agents/*`, żeby boty nie
+  generowały akcji, które resolver odrzuci.
+- Testy: `tests/test_engine_move_validation.py`, `tests/test_agents_base.py`,
+  `tests/test_agents_move_fidelity.py`.
+- Dokumentacja: ten HANDOFF.
+
+**Performance gate:** hot path engine/boty, ale bez DB i bez query. Dodatkowy koszt
+to liniowe sprawdzenie `state.blobs` tylko dla `ManeuverAction`; brak indeksów potrzebnych
+przy typowych małych rosterach MVP. Helper ma fast path po prostym loopie i pomija
+pokonanych / poza Frontem.
+
+**Plan:**
+- [x] 1. Dodać wspólny helper clearance dla końcowej pozycji Manewru.
+- [x] 2. Wpiąć walidację w `resolver._validate_action`.
+- [x] 3. Przefiltrować manewry botów przez ten sam helper.
+- [x] 4. Dodać regresje engine + agents i uruchomić targeted + pełny `pytest -q`.
+- [x] 5. DoD: call-site check, manual `/simplify`, manual `/review` (hot path), diff review.
+
+**Otwarte kwestie:** `READY`: pełne E4 pathfinding/teren `Trudny`/`Niedostępny` po trasie
+zostaje poza tym slice. `LOCKED`: Dywersant pozostaje poza zakresem MVP i nie jest ruszany.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-25T21:18: Dodano `app/services/engine/movement.py` z helperem
+  `maneuver_destination_blocker()` / `maneuver_destination_is_clear()`; model MVP
+  interpretuje pkt 15.b.iii jako gap obwód-obwód między kołami oddziałów.
+- 2026-06-25T21:18: `resolver._validate_action` odrzuca `ManeuverAction`, którego
+  końcowa pozycja jest w odległości `<= 1″` od innego żywego oddziału na Froncie.
+- 2026-06-25T21:18: Boty filtrują Manewr tym samym helperem w `legal_actions`,
+  `PriorityPlayer`, `PriorityV2Player` i `PriorityV3Player`; `ChargeAction` bez zmian,
+  bo pkt 16.d ma własny wyjątek dla celów Związania.
+- 2026-06-25T21:26: Regresje dodane do `test_engine_move_validation`,
+  `test_agents_base` i `test_agents_move_fidelity`. Targeted pytest po poprawce
+  składni w `priority_v2_player.py`: **47 passed**.
+- 2026-06-25T21:38: Pełny pytest ujawnił dwa stare scenariusze `PriorityPlayer`,
+  w których fixture zakładała Manewr kończący się zbyt blisko innego oddziału.
+  Poprawiono pozycje fixture, zachowując sens priorytetu. Targeted paczka
+  `test_engine_move_validation.py test_agents_base.py test_agents_move_fidelity.py
+  test_agents_priority.py`: **61 passed**.
+- 2026-06-25T21:48: Analogiczne fixture w `PriorityV2Player` poprawione dla
+  interceptu i kontynuacji po strzale. Rozszerzony targeted zestaw
+  `test_engine_move_validation.py test_agents_base.py test_agents_move_fidelity.py
+  test_agents_priority.py test_agents_priority_v2.py test_agents_priority_v3.py`:
+  **85 passed**.
+- 2026-06-25T21:58: Pełny pytest doszedł do `test_balance_simulate` i wykazał,
+  że statystyczny test seed-offsetu (`fixed.draws < mirror_draws`) był zależny
+  od fizyki ruchu. Zastąpiono go kontraktowym testem monkeypatch: `simulate_balance`
+  przekazuje P0 seed `base+i`, P1 seed `base+i+PLAYER_SEED_OFFSET`. Targeted
+  `tests/test_balance_simulate.py`: **26 passed**.
+- 2026-06-25T22:08: Zmiana legalności Manewru świadomie zmieniła przebieg wszystkich
+  6 B7 golden case. Dodano ADR-0052, zaktualizowano roadmap E4/ADR index i
+  odświeżono `GOLDEN_CASES` przez `python tests/test_engine_regression.py`.
+  Targeted `tests/test_engine_regression.py`: **14 passed**.
+- 2026-06-25T22:15: Pełny pytest ujawnił jeszcze starą fixture w
+  `tests/test_engine_resolver.py`, gdzie test dispatcher/sequence kończył Manewr
+  za blisko własnego oddziału. Pozycje zmienione na ujemny X (sens testów bez zmian).
+  Targeted `tests/test_engine_resolver.py`: **22 passed**.
+- 2026-06-25T22:31: Final full pytest po docstring-only cleanup:
+  **1925 passed, 1717 warnings** (`.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`).
+- 2026-06-25T22:33: Call-site check:
+  `maneuver_destination_blocker` używany przez resolver i wrapper `is_clear`;
+  `maneuver_destination_is_clear` używany przez `agents.base._can_maneuver_to`;
+  `_can_maneuver_to` używany w `legal_actions`, `PriorityPlayer`, `PriorityV2Player`,
+  `PriorityV3Player`; wszystkie call sites `_move_to_objective` zaktualizowane do
+  przekazywania `state`. Wpływ: tylko `ManeuverAction`, `ChargeAction` bez zmian.
+- 2026-06-25T22:33: Manual `/simplify`: 1 cleanup docstringów w `resolver.py` i
+  `agents/base.py`, logika bez zmian. Manual `/review` (hot path): brak findingów;
+  helper jest współdzielony, koszt O(blobs) tylko dla Manewru, pomija pokonanych
+  i poza Frontem. `/security-review` N/A (brak auth, DB, sekretów, user-input→DB).
+  `git diff --check` bez błędów; tylko ostrzeżenia CRLF dla istniejących plików.
+
+**Następne kroki:** `READY`: pełne E4 pathfinding/teren `Niedostępny`/`Trudny` po trasie
+oraz kolizje dla innych trybów ruchu, jeśli wymagane. `LOCKED`: Dywersant pozostaje
+poza zakresem MVP i nie jest pytaniem do usera.
 
 ## W TRAKCIE — 2026-06-23T21:01:17+02:00 — roadmap/ADR sync po leaderboard-cleanup
 
