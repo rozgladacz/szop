@@ -13,7 +13,6 @@
 |---|---|---|---|
 | [HANDOFF_aideas-knowledge-base](docs/handoffs/HANDOFF_aideas-knowledge-base.md) | Przygotowanie kopii i ekstraktów z aplikacji jako baza wiedzy dla ćwiczenia AIDEAS. | `AIdeas/Baza wiedzy/` | In progress |
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_code-review-telemetry-action-scope](docs/handoffs/HANDOFF_code-review-telemetry-action-scope.md) | Telemetria ADR-0017 mierzy `action_mix`/`decision_time_ms` tylko z 1. akcji aktywacji (drugie akcje niewidoczne) — niespójny zakres vs `quality`. | `app/services/agents/match.py`, `scripts/analyze_agents.py` | In progress (BLOCKED(user): kierunek A/B) |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -54,6 +53,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-06-25 — code-review-telemetry-action-scope (archived) — telemetria per-akcja (opcja A)
+- Domknięty Finding 1 (code-review 2026-06-24): `analyze_agents` mierzył `action_mix`/`decision_time_ms` tylko z PIERWSZEJ akcji aktywacji, a `quality` z pełnej aktywacji (niespójny zakres; pkt 11.b.iv — do 2 akcji). Decyzja usera: **opcja A (per-akcja)**. Implementacja: pętla akcji jest wewnątrz `resolver.apply_activation` → dodano tam czysto-obserwacyjny hook `on_action(action, state_before, state_after)` (additive, default None → **B7 golden digesty identyczne**); czas wyboru każdej akcji mierzony w `run_match` (choose_action dla 1., continuation dla kolejnych) i korelowany z `on_action` przez helper `match._apply_activation_with_telemetry` (silnik raportuje fakt, telemetria dokłada czas — bez `time` w resolverze). Efekt: `action_mix`/`decision_time_ms`/`quality` w jednym zakresie. Smoke: `action_mix` zawiera teraz 2. akcje (priority Ostrzał=32, 128 decyzji > liczby aktywacji).
+- Pliki: `app/services/engine/resolver.py` (+`on_action`/`ActionObserver`), `app/services/agents/match.py` (+helper, rozgałęzienie run_match), `scripts/analyze_agents.py` (docstringi per-akcja), `scripts/README.md`, `docs/architecture.md`, `tests/test_engine_multi_action.py` (+3), `tests/test_agents_match.py` (+2). Commit na `Faza_A`: `8f4b3ad`.
+- Weryfikacja: pytest **1930 passed** (1925 + 5); B7 golden 14/14 zielone; call-site check (`szop_client` backward-compat — `on_action` opcjonalny). `/simplify` 1 cleanup (adnotacja zwrotu helpera + import `ResolverResult`); `/review` hot-path (additive/obserwacyjny, korelacja czasu pokryta testami, brak findingów); `/security-review` N/A.
+- Doc updates: `docs/architecture.md` (sekcja telemetrii — zakres per-akcja + helper), `scripts/README.md` (per-akcja). Brak nowego ADR (ADR-0017 w indeksie status „—"; decyzja A zapisana w tym wpisie). **Przyszły zakres telemetrii (`READY`):** przerwania (pkt 11.b.i) + rozstawienie (D5).
 
 ### 2026-06-25 — faza-b-engine-mvp (E4 slice) — commit ukończonej walidacji odstępu Manewru
 - Sesja autonomiczna domknęła niezacommitowaną, w pełni ukończoną pracę E4 z wcześniejszej dzisiejszej sesji (mtime ~21:30, stabilne — żaden agent równoległy aktywny). Slice: `ManeuverAction` nie może kończyć się ≤1″ od innego żywego oddziału na Froncie (pkt 15.b.iii), wspólny helper `app/services/engine/movement.py` używany przez `resolver._validate_action` ORAZ boty (Priority/V2/V3), `ChargeAction` nietknięty (wyjątek pkt 16.d). Re-weryfikacja: pełny pytest **1925 passed** (0 failed); reguła potwierdzona ze źródła `app/static/docs/SZOP_Rozjemca.md:118`. ADR-0052 Accepted, roadmap E4 3 checkboxy `[x]`, B7 golden digesty odświeżone.
