@@ -331,6 +331,23 @@ def test_cli_games_below_one_rejected(mod, capsys):
     assert "--games" in capsys.readouterr().err
 
 
+def test_cli_initiative_with_games_warns(mod, capsys):
+    # --initiative jest ignorowane dla --games>1 (agregat = naprzemienna
+    # inicjatywa); wcześniej cicho, teraz jawny warning na stderr (non-fatal).
+    rc = mod.main(
+        ["--players", "priority,random", "--seed", "1", "--games", "2", "--initiative", "1"]
+    )
+    assert rc == 0
+    assert "--initiative" in capsys.readouterr().err
+
+
+def test_cli_initiative_no_warn_without_flag(mod, capsys):
+    # Bez jawnego --initiative przy --games>1 — brak szumu na stderr.
+    rc = mod.main(["--players", "priority,random", "--seed", "1", "--games", "2"])
+    assert rc == 0
+    assert "--initiative" not in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # Serializacja JSON (telemetria maszynowa, ADR-0017)
 # ---------------------------------------------------------------------------

@@ -767,7 +767,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--initiative",
         type=int,
         choices=(0, 1),
-        default=0,
+        default=None,
         help="Gracz z inicjatywą w rundzie 1 (domyślnie 0; ignorowane dla --games>1).",
     )
     parser.add_argument(
@@ -824,6 +824,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             path = args.fixture or str(bsim.DEFAULT_FIXTURE)
             fixture = bsim.load_battle_fixture(path)
         if args.games > 1:
+            if args.initiative is not None:
+                print(
+                    "--initiative jest ignorowane dla --games>1 "
+                    "(agregat używa naprzemiennej inicjatywy)",
+                    file=sys.stderr,
+                )
             obj, header = _fixture_aggregate(
                 fixture,
                 player_kinds=args.players,
@@ -837,7 +843,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 fixture,
                 player_kinds=args.players,
                 seed=args.seed,
-                initiative_player=args.initiative,
+                initiative_player=args.initiative if args.initiative is not None else 0,
             )
             report = render_analysis(obj, header=header)
             payload = analysis_to_dict(obj)

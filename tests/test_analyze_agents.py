@@ -145,6 +145,34 @@ def test_aggregate_sets_games_by_kind():
     assert metrics["b"].games == 3
 
 
+def test_aggregate_keeps_zero_row_for_inactive_bot():
+    # Bot "b" nigdy się nie aktywował (brak rekordów), ale jest w driverze
+    # (games_by_kind) → musi dostać wiersz zerowy zamiast zniknąć z raportu.
+    recs = [_rec("a", 1.0), _rec("a", 2.0)]
+    metrics = aa.aggregate_records(recs, games_by_kind={"a": 4, "b": 4})
+    assert set(metrics) == {"a", "b"}
+    assert metrics["b"].decisions == 0
+    assert metrics["b"].games == 4
+    assert metrics["b"].mean_quality == 0.0
+    assert metrics["b"].positive_rate == 0.0
+    assert metrics["b"].action_counts == {}
+    # Kolejność = kolejność z drivera (matchup), nie pierwsze wystąpienie w rekordach.
+    assert list(metrics) == ["a", "b"]
+
+
+def test_aggregate_zero_row_renders_and_serializes():
+    metrics = aa.aggregate_records(
+        [_rec("a", 1.0)], games_by_kind={"a": 1, "b": 1}
+    )
+    report = aa.render_report(
+        metrics, fixture_name="fx", player_kinds=("a", "b"), n_games=1
+    )
+    assert "`b`" in report  # wiersz + miks dla nieaktywnego bota obecne
+    d = aa.metrics_to_dict(metrics["b"])
+    assert d["decisions"] == 0
+    assert d["action_mix"] == {}
+
+
 # --- serializacja JSON (schema v1) ---
 
 

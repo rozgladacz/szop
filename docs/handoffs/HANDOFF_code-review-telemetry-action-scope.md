@@ -18,6 +18,56 @@ Manewr), a `decision_time_ms` nie liczy czasu wyboru 2. akcji. Jednocześnie `qu
 kolumny raportu mierzone w niespójnym zakresie. Cel wątku: podjąć decyzję projektową
 i ujednolicić zakres pomiaru (albo udokumentować ograniczenie jawnie w raporcie).
 
+## W TRAKCIE — 2026-06-25T09:16+02:00 — backlog READY: wiersz zerowy bota + warning --initiative
+
+**Zakres pracy:** domknąć DWIE pozostałe pozycje `READY` z backlogu review (NIE
+główna decyzja `BLOCKED(user)`):
+1. `analyze_agents` cicho pomija bota, który nigdy się nie aktywował (degeneracyjny
+   fixture) → brak wiersza w raporcie ("1 bot zamiast 2"). Pre-seed `AgentMetrics`
+   wszystkich botów z drivera (`games_by_kind`) → wiersz zerowy zamiast zniknięcia.
+2. `analyze_battle --initiative` cicho ignorowane przy `--games>1` (jest w help,
+   brak ostrzeżenia runtime) → jawny warning na stderr (non-fatal).
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A. Backend payload: N/A. JS/CSS/template: N/A.
+- CLI/script: `scripts/analyze_agents.py` (aggregate_records), `scripts/analyze_battle.py` (main + arg default).
+- Testy: `tests/test_analyze_agents.py` (wiersz zerowy), `tests/test_analyze_battle.py` (warning + per-battle initiative bez zmian).
+- Dokumentacja: ten HANDOFF.
+
+**Performance gate:** brak hot path; zero DB queries; tylko raport/walidacja CLI.
+
+**Plan:**
+- [x] 1. `aggregate_records` pre-seeduje boty z `games_by_kind` (wiersz zerowy).
+- [x] 2. `analyze_battle`: `--initiative` default None → detekcja jawnego podania → warning przy `--games>1`; per-battle bez zmian (None→0).
+- [x] 3. Regresje + targeted + pełny pytest fallback.
+- [x] 4. DoD: call-site check, `/simplify`, `/review` jeśli diff >50 linii, diff review, commit.
+
+**Otwarte kwestie:** główna decyzja `BLOCKED(user)` (kierunek A/B) bez zmian.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-25T09:30: `aggregate_records` pre-seeduje wszystkie boty z `games_by_kind`
+  (zamiast post-loopa ustawiającego tylko `.games` dla obecnych kindów) → bot bez
+  aktywacji dostaje wiersz zerowy; kolejność = matchup z drivera. Wstecznie
+  kompatybilne dla `games_by_kind=None` (zachowane: kolejność = pierwsze wystąpienie).
+  Properties już strzegły dzielenia przez 0 (`if self.decisions else 0.0`).
+- 2026-06-25T09:30: `analyze_battle --initiative` default `0`→`None` (detekcja jawnego
+  podania); per-battle używa `args.initiative if not None else 0` (zachowany default 0);
+  przy `--games>1 + jawne --initiative` → non-fatal warning na stderr (rc nadal 0).
+- 2026-06-25T09:35: Targeted `tests/test_analyze_agents.py tests/test_analyze_battle.py`
+  — **51 passed** (47 + 4 nowe regresje). Pełny `pytest -x -q` fallback — **1916 passed**
+  (1912 baseline + 4). Call-site check: `aggregate_records` jeden producent
+  (`analyze_agents.py:413`, przekazuje `games_by_kind`); `args.initiative` w
+  `analyze_battle` tylko w `main()` (`battle_replay.py:428` to osobny parser,
+  nietknięty). Manual `/simplify`: 0 zmian (pre-seed loop zastępuje conditional
+  post-loop = net prostsze; brak duplikacji/dead code). `/review` multi-agent
+  pominięty warunkowo (kod <50 linii, skrypt-liść, brak hot-path/SSOT-mutacji/auth/DB,
+  pełne pokrycie regresjami incl. backward-compat); `/security-review` N/A.
+
+**Status backlogu po tym slice:** wszystkie 4 pozycje `READY` z review domknięte
+(`--players`/`--map`/`--fixture` error-handling + wiersz zerowy bota + warning
+`--initiative`). Pozostaje wyłącznie Finding 1 `BLOCKED(user)` (zakres pomiaru
+action_mix/decision_time_ms — kierunek A/B).
+
 ## W TRAKCIE — 2026-06-25T06:03:05+02:00 — fixture CLI error handling
 
 **Zakres pracy:** domknąć drobny backlog z poprzedniego slice'a: `analyze_agents --fixture <nieistniejący>` ma zwracać czytelny błąd argparse zamiast tracebacku `FileNotFoundError`.
@@ -144,3 +194,6 @@ python -X utf8 -m pytest tests/test_analyze_agents.py -q
 - 2026-06-24: Pozostałe findingi z review (uncaught traceback na złym `--players`/`--map`,
   cichy drop bota który nigdy nie aktywował) — patrz REVIEW_2026-06-24.md sekcja „Backlog
   drobny". Niska severity, nie blokują; można zgarnąć przy okazji tego wątku.
+  **RESOLVED 2026-06-25:** `--players`/`--map`/`--fixture` → `parser.error`; cichy drop
+  bota → wiersz zerowy (`aggregate_records` pre-seed); `--initiative` przy `--games>1`
+  → non-fatal warning. Cały backlog `READY` domknięty; zostaje tylko Finding 1 `BLOCKED(user)`.

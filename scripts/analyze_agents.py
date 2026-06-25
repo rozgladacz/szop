@@ -178,19 +178,22 @@ def aggregate_records(
     """Grupuje `DecisionRecord`-y w `AgentMetrics` per `kind`.
 
     `games_by_kind` (opcjonalne) ustawia liczbę gier per bot (z drivera — liczba
-    decyzji jej nie zna). Kolejność kluczy = pierwsze wystąpienie bota.
+    decyzji jej nie zna) ORAZ pre-seeduje wszystkie boty z drivera: bot, który
+    nigdy się nie aktywował (np. degeneracyjny fixture), dostaje wiersz zerowy
+    zamiast cichego zniknięcia z raportu ("1 bot zamiast 2"). Kolejność kluczy =
+    kolejność z drivera (matchup), a dla botów bez `games_by_kind` — pierwsze
+    wystąpienie w rekordach.
     """
     metrics: dict[str, AgentMetrics] = {}
+    if games_by_kind:
+        for kind, games in games_by_kind.items():
+            metrics[kind] = AgentMetrics(kind=kind, games=games)
     for rec in records:
         m = metrics.get(rec.kind)
         if m is None:
             m = AgentMetrics(kind=rec.kind)
             metrics[rec.kind] = m
         m.add(rec)
-    if games_by_kind:
-        for kind, games in games_by_kind.items():
-            if kind in metrics:
-                metrics[kind].games = games
     return metrics
 
 
