@@ -1,9 +1,9 @@
 # HANDOFF — code-review-telemetry-action-scope
 
 > **Wątek:** Telemetria ADR-0017 (`analyze_agents`) mierzy `action_mix` i `decision_time_ms` tylko z PIERWSZEJ akcji aktywacji — drugie akcje (kontynuacja do 2 akcji, pkt 11.b.iv) są niewidoczne, a `quality` liczy się dla pełnej aktywacji → niespójny zakres pomiaru.
-> **Status:** In progress
+> **Status:** In progress — BLOCKED(user) **RESOLVED 2026-06-25**, Faza 2 (implementacja) ready to start
 > **Utworzony:** 2026-06-24
-> **Ostatnia aktualizacja:** 2026-06-25
+> **Ostatnia aktualizacja:** 2026-06-25 user decision (opcja A per-akcja)
 
 ## Cel
 Wykryte w code-review 2026-06-24 (`docs/handoffs/code-review/REVIEW_2026-06-24.md`, Finding 1).
@@ -144,17 +144,13 @@ action_mix/decision_time_ms — kierunek A/B).
 *(Oznaczaj kroki wg legendy: `[ ]` TODO, `[~]` rozpoczęto, `[x]` sukces, `[!]` błąd/porzucone.)*
 
 ### Faza 1 — Decyzja projektowa
-- [ ] Krok 1.1: Rozstrzygnąć kierunek (patrz Hipotezy). Dwie opcje:
-  - **A) per-akcja:** `on_decision` woła się dla KAŻDEJ akcji aktywacji (zmiana kontraktu
-    `OnDecision` + pętli w `run_match`/`continue_activation`); `elapsed_ms` per akcja.
-    Spójny `action_mix` i czas; więcej eventów telemetrii.
-  - **B) jawne ograniczenie:** zostawić single-fire, ale w raporcie `analyze_agents`
-    nazwać kolumnę „miks PIERWSZYCH akcji" + caveat, żeby nie mylić z pełnym obrazem.
-    Tańsze, ale `quality` nadal w innym zakresie niż `action_mix`.
+- [x] Krok 1.1: **RESOLVED 2026-06-25 — Opcja A (per-akcja).** Uzasadnienie: pierwsza akcja może być wymuszona statusem → rzeczywiste decyzje agenta w drugiej akcji/przerwaniach. Zakres musi obejmować wszystkie akcje aktywacji.
 
-### Faza 2 — Implementacja wybranej opcji
-- [ ] Krok 2.1: <zależne od decyzji>
-- [ ] Krok 2.2: Zaktualizować docstring kontraktu `OnDecision` (match.py) i nagłówki raportu.
+### Faza 2 — Implementacja (zmiana kontraktu OnDecision)
+- [ ] Krok 2.1: Rozszerzyć `match.run_match` — pętla `apply_activation` musi wywoływać `on_decision` dla każdej akcji (index 1..N), nie tylko raz na aktywację. Zmiana: przenieść hook `on_decision` wewnątrz pętli akcji, mierzyć `_elapsed_ms` per akcja.
+- [ ] Krok 2.2: Zmienić sygnaturę `OnDecision` callback'a (jeśli potrzeba) — dodać index akcji (opcjonalnie: czy `action_index` lub `total_actions`?).
+- [ ] Krok 2.3: Zaktualizować `analyze_agents.py` — agregować zdarzenia per akcja (nie per aktywacja), report aggregate po wszystkich akcjach bota per gra.
+- [ ] Krok 2.4: Zaktualizować docstring `OnDecision` (match.py) i nagłówki raportu `analyze_agents` — jasno zaznaczyć zakres „wszystkie akcje aktywacji".
 
 ### Faza N — Weryfikacja end-to-end (Definition of Done)
 - [ ] `pytest -X utf8 -q tests/test_analyze_agents.py tests/test_agents_*` (+ testy match)
@@ -174,9 +170,9 @@ action_mix/decision_time_ms — kierunek A/B).
 - (brak)
 
 ## Hipotezy / pytania otwarte
-- `BLOCKED(user)`: Czy telemetria ma obejmować WSZYSTKIE akcje aktywacji (opcja A), czy
-  pozostać single-fire z jawnym caveatem w raporcie (opcja B)? Brakująca decyzja: koszt
-  rozszerzenia kontraktu vs. wystarczalność „pierwsza akcja" jako proxy decyzji bota.
+- ✅ **RESOLVED (2026-06-25 user decision):** Telemetria musi obejmować WSZYSTKIE akcje aktywacji (opcja A). Uzasadnienie: pierwsza akcja może być wymuszona przez status (Przyszpilenie/Wyczerpanie) — rzeczywiste decyzje agenta przychodzą w drugiej akcji lub w przerwaniach. Mierzenie tylko pierwszej akcji zniekształca obraz decyzji. W przyszłości zakres rozszerzy się o przerwania (pkt 11.b.i) i rozstawienie (Faza D5).
+
+  **Implikacja:** `on_decision` musi być wywoływany dla każdej akcji aktywacji (zmiana kontraktu `OnDecision` + pętli w `match.run_match`/`continue_activation`), `elapsed_ms` per akcja. Spójny `action_mix` i `decision_time_ms`; więcej eventów telemetrii (akceptowalny koszt dla dokładności obserwacji).
 
 ## Jak zweryfikować
 ```bash
