@@ -11,6 +11,8 @@ import importlib.util
 import json
 import pathlib
 
+import pytest
+
 from app.services.agents.policy_eval import OBJECTIVE_WEIGHT, evaluate_state
 from app.services.engine.state import (
     BattleState,
@@ -251,3 +253,33 @@ def test_render_report_contains_agents():
     assert "priority" in report
     assert "random" in report
     assert "decision_quality_score" in report
+
+
+def test_cli_rejects_bad_player_without_traceback(capsys):
+    with pytest.raises(SystemExit) as exc:
+        aa.main(["--players", "priority,nieistniejacy_bot", "-n", "1"])
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "Nieznany gracz" in err
+    assert "Traceback" not in err
+
+
+def test_cli_rejects_unknown_map_without_traceback(capsys):
+    with pytest.raises(SystemExit) as exc:
+        aa.main(["--map", "nieistniejaca", "--players", "priority,random", "-n", "1"])
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "Nieznana mapa" in err
+    assert "Traceback" not in err
+
+
+def test_cli_rejects_missing_fixture_without_traceback(capsys):
+    with pytest.raises(SystemExit) as exc:
+        aa.main(["--fixture", "tests/fixtures/battles/nie_ma.yaml", "-n", "1"])
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "nie_ma.yaml" in err
+    assert "Traceback" not in err

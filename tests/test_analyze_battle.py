@@ -323,6 +323,14 @@ def test_cli_games_with_from_db_rejected(mod, capsys):
     assert "--games" in capsys.readouterr().err
 
 
+def test_cli_games_below_one_rejected(mod, capsys):
+    # --games 0 / wartości <1 nie mają sensu (1 = per-battle, >1 = agregat);
+    # wcześniej cicho dawały raport per-battle, ignorując flagę.
+    rc = mod.main(["--players", "priority,random", "--seed", "1", "--games", "0"])
+    assert rc == 2
+    assert "--games" in capsys.readouterr().err
+
+
 # ---------------------------------------------------------------------------
 # Serializacja JSON (telemetria maszynowa, ADR-0017)
 # ---------------------------------------------------------------------------

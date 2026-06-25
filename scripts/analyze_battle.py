@@ -800,6 +800,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
 
+    if args.games < 1:
+        print(
+            f"--games musi być ≥ 1 (1 = per-battle, >1 = agregat); podano {args.games}",
+            file=sys.stderr,
+        )
+        return 2
+
     if args.from_db is not None:
         if args.games > 1:
             print(

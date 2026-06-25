@@ -390,12 +390,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
-    fixture = (
-        bsim.build_map(args.map, args.map_seed)
-        if args.map
-        else bsim.load_battle_fixture(args.fixture)
-    )
-    player_kinds = bsim._parse_players(args.players)
+    try:
+        player_kinds = bsim._parse_players(args.players)
+    except argparse.ArgumentTypeError as exc:
+        parser.error(str(exc))
+
+    try:
+        fixture = (
+            bsim.build_map(args.map, args.map_seed)
+            if args.map
+            else bsim.load_battle_fixture(args.fixture)
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        parser.error(str(exc))
 
     records, games_by_kind = collect_decisions(
         fixture, n=args.games, player_kinds=player_kinds, base_seed=args.seed
