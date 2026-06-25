@@ -65,6 +65,13 @@ _MOVE_EPSILON = 1e-6
 #: `(state, unit_id, actions_taken) -> Action | None`.
 ActionProvider = Callable[[BattleState, int, "tuple[Action, ...]"], "Action | None"]
 
+#: Czysto obserwacyjny hook telemetrii (ADR-0017) — wołany po KAŻDEJ zaaplikowanej
+#: akcji aktywacji z `(action, state_before_action, state_after_action)`. Stany
+#: bracketują pojedynczą akcję (przed `_finalize_activation`/switch). `None` =
+#: zero wywołań; nie wpływa na stan, event-log ani replay (silnik raportuje fakt,
+#: warstwa telemetrii dokłada czas — patrz `match._apply_activation_with_telemetry`).
+ActionObserver = Callable[["Action", "BattleState", "BattleState"], None]
+
 
 class IllegalActionError(Exception):
     """Akcja niedozwolona w obecnym `BattleState`.
@@ -267,6 +274,7 @@ def apply_activation(
     sequence: int = 1,
     *,
     continuation: ActionProvider | None = None,
+    on_action: ActionObserver | None = None,
 ) -> ResolverResult:
     """Pełna aktywacja (pkt 11.b) — do 2 akcji jednego oddziału, potem switch.
 
@@ -279,6 +287,10 @@ def apply_activation(
     `continuation=None` → zachowanie jak `apply` (1 akcja). Postęp aktywacji
     (lista akcji) jest LOKALNY — `BattleState` bez zmian schematu, replay
     invariant zachowany (eventy te same prymitywy: akcja* + Aktywowany + switch).
+
+    `on_action` (opcjonalny, ADR-0017): czysto obserwacyjny hook wołany po KAŻDEJ
+    zaaplikowanej akcji z `(action, state_before, state_after)`. `None` → zero
+    wywołań; nie zmienia stanu, eventów ani replay (B7 golden bez zmian).
 
     Raises:
         IllegalActionError: pierwsza akcja niedozwolona (zob. `_validate_action`).
@@ -294,9 +306,12 @@ def apply_activation(
     actions_taken: list[Action] = []
     action: Action | None = first_action
     while action is not None:
+        state_before_action = state
         state, action_events, seq = _apply_single_action(state, action, dice, seq)
         events.extend(action_events)
         actions_taken.append(action)
+        if on_action is not None:
+            on_action(action, state_before_action, state)
 
         if continuation is None or len(actions_taken) >= MAX_ACTIONS_PER_ACTIVATION:
             break

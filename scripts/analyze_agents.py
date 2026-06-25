@@ -10,11 +10,13 @@ Uruchom:
 Co robi (roadmap "Cross-cutting: telemetria od dnia 1", ADR-0017 →
 `data/agent_metrics/{agent}.jsonl`):
 Mierzy KOSZT i JAKOŚĆ decyzji botów **per bot** (nie per bitwa — to robi
-`analyze_battle.py`). Z N gier zbiera per aktywację:
-1. **`decision_time_ms`** — wall-clock głównej decyzji `Player.choose_action`.
+`analyze_battle.py`). Z N gier zbiera per AKCJĘ (opcja A, ADR-0017 — aktywacja
+może mieć 2 akcje pkt 11.b.iv, np. Manewr→Ostrzał; mierzymy każdą):
+1. **`decision_time_ms`** — wall-clock wyboru tej akcji (`choose_action` dla 1.,
+   `continue_activation` dla kolejnych).
 2. **`decision_quality_score`** — samoocena bota: Δ `evaluate_state` (SSOT
    `policy_eval`, ADR-0031/0044) z perspektywy decydenta między stanem przed
-   a po aktywacji. Dodatnia = bot poprawił własną pozycję wg swojej funkcji oceny.
+   a po tej akcji. Dodatnia = bot poprawił własną pozycję wg swojej funkcji oceny.
 
 Agregat per bot: liczba decyzji, średni/mediana/max czas, średnia jakość, odsetek
 decyzji "poprawiających" (quality > 0), miks typów akcji. Diagnostyka uzupełnia
@@ -104,7 +106,7 @@ def quality_from_states(
     """Δ `evaluate_state` z perspektywy decydenta (samoocena jakości decyzji).
 
     Reużywa SSOT `policy_eval.evaluate_state` (bilans HP + kontrola/bliskość celów
-    pkt 5, ADR-0031). Dodatnia wartość = aktywacja poprawiła pozycję bota wg jego
+    pkt 5, ADR-0031). Dodatnia wartość = akcja poprawiła pozycję bota wg jego
     własnej funkcji oceny. Czysta i deterministyczna (funkcja stanów, zero RNG).
 
     Uwaga (ograniczenie): `evaluate_state` czyta `obj.controller` jak jest
@@ -119,7 +121,7 @@ def quality_from_states(
 
 @dataclass(slots=True)
 class DecisionRecord:
-    """Pojedyncza decyzja (aktywacja) bota."""
+    """Pojedyncza decyzja bota (jedna akcja aktywacji — opcja A, ADR-0017)."""
 
     kind: str
     perspective: int
@@ -339,9 +341,10 @@ def render_report(
         lines.append(f"- `{m.kind}`: {mix or '—'}")
     lines.append("")
     lines.append(
-        "> `decision_quality_score` = Δ `evaluate_state` (samoocena bota, SSOT "
-        "policy_eval) — deterministyczna. `decision_time_ms` = wall-clock "
-        "`choose_action` — zależy od maszyny, nie do regresji."
+        "> Zakres pomiaru: KAŻDA akcja aktywacji (opcja A — pkt 11.b.iv do 2 akcji). "
+        "`decision_quality_score` = Δ `evaluate_state` (samoocena bota, SSOT "
+        "policy_eval) — deterministyczna. `decision_time_ms` = wall-clock wyboru "
+        "akcji — zależy od maszyny, nie do regresji."
     )
     return "\n".join(lines)
 

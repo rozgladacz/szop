@@ -1,9 +1,9 @@
 # HANDOFF — code-review-telemetry-action-scope
 
 > **Wątek:** Telemetria ADR-0017 (`analyze_agents`) mierzy `action_mix` i `decision_time_ms` tylko z PIERWSZEJ akcji aktywacji — drugie akcje (kontynuacja do 2 akcji, pkt 11.b.iv) są niewidoczne, a `quality` liczy się dla pełnej aktywacji → niespójny zakres pomiaru.
-> **Status:** In progress — BLOCKED(user) **RESOLVED 2026-06-25**, Faza 2 (implementacja) ready to start
+> **Status:** **DONE 2026-06-25** — Faza 1 (decyzja A) + Faza 2 (implementacja per-akcja) + DoD domknięte; gotowy do archiwizacji. Finding 1 rozwiązany (`action_mix`/`decision_time_ms` spójne z `quality`).
 > **Utworzony:** 2026-06-24
-> **Ostatnia aktualizacja:** 2026-06-25 user decision (opcja A per-akcja)
+> **Ostatnia aktualizacja:** 2026-06-25 Faza 2 zaimplementowana (per-akcja, 1930 passed)
 
 ## Cel
 Wykryte w code-review 2026-06-24 (`docs/handoffs/code-review/REVIEW_2026-06-24.md`, Finding 1).
@@ -17,6 +17,67 @@ Manewr), a `decision_time_ms` nie liczy czasu wyboru 2. akcji. Jednocześnie `qu
 (`quality_from_states`) obejmuje pełną aktywację (state_before vs stan finalny) → dwie
 kolumny raportu mierzone w niespójnym zakresie. Cel wątku: podjąć decyzję projektową
 i ujednolicić zakres pomiaru (albo udokumentować ograniczenie jawnie w raporcie).
+
+## W TRAKCIE — 2026-06-25T23:20+02:00 — Faza 2: telemetria per-akcja (opcja A)
+
+**Zakres pracy:** zaimplementować decyzję usera (opcja A) — `on_decision` ma być
+wołany dla KAŻDEJ akcji aktywacji (nie tylko pierwszej), z `elapsed_ms`, `action_type`
+i `quality` per akcja. Ujednolicenie zakresu pomiaru `action_mix`/`decision_time_ms`
+z `quality`.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A. Backend payload/API: N/A. JS/CSS/template: N/A.
+- Engine: `app/services/engine/resolver.py` — `apply_activation` dostaje opcjonalny
+  czysto-obserwacyjny hook `on_action(action, state_before, state_after)` (default
+  None → zero zmian zachowania).
+- Runner: `app/services/agents/match.py` — `run_match` mierzy czas wyboru każdej
+  akcji (choose_action dla 1., continuation dla kolejnych) i woła `on_decision`
+  per akcja przez helper telemetrii.
+- Konsument: `scripts/analyze_agents.py` — docstringi/nagłówki „per aktywację" →
+  „per akcję"; agregacja już per-rekord (każda akcja = rekord).
+- Testy: `tests/test_agents_match.py`, `tests/test_analyze_agents.py`,
+  `tests/test_engine_multi_action.py`.
+
+**Performance gate:** hot path engine/runner. Hook jest no-op gdy `on_decision`
+None (jeden test `is not None`); zero DB/query. Aktywny tylko w trybie telemetrii.
+
+**Plan:**
+- [x] 1. `resolver.apply_activation`: opcjonalny `on_action` hook per akcja (additive).
+- [x] 2. `match.run_match`: helper `_apply_activation_with_telemetry` mierzy czas per
+  akcja i woła `on_decision` per akcja; ścieżka bez telemetrii bez zmian.
+- [x] 3. Zaktualizować docstring `OnDecision` + `analyze_agents` + README + architecture.
+- [x] 4. Regresje (per-action firing) + targeted + pełny pytest; B7 golden bez zmian.
+- [x] 5. DoD: call-site check, `/simplify`, `/review` (hot path), diff review, commit.
+
+**Otwarte kwestie:** decyzja A LOCKED (nie podnosić). Przerwania (pkt 11.b.i) i
+rozstawienie (D5) jako przyszły zakres telemetrii — poza tym slice (`READY`).
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-25T23:40: `resolver.apply_activation` ma opcjonalny `ActionObserver`
+  `on_action(action, state_before, state_after)` wołany po KAŻDEJ zaaplikowanej
+  akcji (default None → zero zmian; **B7 golden 14/14 zielone, digesty identyczne**).
+  Silnik raportuje fakt (stany bracketujące pojedynczą akcję), warstwa telemetrii
+  dokłada czas → czysty rozdział odpowiedzialności (brak `time` w resolverze).
+- 2026-06-25T23:40: `match._apply_activation_with_telemetry` mierzy czas wyboru
+  każdej akcji TAM, gdzie wybierana (`first_action_elapsed_ms` dla 1.;
+  `continuation` dla kolejnych) i koreluje z `on_action` po kolejności aplikacji.
+  `run_match` rozgałęzia: `on_decision is None` → stara ścieżka bit-perfect;
+  inaczej → helper. Współdzielony `base_continuation` (brak duplikacji).
+- 2026-06-25T23:40: Smoke CLI (`priority,random` n=4): `action_mix` zawiera teraz
+  drugie akcje (priority Ostrzał=32, 128 decyzji > liczby aktywacji) — wcześniej
+  systematycznie pomijane. `action_mix`/`decision_time_ms`/`quality` w jednym
+  zakresie (per akcja) — Finding 1 rozwiązany.
+- 2026-06-25T23:40: Testy: +3 resolver (`test_engine_multi_action`: on_action per
+  akcja, tylko zaaplikowane, None=no-op) +2 match (`test_agents_match`: helper woła
+  `on_decision` per akcja + parytet 1-akcja). Pełny pytest **1930 passed**
+  (1925 baseline + 5). Call-site: `apply_activation` w `szop_client/local.py`
+  bez `on_action` (opcjonalny → backward compat); `on_decision` sygnatura bez
+  zmian (collect wołany częściej). `/simplify` 1 cleanup (adnotacja zwrotu helpera
+  + import `ResolverResult`). `/review` hot-path: additive, obserwacyjny, korelacja
+  czasu pokryta testami — brak findingów. `/security-review` N/A.
+- Doc: `analyze_agents.py` (docstringi/stopka per-akcja), `scripts/README.md`,
+  `docs/architecture.md` (sekcja telemetrii). Brak nowego ADR (ADR-0017 w indeksie
+  status „—" — pełny ADR odłożony, decyzja A zapisana w tym HANDOFF).
 
 ## W TRAKCIE — 2026-06-25T09:16+02:00 — backlog READY: wiersz zerowy bota + warning --initiative
 
@@ -146,20 +207,25 @@ action_mix/decision_time_ms — kierunek A/B).
 ### Faza 1 — Decyzja projektowa
 - [x] Krok 1.1: **RESOLVED 2026-06-25 — Opcja A (per-akcja).** Uzasadnienie: pierwsza akcja może być wymuszona statusem → rzeczywiste decyzje agenta w drugiej akcji/przerwaniach. Zakres musi obejmować wszystkie akcje aktywacji.
 
-### Faza 2 — Implementacja (zmiana kontraktu OnDecision)
-- [ ] Krok 2.1: Rozszerzyć `match.run_match` — pętla `apply_activation` musi wywoływać `on_decision` dla każdej akcji (index 1..N), nie tylko raz na aktywację. Zmiana: przenieść hook `on_decision` wewnątrz pętli akcji, mierzyć `_elapsed_ms` per akcja.
-- [ ] Krok 2.2: Zmienić sygnaturę `OnDecision` callback'a (jeśli potrzeba) — dodać index akcji (opcjonalnie: czy `action_index` lub `total_actions`?).
-- [ ] Krok 2.3: Zaktualizować `analyze_agents.py` — agregować zdarzenia per akcja (nie per aktywacja), report aggregate po wszystkich akcjach bota per gra.
-- [ ] Krok 2.4: Zaktualizować docstring `OnDecision` (match.py) i nagłówki raportu `analyze_agents` — jasno zaznaczyć zakres „wszystkie akcje aktywacji".
+### Faza 2 — Implementacja (zmiana kontraktu OnDecision) — **DONE 2026-06-25**
+- [x] Krok 2.1: `on_decision` wołany dla KAŻDEJ akcji. Realizacja: pętla akcji jest
+  WEWNĄTRZ `resolver.apply_activation` (nie w `run_match`), więc dodano tam czysto
+  obserwacyjny `on_action` hook (stany per akcja); czas mierzony w `run_match` przez
+  helper `_apply_activation_with_telemetry` i korelowany po kolejności.
+- [x] Krok 2.2: Sygnatura `OnDecision` BEZ zmian (6 arg) — `action_index`/`total_actions`
+  niepotrzebne; każde wywołanie = jedna akcja, agregacja per-kind już wystarcza.
+- [x] Krok 2.3: `analyze_agents.py` agreguje per akcja (każdy rekend = jedna akcja);
+  `DecisionRecord`/docstringi „aktywacja"→„akcja". Brak zmiany w `aggregate_records`.
+- [x] Krok 2.4: Docstring `OnDecision`/`run_match` + nagłówek/stopka `analyze_agents`
+  + `scripts/README.md` + `docs/architecture.md` — zakres „każda akcja aktywacji".
 
-### Faza N — Weryfikacja end-to-end (Definition of Done)
-- [ ] `pytest -X utf8 -q tests/test_analyze_agents.py tests/test_agents_*` (+ testy match)
-- [ ] Call-site check `on_decision` / `run_match` / `simulate_from_rosters`
-- [ ] `/simplify` — przegląd jakości, reuse, dead code
-- [ ] `/review` — jeśli diff >50 linii LUB hot path
-- [ ] `/security-review` — (nie dotyczy — czysta telemetria obserwacyjna, brak auth/user-input→DB)
-- [ ] Re-run `pytest` jeśli `/simplify` lub `/review` coś zmieniły
-- [ ] Diff review przed commitem
+### Faza N — Weryfikacja end-to-end (Definition of Done) — **DONE 2026-06-25**
+- [x] `pytest` pełny: **1930 passed** (1925 + 5); targeted match/multi_action/analyze/B7 78 passed.
+- [x] Call-site check `on_decision`/`apply_activation`/`on_action` (`szop_client` backward-compat).
+- [x] `/simplify` — 1 cleanup (adnotacja zwrotu + import `ResolverResult`); helper dedup.
+- [x] `/review` (hot path) — additive/obserwacyjny, korelacja czasu pokryta testami, brak findingów.
+- [x] `/security-review` — N/A (telemetria obserwacyjna, brak auth/user-input→DB).
+- [x] Re-run `pytest` po cleanupie — 1930 passed. Diff review przed commitem OK.
 
 ## Pliki dotknięte
 - `scripts/analyze_agents.py` — błędne `--players` i `--map` trafiają w `parser.error` zamiast tracebacku.

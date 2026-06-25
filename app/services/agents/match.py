@@ -37,6 +37,7 @@ from app.services.engine.phases import (
 )
 from app.services.engine.resolver import (
     IllegalActionError,
+    ResolverResult,
     apply_activation,
     is_battle_over,
     should_end_round,
@@ -55,11 +56,13 @@ from app.services.engine.state import (
 DEFAULT_MAX_ACTIVATIONS: int = 2000
 
 #: Sygnatura opcjonalnego obserwatora decyzji bota (telemetria, ADR-0017).
-#: Wołany RAZ na aktywację, gdy aktywny gracz faktycznie podejmuje akcję
-#: (pomijane przy przekazaniu inicjatywy / braku aktywowalnych oddziałów).
-#: Argumenty: `(perspective, unit_id, action, state_before, state_after, elapsed_ms)`
-#: — `elapsed_ms` to wall-clock głównej decyzji `choose_action` (bez kontynuacji
-#: 2. akcji). Czysto obserwacyjny — nie wpływa na przebieg gry ani event-log.
+#: Wołany dla KAŻDEJ akcji aktywacji (opcja A — pkt 11.b.iv może dać 2 akcje, np.
+#: Manewr→Ostrzał; pomijane przy przekazaniu inicjatywy / braku aktywowalnych
+#: oddziałów). Argumenty:
+#: `(perspective, unit_id, action, state_before, state_after, elapsed_ms)` —
+#: `state_before`/`state_after` bracketują POJEDYNCZĄ akcję; `elapsed_ms` to
+#: wall-clock wyboru TEJ akcji (`choose_action` dla 1., `continue_activation` dla
+#: kolejnych). Czysto obserwacyjny — nie wpływa na przebieg gry ani event-log.
 OnDecision = Callable[[int, int, "Action", "BattleState", "BattleState", float], None]
 
 
@@ -89,6 +92,61 @@ def _winner(state: BattleState) -> int | None:
     return None
 
 
+def _apply_activation_with_telemetry(
+    state: BattleState,
+    first_action: Action,
+    dice: DeterministicDice,
+    sequence: int,
+    continuation: Callable[[BattleState, int, tuple[Action, ...]], "Action | None"],
+    *,
+    perspective: int,
+    first_action_elapsed_ms: float,
+    on_decision: OnDecision,
+) -> ResolverResult:
+    """`apply_activation` z telemetrią per-akcja (ADR-0017, opcja A).
+
+    Mierzy wall-clock wyboru KAŻDEJ akcji tam, gdzie akcja jest wybierana
+    (`first_action_elapsed_ms` dla 1. akcji; każde wywołanie `continuation` dla
+    kolejnych) i koreluje czas z `on_action` (resolver) po kolejności aplikacji:
+    akcje aplikowane są w tej samej kolejności, w której mierzono ich czas wyboru.
+    Continuation odrzucony (akcja nielegalna/inny oddział/None) dokłada zmierzony
+    czas, którego `on_action` nie skonsumuje — indeksujemy tylko zaaplikowane akcje.
+    """
+    decision_times_ms: list[float] = [first_action_elapsed_ms]
+    applied = 0
+
+    def timed_continuation(
+        s: BattleState, uid: int, taken: tuple[Action, ...]
+    ) -> "Action | None":
+        _t0 = time.perf_counter()
+        nxt = continuation(s, uid, taken)
+        decision_times_ms.append((time.perf_counter() - _t0) * 1000.0)
+        return nxt
+
+    def on_action(
+        action: Action, state_before: BattleState, state_after: BattleState
+    ) -> None:
+        nonlocal applied
+        on_decision(
+            perspective,
+            action.unit_id,
+            action,
+            state_before,
+            state_after,
+            decision_times_ms[applied],
+        )
+        applied += 1
+
+    return apply_activation(
+        state,
+        first_action,
+        dice,
+        sequence=sequence,
+        continuation=timed_continuation,
+        on_action=on_action,
+    )
+
+
 def run_match(
     state: BattleState,
     players: Sequence[Player],
@@ -105,9 +163,10 @@ def run_match(
         dice: `DeterministicDice` — seed determinuje całą grę.
         max_activations: bezpiecznik anty-zapętlenie.
         on_decision: opcjonalny obserwator telemetrii (ADR-0017). `None` =
-            zachowanie bez zmian (jedynie pomiar `perf_counter` + test
-            `is not None` per decyzja — bez wpływu na stan/event-log).
-            Wołany po każdej aktywacji — patrz `OnDecision`.
+            zachowanie bez zmian (ścieżka bez telemetrii bit-perfect jak
+            wcześniej — bez wpływu na stan/event-log). Gdy podany, wołany dla
+            KAŻDEJ akcji aktywacji (opcja A) — patrz `OnDecision` i
+            `_apply_activation_with_telemetry`.
 
     Returns:
         `MatchResult(final_state, events, winner, rounds_played)`.
@@ -152,23 +211,32 @@ def run_match(
             # Aktywacja do 2 akcji (pkt 11.b.iv) — aktywny gracz dostarcza
             # kolejne akcje przez `continue_activation`.
             player = players[active]
-            state_before = state
-            result = apply_activation(
-                state,
-                action,
-                dice,
-                sequence=seq,
-                continuation=lambda s, uid, taken, _p=player, _a=active: _p.continue_activation(
+            base_continuation = (
+                lambda s, uid, taken, _p=player, _a=active: _p.continue_activation(
                     s, _a, uid, taken
-                ),
+                )
             )
+            if on_decision is None:
+                result = apply_activation(
+                    state, action, dice, sequence=seq, continuation=base_continuation
+                )
+            else:
+                # Telemetria per-akcja (ADR-0017, opcja A) — czas i staty każdej
+                # akcji, nie tylko pierwszej. Ścieżka bez telemetrii (None) jest
+                # bit-perfect jak wcześniej → B7 golden digesty bez zmian.
+                result = _apply_activation_with_telemetry(
+                    state,
+                    action,
+                    dice,
+                    seq,
+                    base_continuation,
+                    perspective=active,
+                    first_action_elapsed_ms=_elapsed_ms,
+                    on_decision=on_decision,
+                )
             state = result.state
             seq = result.next_sequence
             events.extend(result.events)
-            if on_decision is not None:
-                on_decision(
-                    active, action.unit_id, action, state_before, state, _elapsed_ms
-                )
             activations += 1
             if activations >= max_activations:
                 raise RuntimeError(

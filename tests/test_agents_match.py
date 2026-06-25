@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from app.services.agents.match import (
     MatchResult,
+    _apply_activation_with_telemetry,
     run_match,
     simulate_from_rosters,
 )
 from app.services.agents.random_player import RandomPlayer
 from app.services.agents.greedy_player import GreedyPlayer
+from app.services.engine.actions import ManeuverAction, ShootAction
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import InitiativePassed
 from app.services.engine.phases import MAX_ROUND
@@ -113,6 +115,75 @@ def _blob(uid: int, owner: int, x: float, **kw) -> UnitBlob:
     }
     defaults.update(kw)
     return UnitBlob(**defaults)
+
+
+# --- telemetria per-akcja (ADR-0017, opcja A) ---
+
+_RIFLE = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=2)
+
+
+def _telemetry_state() -> BattleState:
+    blobs = (
+        _blob(1, 0, 4, ranged_weapons=(_RIFLE,)),
+        _blob(2, 1, 10),
+    )
+    return BattleState(
+        round=1,
+        active_player=0,
+        activations_remaining=(1, 1),
+        blobs=blobs,
+        terrain=(),
+        objectives=(),
+    )
+
+
+def test_telemetry_fires_on_decision_per_action():
+    # Manewr→Ostrzał w jednej aktywacji → on_decision woła się 2× (opcja A).
+    def cont(state, uid, taken):
+        if len(taken) == 1:
+            return ShootAction(uid, 2, _RIFLE)
+        return None
+
+    calls: list[tuple] = []
+
+    def on_dec(perspective, unit_id, action, state_before, state_after, elapsed_ms):
+        calls.append((perspective, unit_id, type(action).__name__, elapsed_ms))
+
+    _apply_activation_with_telemetry(
+        _telemetry_state(),
+        ManeuverAction(1, Position(4, 0)),
+        DeterministicDice(7),
+        1,
+        cont,
+        perspective=0,
+        first_action_elapsed_ms=1.5,
+        on_decision=on_dec,
+    )
+    assert [c[2] for c in calls] == ["ManeuverAction", "ShootAction"]
+    assert all(c[0] == 0 and c[1] == 1 for c in calls)  # perspektywa + unit_id
+    assert calls[0][3] == 1.5  # 1. akcja: przekazany elapsed
+    assert calls[1][3] >= 0.0  # 2. akcja: zmierzony czas continuation
+
+
+def test_telemetry_single_action_fires_once():
+    # Brak kontynuacji → dokładnie 1 wywołanie (parytet z trybem 1-akcja).
+    calls: list[tuple] = []
+
+    def on_dec(*args):
+        calls.append(args)
+
+    _apply_activation_with_telemetry(
+        _telemetry_state(),
+        ManeuverAction(1, Position(5, 0)),
+        DeterministicDice(1),
+        1,
+        lambda s, uid, taken: None,
+        perspective=0,
+        first_action_elapsed_ms=2.0,
+        on_decision=on_dec,
+    )
+    assert len(calls) == 1
+    assert calls[0][5] == 2.0  # elapsed_ms pierwszej akcji
 
 
 def test_initiative_passes_when_active_player_has_no_actions():

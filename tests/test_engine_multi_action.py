@@ -164,6 +164,65 @@ def test_continuation_for_other_unit_rejected():
     assert _count(res.events, MoveExecuted) == 1
 
 
+# --- on_action hook (telemetria per-akcja, ADR-0017) ---
+
+
+def test_on_action_fires_per_applied_action():
+    # Manewr→Ostrzał: hook woła się 2× ze stanami bracketującymi pojedynczą akcję.
+    def cont(state, uid, taken):
+        if len(taken) == 1 and isinstance(taken[0], ManeuverAction):
+            return ShootAction(uid, 2, RIFLE)
+        return None
+
+    seen: list[tuple] = []
+
+    def obs(action, state_before, state_after):
+        seen.append((type(action).__name__, state_before, state_after))
+
+    apply_activation(
+        _state(),
+        ManeuverAction(1, Position(4, 0)),
+        DeterministicDice(7),
+        continuation=cont,
+        on_action=obs,
+    )
+    assert [s[0] for s in seen] == ["ManeuverAction", "ShootAction"]
+    # after 1. akcji == before 2. akcji (stany bracketują pojedynczą akcję).
+    assert seen[0][2] == seen[1][1]
+    # Manewr zmienił stan (pozycja) → before != after dla 1. akcji.
+    assert seen[0][1] != seen[0][2]
+
+
+def test_on_action_only_fires_for_applied_actions():
+    # continuation zwraca 2. Ostrzał (odrzucony pkt 14.c.v) → hook tylko 1×.
+    def cont(state, uid, taken):
+        return ShootAction(uid, 2, RIFLE)
+
+    count = 0
+
+    def obs(action, state_before, state_after):
+        nonlocal count
+        count += 1
+
+    apply_activation(
+        _state(),
+        ShootAction(1, 2, RIFLE),
+        DeterministicDice(3),
+        continuation=cont,
+        on_action=obs,
+    )
+    assert count == 1
+
+
+def test_on_action_none_is_noop():
+    # on_action=None bit-perfect jak bez hooka (B7 golden bez zmian).
+    a = apply_activation(_state(), ManeuverAction(1, Position(5, 0)), DeterministicDice(1))
+    b = apply_activation(
+        _state(), ManeuverAction(1, Position(5, 0)), DeterministicDice(1), on_action=None
+    )
+    assert a.state == b.state and a.events == b.events
+
+
 def test_replay_invariant_two_action_activation():
     state = _state()
 

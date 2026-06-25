@@ -364,9 +364,11 @@ staty per oddział/strona, kontrola celów. Dla downstream tooling/agregacji
 ### `analyze_agents.py` (telemetria decyzji bota, ADR-0017)
 
 Telemetria **per bot** (nie per bitwa — to robi `analyze_battle.py`): z N gier
-zbiera per aktywację `decision_time_ms` (wall-clock `Player.choose_action`) +
-`decision_quality_score` (Δ `evaluate_state`, samoocena bota wg SSOT
-`policy_eval`). Agregat per agent: liczba decyzji, śr./mediana/max czas, śr.
+zbiera per AKCJĘ (opcja A, ADR-0017 — aktywacja może mieć 2 akcje pkt 11.b.iv,
+np. Manewr→Ostrzał) `decision_time_ms` (wall-clock wyboru akcji: `choose_action`
+dla 1., `continue_activation` dla kolejnych) + `decision_quality_score`
+(Δ `evaluate_state`, samoocena bota wg SSOT `policy_eval`). Spójny zakres
+`action_mix`/`decision_time_ms`/`quality`. Agregat per agent: liczba decyzji, śr./mediana/max czas, śr.
 jakość, odsetek decyzji poprawiających (quality > 0), miks typów akcji.
 Diagnostyka uzupełnia leaderboard/balance twardymi liczbami per-decyzja (np.
 czy bot "myśli drogo a decyduje dobrze"). Źródło: re-symulacja (`simulate_from_rosters`
