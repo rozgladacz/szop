@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -24,6 +26,11 @@ def test_unit_base_geometry_defaults_on_fresh_schema():
 
     with Session() as session:
         user = models.User(username="base-defaults", password_hash="x")
+        agent = models.User(
+            username="agent-defaults",
+            password_hash="x",
+            role=models.USER_ROLE_AGENT,
+        )
         ruleset = models.RuleSet(name="Rules")
         armory = models.Armory(name="Armory", owner=user)
         army = models.Army(name="Army", owner=user, ruleset=ruleset, armory=armory)
@@ -34,12 +41,51 @@ def test_unit_base_geometry_defaults_on_fresh_schema():
             defense=5,
             toughness=3,
         )
-        session.add_all([user, ruleset, armory, army, unit])
+        token = models.AgentToken(
+            agent_user=agent,
+            owner_user=user,
+            token_hash="sha256:test-token",
+            scope_json='{"battle:read": true}',
+            expires_at=datetime.now(UTC).replace(tzinfo=None) + timedelta(days=1),
+        )
+        audit = models.AgentAuditLog(
+            user=user,
+            agent_user=agent,
+            route="/api/battles",
+            params_json='{"battle_id": 1}',
+        )
+        session.add_all([user, agent, ruleset, armory, army, unit, token, audit])
         session.commit()
         session.refresh(unit)
+        session.refresh(user)
+        session.refresh(token)
+        session.refresh(audit)
 
+        assert user.role == models.USER_ROLE_USER
         assert unit.base_size_mm == 25
         assert unit.base_shape == "round"
+        assert token.agent_user_id == agent.id
+        assert token.owner_user_id == user.id
+        assert token.revoked_at is None
+        assert token.last_used_at is None
+        assert audit.user_id == user.id
+        assert audit.agent_user_id == agent.id
+        assert audit.timestamp is not None
+
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    assert {"agent_tokens", "agent_audit_logs"}.issubset(table_names)
+    user_columns = {column["name"]: column for column in inspector.get_columns("users")}
+    assert user_columns["role"]["nullable"] is False
+    token_columns = {
+        column["name"]: column for column in inspector.get_columns("agent_tokens")
+    }
+    assert token_columns["token_hash"]["nullable"] is False
+    assert token_columns["expires_at"]["nullable"] is False
+    audit_columns = {
+        column["name"]: column for column in inspector.get_columns("agent_audit_logs")
+    }
+    assert audit_columns["route"]["nullable"] is False
 
 
 def test_migrate_schema_adds_unit_base_geometry_columns(monkeypatch):
@@ -95,3 +141,49 @@ def test_migrate_schema_adds_unit_base_geometry_columns(monkeypatch):
 
     assert row["base_size_mm"] == 25
     assert row["base_shape"] == "round"
+
+
+def test_migrate_schema_adds_user_role_column(monkeypatch):
+    engine = _memory_engine()
+    with engine.begin() as connection:
+        connection.execute(text("CREATE TABLE armories (id INTEGER PRIMARY KEY, owner_id INTEGER)"))
+        connection.execute(text("INSERT INTO armories (id, owner_id) VALUES (1, NULL)"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    username VARCHAR(50) NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    is_admin BOOLEAN NOT NULL DEFAULT 0
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO users (id, username, password_hash, is_admin)
+                VALUES
+                    (1, 'admin', 'x', 1),
+                    (2, 'regular', 'x', 0)
+                """
+            )
+        )
+
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DB_URL", "sqlite://")
+    db._migrate_schema()
+
+    columns = {column["name"]: column for column in inspect(engine).get_columns("users")}
+    assert columns["role"]["nullable"] is False
+
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text("SELECT username, role FROM users ORDER BY id")
+        ).mappings().all()
+
+    assert rows == [
+        {"username": "admin", "role": models.USER_ROLE_ADMIN},
+        {"username": "regular", "role": models.USER_ROLE_USER},
+    ]

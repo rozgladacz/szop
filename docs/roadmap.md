@@ -102,17 +102,17 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ### B2. Modele danych (4 tyg)
 
-> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). Reszta B2 (User.role/invite/snapshot/AgentToken/AuditLog) odroczona — auth wymaga usera + `/security-review`. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
+> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). **Auth/agent schema slice DONE 2026-06-26:** `User.role`, `AgentToken`, `AgentAuditLog`; endpointy/middleware tokenów nadal C1/B4. `BattleInvite` i snapshoty poza pierwszym krokiem. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
 
 **ORM — persistence layer (`app/models.py`):**
-- [ ] `User` — rozszerz: `role` (dodaj `agent`), `owner_user_id?`, `agent_kind?`
+- [x] `User` — `role ∈ {user, agent, admin}` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`; `is_admin` zostaje źródłem uprawnień UI w tym slice)
 - [x] `Battle` — `(p1_user_id?, p2_user_id?, p1_roster_id?, p2_roster_id?, winner_user_id?, current_round, rng_seed, status)` — tabela `battles` (ADR-0050)
 - [ ] `BattleInvite` — `(from_user_id, to_user_id?, roster_id, scenario, status ∈ {pending/accepted/declined/expired}, expires_at)`
 - [x] `BattleEvent` — append-only: `(battle_id, sequence, event_type, payload_json, timestamp)` + `UniqueConstraint(battle_id, sequence)` — tabela `battle_events` (ADR-0050)
 - [ ] `BattleSnapshot` — opcjonalny: `(battle_id, sequence_at, state_json)` (MVP: nie używany)
 - [x] `Unit` — `base_size_mm: int = 25`, `base_shape: str = "round"` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`)
-- [ ] `AgentToken` — `(agent_user_id, owner_user_id, scope_json, expires_at, revoked_at?, last_used_at)`
-- [ ] `AgentAuditLog` — `(user_id?, agent_user_id?, route, params_json, timestamp)`
+- [x] `AgentToken` — `(agent_user_id, owner_user_id, token_hash, scope_json, expires_at, revoked_at?, last_used_at)` (DONE 2026-06-26; `token_hash` zamiast raw tokena)
+- [x] `AgentAuditLog` — `(user_id?, agent_user_id?, route, params_json, timestamp)` (DONE 2026-06-26)
 - [!] Migracja Alembic: `XXX_add_battle_models.py` — N/A: projekt nie używa Alembic; nowe tabele addytywne przez `create_all`.
 
 **Runtime dataclass'y — czysty Python (`app/services/engine/state.py`):**
@@ -268,9 +268,9 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 ### C3. Narzędzia MCP (3 tyg)
 - [ ] `lookup_rule(query)` — RAG nad SZOP.docx + YAML
 - [x] `explain_ability(slug)` — **leaf-CLI DONE 2026-06-24** (`scripts/explain_ability.py`): strukturalny lookup po slug/nazwie PL z katalogu SSOT `app.data.abilities`, `--list`, `--type`, `--json`, testy bez DB. Wrapper MCP/HTTP pozostaje gated na C1/B4.
-- [ ] `validate_loadout(payload)` — `POST /rosters/.../quote`
-- [ ] `find_exploit_candidates(army_id)` — heurystyka cost/effectiveness
-- [ ] `score_list(roster_id)` — quick heuristic
+- [ ] `validate_loadout(payload)` — decyzja 2026-06-26: read-only diff validator raw→normalized + dropped/clamped selections + koszt
+- [ ] `find_exploit_candidates(army_id)` — decyzja 2026-06-26: turniej kandydatów do ręcznej weryfikacji; niższy priorytet niż usuwanie uproszczeń silnika
+- [ ] `score_list(roster_id)` — decyzja 2026-06-26: agregacja wyników symulacji bitwy, później interpretacja dedykowanego agenta; niższy priorytet niż usuwanie artefaktów
 - [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
 
 ---
@@ -374,6 +374,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] `structlog` w `app/services/engine/{resolver, persistence}.py` — każdy event: `battle_id, action_id, actor_user_id`
 - [~] `data/battle_metrics/{battle_id}.jsonl` — **slice DONE 2026-06-21** (`analyze_battle.py --json PATH`): pola ODZYSKIWALNE z event-logu (`action_count`/`event_type_counts`, `dice_distribution`, staty per oddział/strona, kontrola celów; schema `szop.battle_metrics/v1`, jsonl-kompatybilny rekord). Pola czasowe `time_per_action_ms`/`dice_rolls_total` live odłożone (hot-path).
 - [x] `data/agent_metrics/{agent_user_id}.jsonl` — `decision_time_ms, decision_quality_score` — **slice DONE 2026-06-22** (`scripts/analyze_agents.py --json`): telemetria decyzji **per bot** z re-symulacji. `decision_time_ms` = wall-clock `choose_action`; `decision_quality_score` = Δ `evaluate_state` (samoocena bota, SSOT `policy_eval`). Agregat: śr./mediana/max czas, śr. jakość, odsetek decyzji poprawiających, miks akcji (schema `szop.agent_metrics/v1`). Instrumentacja przez additive `on_decision` hook w `match.run_match` (default None → zero zmian zachowania). `agent` = nazwa bota; konta DB (`agent_user_id`) + live-emission w produkcyjnym przepływie B4 odłożone do B2 auth (ADR-0030 cz. 2).
+- [!] Raw combat rolls / pełny audyt szczęścia kości bojowych — decyzja 2026-06-26: odłożone do czasu konkretnej potrzeby; niska wartość teraz, a zmiana wymagałaby schemy eventów + ADR + regen B7.
 - [x] `scripts/analyze_battle.py` — raport markdown z (tekstowymi) wykresami z event-logu — **DONE 2026-06-21** (slice; `<id>` przez `--from-db`; `--json` = maszynowy eksport metryk)
 - [x] `scripts/analyze_agents.py` — telemetria decyzji bota per agent (`decision_time_ms`/`decision_quality_score`, `--json`) — **DONE 2026-06-22**
 - [x] `.gitignore`: `data/{battle,agent}_metrics/` — pokryte blankietowym `data/` (wyjątek `!app/data/`)

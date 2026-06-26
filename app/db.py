@@ -302,6 +302,21 @@ def _migrate_schema() -> None:
 
         default_armory_id = _ensure_default_armory(connection)
 
+        if "users" in table_names:
+            columns = inspector.get_columns("users")
+            column_names = {column["name"] for column in columns}
+            if "role" not in column_names:
+                logger.info("Adding role column to users table")
+                connection.execute(
+                    text(
+                        "ALTER TABLE users ADD COLUMN role VARCHAR(20) "
+                        "NOT NULL DEFAULT 'user'"
+                    )
+                )
+                connection.execute(
+                    text("UPDATE users SET role = 'admin' WHERE is_admin = 1")
+                )
+
         if "weapons" in table_names:
             columns = inspector.get_columns("weapons")
             column_names = {column["name"] for column in columns}
@@ -467,6 +482,7 @@ def init_db() -> None:
                 username="admin",
                 password_hash=hash_password("admin"),
                 is_admin=True,
+                role=models.USER_ROLE_ADMIN,
             )
             session.add(admin)
             logger.warning("Default admin user created with username 'admin' and password 'admin'. Please change it.")

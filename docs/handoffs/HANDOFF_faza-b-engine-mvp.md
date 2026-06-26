@@ -11,6 +11,92 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## W TRAKCIE — 2026-06-26T09:15:00+02:00 — B2 minimal auth/agent schema
+
+**Zakres pracy:** addytywny slice B2 zgodny z decyzją usera z 2026-06-26:
+dodać do ORM `User.role` oraz tabele `AgentToken` i `AgentAuditLog`. Ten slice
+buduje fundament danych pod B4/C1 agent access, ale nie dodaje endpointów,
+middleware `require_agent_scope`, generowania tokenów ani zmian w istniejącym
+runtime auth poza domyślnym `role="admin"` dla konta admina.
+
+**Wybór zadania:** B2/B4/C1 to następny główny kierunek parenta. Minimalny
+auth/agent slice jest już rozstrzygnięty przez usera, nie wymaga interakcji,
+mieści się w jednej sesji i jest bezpiecznie addytywny. C3 leaf-CLI mają niższy
+priorytet według świeżych decyzji, a AIDEAS jest poza aplikacją.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: `app/models.py`, `app/db.py`, testy schematu.
+- Backend payload/API: N/A (bez routerów i bez zmian odpowiedzi JSON).
+- JS render / CSS / template: N/A.
+- Testy: regresje świeżego schematu i ręcznej migracji starej bazy SQLite,
+  targeted pytest + pełny pytest.
+- Dokumentacja: roadmap B2 + ten HANDOFF po sukcesie.
+
+**Performance gate:** brak hot path `/quote` / `/rosters/{id}`. Nowe tabele
+tworzy `Base.metadata.create_all`, a migracja starej tabeli `users` wykonuje
+jedno `PRAGMA table_info(users)`, jedno addytywne `ALTER TABLE` i jednorazowy
+`UPDATE` ról adminów tylko podczas startu/migracji SQLite. Runtime bez nowych
+query w istniejących requestach.
+
+**Plan:**
+- [x] 1. Potwierdzić istniejące użycia `User.is_admin`, wzorzec migracji i testy DB.
+- [x] 2. Wykonać encoding gate dla edytowanych `.py`, dodać ORM + migrację.
+- [x] 3. Dodać testy regresyjne świeżego schematu i migracji starej tabeli `users`.
+- [x] 4. Weryfikacja: targeted pytest, pełny `pytest -q`, call-site check.
+- [x] 5. DoD: manual `/simplify`, manual `/review`, manual `/security-review`,
+  diff review; re-run pytest jeśli przegląd coś zmieni.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice. `LOCKED`: Dywersant,
+raw combat rolls i post-MVP `models_mode=per_copy` nie są dotykane ani podnoszone.
+`READY` dla przyszłego B4/C1 runtime: generować tylko bearer token jednorazowo,
+persystować wyłącznie `token_hash`, porównywać hash i redagować sekrety z
+`AgentAuditLog.params_json`.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-26T09:15:00+02:00: Start slice po bootstrapie automatyzacji. Working
+  tree zawiera zastane zmiany docs (`HANDOFF.md`, roadmap, ten HANDOFF) z decyzjami
+  usera 2026-06-26 oraz lokalną zmianę `.claude/settings.local.json`; nie są
+  rewertowane. `rg` potwierdził, że aplikacja nadal używa `User.is_admin` w
+  routerach, więc `role` zostaje addytywnym polem danych bez przepinania auth
+  w tym slice.
+- 2026-06-26T09:20: Encoding gate UTF-8 dla `app/models.py`, `app/db.py` i
+  `tests/test_db_schema_migrations.py` zaliczony po eskalacji lokalnego `.venv`
+  poza sandbox (`utf8-ok`; Store Python w sandboxie zwrócił `Odmowa dostępu`).
+- 2026-06-26T09:24: Dodano `User.role` (`user`/`agent`/`admin` jako stałe modelu),
+  `AgentToken` z `token_hash` (unikalny skrót zamiast raw tokena), `scope_json`,
+  wygasaniem/cofnięciem/ostatnim użyciem oraz `AgentAuditLog` z route/params/timestamp.
+  `_migrate_schema` dodaje `users.role` i mapuje istniejące `is_admin=1` na
+  `role='admin'`; konto seedowane `admin` dostaje `role='admin'`.
+- 2026-06-26T09:25: `tests/test_db_schema_migrations.py` rozszerzony o świeży
+  schemat `agent_tokens`/`agent_audit_logs` oraz migrację starej tabeli `users`
+  bez kolumny `role`.
+- 2026-06-26T09:31: Targeted pytest `tests/test_db_schema_migrations.py`: **3 passed**.
+  Rozszerzony targeted DB/auth
+  `tests/test_db_schema_migrations.py tests/test_db_import_cycle.py tests/test_registration_control.py`:
+  **24 passed** po cleanupie testowego `datetime.utcnow()`.
+- 2026-06-26T09:35: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1937 passed**, 1725 warnings.
+- 2026-06-26T09:38: Call-site check: `User.role`, `AgentToken`, `AgentAuditLog`,
+  `token_hash` i `scope_json` występują tylko w modelach, migracji seedowanego
+  admina, testach i docs. Istniejące routery nadal używają `User.is_admin`; brak
+  zmian payload/API/JS. `_migrate_schema()` nadal wywoływany tylko z `init_db()`
+  plus testy bezpośrednie.
+- 2026-06-26T09:40: Zaktualizowano `docs/roadmap.md`, `docs/architecture.md` i
+  ADR-0050, żeby status B2 nie mówił już, że `AgentToken`/`AgentAuditLog` są
+  całkowicie odroczone. Endpointy/middleware tokenów pozostają C1/B4 i nie są
+  częścią tego slice.
+- 2026-06-26T09:45: DoD manualny zakończony. `/simplify`: brak dalszych zmian po
+  cleanupie testowego `datetime.utcnow()`; model pozostaje lokalny i addytywny.
+  `/review`: brak zmian istniejącej autoryzacji/payloadów, migracja idempotentna,
+  FKs/indeksy na relacjach agent-owner i audit. `/security-review`: brak raw
+  tokenów w schemacie (`token_hash`), brak endpointów/user-input→DB w tym slice,
+  SQL migracji statyczny; future runtime musi redagować sekrety z `params_json`.
+  `git diff --check` bez błędów (tylko standardowe ostrzeżenia CRLF dla docs).
+
+**Następne kroki:** slice gotowy. Następne B2/B4: endpointy tokenów i middleware
+scope/audit albo `BattleInvite`/snapshoty jako osobny zakres.
+
 ## W TRAKCIE — 2026-06-26T01:02:05+02:00 — B2 Unit base geometry slice
 
 **Zakres pracy:** maly addytywny slice B2: dodac do ORM `Unit` pola
@@ -458,6 +544,24 @@ python -c "from app.services.rulesets.loader import load_b_mvp_exclusions; print
   - **[MVP DONE 2026-06-09 — wątek `faza-b-order-interrupts`, ADR-0049] Klątwa(X) / Rozkaz(X) / Oznaczenie(X)** (id 45/49/50). Zaimplementowane: substrat `ability_overrides` + `effective_passives`, handlery interrupt `BEFORE_ACTION` (zasięg 12″, ally/enemy, `rozkaz_tak`, raz-na-rundę), wygaśnięcie na końcu aktywacji, 28 testów. **Pozostaje (follow-up):** Oznaczenie precyzyjny trigger ataku + auto-orkiestracja przerwań w pętli aktywacji (H2/B4). Spec poniżej zachowany dla kontekstu. **NIE jest zablokowane decyzją** — to czysta robota engine. **Policy (user 2026-06-09):** przerwanie wyzwalane **przed akcją** — w regułach to JEDEN krok „Rozpatrujemy przerwania" (pkt 11.b.i), odwiedzany na początku każdej iteracji pętli akcji (pkt 11.b.iv→i), więc w praktyce **dwa okna przed-akcyjne** (przed akcją #1 i #2). Raz na rundę; efekt (nadanie/odebranie X) działa **do końca aktywacji**; X = dowolna pasywka z `rozkaz_tak: true` (SZOP_Zdolnosci.md #45/49/50). Cost-side + `rozkaz_tak` field done. **✅ DRIFT ADR-0015 NAPRAWIONY (2026-06-09):** enum `InterruptPoint` zredukowany do `BEFORE_ACTION` (pkt 11.b.i; ≤2 okna/aktywację via pętla 11.b.iv→i). Usunięto ACTIVATION_START/AFTER_ACTION/BEFORE_REGROUP/AFTER_REGROUP (drift — brak oparcia w pkt 11/12). ADR-0015 skorygowany (sekcja Korekta), `interrupts.py`/`events.py`/testy/ADR-0011/roadmap zsynchronizowane. **Pozostała robota engine (osobno):** mechanizm czasowego nadania/odebrania pasywki + limit `used_interrupts_this_round` + podpięcie `BEFORE_ACTION` do `phases.activation_phase` + 3 handlery. **Brakująca mechanika engine (do zbudowania):** (1) czasowe nadanie/odebranie pasywki na `UnitBlob` — dziś `passives` to statyczna krotka (`state.py:165`); potrzeba pola `granted_abilities`/`suppressed_abilities` z wygaśnięciem LUB eventów `AbilityGranted`/`AbilityRemoved` + reducery + sprzątanie na końcu aktywacji; (2) limit „raz na rundę" — `BattleState.used_interrupts_this_round` (TODO wg `interrupts.py:20-23`, nie istnieje); (3) podpięcie `InterruptPoint` do `phases.activation_phase` (dziś tylko stub Strażnika, brak integracji faz). Zakres: nowe pole + 2-3 eventy + reducery + integracja faz + limit per-runda + 3 handlery + testy replay-invariant. Wymaga ADR (interrupt orchestration + ability-grant mechanism).
   - **[H7 — czeka na fazę Leczenia pkt 21] heal-revive limit dla ELIMINOWANY/Zguby** — gdy powstanie faza Leczenia: `_apply_heal_*` przywraca tylko `location == WYCOFANY` (nie ELIMINOWANY, pkt 26.d); limit odzyskania pomniejszony o `wounds_eliminating`. Pole `wounds_eliminating` JUŻ persystowane na `UnitBlob` (R4.Zguba). **NIE blokuje B2/B4** (pole w schemacie).
   - **B2 ORM schema impact (ZAMROŻONE, zero migration churn):** `BattleEvent.payload_json` per unit +`location: Lokalizacja` +`wounds_eliminating: int`; `ModelKilled` +`eliminated: bool`; `Shot/MeleeResolved` +`wounds_eliminating: int`; nowy event `MutexCollision`. (14 event types po resync.)
+
+## Decyzje usera — 2026-06-26
+
+- **B2 auth / agent access:** zaakceptowany minimalny pierwszy slice: `User.role`
+  (`user|agent|admin`), `AgentToken`, `AgentAuditLog`. `BattleInvite` i snapshoty
+  nie wchodza do pierwszego kroku. Zakres wymaga pelnego `/security-review`.
+- **C3 `score_list(roster_id)`:** pierwsza wersja ma oceniac liste przez agregacje
+  wynikow symulacji bitwy; pozniejsza interpretacja nalezy do dedykowanego agenta.
+  Priorytet nizszy niz usuwanie uproszczen i artefaktow silnika.
+- **C3 `find_exploit_candidates(army_id)`:** mozna robic przez turniej; wynik to
+  kandydaci do recznej weryfikacji, nie automatyczny wyrok o exploicie. Priorytet
+  nizszy niz postep w wiernosci silnika.
+- **C3 `validate_loadout(payload)`:** zaakceptowany kierunek diff-validatora:
+  read-only leaf CLI pokazujacy raw->normalized, odrzucone/sklampowane selekcje
+  i koszt, z reuse istniejacego quote/normalize SSOT.
+- **Telemetria raw combat rolls:** odlozone bez terminu; audyt kosci ma niska
+  wartosc i ma wrocic dopiero, gdy konkretna potrzeba pokaze, jaki wariant danych
+  bedzie uzyteczny.
 
 ## Decyzje zamrożone (NIE podnosić ponownie)
 

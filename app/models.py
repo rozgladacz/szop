@@ -21,6 +21,9 @@ from .db import Base
 
 
 ARMY_SPELL_NAME_MAX_LENGTH = 60
+USER_ROLE_USER = "user"
+USER_ROLE_AGENT = "agent"
+USER_ROLE_ADMIN = "admin"
 
 
 class TimestampMixin:
@@ -42,6 +45,7 @@ class User(TimestampMixin, Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    role: Mapped[str] = mapped_column(String(20), default=USER_ROLE_USER, nullable=False)
 
     armies: Mapped[List["Army"]] = relationship(back_populates="owner")
     armories: Mapped[List["Armory"]] = relationship(back_populates="owner")
@@ -50,6 +54,46 @@ class User(TimestampMixin, Base):
     abilities: Mapped[List["Ability"]] = relationship(
         "Ability", back_populates="owner", cascade="all, delete-orphan"
     )
+
+
+class AgentToken(TimestampMixin, Base):
+    __tablename__ = "agent_tokens"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    agent_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    scope_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    agent_user: Mapped[User] = relationship(foreign_keys=[agent_user_id])
+    owner_user: Mapped[User] = relationship(foreign_keys=[owner_user_id])
+
+
+class AgentAuditLog(Base):
+    __tablename__ = "agent_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    agent_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+    route: Mapped[str] = mapped_column(String(200), nullable=False)
+    params_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.utcnow, nullable=False, index=True
+    )
+
+    user: Mapped[Optional[User]] = relationship(foreign_keys=[user_id])
+    agent_user: Mapped[Optional[User]] = relationship(foreign_keys=[agent_user_id])
 
 
 class RuleSet(TimestampMixin, Base):
@@ -600,6 +644,7 @@ for cls in [
     RosterUnit,
     ArmySpell,
     Battle,
+    AgentToken,
 ]:
     event.listen(cls, "before_insert", touch_timestamps)
     event.listen(cls, "before_update", touch_timestamps)

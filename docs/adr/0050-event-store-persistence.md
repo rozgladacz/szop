@@ -12,10 +12,10 @@
   `BattleEvent` (append-only, UniqueConstraint) oraz
   `app/services/engine/persistence.py` (`save_events`/`load_events`).
 
-  Pełne B2 (`BattleInvite`/`BattleSnapshot`/`AgentToken`/`AgentAuditLog`)
-  ODROCZONE: modele auth/scoping wymagają decyzji usera + `/security-review`.
-  Kolumny `Unit.base_size_mm/base_shape` zostały domknięte później jako osobny,
-  addytywny slice B2 (2026-06-26) przez ręczny `_migrate_schema`, poza zakresem
+  Pełne B2 było wtedy odroczone: modele auth/scoping wymagały decyzji usera +
+  `/security-review`. Późniejsze addytywne slice'y B2 z 2026-06-26 domknęły
+  `Unit.base_size_mm/base_shape` oraz minimalny auth/agent schema (`User.role`,
+  `AgentToken`, `AgentAuditLog`) przez ręczny `_migrate_schema`, poza zakresem
   tego ADR. Projekt nie używa Alembic — schema z `Base.metadata.create_all`,
   ręczny `_migrate_schema` w `db.py`. Ten ADR obejmuje wyłącznie **rdzeń event-store**.
 
@@ -75,10 +75,10 @@ active_player.
   locking (UniqueConstraint). **B5 LocalClient** może zapisywać in-process.
 - **Brak Alembic** pozostaje świadomy: kolejne NOWE tabele = bezpieczne; zmiany
   kolumn istniejących tabel wymagają wpisu w `_migrate_schema` (db.py).
-- **Odroczone (osobny wątek + user + security-review):** `BattleInvite`,
-  `BattleSnapshot`, `AgentToken`, `AgentAuditLog`, faktyczny `create_snapshot`
-  (roadmap: MVP nie wywołuje snapshotów). Kolumny `Unit.base_size_mm/base_shape`
-  zostały domknięte addytywnie 2026-06-26.
+- **Odroczone poza ten ADR:** `BattleInvite`, `BattleSnapshot`, faktyczny
+  `create_snapshot` (roadmap: MVP nie wywołuje snapshotów) oraz runtime endpointów
+  i middleware agent-token. Kolumny `Unit.base_size_mm/base_shape` oraz minimalne
+  modele `AgentToken`/`AgentAuditLog` zostały domknięte addytywnie 2026-06-26.
 - **Round-trip nested tuple:** tuple zagnieżdżone w `payload` dict (EffectApplied/
   InterruptTriggered) NIE są konwertowane z list z powrotem na tuple — ale
   payloady budowane są z list (`list(rolls)`), więc round-trip pozostaje spójny.
