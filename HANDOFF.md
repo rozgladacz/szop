@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_aideas-knowledge-base](docs/handoffs/HANDOFF_aideas-knowledge-base.md) | Przygotowanie kopii i ekstraktów z aplikacji jako baza wiedzy dla ćwiczenia AIDEAS. | `AIdeas/Baza wiedzy/` | In progress |
-| [HANDOFF_faza-c-validate-loadout](docs/handoffs/HANDOFF_faza-c-validate-loadout.md) | C3 `validate_loadout` read-only leaf-CLI — diff raw→normalized loadout + odrzucone/sklampowane + koszt. | `scripts/validate_loadout.py` (NEW), `tests/test_validate_loadout.py` (NEW) | In progress |
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 
 
@@ -55,6 +54,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-06-26 — faza-c-validate-loadout (archived) — C3 leaf-CLI diff validator loadoutu
+- Domknięty deliverable C3 `validate_loadout(payload)` (roadmap „Narzędzia MCP") jako skrypt-liść (ADR-0013), zgodnie z decyzją usera 2026-06-26 (read-only diff validator). `scripts/validate_loadout.py` — bierze id jednostki z DB (kontekst legalnych broni/zdolności/passive) + RAW loadout payload (JSON `--loadout`/`--loadout-file`) i pokazuje diff względem sanityzacji SSOT `normalize_roster_unit_loadout`: selekcje ZAAKCEPTOWANE / ODRZUCONE (id spoza dozwolonego zbioru jednostki / niepoprawne) / SKLAMPOWANE (ujemny count → 0, nieznany `mode` → per_model, nierozpoznane passive) + KOSZT znormalizowanej konfiguracji przez `calculate_roster_unit_quote` (selected_total + składowe). „Dry-run" endpointu quote bez zapisu do DB. Reuse SSOT (AGENTS [CRITICAL] #3 — zero replikacji logiki kosztów; jedyny świadomy mirror = raw-enumerator id, bo SSOT celowo ukrywa odrzucone id). `--list`/`--count`/`--json` (schema `szop.validate_loadout/v1`). Wrapper MCP/HTTP gated na C1/B4.
+- Pliki: `scripts/validate_loadout.py` (NEW), `tests/test_validate_loadout.py` (NEW 18 — czyste funkcje diffu + ścieżka DB seeded SQLite + JSON round-trip + błędy CLI), `scripts/README.md` (sekcja C3), `docs/roadmap.md` (C3 checkbox `[x]`). Commit na `Faza_A`: `5b50926`.
+- Weryfikacja: pytest **1955 passed** (1937 + 18); targeted 18 passed. DoD: `/simplify` manualny (0 zmian — kod czysty, reuse SSOT); `/review`/`/security-review` pominięte warunkowo (skrypt-liść read-only DB `session.get`, brak hot-path/SSOT-mutacji/auth/user-input→DB-write; JSON przez `json.loads` z czystą obsługą błędu). Smoke CLI na `data/szop.db`: `--list`, bogus loadout (mode clamp+rejected weapon/passive+koszt), empty (clean+koszt), bad json rc=2, unknown unit rc=1.
+- Doc updates: `docs/roadmap.md` (C3 `validate_loadout` `[x]` leaf-CLI DONE), `scripts/README.md` (sekcja użycia + testy). Brak nowego ADR (ADR-0013 leaf-skrypt już w indeksie). **Odkrycie (NIE blokujące):** standalone DB-read leaf CLI (`validate_loadout`/`simulate_engagement`/`exploit_hunt`) nie wołają `init_db()` → na lokalnej `data/szop.db` sprzed migracji kolumn (`base_size_mm`) crashują surowym SQLAlchemy traceback; smoke wykonano po migracji bazy standardową ścieżką startową. Kandydat na drobny hardening (graceful migrate-or-hint w leaf CLI).
 
 ### 2026-06-26 — prezentacja (B6, ADR-0013) — hardening CLI `battle_replay` (bad --fixture/--map)
 - Ten sam bug-class co `analyze_battle` (poniżej): `scripts/battle_replay.py` `main()` budował fixturę/mapę bez `try/except` → surowy traceback przy nieistniejącej `--fixture`/nieznanej `--map`. Fix identyczny: `try/except (FileNotFoundError, ValueError)` → `print(stderr); return 2`. +2 regresje (`test_cli_missing_fixture_clean_error`, `test_cli_unknown_map_clean_error`). Po fixie wszystkie 3 skrypty-liście ładujące fixturę/mapę (`analyze_agents`/`analyze_battle`/`battle_replay`) są spójnie zahardenowane.
