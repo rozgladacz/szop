@@ -818,11 +818,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = render_analysis(obj, header=header)
         payload = analysis_to_dict(obj)
     else:
-        if args.map:
-            fixture = bsim.build_map(args.map, args.map_seed)
-        else:
-            path = args.fixture or str(bsim.DEFAULT_FIXTURE)
-            fixture = bsim.load_battle_fixture(path)
+        try:
+            if args.map:
+                fixture = bsim.build_map(args.map, args.map_seed)
+            else:
+                path = args.fixture or str(bsim.DEFAULT_FIXTURE)
+                fixture = bsim.load_battle_fixture(path)
+        except (FileNotFoundError, ValueError) as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
         if args.games > 1:
             if args.initiative is not None:
                 print(

@@ -348,6 +348,26 @@ def test_cli_initiative_no_warn_without_flag(mod, capsys):
     assert "--initiative" not in capsys.readouterr().err
 
 
+def test_cli_missing_fixture_clean_error(mod, capsys):
+    # Nieistniejąca ścieżka --fixture: czysty błąd CLI (rc=2 + komunikat na
+    # stderr), nie surowy traceback FileNotFoundError. Spójne z analyze_agents.
+    rc = mod.main(["--fixture", "nope_missing_fixture.yaml"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "nope_missing_fixture.yaml" in err
+    assert "Traceback" not in err
+
+
+def test_cli_unknown_map_clean_error(mod, capsys):
+    # Nieznana nazwa --map: czysty błąd CLI (ValueError z build_map → rc=2),
+    # nie surowy traceback.
+    rc = mod.main(["--map", "not_a_real_map"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "not_a_real_map" in err
+    assert "Traceback" not in err
+
+
 # ---------------------------------------------------------------------------
 # Serializacja JSON (telemetria maszynowa, ADR-0017)
 # ---------------------------------------------------------------------------
