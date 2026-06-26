@@ -93,6 +93,14 @@ persystować wyłącznie `token_hash`, porównywać hash i redagować sekrety z
   tokenów w schemacie (`token_hash`), brak endpointów/user-input→DB w tym slice,
   SQL migracji statyczny; future runtime musi redagować sekrety z `params_json`.
   `git diff --check` bez błędów (tylko standardowe ostrzeżenia CRLF dla docs).
+- 2026-06-26T~09:50: **COMMIT** `b766060` na `Faza_A` (sesja autonomiczna domknęła
+  zweryfikowaną, niezacommitowaną pracę slice). Re-weryfikacja w tej sesji: targeted
+  `tests/test_db_schema_migrations.py tests/test_db_import_cycle.py
+  tests/test_registration_control.py` **24 passed**; pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **1937 passed**,
+  1725 warnings. Commit obejmuje 8 plików jednego slice (kod `app/models.py`/`app/db.py`,
+  test `tests/test_db_schema_migrations.py`, docs `roadmap`/`architecture`/ADR-0050/oba
+  HANDOFF). `.claude/settings.local.json` świadomie poza commitem (lokalna allowlista).
 
 **Następne kroki:** slice gotowy. Następne B2/B4: endpointy tokenów i middleware
 scope/audit albo `BattleInvite`/snapshoty jako osobny zakres.
