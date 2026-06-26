@@ -333,6 +333,8 @@ class Unit(TimestampMixin, Base):
     owner_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     typical_models: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    base_size_mm: Mapped[int] = mapped_column(Integer, nullable=False, default=25)
+    base_shape: Mapped[str] = mapped_column(String(20), nullable=False, default="round")
     group_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("unit_groups.id"), nullable=True
     )

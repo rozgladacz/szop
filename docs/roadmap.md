@@ -102,7 +102,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ### B2. Modele danych (4 tyg)
 
-> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). Reszta B2 (User.role/invite/snapshot/Unit-kolumny/AgentToken/AuditLog) odroczona — auth wymaga usera + `/security-review`; kolumny `Unit` wymagają ręcznego ALTER (brak Alembic). Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
+> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). Reszta B2 (User.role/invite/snapshot/AgentToken/AuditLog) odroczona — auth wymaga usera + `/security-review`. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
 
 **ORM — persistence layer (`app/models.py`):**
 - [ ] `User` — rozszerz: `role` (dodaj `agent`), `owner_user_id?`, `agent_kind?`
@@ -110,7 +110,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [ ] `BattleInvite` — `(from_user_id, to_user_id?, roster_id, scenario, status ∈ {pending/accepted/declined/expired}, expires_at)`
 - [x] `BattleEvent` — append-only: `(battle_id, sequence, event_type, payload_json, timestamp)` + `UniqueConstraint(battle_id, sequence)` — tabela `battle_events` (ADR-0050)
 - [ ] `BattleSnapshot` — opcjonalny: `(battle_id, sequence_at, state_json)` (MVP: nie używany)
-- [ ] `Unit` — dodaj: `base_size_mm: int = 25`, `base_shape: str = "round"`
+- [x] `Unit` — `base_size_mm: int = 25`, `base_shape: str = "round"` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`)
 - [ ] `AgentToken` — `(agent_user_id, owner_user_id, scope_json, expires_at, revoked_at?, last_used_at)`
 - [ ] `AgentAuditLog` — `(user_id?, agent_user_id?, route, params_json, timestamp)`
 - [!] Migracja Alembic: `XXX_add_battle_models.py` — N/A: projekt nie używa Alembic; nowe tabele addytywne przez `create_all`.

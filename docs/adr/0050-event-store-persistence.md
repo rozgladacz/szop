@@ -12,11 +12,12 @@
   `BattleEvent` (append-only, UniqueConstraint) oraz
   `app/services/engine/persistence.py` (`save_events`/`load_events`).
 
-  Pełne B2 (`BattleInvite`/`BattleSnapshot`/`AgentToken`/`AgentAuditLog` +
-  kolumny `Unit.base_size_mm/base_shape`) ODROCZONE: modele auth/scoping wymagają
-  decyzji usera + `/security-review`, a kolumny `Unit` wymagają ręcznego ALTER
-  (projekt nie używa Alembic — schema z `Base.metadata.create_all`, ręczny
-  `_migrate_schema` w `db.py`). Ten ADR obejmuje wyłącznie **rdzeń event-store**.
+  Pełne B2 (`BattleInvite`/`BattleSnapshot`/`AgentToken`/`AgentAuditLog`)
+  ODROCZONE: modele auth/scoping wymagają decyzji usera + `/security-review`.
+  Kolumny `Unit.base_size_mm/base_shape` zostały domknięte później jako osobny,
+  addytywny slice B2 (2026-06-26) przez ręczny `_migrate_schema`, poza zakresem
+  tego ADR. Projekt nie używa Alembic — schema z `Base.metadata.create_all`,
+  ręczny `_migrate_schema` w `db.py`. Ten ADR obejmuje wyłącznie **rdzeń event-store**.
 
 ## Decyzja
 
@@ -75,8 +76,9 @@ active_player.
 - **Brak Alembic** pozostaje świadomy: kolejne NOWE tabele = bezpieczne; zmiany
   kolumn istniejących tabel wymagają wpisu w `_migrate_schema` (db.py).
 - **Odroczone (osobny wątek + user + security-review):** `BattleInvite`,
-  `BattleSnapshot`, `AgentToken`, `AgentAuditLog`, kolumny `Unit.base_size_mm/
-  base_shape`, faktyczny `create_snapshot` (roadmap: MVP nie wywołuje snapshotów).
+  `BattleSnapshot`, `AgentToken`, `AgentAuditLog`, faktyczny `create_snapshot`
+  (roadmap: MVP nie wywołuje snapshotów). Kolumny `Unit.base_size_mm/base_shape`
+  zostały domknięte addytywnie 2026-06-26.
 - **Round-trip nested tuple:** tuple zagnieżdżone w `payload` dict (EffectApplied/
   InterruptTriggered) NIE są konwertowane z list z powrotem na tuple — ale
   payloady budowane są z list (`list(rolls)`), więc round-trip pozostaje spójny.

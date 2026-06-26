@@ -3,13 +3,111 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-06-25 (E4 slice: końcowa kolizja Manewru)
+> **Ostatnia aktualizacja:** 2026-06-26 (B2 Unit base geometry slice)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## W TRAKCIE — 2026-06-26T01:02:05+02:00 — B2 Unit base geometry slice
+
+**Zakres pracy:** maly addytywny slice B2: dodac do ORM `Unit` pola
+`base_size_mm` i `base_shape` z domyslami `25` / `"round"` oraz reczna migracja
+SQLite w `_migrate_schema`. Ten slice tylko przygotowuje model danych pod przyszla
+geometrie podstawek; nie zmienia silnika bitwy, kosztow ani UI.
+
+**Wybor zadania:** B2/B4 jest nastepnym glownym kierunkiem parenta. Auth/tokens/invite
+sa wieksze i wymagaja osobnego security-review oraz decyzji zakresu, a pozostale C3
+leaf-CLI sa oznaczone w `HANDOFF.md` jako wymagajace decyzji projektowej. Kolumny
+`Unit` sa dobrze okreslone w roadmapie i mieszcza sie w jednej sesji.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: `app/models.py`, `app/db.py`, test migracji.
+- Backend payload/API: N/A (pola nie sa jeszcze eksponowane w routerach).
+- JS render / CSS / template: N/A.
+- Testy: targeted DB/model test + pelny pytest.
+- Dokumentacja: ten HANDOFF; roadmap checkbox po sukcesie.
+
+**Performance gate:** brak hot path `/quote` / `/rosters/{id}` i zero nowych query.
+Migracja uzywa `PRAGMA table_info(units)` oraz maksymalnie dwoch `ALTER TABLE`
+podczas startu, tylko gdy kolumn brakuje. Runtime aplikacji bez dodatkowych petli.
+
+**Plan:**
+- [x] 1. Potwierdzic aktualny model `Unit`, migracje `_migrate_schema` i testy DB.
+- [x] 2. Wykonac encoding gate dla edytowanych `.py`, dodac pola ORM + migracje.
+- [x] 3. Dodac test regresyjny dla domyslnych kolumn i migracji starej tabeli.
+- [x] 4. Weryfikacja: targeted pytest, pelny `pytest -q`, call-site check.
+- [x] 5. DoD: manual `/simplify`, manual `/review` (data model), manual `/security-review`
+  jesli zakres dotknie user input/DB beyond additive schema, diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice. `LOCKED`: Dywersant i
+post-MVP `models_mode=per_copy` nie sa dotykane ani podnoszone.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-26T01:02:05+02:00: Start slice po bootstrapie automatyzacji. Working tree
+  bez widocznych zmian w `git status --short` (poza ostrzezeniem o globalnym
+  `C:\Users\mlis\.config\git\ignore` bez dostepu).
+- 2026-06-26T01:08: Potwierdzono aktualny stan: `Unit` ma juz addytywne kolumny
+  `position`, `typical_models`, `group_id`; `_migrate_schema` dopisuje brakujace
+  kolumny `units` przez `ALTER TABLE`. Brak istniejacego testu dla `_migrate_schema`,
+  wiec ten slice doda regresje na starej tabeli SQLite.
+- 2026-06-26T01:09: Encoding gate UTF-8 dla `app/models.py` i `app/db.py` zaliczony
+  po eskalacji lokalnego `.venv` poza sandbox (`utf8-ok`; Store Python w sandboxie
+  zwrocil `Odmowa dostepu`, zgodnie z notatka w `docs/testing.md`).
+- 2026-06-26T01:10: Dodano `Unit.base_size_mm` / `Unit.base_shape` z domyslami
+  `25` / `"round"` oraz addytywne `ALTER TABLE` w `_migrate_schema`.
+  `tests/test_db_schema_migrations.py` pinuje domysly na swiezym schemacie i
+  migracje starej tabeli `units`.
+- 2026-06-26T01:11: Targeted pytest `tests/test_db_schema_migrations.py`:
+  **2 passed**, 5 warnings.
+- 2026-06-26T01:12: Targeted DB/client pytest
+  `tests/test_db_schema_migrations.py tests/test_db_import_cycle.py tests/test_clients_local.py tests/test_exploit_hunt_db.py`:
+  **31 passed**, 371 warnings.
+- 2026-06-26T01:13: Pelny pytest
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1932 passed**, 1722 warnings.
+- 2026-06-26T01:14: Call-site check: `base_size_mm`/`base_shape` wystepuja tylko w
+  modelu, migracji, nowym tescie i docs; pola nie sa jeszcze konsumowane przez
+  payload/API/JS. `_migrate_schema()` wywolywany tylko z `init_db()`; nowy test
+  bezposrednio pinuje addytywna migracje starej tabeli `units`. Wszystkie
+  istniejace miejsca `Base.metadata.create_all` przeszly w pelnym pytest.
+- 2026-06-26T01:14: Zaktualizowano `docs/roadmap.md` (B2 Unit checkbox `[x]`)
+  oraz ADR-0050/HANDOFF, zeby nie zostawic stalego statusu "Unit columns
+  odroczone". `rg` nie znajduje juz otwartych checkboxow/starych blokad dla
+  `Unit.base_size_mm/base_shape`, tylko wpisy DONE.
+- 2026-06-26T01:15: Manual `/simplify`: patch minimalny, bez nowej abstrakcji;
+  testy rozdzielaja swiezy schemat od migracji starej tabeli. Manual `/review`
+  (data model): zmiana addytywna, domysly zgodne z roadmapa, migracja idempotentna
+  po sprawdzeniu `PRAGMA table_info`. Manual `/security-review`: N/A dla auth/user
+  input/sekretow; DDL nie ujawnia danych i nie zmienia scopingu. `git diff --check`
+  bez bledow, tylko istniejace ostrzezenia CRLF dla dotknietych docs.
+- 2026-06-26T06:03:11+02:00: Rewalidacja automatyzacji po bootstrapie. Zakres bez
+  zmian kodu: sprawdzic zastany slice `Unit.base_size_mm/base_shape`, przeczytac
+  review, powtorzyc call-site check i uruchomic targeted + pelny pytest w tej sesji.
+- 2026-06-26T06:05:39+02:00: Rewalidacja zakonczona. `tests/test_db_schema_migrations.py
+  tests/test_db_import_cycle.py tests/test_clients_local.py tests/test_exploit_hunt_db.py`:
+  **31 passed**, 371 warnings. Pelny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1932 passed**, 1722 warnings. Call-site check bez nowych konsumentow poza
+  modelem/migracja/testem/docs. `git diff --check` bez bledow, tylko ostrzezenia
+  CRLF dla dotknietych docs. Manual `/simplify` i `/review`: brak dodatkowych zmian;
+  low backlog `base_shape` enum/walidacja zostaje do przyszlego slice API/UI.
+- 2026-06-26T~06:30: **COMMIT** na `Faza_A` (sesja autonomiczna domknela
+  zweryfikowana, niezacommitowana prace slice). Re-weryfikacja w tej sesji:
+  targeted `tests/test_db_schema_migrations.py tests/test_db_import_cycle.py`
+  **5 passed**; pelny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`
+  **1932 passed**, 1722 warnings. Diff zgodny z `REVIEW_2026-06-26.md` (0 bugow
+  korektnosci). Commit obejmuje 7 plikow jednego slice: kod (`app/models.py`,
+  `app/db.py`), test (`tests/test_db_schema_migrations.py`) oraz docs slice
+  (`docs/roadmap.md`, `docs/adr/0050-event-store-persistence.md`, ten HANDOFF,
+  `REVIEW_2026-06-26.md`). Slice B2 "Unit base geometry" zamkniety.
+
+**Nastepne kroki:** slice gotowy. Pozostale B2 elementy to auth/invite/tokens/
+snapshot (`BattleInvite`, `AgentToken`, `AgentAuditLog`, `BattleSnapshot`) i powinny
+isc jako osobny zakres z pelnym security-review. Brak decyzji usera wymaganej dla
+tego slice.
 
 ## W TRAKCIE — 2026-06-25T21:04:50+02:00 — E4 final-position collision for Maneuver
 
@@ -168,7 +266,7 @@ poza zakresem MVP i nie jest pytaniem do usera.
 **Sub-wątki B2+ (delegacja zakresów):**
 - **`faza-b-3-executor`** ✅ **archived 2026-05-30** (B3.0-B3.8 done, 1244/1244 testów). LOG SESJI w HANDOFF.md.
 - **`faza-b-3-hardening`** (NIE uruchomione — następna sesja) — refactor architektoniczny B3 przed startem B2/B4. 6 modułów + refaktorów + 3 nowe ADR-y (0045/0046/0047). Plik: `app/services/engine/{status,geometry}.py` (NEW), modyfikacje `state`/`combat`/`phases`/`effects`/`resolver`, nowe event types `StatusAdded`/`StatusRemoved` + pełne reducery, smoke replay parity test (`live_state == apply_events(initial, events)`). Powód: 7 bugów z code review (cumulative `wounds_received`, charger.radius ignored, silent status mutation, weapon inventory missing, constants drift) + brak `_ACTIVE_ABILITY_REGISTRY` blokuje skalowanie aktywnych zdolności.
-- **`faza-b-2-models`** (NIE uruchomione — po B3.9 hardening) — `app/models.py` (Battle/BattleEvent/BattleInvite/BattleSnapshot/AgentToken/AgentAuditLog + Unit.base_size_mm/base_shape/melee_weapons/ranged_weapons), Alembic migration. **Decyzja:** B2 ORM zaprojektowane wokół ustabilizowanego engine (post-B3.9) żeby uniknąć migration churn przy refactor schema event-store.
+- **`faza-b-2-models`** (NIE uruchomione — po B3.9 hardening) — `app/models.py` (Battle/BattleEvent/BattleInvite/BattleSnapshot/AgentToken/AgentAuditLog; `Unit.base_size_mm/base_shape` DONE 2026-06-26), ręczne migracje SQLite zamiast Alembic. **Decyzja:** B2 ORM zaprojektowane wokół ustabilizowanego engine (post-B3.9) żeby uniknąć migration churn przy refactor schema event-store.
 - **`faza-b-4-api`** — `app/routers/battles.py` (NEW). Po B3.9 + faza-b-2-models.
 - **`faza-b-5-client`** — `szop_client/` (NEW pakiet). Równolegle z B4.
 - **`faza-b-7-test-bed`** — `tests/fixtures/battles/*.yaml` (NEW). Po B3.9.
@@ -240,7 +338,7 @@ poza zakresem MVP i nie jest pytaniem do usera.
 
 ### B2 — Modele danych (4 tyg, sub-wątek `faza-b-2-models`) — **POST-B3.9**
 
-Per `docs/roadmap.md#b2-modele-danych`. ORM (Battle, BattleEvent, BattleInvite, BattleSnapshot, Unit.base_size_mm + melee_weapons/ranged_weapons, AgentToken, AgentAuditLog) + persistence (`persistence.py`). Alembic migration. **Konsumuje ustabilizowany engine z B3.9** — `BattleEvent.payload_json` schema mapuje 1:1 na `events.py` event types (12 po B3.9: 10 oryginalnych + StatusAdded/StatusRemoved). Persisting + replay weryfikuje inwariant z ADR-0046.
+Per `docs/roadmap.md#b2-modele-danych`. ORM (Battle, BattleEvent, BattleInvite, BattleSnapshot, AgentToken, AgentAuditLog; `Unit.base_size_mm/base_shape` DONE 2026-06-26) + persistence (`persistence.py`). Ręczne migracje SQLite zamiast Alembic. **Konsumuje ustabilizowany engine z B3.9** — `BattleEvent.payload_json` schema mapuje 1:1 na `events.py` event types (12 po B3.9: 10 oryginalnych + StatusAdded/StatusRemoved). Persisting + replay weryfikuje inwariant z ADR-0046.
 
 ADR-0010 (event-sourced) + ADR-0014 (per-unit wounds) + ADR-0045 (activation context) + ADR-0046 (event-sourced mutations) + ADR-0047 (weapons inventory) dyktują strukturę. ADR-0042 (facing) odłożony do E3.
 
@@ -341,7 +439,7 @@ python -c "from app.services.rulesets.loader import load_b_mvp_exclusions; print
   - **Koszt (metryka D3):** `calculate_roster_unit_quote(unit, loadout, count, include_item_costs)` (`app/services/costs/quote.py`, SSOT Strumień A) — gotowe, adapter tylko wywołuje.
   - **Auto-rozstawienie:** pozycje w strefie rozstawienia (pkt 3) — grid równomierny (pokrywa się z D5).
   - Klasyfikacja: NIE blokada usera (czysta inżynieria), ale ≥1 osobny wątek przez głębokość + decyzje modelowania.
-- **2026-06-13 — ✅ B7 (Test bed) DONE** (wątek `faza-b-7-test-bed`, archived): `tests/test_engine_regression.py` — 14 testów golden regression (6 deterministycznych bitew + digest sha256 + reproducible + sanity). Reuse fixtur D2 + `balance_simulate`, zero zmian w rdzeniu. Roadmap B7 ✅. Commit `a700b74`. **Strumień B: zostają B2-reszta (auth/Unit-kolumny), B4 API, B5 klient, B6 prezentacja.**
+- **2026-06-13 — ✅ B7 (Test bed) DONE** (wątek `faza-b-7-test-bed`, archived): `tests/test_engine_regression.py` — 14 testów golden regression (6 deterministycznych bitew + digest sha256 + reproducible + sanity). Reuse fixtur D2 + `balance_simulate`, zero zmian w rdzeniu. Roadmap B7 ✅. Commit `a700b74`. **Strumień B: zostają B2-reszta (auth/invite/tokens/snapshot; `Unit.base_size_mm/base_shape` DONE 2026-06-26), B4 API, B5 klient, B6 prezentacja.**
 - **2026-06-13 — `WAITING(prereq)`: D3 `exploit_hunt` zablokowane na adapterze kosztu, nie na decyzji usera.** D3 (roadmap) ma raportować exploity wg „**win_rate / points**". Silnik engine-dict NIE ma kosztu punktowego (`UnitBlob` nie zna pkt; potwierdzone w `priority_player`/D2). Metryka „top wg samego win-rate" znajduje najsilniejszą armię, **nie exploit** (przewagę względem kosztu) → rdzeń wartości D3 wymaga mostu **ORM `Roster`→engine-dict** który liczy koszt przez `calculate_roster_unit_quote` (Strumień A SSOT) ORAZ auto-rozstawia pozycje w strefach (pkt 3) + mapuje abilities→passives (podzbiór MVP) + weapons z `loadout_json`. Ten sam adapter odblokowuje odłożony D2 breakdown per-zdolność/broń. **To NIE blokada usera** (czysta robota inżynierska, READY do zaprojektowania), ale nietrywialna (czyta DB, decyzje mapowania zdolności) — kandydat na własny wątek `faza-d-roster-adapter` przed D3. Do tego czasu D3 świadomie niezrobione.
 - **2026-06-12 — ✅ ROZWIĄZANE: pkt 20.f.i — 1 porażka Przegrupowania = Przyszpilony deterministycznie.** Zmiana zasad (decyzja usera 2026-06-12): opcja (A) źródło-as-written. Usunięto mechanizm `regroup_choice` callback ze wszystkich warstw (phases/resolver/match/base/priority_v3). `source_hashes.yaml` zaktualizowany (`SZOP_Rozjemca.md` hash `99f5cd…`). Pliki: `phases.py`, `resolver.py`, `match.py`, `agents/{base,priority_v3_player}.py`, `tests/test_engine_regroup_choice.py` (przepisany — 2 testy deterministyczne), `tests/test_agents_priority_v3.py` (usunięty `test_regroup_choice_tree`), `source_hashes.yaml`. pytest **1607 passed** (0 failed).
 - **2026-06-12 — ✅ ROZWIĄZANE: F5 — greedy niedoszacowywał ataków przejmujących cel (zaokrąglenie do 0).** `greedy_player._attack_score`: `round(expected_models_killed())` → `math.ceil` + ważenie delty (`weight = expected_kills / ceil`). Atak zdejmujący ostatni model z celu (E<0.5) teraz daje proporcjonalną `objective_delta` zamiast 0. Nowy test `test_attack_score_nonzero_for_low_expected_kills_on_objective`. pytest 1607 passed.
@@ -353,7 +451,7 @@ python -c "from app.services.rulesets.loader import load_b_mvp_exclusions; print
 
 - **2026-06-14 — ✅ 2-AKCJE NA AKTYWACJĘ POTWIERDZONE ZROBIONE.** `apply_activation()` (resolver.py:210) implementuje pętlę do 2 akcji (pkt 11.b.iv) z `continuation` callback w `match.py:135-143`. Każdy `Player` podaje 2. akcję przez `continue_activation()`. Weryfikacja: pytest (boty używają, regroup+switch pracują). Zamyka pytanie z 2026-06-10.
 
-- **2026-06-10 — B2 event-store slice DONE** (wątek `faza-b-2-event-store`, ADR-0050). Persystencja: nowe tabele `battles`/`battle_events` (`app/models.py`) + `app/services/engine/persistence.py` (`save_events`/`load_events`). **GATE replay-from-DB invariant** zielony — schemat eventów (16 typów) persystuje i odtwarza bit-perfect. **B4 API odblokowane** (konsumuje persistence + optimistic locking via `UniqueConstraint(battle_id, sequence)`). **Brak Alembic** w projekcie — nowe tabele addytywne via `create_all`; zmiany kolumn istniejących tabel wymagają wpisu w `_migrate_schema` (db.py). **Odroczone z B2** (osobny wątek + user + security-review): `BattleInvite`/`BattleSnapshot`/`AgentToken`/`AgentAuditLog` + kolumny `Unit.base_size_mm/base_shape`. Serializer `event_to_json`/`json_to_event` JUŻ istniał w `events.py` (B2 deliverable zrobiony wcześniej). pytest 1504.
+- **2026-06-10 — B2 event-store slice DONE** (wątek `faza-b-2-event-store`, ADR-0050). Persystencja: nowe tabele `battles`/`battle_events` (`app/models.py`) + `app/services/engine/persistence.py` (`save_events`/`load_events`). **GATE replay-from-DB invariant** zielony — schemat eventów (16 typów) persystuje i odtwarza bit-perfect. **B4 API odblokowane** (konsumuje persistence + optimistic locking via `UniqueConstraint(battle_id, sequence)`). **Brak Alembic** w projekcie — nowe tabele addytywne via `create_all`; zmiany kolumn istniejących tabel wymagają wpisu w `_migrate_schema` (db.py). **Odroczone z B2** (osobny wątek + user + security-review): `BattleInvite`/`BattleSnapshot`/`AgentToken`/`AgentAuditLog`; kolumny `Unit.base_size_mm/base_shape` domknięte 2026-06-26. Serializer `event_to_json`/`json_to_event` JUŻ istniał w `events.py` (B2 deliverable zrobiony wcześniej). pytest 1504.
 - **2026-06-10 — Headless pętla bitwy DONE** (wątek `faza-d-match-runner`, ADR-0032). `app/services/agents/match.py`: `run_match(state, players, dice)` + `simulate_from_rosters(...)` → `MatchResult`. Domyka „pętlę bitwy" wskazaną poniżej jako brakującą po D1 — orkiestrator `apply`+`round_end_phase`+alternacja inicjatywy (pkt 8), headless (ADR-0013), zero zmian w rdzeniu. **D2 `balance_simulate` jest teraz READY** (agreguje N `simulate_from_rosters`). To zalążek B5 `LocalClient.simulate`. pytest 1494/1494. (Uwaga: rezerwy Zaplecze nie są rozstawiane mid-game w MVP — siedzą bezczynnie; pełne rozstawianie rezerw odłożone.)
 - **2026-06-09 (sesja codzienna autonomiczna) — Strumień D1 MVP DONE** (wątek `faza-d-heuristic-players`, ADR-0031). Nowy pakiet `app/services/agents/` (Player ABC + `legal_actions` enumerator + RandomPlayer + GreedyPlayer + `evaluate_state`), czyta tylko publiczne API silnika (zero zmian w rdzeniu → brak kolizji z `faza-b-order-interrupts`). 26 testów, pytest 1489/1489. **Odblokowuje D2/D3, ale `balance_simulate` (D2) wymaga pętli bitwy** = orkiestrator `apply`+`round_end_phase`+alternacja inicjatywy → to **B5 LocalClient / B4 routers** (`READY` po B2 ORM). Boty są kompletne i testowalne w izolacji; brakuje tylko warstwy, która je uruchamia w pełnej grze. To kolejny naturalny krok parenta (obok B2 ORM).
 - **2026-06-09 (sesja codzienna autonomiczna) — wątek `faza-b-rules-resync` ZARCHIWIZOWANY (R0–R7 + RW ✅).** Resync 3 warstw SSOT z driftem 2026-06-03 kompletny i zweryfikowany (pytest 1435/1435, both_assert 156/156, yaml 93/93, drift WARN, smoke EXIT 0). Pełny rekord driftu: **ADR-0048**. **Przejęte do tego parenta jako backlog przyrostowych zdolności engine:**

@@ -357,6 +357,20 @@ def _migrate_schema() -> None:
                         "ALTER TABLE units ADD COLUMN typical_models INTEGER NOT NULL DEFAULT 1"
                     )
                 )
+            if "base_size_mm" not in column_names:
+                logger.info("Adding base_size_mm column to units table")
+                connection.execute(
+                    text(
+                        "ALTER TABLE units ADD COLUMN base_size_mm INTEGER NOT NULL DEFAULT 25"
+                    )
+                )
+            if "base_shape" not in column_names:
+                logger.info("Adding base_shape column to units table")
+                connection.execute(
+                    text(
+                        "ALTER TABLE units ADD COLUMN base_shape VARCHAR(20) NOT NULL DEFAULT 'round'"
+                    )
+                )
             if "group_id" not in column_names:
                 logger.info("Adding group_id column to units table")
                 connection.execute(
