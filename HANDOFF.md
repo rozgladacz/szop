@@ -12,6 +12,7 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_aideas-knowledge-base](docs/handoffs/HANDOFF_aideas-knowledge-base.md) | Przygotowanie kopii i ekstraktów z aplikacji jako baza wiedzy dla ćwiczenia AIDEAS. | `AIdeas/Baza wiedzy/` | In progress |
+| [HANDOFF_faza-c-validate-loadout](docs/handoffs/HANDOFF_faza-c-validate-loadout.md) | C3 `validate_loadout` read-only leaf-CLI — diff raw→normalized loadout + odrzucone/sklampowane + koszt. | `scripts/validate_loadout.py` (NEW), `tests/test_validate_loadout.py` (NEW) | In progress |
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 
 

@@ -467,6 +467,27 @@ python scripts/explain_ability.py "Podwójny" --json
 > Testy pokrywają lookup po slug/nazwie, render parametru, flagę `blocked`,
 > filtry listy i JSON round-trip (`tests/test_explain_ability.py`).
 
+### `validate_loadout.py` (C3)
+
+Read-only **diff validator** loadoutu jednostki: bierze id jednostki z DB
+(kontekst legalnych broni/zdolności/passive) + RAW loadout payload (JSON) i
+pokazuje, co sanityzacja SSOT `normalize_roster_unit_loadout` zaakceptuje,
+odrzuci (id spoza dozwolonego zbioru / niepoprawne) i sklampuje (ujemny count
+→ 0, nieznany `mode` → per_model) oraz koszt znormalizowanej konfiguracji przez
+`calculate_roster_unit_quote`. „Dry-run" endpointu quote bez zapisu do DB. Leaf-CLI
+dla roadmap C3; wrapper MCP/HTTP czeka na C1/B4.
+
+```powershell
+python scripts/validate_loadout.py --list
+python scripts/validate_loadout.py 5 --loadout '{"weapons":{"3":1,"99":1}}'
+python scripts/validate_loadout.py 5 --loadout-file payload.json --count 3 --json
+```
+
+> Uwaga: skrypt czyta DB bez wołania `init_db()`, więc działa na bazie z aktualną
+> schemą (po starcie aplikacji / migracji). Testy pokrywają czyste funkcje diffu,
+> ścieżkę DB (seeded SQLite), JSON round-trip i błędy CLI
+> (`tests/test_validate_loadout.py`).
+
 ### `reflect_and_improve.py`
 
 Analiza ostatnich 10 transkryptów Claude Code, generuje

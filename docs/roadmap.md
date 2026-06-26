@@ -268,7 +268,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 ### C3. Narzędzia MCP (3 tyg)
 - [ ] `lookup_rule(query)` — RAG nad SZOP.docx + YAML
 - [x] `explain_ability(slug)` — **leaf-CLI DONE 2026-06-24** (`scripts/explain_ability.py`): strukturalny lookup po slug/nazwie PL z katalogu SSOT `app.data.abilities`, `--list`, `--type`, `--json`, testy bez DB. Wrapper MCP/HTTP pozostaje gated na C1/B4.
-- [ ] `validate_loadout(payload)` — decyzja 2026-06-26: read-only diff validator raw→normalized + dropped/clamped selections + koszt
+- [x] `validate_loadout(payload)` — **leaf-CLI DONE 2026-06-26** (`scripts/validate_loadout.py`): read-only diff validator raw→normalized (odrzucone id / sklampowane count i `mode` / nierozpoznane passive) + koszt przez `calculate_roster_unit_quote`; reuse `normalize_roster_unit_loadout` SSOT; `--list`, `--loadout`/`--loadout-file`, `--count`, `--json`, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
 - [ ] `find_exploit_candidates(army_id)` — decyzja 2026-06-26: turniej kandydatów do ręcznej weryfikacji; niższy priorytet niż usuwanie uproszczeń silnika
 - [ ] `score_list(roster_id)` — decyzja 2026-06-26: agregacja wyników symulacji bitwy, później interpretacja dedykowanego agenta; niższy priorytet niż usuwanie artefaktów
 - [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
