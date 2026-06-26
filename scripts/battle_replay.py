@@ -414,11 +414,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(replay_from_db(args.from_db))
         return 0
 
-    if args.map:
-        fixture = bsim.build_map(args.map, args.map_seed)
-    else:
-        path = args.fixture or str(bsim.DEFAULT_FIXTURE)
-        fixture = bsim.load_battle_fixture(path)
+    try:
+        if args.map:
+            fixture = bsim.build_map(args.map, args.map_seed)
+        else:
+            path = args.fixture or str(bsim.DEFAULT_FIXTURE)
+            fixture = bsim.load_battle_fixture(path)
+    except (FileNotFoundError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
 
     print(
         replay_from_fixture(

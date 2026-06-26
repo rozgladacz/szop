@@ -54,6 +54,10 @@
 
 ## LOG SESJI
 
+### 2026-06-26 — prezentacja (B6, ADR-0013) — hardening CLI `battle_replay` (bad --fixture/--map)
+- Ten sam bug-class co `analyze_battle` (poniżej): `scripts/battle_replay.py` `main()` budował fixturę/mapę bez `try/except` → surowy traceback przy nieistniejącej `--fixture`/nieznanej `--map`. Fix identyczny: `try/except (FileNotFoundError, ValueError)` → `print(stderr); return 2`. +2 regresje (`test_cli_missing_fixture_clean_error`, `test_cli_unknown_map_clean_error`). Po fixie wszystkie 3 skrypty-liście ładujące fixturę/mapę (`analyze_agents`/`analyze_battle`/`battle_replay`) są spójnie zahardenowane.
+- Weryfikacja: targeted `tests/test_battle_replay.py` **18 passed**; pełny pytest **1936 passed** (1934 + 2). Smoke CLI: bad fixture/map → rc=2, czysty komunikat. DoD jak niżej (skrypt-liść, ~7 linii prod, `/review`/`/security-review` pominięte warunkowo). Commit na `Faza_A`: `<this>`.
+
 ### 2026-06-26 — telemetria (ADR-0017) — hardening CLI `analyze_battle` (bad --fixture/--map)
 - Bug-fix spójności CLI w telemetrii: `scripts/analyze_battle.py` przy nieistniejącej `--fixture` (FileNotFoundError) lub nieznanej `--map` (ValueError z `build_map`) wypisywał **surowy traceback** zamiast czystego błędu. Siostrzany `scripts/analyze_agents.py` był już zahardenowany (commit `b38c700`), `analyze_battle` pominięty. **Korekta stale-findingu:** review `REVIEW_2026-06-26.md` listował to jako „`analyze_agents --fixture <nieistniejący>`" — empirycznie potwierdzone, że to `analyze_battle` był niezahardenowany (`analyze_agents` daje `parser.error`; pozostałe 2 low z 06-24 = `dd528d3` już DONE).
 - Fix: budowa fixtury/mapy w `main()` owinięta w `try/except (FileNotFoundError, ValueError)` → `print(str(exc), file=sys.stderr); return 2` (konwencja własna pliku, linie 803-816; rc=2 = jak `parser.error`). +2 regresje (`test_cli_missing_fixture_clean_error`, `test_cli_unknown_map_clean_error`: rc==2, komunikat na stderr, brak `Traceback`).
