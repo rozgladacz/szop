@@ -29,6 +29,13 @@ def _sessionmaker():
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def _patch_cli_db(monkeypatch, sm):
+    calls: list[str] = []
+    monkeypatch.setattr("app.db.init_db", lambda: calls.append("init"))
+    monkeypatch.setattr("app.db.SessionLocal", sm)
+    return calls
+
+
 def _seed_two_rosters(session):
     user = models.User(username="engagement-tester", password_hash="x")
     ruleset = models.RuleSet(name="Rules")
@@ -158,18 +165,19 @@ def test_main_list_uses_sessionlocal(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         _seed_two_rosters(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    init_calls = _patch_cli_db(monkeypatch, sm)
 
     rc = se.main(["--list"])
     out = capsys.readouterr().out
 
     assert rc == 0
+    assert init_calls == ["init"]
     assert "Rozpiski w bazie" in out
     assert "Roster A" in out
 
 
 def test_main_missing_args_returns_usage_error(monkeypatch, capsys):
-    monkeypatch.setattr("app.db.SessionLocal", _sessionmaker())
+    _patch_cli_db(monkeypatch, _sessionmaker())
 
     rc = se.main([])
     err = capsys.readouterr().err
@@ -182,7 +190,7 @@ def test_main_unknown_roster_returns_not_found(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         rid_a, _rid_b = _seed_two_rosters(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    _patch_cli_db(monkeypatch, sm)
 
     rc = se.main([str(rid_a), "99999", "-n", "1"])
     err = capsys.readouterr().err
@@ -195,7 +203,7 @@ def test_main_unknown_bot_returns_usage_error(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         rid_a, rid_b = _seed_two_rosters(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    _patch_cli_db(monkeypatch, sm)
 
     rc = se.main([str(rid_a), str(rid_b), "-n", "1", "--bot", "nope"])
     err = capsys.readouterr().err

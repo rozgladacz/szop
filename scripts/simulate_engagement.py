@@ -47,6 +47,8 @@ _repo_root = pathlib.Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
+from scripts.db_bootstrap import initialized_session  # noqa: E402
+
 from app.services.agents import roster_points  # noqa: E402
 from szop_client.local import LocalClient, RosterNotFoundError  # noqa: E402
 from szop_client.protocol import SimulationSummary  # noqa: E402
@@ -304,9 +306,8 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    from app.db import SessionLocal
 
-    with SessionLocal() as session:
+    with initialized_session() as session:
         if args.list:
             print(format_roster_list(list_rosters(session)))
             return 0

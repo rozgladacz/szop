@@ -11,6 +11,136 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## DONE — 2026-06-27 — C3 DB-read CLI schema bootstrap hardening (commit na `Faza_A`)
+
+> **Status:** slice domknięty i zacommitowany. Re-weryfikacja przed commitem (sesja autonomiczna 2026-06-27): targeted **32 passed**, pełny pytest **1955 passed**, smoke CLI (`validate_loadout`/`simulate_engagement` `--list`) na realnej `data/szop.db` exit 0 bez pre-fix tracebacka. Szczegóły niżej.
+
+**Zakres pracy:** mały hardening błędu zapisanego w `HANDOFF.md` po C3
+`validate_loadout`: standalone skrypty-liście czytające domyślną bazę
+(`validate_loadout`, `simulate_engagement`, `exploit_hunt`) otwierają
+`SessionLocal` bez standardowego bootstrapu `init_db()`. Na lokalnej
+`data/szop.db` sprzed ostatnich addytywnych migracji kończy się to surowym
+tracebackiem SQLAlchemy zamiast działania jak aplikacja po starcie.
+
+**Wybór zadania:** kontynuacja istniejącego parenta B/C, dobrze określony bug
+z poprzedniego LOG SESJI, bez decyzji usera, przybliża używalność narzędzi C3
+i B5 DB-backed `LocalClient` bez ruszania większego zakresu auth/B4. AIDEAS ma
+status `Ready for archive` i nie jest dotykany.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A — brak nowych kolumn/tabel; tylko wywołanie
+  istniejącego `init_db()` przed sesją CLI.
+- Backend payload/API: N/A — brak routerów i JSON API.
+- CLI/backend scripts: `scripts/validate_loadout.py`,
+  `scripts/simulate_engagement.py`, `scripts/exploit_hunt.py`, ewentualnie
+  wspólny helper bootstrapu.
+- JS render / CSS / template: N/A.
+- Testy: istniejące testy trzech skryptów plus regresja, że CLI woła bootstrap
+  i testy nadal nie dotykają `data/szop.db`.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`; dotyczy tylko
+uruchomienia procesów CLI. Koszt to jednorazowe `init_db()` przed pracą
+skryptu, zgodne ze startupem FastAPI (`app.main`). Brak dodatkowych query w
+requestach aplikacji i brak zmian w pętlach silnika.
+
+**Plan:**
+- [x] 1. Potwierdzić call sites DB-read CLI i obecny wzorzec testów z podmienionym
+  `SessionLocal`.
+- [x] 2. Dodać minimalny wspólny helper albo lokalne wywołanie bootstrapu schematu
+  przed otwarciem sesji w trzech skryptach.
+- [x] 3. Rozszerzyć testy CLI tak, aby bootstrap był wymagany, ale w testach był
+  no-op i nadal używał seeded in-memory SQLite.
+- [x] 4. Weryfikacja: targeted pytest dla trzech skryptów, pełny `pytest -q`,
+  call-site check.
+- [x] 5. DoD: manual `/simplify`, manual `/review` jeśli diff >50 linii, manual
+  `/security-review` jeśli zmiana zostanie uznana za DB/user-input risk; diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED`: Dywersant i raw combat rolls
+nie są dotykane ani podnoszone. Zmiana świadomie może wykonać standardowe,
+addytywne migracje istniejącej lokalnej bazy przy uruchomieniu tych CLI, tak jak
+robi to aplikacja.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-27T01:03:03+02:00: Bootstrap automatyzacji zakończony: przeczytano
+  memory, `AGENTS.md`, `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`,
+  oba aktywne handoffy, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md` i `docs/testing.md`. `git status --short` pokazuje tylko
+  zastaną lokalną zmianę `.claude/settings.local.json`; nie jest dotykana.
+  `rg` potwierdził trzy C3/D3 skrypty z bezpośrednim `SessionLocal` bez `init_db()`:
+  `validate_loadout.py`, `simulate_engagement.py`, `exploit_hunt.py`.
+- 2026-06-27T01:10: Dodano `scripts/db_bootstrap.py` z context managerem
+  `initialized_session()` (`init_db()` → `SessionLocal()`), a trzy skrypty
+  DB-read używają go w `main()`. Zakres bootstrapu jest wspólny i zgodny ze
+  startupem aplikacji; rdzeń walidacji/symulacji pozostaje bez zmian.
+- 2026-06-27T01:15: Testy CLI `validate_loadout`, `simulate_engagement` i
+  `exploit_hunt` podmieniają teraz jednocześnie `app.db.init_db` (no-op/licznik)
+  oraz `app.db.SessionLocal` (seeded in-memory SQLite). Regresje pinują, że
+  `main()` wywołuje bootstrap, ale testy nadal nie dotykają `data/szop.db`.
+- 2026-06-27T01:22: Targeted pytest
+  `tests/test_validate_loadout.py tests/test_simulate_engagement.py
+  tests/test_exploit_hunt_db.py`: **32 passed**, 652 warnings. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1955 passed**, 2005 warnings.
+- 2026-06-27T01:27: Manual `/simplify`: jedna korekta komentarza w
+  `tests/test_exploit_hunt_db.py` (stary opis bezpośredniego importu `SessionLocal`
+  po przejściu na helper). Po tej korekcie ponowiono targeted pytest:
+  **32 passed**, 652 warnings oraz pełny pytest: **1955 passed**, 2005 warnings.
+- 2026-06-27T01:30: Smoke CLI importu bez dotykania DB:
+  `validate_loadout.py --help`, `simulate_engagement.py --help`,
+  `exploit_hunt.py --help` — wszystkie exit 0 i pokazują parser argparse.
+- 2026-06-27T01:32: Call-site check `rg "initialized_session|SessionLocal"`:
+  trzy skrypty DB-read (`validate_loadout`, `simulate_engagement`, `exploit_hunt`)
+  używają `initialized_session()`. `scripts/db_bootstrap.py` jest jedynym nowym
+  miejscem bezpośredniego `SessionLocal` dla tego wzorca. Pozostałe bezpośrednie
+  użycia poza zakresem: `profile_quote.py` ma własny startup FastAPI przed sesją,
+  `battle_replay.py` i `analyze_battle.py` dotyczą trybu `--from-db` event-logu
+  i nie czytają katalogów jednostek/rosterów, które wywoływały crash po migracjach.
+- 2026-06-27T01:34: Manual `/review` (diff >50 linii): helper nie przyjmuje
+  danych usera, importuje `init_db` lazy w czasie użycia, zamyka sesję przez
+  context manager; zmienione `main()` nie zmieniają rdzenia diffu/symulacji.
+  Testy izolują lokalną bazę przez patch `init_db` + in-memory `SessionLocal`.
+  Manual `/security-review`: brak auth, sekretów i dynamicznego SQL; jedyny write
+  to standardowy addytywny bootstrap/migracja schematu aplikacji, bez zależności
+  od inputu CLI. `git diff --check` bez błędów (tylko ostrzeżenia CRLF dla
+  `.claude/settings.local.json`/HANDOFF); `.claude/settings.local.json` to zastana
+  lokalna zmiana i nie jest dotykana.
+- 2026-06-27 (autonomiczny `/code-review`): 0 bugów korektności; testy
+  zweryfikowane niezależnie (**32 passed**). Jedyne znalezisko: slice zmienił
+  zachowanie z czysto-czytającego na bootstrap+read (`init_db()`), ale nie
+  zsynchronizował docs — opisy „read-only" / „bez wołania `init_db()`" stały się
+  nieprawdziwe. Naprawione w tej sesji (proste/bezpieczne): docstring
+  `scripts/exploit_hunt.py` oraz trzy fragmenty `scripts/README.md`
+  (sekcje `exploit_hunt`, `simulate_engagement` oraz nota przy
+  `validate_loadout`). Layer Checklist tego slice nie miał wiersza „docs" — przy
+  podobnych zmianach zachowania dodać sync docstring/README do checklisty.
+  Pełny raporcik: `docs/handoffs/code-review/REVIEW_2026-06-27.md`.
+- 2026-06-27T06:04:00+02:00: Rewalidacja autonomiczna po wznowieniu kontekstu:
+  przed zamknięciem ponownie sprawdzić diff, call sites, targeted pytest i pełny
+  pytest dla tego samego slice. Brak nowego zakresu funkcjonalnego; zastana
+  `.claude/settings.local.json` pozostaje nietykana.
+- 2026-06-27T06:10:00+02:00: Smoke `--help` wykazał jeden pozostawiony drift
+  opisowy w `validate_loadout.py` (`read-only` w opisie argparse). Poprawiono
+  na „diff validator bez zapisu loadoutu”, żeby nie sugerować, że CLI nie wykonuje
+  bootstrapu `init_db()`. Po tej zmianie ponowić targeted i pełny pytest.
+- 2026-06-27T06:16:00+02:00: Rewalidacja po poprawce opisowej zakończona.
+  Targeted pytest (`tests/test_validate_loadout.py tests/test_simulate_engagement.py
+  tests/test_exploit_hunt_db.py`): **32 passed**, 652 warnings. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1955 passed**, 2005 warnings. Smoke `validate_loadout.py --help` pokazuje
+  już „diff validator loadoutu bez zapisu”. `rg` nie znajduje starych fraz
+  `read-only diff` ani `bez wołania init_db`; `git diff --check` bez błędów
+  (tylko ostrzeżenia CRLF dla zastanych/dotkniętych plików). Call-site check:
+  trzy DB-read CLI używają `initialized_session()`; `analyze_battle.py` i
+  `battle_replay.py` pozostają poza zakresem, bo czytają event-logi `--from-db`,
+  a `profile_quote.py` ma własny startup aplikacji przed sesją.
+- 2026-06-27T06:17:00+02:00: Finalny pass po znalezieniu ostatniej polskiej frazy
+  „DB wyłącznie do odczytu” w docstringu `validate_loadout.py`: doprecyzowano,
+  że poza bootstrapem `init_db()` skrypt nie zapisuje walidowanego loadoutu ani
+  wyników diffu. Ponowiono `rg` dla fraz driftu (brak wyników), targeted pytest
+  **32 passed**, pełny pytest **1955 passed**, `git diff --check` bez błędów.
+  Raport `docs/handoffs/code-review/REVIEW_2026-06-27.md` zaktualizowany do
+  sześciu naprawionych opisów.
+
 ## W TRAKCIE — 2026-06-26T09:15:00+02:00 — B2 minimal auth/agent schema
 
 **Zakres pracy:** addytywny slice B2 zgodny z decyzją usera z 2026-06-26:

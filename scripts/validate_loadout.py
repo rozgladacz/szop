@@ -1,4 +1,4 @@
-"""C3 — `validate_loadout`: read-only diff validator loadoutu jednostki.
+"""C3 — `validate_loadout`: diff validator loadoutu jednostki bez zapisu loadoutu.
 
 Uruchom:
     python scripts/validate_loadout.py --list                         # jednostki w bazie
@@ -19,11 +19,12 @@ między tym, co przysłał klient, a tym, co zaakceptuje SSOT sanityzacji
 plus KOSZT znormalizowanej konfiguracji przez `calculate_roster_unit_quote`
 (`selected_total` + składowe). To „dry-run" endpointu quote bez zapisu do DB.
 
-Decyzja usera 2026-06-26: validate_loadout = read-only diff validator, reuse
+Decyzja usera 2026-06-26: validate_loadout = diff validator bez zapisu loadoutu, reuse
 istniejącego quote/normalize SSOT (AGENTS [CRITICAL] #3 — bez replikacji logiki).
 
-Skrypt-liść: zero zmian w rdzeniu silnika/costs; DB wyłącznie do odczytu
-(`session.get(Unit, id)`), bez scopingu własności (jednostki = katalog armii).
+Skrypt-liść: zero zmian w rdzeniu silnika/costs; poza standardowym bootstrapem
+schematu przez `init_db()` nie zapisuje walidowanego loadoutu ani wyników diffu.
+Bez scopingu własności (jednostki = katalog armii).
 """
 
 from __future__ import annotations
@@ -47,6 +48,8 @@ if hasattr(sys.stdout, "reconfigure"):
 _repo_root = pathlib.Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
+
+from scripts.db_bootstrap import initialized_session  # noqa: E402
 
 from app.services.costs import calculate_roster_unit_quote  # noqa: E402
 from app.services.costs.primitives import (  # noqa: E402
@@ -255,7 +258,7 @@ def validate_loadout(unit, raw_loadout: dict[str, Any], count: int = 1) -> Loado
 
 
 # ---------------------------------------------------------------------------
-# DB (read-only)
+# DB queries (no loadout writes)
 # ---------------------------------------------------------------------------
 
 
@@ -402,7 +405,7 @@ def diff_to_dict(diff: LoadoutDiff) -> dict[str, Any]:
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="C3 validate_loadout — read-only diff validator loadoutu jednostki.",
+        description="C3 validate_loadout — diff validator loadoutu bez zapisu.",
     )
     parser.add_argument("unit_id", type=int, nargs="?", help="id jednostki z bazy.")
     parser.add_argument("--loadout", type=str, default=None, help="RAW loadout jako JSON.")
@@ -432,9 +435,8 @@ def _load_raw_loadout(args: argparse.Namespace) -> dict[str, Any]:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parse_args(argv)
-    from app.db import SessionLocal
 
-    with SessionLocal() as session:
+    with initialized_session() as session:
         if args.list:
             print(format_unit_list(list_units(session)))
             return 0

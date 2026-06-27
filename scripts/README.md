@@ -394,8 +394,9 @@ round-trip + driver end-to-end + backward-compat hooka).
 
 ### `exploit_hunt.py` (D3)
 
-Exploit hunting (roadmap D3, **Opcja A in-memory** — bez DB-write/auth). Czyta
-jednostki z bazy **read-only**, generuje losowe **efemeryczne** rozpiski (transient
+Exploit hunting (roadmap D3, **Opcja A in-memory** — bez zapisu wyników/auth).
+Bootstrapuje schemat przez `init_db()` (jak start aplikacji), czyta jednostki z
+bazy, generuje losowe **efemeryczne** rozpiski (transient
 `Roster`) blisko budżetu punktowego (4–8 oddziałów pkt 2.a; `models_mode=per_copy`),
 rozgrywa round-robin self-play (reuse `simulate_from_rosters` + `deployment_zones`
 D5 + mapa z `balance_simulate`; naprzemienna inicjatywa + rozłączne seedy) i
@@ -435,7 +436,8 @@ python scripts/exploit_hunt.py --bot priority --top 5 --out build/exploit.csv --
 Head-to-head dwóch konkretnych rozpisek z bazy (`Roster.id`) przez
 `LocalClient.simulate_roster_ids` (GameClient seam) → win-rate A/B/remis,
 średnia liczba rund, koszt punktowy i skład. To leaf-CLI dla roadmap C3; pełny
-MCP-tool/HTTP wrapper czeka na C1/B4. Skrypt jest read-only względem DB, używa
+MCP-tool/HTTP wrapper czeka na C1/B4. Skrypt nie zapisuje wyników do DB (poza
+bootstrapem schematu przez `init_db()` przy starcie, jak aplikacja), używa
 tego samego bota po obu stronach, naprzemiennej inicjatywy i rozłącznych seedów
 graczy jak narzędzia D2/D3.
 
@@ -483,8 +485,10 @@ python scripts/validate_loadout.py 5 --loadout '{"weapons":{"3":1,"99":1}}'
 python scripts/validate_loadout.py 5 --loadout-file payload.json --count 3 --json
 ```
 
-> Uwaga: skrypt czyta DB bez wołania `init_db()`, więc działa na bazie z aktualną
-> schemą (po starcie aplikacji / migracji). Testy pokrywają czyste funkcje diffu,
+> Uwaga: skrypt bootstrapuje schemat przez `init_db()` (jak start aplikacji,
+> wspólny helper `scripts/db_bootstrap.initialized_session`), więc działa też na
+> bazie sprzed ostatnich addytywnych migracji — wykonuje je jak aplikacja, zanim
+> zacznie czytać. Testy pokrywają czyste funkcje diffu,
 > ścieżkę DB (seeded SQLite), JSON round-trip i błędy CLI
 > (`tests/test_validate_loadout.py`).
 

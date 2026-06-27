@@ -28,6 +28,13 @@ def _sessionmaker():
     return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def _patch_cli_db(monkeypatch, sm):
+    calls: list[str] = []
+    monkeypatch.setattr("app.db.init_db", lambda: calls.append("init"))
+    monkeypatch.setattr("app.db.SessionLocal", sm)
+    return calls
+
+
 def _seed_unit(session):
     """Jednostka z 1 dozwoloną bronią + 1 aktywną + 1 aurą; zwraca (unit_id, ids)."""
     user = models.User(username="loadout-tester", password_hash="x")
@@ -218,10 +225,11 @@ def test_main_list(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         _seed_unit(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    init_calls = _patch_cli_db(monkeypatch, sm)
     rc = vl.main(["--list"])
     out = capsys.readouterr().out
     assert rc == 0
+    assert init_calls == ["init"]
     assert "Strzelcy" in out
 
 
@@ -229,7 +237,7 @@ def test_main_validate_ok(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         uid, ids = _seed_unit(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    _patch_cli_db(monkeypatch, sm)
     rc = vl.main([str(uid), "--loadout", '{"weapons":{"%d":1}}' % ids["weapon"]])
     out = capsys.readouterr().out
     assert rc == 0
@@ -240,7 +248,7 @@ def test_main_json_output(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         uid, _ = _seed_unit(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    _patch_cli_db(monkeypatch, sm)
     rc = vl.main([str(uid), "--loadout", '{"mode":"bad"}', "--json"])
     out = capsys.readouterr().out
     assert rc == 0
@@ -251,7 +259,7 @@ def test_main_json_output(monkeypatch, capsys):
 
 
 def test_main_missing_unit_id_usage_error(monkeypatch, capsys):
-    monkeypatch.setattr("app.db.SessionLocal", _sessionmaker())
+    _patch_cli_db(monkeypatch, _sessionmaker())
     rc = vl.main([])
     err = capsys.readouterr().err
     assert rc == 2
@@ -262,7 +270,7 @@ def test_main_bad_json_returns_error(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         uid, _ = _seed_unit(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    _patch_cli_db(monkeypatch, sm)
     rc = vl.main([str(uid), "--loadout", "{not json"])
     err = capsys.readouterr().err
     assert rc == 2
@@ -273,7 +281,7 @@ def test_main_unknown_unit_returns_not_found(monkeypatch, capsys):
     sm = _sessionmaker()
     with sm() as session:
         _seed_unit(session)
-    monkeypatch.setattr("app.db.SessionLocal", sm)
+    _patch_cli_db(monkeypatch, sm)
     rc = vl.main(["99999", "--loadout", "{}"])
     err = capsys.readouterr().err
     assert rc == 1
