@@ -21,7 +21,14 @@
 
 ## Uprawnienia
 
-Dwa poziomy: `admin` i `user`. Funkcje administracyjne **jawnie odseparowane** od user-flow. Nie rozszerzaj uprawnień usera bez wyraźnego wymagania.
+UI nadal ma dwa poziomy: `admin` i `user`. Funkcje administracyjne **jawnie odseparowane** od user-flow. Nie rozszerzaj uprawnień usera bez wyraźnego wymagania.
+
+Agent access (B2/C1) jest osobnym torem: `User.role="agent"` + `AgentToken`
+przechowuje wyłącznie `token_hash`, a `app/security.py:require_agent_scope(scope_name)`
+weryfikuje bearer token przez hash, sprawdza scope (`*` albo konkretny scope),
+odrzuca tokeny wygasłe/cofnięte oraz zapisuje `AgentAuditLog` z redakcją
+sekretów w parametrach. Endpointy generowania/listowania tokenów są nadal
+osobnym zakresem C1/B4.
 
 ## Dokumentacja reguł gry — read-only
 
@@ -180,7 +187,7 @@ while not is_battle_over(state):
 - **`battles`** (`Battle`): metadane gry (`p1/p2_user_id?`, `p1/p2_roster_id?`, `winner_user_id?`, `current_round`, `rng_seed`, `status`). Przebieg NIE tu — event-sourced.
 - **`battle_events`** (`BattleEvent`, append-only): `event_type` + `payload_json` (`json.dumps(event_to_json(e))`) + `sequence`, `UniqueConstraint(battle_id, sequence)` (optimistic locking).
 
-`save_events(session, battle_id, events, *, flush=True)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0)` (rekonstrukcja przez `json_to_event`). **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape` oraz auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`). Odroczone: `BattleInvite`, `BattleSnapshot`, endpointy tokenów i middleware scope/audit w B4/C1.
+`save_events(session, battle_id, events, *, flush=True)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0)` (rekonstrukcja przez `json_to_event`). **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`) oraz C1 helper `require_agent_scope(scope_name)` w `app/security.py`. Odroczone: `BattleInvite`, `BattleSnapshot`, endpointy generowania/listowania tokenów i konsumenci B4 API.
 
 ### Status B3 (zamknięte 2026-05-30) + B3.9 hardening (zamknięte 2026-06-02)
 

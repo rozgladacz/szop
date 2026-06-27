@@ -102,7 +102,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ### B2. Modele danych (4 tyg)
 
-> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). **Auth/agent schema slice DONE 2026-06-26:** `User.role`, `AgentToken`, `AgentAuditLog`; endpointy/middleware tokenów nadal C1/B4. `BattleInvite` i snapshoty poza pierwszym krokiem. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
+> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). **Auth/agent schema slice DONE 2026-06-26:** `User.role`, `AgentToken`, `AgentAuditLog`; **runtime helper tokenów DONE 2026-06-27:** `security.require_agent_scope(scope_name)` weryfikuje bearer token hash + scope i zapisuje `AgentAuditLog`. Endpointy generowania/listowania tokenów nadal C1/B4. `BattleInvite` i snapshoty poza pierwszym krokiem. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
 
 **ORM — persistence layer (`app/models.py`):**
 - [x] `User` — `role ∈ {user, agent, admin}` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`; `is_admin` zostaje źródłem uprawnień UI w tym slice)
@@ -253,7 +253,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 ### C1. Infrastruktura (3 tyg)
 - [ ] `mcp_server/{server.py, config.py}` — MCP Python SDK, rejestracja narzędzi
 - [ ] Endpointy tokenów: `POST /agent_tokens`, `DELETE /agent_tokens/{id}`, `GET /agent_tokens`
-- [ ] Middleware `require_agent_scope(scope_name)` — weryfikacja + `AgentAuditLog`
+- [x] Middleware `require_agent_scope(scope_name)` — **DONE 2026-06-27**: `app/security.py` hash bearer tokena (`sha256:`), lookup `AgentToken.token_hash`, scope JSON (`*` albo konkretny scope), odrzucenie expired/revoked/non-agent i `AgentAuditLog` z redakcją sekretów z query/path params. 8 testów. Konsumenci endpointów B4/C1 jeszcze niepodpięci.
 - [ ] `AgentProposal` model + `POST /agent_proposals`, `POST /agent_proposals/{id}/approve`
 - [ ] Frontend: approval UI "[Agent chce X] [Zezwól] [Odrzuć]"
 - [ ] ADR-0021: MCP jako klient publicznego API; ADR-0024: Consent-gated writes; ADR-0025: Rola agent + scoped tokens

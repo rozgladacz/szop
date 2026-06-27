@@ -3,13 +3,116 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-06-26 (B2 Unit base geometry slice)
+> **Ostatnia aktualizacja:** 2026-06-27 (C1/B4 agent token runtime helper)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE — 2026-06-27 — C1/B4 agent token runtime helper (commit na `Faza_A`)
+
+> **Status:** slice domknięty i zacommitowany. Sesja autonomiczna 2026-06-27 domknęła
+> w pełni ukończoną, zweryfikowaną i zrecenzowaną (manual `/simplify`+`/review`+`/security-review`),
+> ale niezacommitowaną pracę z wcześniejszej sesji. Re-weryfikacja przed commitem:
+> targeted `tests/test_agent_token_security.py tests/test_registration_control.py
+> tests/test_db_schema_migrations.py` **29 passed**; pełny
+> `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **1963 passed**, 2030 warnings.
+> Modele potwierdzone (`AgentToken.agent_user/owner_user`, `USER_ROLE_AGENT`, `token_hash`,
+> `scope_json`, `expires_at/revoked_at/last_used_at`); `get_db` import obecny. Commit obejmuje
+> 5 plików jednego slice: `app/security.py`, `tests/test_agent_token_security.py`,
+> `docs/architecture.md`, `docs/roadmap.md`, ten HANDOFF. `.claude/settings.local.json`
+> świadomie poza commitem (zastana lokalna allowlista). Szczegóły niżej.
+
+**Zakres pracy:** minimalny runtime nad istniejącym schematem B2
+`AgentToken`/`AgentAuditLog`: helper hashujący token, dependency
+`require_agent_scope(scope_name)` do weryfikacji bearer tokena i zapis audytu
+bez sekretów. Ten slice nie dodaje endpointu generowania tokenów, nie zmienia
+session-cookie UI auth i nie włącza jeszcze pełnego `app/routers/battles.py`.
+
+**Wybór zadania:** roadmap wskazuje B4/C1 jako następny główny kierunek po B2,
+a HANDOFF ma `READY` dla runtime: hash bearer tokena, porównanie hasha i
+redakcja sekretów w `AgentAuditLog.params_json`. To mały, dobrze odcięty krok,
+bez potrzeby decyzji użytkownika, który domyka praktyczny fundament pod
+przyszłe endpointy agentowe bardziej niż kolejny doc-only cleanup.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A — używa istniejących tabel `agent_tokens` i
+  `agent_audit_logs`, bez nowych kolumn.
+- Backend payload/API: helper/dependency w `app/security.py`; brak nowych
+  routerów i brak zmian istniejących odpowiedzi JSON.
+- JS render / CSS / template: N/A.
+- Testy: nowe/rozszerzone testy bezpieczeństwa dla poprawnego tokena, scope,
+  tokenów wygasłych/cofniętych, brakującego bearer i audytu bez sekretów.
+- Dokumentacja: roadmap/architecture/HANDOFF po sukcesie.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Dependency będzie
+wykonywać jeden lookup po `AgentToken.token_hash` na endpoint agentowy, który go
+użyje; kolumna `token_hash` jest unikalna, a ten slice nie dodaje wywołań w
+istniejących requestach UI ani w pętlach silnika.
+
+**Plan:**
+- [x] 1. Potwierdzić obecny wzorzec auth, modele token/audit i call sites.
+- [x] 2. Wykonać encoding gate dla edytowanych `.py`, dodać helper hash/scope/audit.
+- [x] 3. Dodać testy regresyjne dla tokenów i audytu.
+- [x] 4. Weryfikacja: targeted pytest, pełny `pytest -q`, call-site check.
+- [x] 5. DoD: manual `/simplify`, manual `/review` (auth helper), manual
+  `/security-review`, diff review; re-run pytest jeśli przegląd coś zmieni.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED`: Dywersant i raw combat rolls
+nie są dotykane ani podnoszone. Endpoint generowania tokenu i konsument B4 API
+pozostają przyszłym, osobnym zakresem.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-27T21:04:05+02:00: Bootstrap automatyzacji zakończony: przeczytano
+  memory, `AGENTS.md`, `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`,
+  oba aktywne handoffy, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md` i `docs/testing.md`. `aideas-knowledge-base` ma status
+  `Ready for archive` i blokuje tylko `AIdeas/`; pracę prowadzę w parent
+  `faza-b-engine-mvp`. `git status --short` pokazuje tylko zastaną lokalną
+  zmianę `.claude/settings.local.json`, której nie dotykam.
+- 2026-06-27T21:04:05+02:00: `rg` potwierdził, że `AgentToken`/`AgentAuditLog`
+  występują tylko w modelu, migracji/testach/docs, a istniejące routery nadal
+  używają cookie-session `get_current_user()` i `User.is_admin`. Slice będzie
+  addytywny: nowy helper nie przepina UI auth.
+- 2026-06-27T21:08: Encoding gate UTF-8 dla `app/security.py` i testów auth
+  zaliczony po eskalacji lokalnego `.venv` poza sandbox (`utf8-ok`; Store Python
+  w sandboxie zwrócił `Odmowa dostępu`). Dodano w `app/security.py` osobny
+  agentowy path auth: `hash_agent_token()`, `AgentPrincipal`,
+  `require_agent_scope(scope_name)`, parsing scope JSON, aktualizację
+  `last_used_at` i zapis `AgentAuditLog` z redakcją parametrów zawierających
+  sekrety. Istniejący `get_current_user()` i cookie-session UI auth bez zmian.
+- 2026-06-27T21:14: Dodano `tests/test_agent_token_security.py`: sukces z
+  audytem, wildcard scope, brak bearer, brak scope, token wygasły/cofnięty i
+  token przypięty do nie-agentowego usera. Targeted pytest nowego modułu:
+  **8 passed**, 25 warnings (pozostałe ostrzeżenia ze starego `TimestampMixin`).
+  Rozszerzony targeted auth/DB
+  `tests/test_agent_token_security.py tests/test_registration_control.py
+  tests/test_db_schema_migrations.py`: **29 passed**, 51 warnings.
+- 2026-06-27T21:13: Zsynchronizowano `docs/roadmap.md` i `docs/architecture.md`:
+  C1 `require_agent_scope(scope_name)` oznaczone jako DONE, a endpointy
+  generowania/listowania tokenów i konsumenci B4 API pozostają otwarte.
+- 2026-06-27T21:15: Manual `/simplify`: `AgentPrincipal` budowany przed
+  `db.commit()`, żeby nie polegać na atrybutach ORM po wygaśnięciu obiektu;
+  dodano rollback przy błędzie zapisu audytu. Po zmianie ponowiono targeted
+  nowego modułu (**8 passed**) oraz rozszerzony auth/DB (**29 passed**).
+- 2026-06-27T21:18: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1963 passed**, 2030 warnings. Call-site check:
+  `require_agent_scope`/`hash_agent_token` występują w `app/security.py`,
+  nowych testach i docs; brak istniejących routerów-konsumentów, więc UI auth
+  bez zmian. `git diff --check` bez błędów (tylko standardowe ostrzeżenia CRLF
+  dla `.claude/settings.local.json` i dotkniętych docs). Zastana
+  `.claude/settings.local.json` nadal nietykana.
+- 2026-06-27T21:19: Manual `/review`: helper jest addytywny, ma jeden lookup po
+  unikalnym `token_hash`, zwraca lekki `AgentPrincipal` zamiast ORM usera i nie
+  zmienia `get_current_user()`. Manual `/security-review`: raw bearer token nie
+  jest persystowany, `AgentToken` porównywany po hashu, expired/revoked/non-agent
+  odrzucane, brak scope daje 403 bez aktualizacji `last_used_at`, audyt sukcesu
+  redaguje parametry zawierające `authorization`/`token`/`password`/`secret`/
+  `api_key`. Residual future risk: endpointy z body zawierającym sekrety muszą
+  mieć osobną redakcję, jeśli kiedyś trafią do `params_json`.
 
 ## DONE — 2026-06-27 — C3 DB-read CLI schema bootstrap hardening (commit na `Faza_A`)
 
