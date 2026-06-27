@@ -11,6 +11,78 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## DONE — 2026-06-27 — C3 `score_list(roster_id)` leaf-CLI (commit na `Faza_A`)
+
+> **Status:** slice domknięty i zacommitowany. Targeted
+> `tests/test_score_list.py tests/test_simulate_engagement.py` **24 passed**;
+> pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **1979 passed**
+> (1963 + 16). Smoke CLI na realnej `data/szop.db`: `score_list.py 10 --vs "11,14" -n 2`
+> → exit 0, poprawny raport (siła w polu + per-przeciwnik win-rate + sygnał koszt↔wynik).
+> Commit obejmuje 5 plików: `scripts/score_list.py` (NEW), `tests/test_score_list.py`
+> (NEW 16), `scripts/README.md`, `docs/roadmap.md`, ten HANDOFF.
+
+**Zakres pracy:** deliverable C3 `score_list(roster_id)` (roadmap „Narzędzia MCP")
+jako skrypt-liść (ADR-0013), zgodnie z decyzją usera 2026-06-26: ocena rozpiski =
+**agregacja wyników symulacji bitwy** przeciw POLU pozostałych rozpisek z DB.
+Reuse `scripts/simulate_engagement.py` (pairing SSOT) + `LocalClient.simulate_roster_ids`
+(B5). Read-only DB, `user_id=None` (narzędzie balansu). Wrapper MCP/HTTP gated C1/B4.
+Później interpretacja dedykowanego agenta (poza zakresem tego slice).
+
+**Wybór zadania:** ostatni nieзrobiony C3 leaf-CLI z czterech rodzeństwa
+(`explain_ability`/`validate_loadout`/`simulate_engagement` DONE); decyzja usera
+rozstrzygnięta (agregacja symulacji), zero interakcji, mieści się w oknie, wzorzec
+w pełni ustalony przez sibling `simulate_engagement`. `find_exploit_candidates` to
+osobny (turniej) deliverable, nie ten slice.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A.
+- Backend payload/API: N/A (skrypt-liść CLI, brak routerów).
+- JS render / CSS / template: N/A.
+- CLI/scripts: `scripts/score_list.py` (NEW), `scripts/README.md` (sekcja C3).
+- Testy: `tests/test_score_list.py` (NEW — czyste funkcje agregacji/renderu +
+  ścieżka DB seeded SQLite + parity z `LocalClient` + błędy CLI).
+- Dokumentacja: `docs/roadmap.md` (C3 checkbox), `scripts/README.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote`/`/rosters/{id}`. Koszt = N gier ×
+(liczba przeciwników) symulacji offline w procesie CLI; brak nowych query w
+requestach UI ani zmian w pętli silnika.
+
+**Plan:**
+- [x] 1. Napisać `scripts/score_list.py` (reuse simulate_engagement pairing + agregacja pola).
+- [x] 2. Testy `tests/test_score_list.py` (czyste funkcje + DB seeded + błędy CLI).
+- [x] 3. Weryfikacja: targeted pytest, pełny `pytest -q`, smoke CLI na `data/szop.db`.
+- [x] 4. DoD: `/simplify`; `/review`/`/security-review` warunkowo; doc sync; diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED`: Dywersant, raw combat rolls,
+`models_mode=per_copy` nie są dotykane ani podnoszone. **Follow-up (NIE blokujący):**
+interpretacja wyniku przez dedykowanego agenta (decyzja usera 2026-06-26) = osobny
+zakres po C1/B4 (serwer MCP + endpointy). Sygnał koszt↔wynik w raporcie jest
+heurystyczny (wzór >50% jak `exploit_hunt`), nie automatyczna diagnoza.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-27: Start slice po bootstrapie. Working tree: zacommitowany helper
+  agent-token (`600051f`), zastana lokalna zmiana `.claude/settings.local.json`
+  (nietykana). Potwierdzono wzorzec siblinga `simulate_engagement` + sygnaturę
+  `LocalClient.simulate_roster_ids` + `SimulationSummary` (wins_p0/p1/draws/total_rounds).
+- 2026-06-27: `scripts/score_list.py` (NEW) — `score_list(session, roster_id, ...)`
+  ocenia rozpiskę (zawsze owner 0) przez N gier vs każdy przeciwnik w polu
+  (`_select_opponents`: wszystkie poza self, opcjonalnie `--vs`/`--army`); każdy
+  pairing deleguje do `simulate_engagement` (SSOT). Agregacja `aggregate_score` →
+  `ScoreSummary` (wins/losses/draws/win_rate/avg_rounds). Raport: per-przeciwnik
+  win-rate + Δpkt, „siła w polu" + bar, sygnał koszt↔wynik (vs tańsi/drożsi).
+  Czyste funkcje agregacji/renderu testowalne bez DB.
+- 2026-06-27: `tests/test_score_list.py` (NEW 16): agregacja z perspektywy owner 0,
+  render pola + sygnał kosztu + puste pole, `_select_opponents` (self/`--vs`/`--army`),
+  ścieżka DB seeded SQLite (pole, parity z `simulate_engagement`, determinizm,
+  unknown target), CLI (`--list`, scoring, brak roster, unknown roster, bad `--vs`,
+  unknown bot). Targeted **16 passed**; z siblingiem **24 passed**; pełny **1979 passed**.
+- 2026-06-27: Smoke CLI realna DB `score_list.py 10 --vs "11,14" -n 2 --seed 1` → exit 0.
+  Drobna korekta odmiany („gier"→`_games_label`) po smoke. Doc sync:
+  `docs/roadmap.md` (C3 `score_list` `[x]`), `scripts/README.md` (sekcja C3).
+  `git diff --check` bez błędów (tylko CRLF dla docs). DoD: `/simplify` bez zmian
+  (reuse SSOT, minimalny patch); `/review`/`/security-review` pominięte warunkowo
+  (skrypt-liść read-only DB, brak hot-path/SSOT-mutacji/auth/write/dynamic SQL).
+
 ## DONE — 2026-06-27 — C1/B4 agent token runtime helper (commit na `Faza_A`)
 
 > **Status:** slice domknięty i zacommitowany. Sesja autonomiczna 2026-06-27 domknęła
