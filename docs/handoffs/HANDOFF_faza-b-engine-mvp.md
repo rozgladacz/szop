@@ -3,13 +3,192 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-06-27 (C1/B4 agent token runtime helper)
+> **Ostatnia aktualizacja:** 2026-06-28 (weryfikacja C1 agent token endpoints)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-06-28 (sesja autonomiczna, commit) - C1 agent token endpoints zacommitowane
+
+**Stan:** poprzednie sesje ukonczyly, zweryfikowaly i zrecenzowaly slice C1 agent
+token endpoints, ale go **nie zacommitowaly** ("Commit nie wykonany w tej sesji").
+Ta sesja domyka higiene: re-weryfikacja + commit na `Faza_A` (bez push, workflow
+projektu). Re-weryfikacja przed commitem: targeted
+`tests/test_agent_tokens_router.py tests/test_agent_token_security.py` **18 passed**;
+pelny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **1989 passed**,
+2383 warnings. Diff bez zmian wzgledem zrecenzowanego stanu (REVIEW_2026-06-28.md,
+0 bugow korektnosci). Commit obejmuje 7 plikow slice'a (router + testy + rejestracja
+`app/main.py`/`app/routers/__init__.py` + docs roadmap/architecture + REVIEW + ten
+HANDOFF). `.claude/settings.local.json` swiadomie poza commitem (zastana lokalna
+allowlista). Brak `BLOCKED(user)`; `LOCKED` (Dywersant, raw combat rolls,
+`models_mode=per_copy`) nietykane. Nastepny zakres: konsumenci B4/MCP tokenow.
+
+## DONE - 2026-06-28T06:10:37+02:00 - weryfikacja i domkniecie C1 agent token endpoints
+
+**Zakres pracy:** zastany working tree zawiera kompletny slice
+`app/routers/agent_tokens.py` + testy i dokumentacje opisane juz nizej jako DONE.
+Ta sesja nie rozpoczyna drugiego zadania; domyka stan przez review diffu,
+ponowna weryfikacje testami i zapis ustalen.
+
+**Wybor zadania:** endpointy tokenow sa najblizszym krokiem B4/C1 i juz sa w toku
+w working tree. Kontynuacja minimalizuje ryzyko konfliktu z rownoleglymi agentami
+i przybliza plan B API + C MCP bez dotykania zasad gry ani UI.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak nowych kolumn, uzycie istniejacych tabel.
+- Backend payload/API: `app/routers/agent_tokens.py`, rejestracja w `app/main.py`
+  i `app/routers/__init__.py`.
+- JS render / CSS / template: N/A.
+- Testy: `tests/test_agent_tokens_router.py` oraz istniejące testy token security.
+- Dokumentacja: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Brak zmian w
+petlach renderu i brak nowych query w istniejacych endpointach UI.
+
+**Plan:**
+- [x] 1. Przejrzec zastany diff i call sites bez cofania cudzych zmian.
+- [x] 2. Uruchomic targeted testy C1 token endpoints/security.
+- [x] 3. Uruchomic pelny `pytest -q` fallback z `-X utf8`.
+- [x] 4. Wykonac manual `/simplify`, `/review` i `/security-review` dla auth API.
+- [x] 5. Zaktualizowac HANDOFF/memory finalnym statusem i realnymi pytaniami.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED`: Dywersant i raw combat rolls
+nie sa dotykane ani podnoszone.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-28T06:03:31+02:00: Bootstrap zakonczony; memory automatyzacji nie
+  istnialo. Aktywne handoffy przeczytane. `aideas-knowledge-base` ma status
+  Ready for archive i blokuje tylko `AIdeas/`. `git status --short` pokazuje
+  zastany uncommitted slice token endpoints oraz `.claude/settings.local.json`,
+  ktorej nie dotykam.
+- 2026-06-28T06:08:00+02:00: Diff review zastanego slice'a bez poprawek kodu:
+  router addytywny, owner-only dla list/revoke, raw token tylko w odpowiedzi
+  `POST`, docs zsynchronizowane. Nowe untracked pliki potwierdzone:
+  `app/routers/agent_tokens.py`, `tests/test_agent_tokens_router.py`,
+  `docs/handoffs/code-review/REVIEW_2026-06-28.md`.
+- 2026-06-28T06:07:30+02:00: Targeted po eskalacji `.venv` poza sandbox
+  (`WindowsApps`/Store Python w sandboxie zwrocil `Odmowa dostepu`):
+  `tests/test_agent_tokens_router.py tests/test_agent_token_security.py` -
+  **18 passed**, 56 warnings.
+- 2026-06-28T06:09:00+02:00: Pelny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` po eskalacji:
+  **1989 passed**, 2383 warnings.
+- 2026-06-28T06:10:00+02:00: Call-site check `rg` dla `agent_tokens`,
+  `create_agent_token`, `list_agent_tokens`, `revoke_agent_token`,
+  `require_agent_scope`, `hash_agent_token`: nowy router jest rejestrowany tylko
+  w `app.main`/`app.routers.__init__`; istniejace endpointy UI nadal korzystaja
+  z cookie-session auth, a `require_agent_scope` nie ma nowych konsumentow.
+  `git diff --check` exit 0, tylko CRLF warnings dla docs i zastanej `.claude`.
+- 2026-06-28T06:10:30+02:00: Manual `/simplify`: brak lokalnej redukcji bez
+  obnizenia czytelnosci; defensywna walidacja scope zostaje. Manual `/review`:
+  0 bugow korektnosci. Manual `/security-review`: owner-only list/revoke,
+  raw token tylko w create response, DB/audit bez sekretu, cudzy revoke = 404.
+  Residual low backlog: quota/rate-limit liczby agent-tokenow per owner.
+  Commit nie wykonany w tej sesji; `.claude/settings.local.json` pozostaje
+  zastana lokalna zmiana i nie jest dotykana.
+- 2026-06-28T06:10:37+02:00: Memory automatyzacji zapisane w
+  `C:\Users\mlis\.codex\automations\szop-codzienna-autonomiczna-sesja\memory.md`.
+  Brak realnych pytan do usera dla tego slice'a; nastepny techniczny krok to
+  commit wybranych plikow C1 albo rozpoczecie osobnego B4 API/MCP wrapper zakresu.
+
+## DONE — 2026-06-28 — C1 agent token management endpoints
+
+**Zakres pracy:** addytywny slice C1/B4: JSON endpointy zarządzania tokenami
+agentów (`POST /agent_tokens`, `GET /agent_tokens`, `DELETE /agent_tokens/{id}`).
+Wykorzystuje istniejące tabele `AgentToken`/`AgentAuditLog` oraz helper
+`hash_agent_token()`. Endpoint tworzy surowy bearer token tylko raz w odpowiedzi,
+a w DB zapisuje wyłącznie hash. Nie podłącza jeszcze endpointów bitew/B4 ani MCP
+servera.
+
+**Wybór zadania:** roadmap C1 ma już gotowy schemat i runtime dependency
+`require_agent_scope(scope_name)`, a otwarte pozostają endpointy tokenów. To
+mały, dobrze określony krok przybliżający dwufalowy kierunek B API + C MCP bez
+ruszania reguł gry, UI ani LOCKED decyzji. `aideas-knowledge-base` ma status
+Ready for archive i nie jest dotykany.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A — używa istniejących tabel `users`,
+  `agent_tokens`, `agent_audit_logs`.
+- Backend payload/API: nowy router JSON `app/routers/agent_tokens.py` i
+  rejestracja w `app/main.py`.
+- JS render / CSS / template: N/A — brak UI, tylko API.
+- Testy: nowy moduł `tests/test_agent_tokens_router.py` + targeted auth tests.
+- Dokumentacja: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Endpointy robią
+operacje administracyjne na małej tabeli tokenów: listowanie tokenów ownera,
+utworzenie usera-agent + tokena oraz cofnięcie tokena po `owner_user_id`. Brak
+nowych query w istniejących requestach UI i brak zmian w pętli silnika.
+
+**Plan:**
+- [x] 1. Potwierdzić wzorce auth/routerów, wykonać encoding gate i dodać router.
+- [x] 2. Dodać testy tworzenia/listowania/cofania tokenów, scope validation,
+  brak raw sekretów w DB oraz kontrolę uprawnień owner/admin.
+- [x] 3. Zarejestrować router i zsynchronizować roadmap/architecture.
+- [x] 4. Weryfikacja: targeted pytest, pełny `pytest -q`, call-site check.
+- [x] 5. DoD: manual `/simplify`, manual `/review` (diff >50/auth API),
+  manual `/security-review`, diff review; re-run pytest jeśli przegląd coś zmieni.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED`: Dywersant, raw combat rolls
+i post-MVP `models_mode=per_copy` nie są dotykane ani podnoszone. Decyzja
+produktowa czy dodać UI dla tokenów pozostaje poza zakresem; API wystarcza pod
+przyszły MCP/HTTP wrapper.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-28T01:03:50+02:00: Bootstrap autonomiczny zakończony: memory brak,
+  przeczytano `AGENTS.md`, `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`,
+  oba aktywne handoffy, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md` oraz aktualne sekcje `docs/architecture.md`.
+  `git status --short` pokazuje tylko zastaną `.claude/settings.local.json`
+  (nietykana). Wybrano kontynuację parenta `faza-b-engine-mvp`.
+- 2026-06-28T01:03:50+02:00: `rg` potwierdził brak istniejącego routera
+  `/agent_tokens`; `AgentToken`/`AgentAuditLog` są używane w modelach,
+  migracjach, testach i `security.require_agent_scope`. Istniejące routery UI
+  nadal korzystają z cookie-session `get_current_user()` oraz `User.is_admin`.
+- 2026-06-28T01:12: Encoding gate UTF-8 dla istniejących `.py` przeszedł po
+  eskalacji `.venv` poza sandbox (`utf8-ok`; Store Python zwrócił `Odmowa
+  dostępu`). Dodano `app/routers/agent_tokens.py` oraz rejestrację w
+  `app/main.py`/`app/routers/__init__.py`. Endpointy są addytywne i JSON-only:
+  tworzenie tokenu, listowanie własnych tokenów, cofanie własnego tokenu.
+- 2026-06-28T01:22: Dodano `tests/test_agent_tokens_router.py`: tworzenie zwraca
+  raw token tylko raz i zapisuje wyłącznie hash; listowanie filtruje po
+  `owner_user_id`; cofnięcie cudzego tokenu daje 404; cofnięcie własnego jest
+  idempotentne; walidacja scope odrzuca pusty/niepoprawny zakres i kombinację
+  `*` + scope szczegółowy. Pierwszy targeted znalazł lukę pustej listy scope po
+  mutacji payloadu; `_validate_scopes` utwardzony. Ponowiony targeted
+  `tests/test_agent_tokens_router.py tests/test_agent_token_security.py`:
+  **16 passed**, 53 warnings.
+- 2026-06-28T01:28: Zsynchronizowano `docs/roadmap.md` i
+  `docs/architecture.md`; C1 endpointy tokenów oznaczone jako DONE, konsumenci
+  B4/MCP nadal osobny zakres. Test rejestracji `app.main` dopięty do
+  `tests/test_agent_tokens_router.py`. Targeted po tej zmianie:
+  **17 passed**, 55 warnings.
+- 2026-06-28T01:34: Call-site check `rg` dla `agent_tokens` /
+  `create_agent_token` / `revoke_agent_token` / `require_agent_scope`: nowy
+  router jest importowany tylko przez `app.main` i `app.routers.__init__`;
+  istniejący `require_agent_scope` bez zmian. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1988 passed**, 2382 warnings.
+- 2026-06-28T01:44: Manual `/simplify`: dodano domenową straż
+  `_validate_scopes` dla `len(scopes) > 20`, niezależną od walidacji Pydantic,
+  plus regresję na zmutowany payload. Targeted po zmianie:
+  **18 passed**, 56 warnings. Pełny re-run pytest:
+  **1989 passed**, 2383 warnings.
+- 2026-06-28T01:49: Manual `/review`: router jest addytywny, bez zmian
+  istniejącego UI auth; `GET/DELETE` filtrują po `owner_user_id`, a `POST`
+  tworzy dedykowanego agenta bez hasła użytkowego. Manual `/security-review`:
+  raw bearer token wraca tylko w odpowiedzi `POST`, DB trzyma wyłącznie
+  `hash_agent_token(raw)`, listowanie nigdy nie zwraca `token`, revoke cudzego
+  tokenu daje 404 bez oracle, scope ma whitelist/limit, expiry 1-365 dni, audyt
+  create/revoke nie zawiera sekretu. Residual risk do przyszłych B4/MCP: przy
+  włączeniu CORS lub UI dla tokenów trzeba wrócić do CSRF/UX potwierdzeń.
+  `git diff --check` bez błędów (tylko CRLF warnings dla dotkniętych docs i
+  zastanej `.claude/settings.local.json`); `rg "[ \t]+$"` na nowych plikach bez
+  wyników. `rg` stale statusów token endpointów bez wyników poza historycznymi
+  sekcjami DONE, których nie przepisujemy.
 
 ## DONE — 2026-06-27 — C3 `score_list(roster_id)` leaf-CLI (commit na `Faza_A`)
 
