@@ -256,7 +256,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] Middleware `require_agent_scope(scope_name)` — **DONE 2026-06-27**: `app/security.py` hash bearer tokena (`sha256:`), lookup `AgentToken.token_hash`, scope JSON (`*` albo konkretny scope), odrzucenie expired/revoked/non-agent i `AgentAuditLog` z redakcją sekretów z query/path params. 8 testów. Konsumenci B4/MCP jeszcze niepodpięci.
 - [ ] `AgentProposal` model + `POST /agent_proposals`, `POST /agent_proposals/{id}/approve`
 - [ ] Frontend: approval UI "[Agent chce X] [Zezwól] [Odrzuć]"
-- [ ] ADR-0021: MCP jako klient publicznego API; ADR-0024: Consent-gated writes; ADR-0025: Rola agent + scoped tokens
+- [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy). ADR-0021 (MCP jako klient publicznego API) i ADR-0024 (Consent-gated writes) nadal otwarte (warstwa konsumenta/zapisów za zgodą).
 
 ### C2. RAG (3 tyg)
 - [ ] `mcp_server/indexer.py` — chunki ~300 słów / 50 overlap z DOCX; embed via `paraphrase-multilingual-MiniLM-L12-v2`; store w `sqlite-vec`
@@ -409,7 +409,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0022 | Vector store: sqlite-vec | — |
 | 0023 | Embeddings: sentence-transformers offline | — |
 | 0024 | Consent-gated agent writes | — |
-| 0025 | Rola agent + scoped tokens | — |
+| 0025 | Rola agent + scoped tokens (schema + helper + endpointy) | ✓ |
 | 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
 | 0032 | Headless match runner (orkiestrator pełnej gry dla botów) | ✓ |

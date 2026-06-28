@@ -11,6 +11,26 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## DONE - 2026-06-28 (sesja autonomiczna, doc-only) - ADR-0025 spisany (rola agent + scoped tokens)
+
+Drugi task tej sesji: **ADR-0025** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted)
+spisuje zaimplementowaną infrastrukturę agent-token, która w indeksie roadmapy
+miała status `—` mimo że schema + helper + endpointy są DONE. ADR dokumentuje:
+(1) rolę `agent` obok cookie-session UI (`is_admin` dalej źródłem uprawnień UI),
+(2) `AgentToken` z `token_hash` (raw token nigdy w DB, zwracany raz), (3) scope
+JSON-set `*`/konkretny + walidacja regex/dedup/wildcard-exclusivity, (4)
+`require_agent_scope` dependency (401/403, naiwny UTC, lekki `AgentPrincipal`),
+(5) audyt bez sekretów (`_redacted_mapping`), (6) owner-only endpointy
+(`POST`/`GET`/`DELETE`, 404 bez oracle, idempotentny revoke), (7) brak Alembic.
+Zaktualizowano indeks ADR w `docs/roadmap.md` (0025 `—`→`✓`), linię C1 ADR oraz
+ref w `docs/architecture.md`. **Zero zmian w kodzie produkcyjnym** → pytest gate
+N/A (doc-only); pełna suita zielona z poprzedniego taska (1989 passed). Pliki:
+`docs/adr/0025-agent-scoped-tokens.md` (NEW), `docs/roadmap.md`,
+`docs/architecture.md`, ten HANDOFF. ADR-0021/0024 nadal `—` (warstwa konsumenta
+MCP + consent-gated writes — przyszły zakres).
+
+## DONE - 2026-06-28 (sesja autonomiczna, commit) - C1 agent token endpoints zacommitowane
+
 ## DONE - 2026-06-28 (sesja autonomiczna, commit) - C1 agent token endpoints zacommitowane
 
 **Stan:** poprzednie sesje ukonczyly, zweryfikowaly i zrecenzowaly slice C1 agent
