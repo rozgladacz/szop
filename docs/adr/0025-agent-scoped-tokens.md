@@ -78,10 +78,12 @@ udanej autentykacji (transakcyjnie z zapisem audytu; przy błędzie rollback).
 `app/routers/__init__.py`), auth przez istniejące cookie-session
 `get_current_user()`:
 
-- `POST /agent_tokens` (201) — mint: tworzy `User(role=agent)` z losowym hasłem +
-  `AgentToken`; zwraca raw token raz. Transakcja: `add_all` + `flush` (id do
-  audytu) → audyt → pojedynczy `commit` (kolizja unikalnej nazwy agenta = wyjątek,
-  nic nie zacommitowane).
+- `POST /agent_tokens` (201) — mint: przed wygenerowaniem raw sekretu egzekwuje
+  limit 20 aktywnych tokenów ownera (aktywne = `revoked_at IS NULL` i
+  `expires_at > now`; przekroczenie → 409, bez utworzenia agenta/audytu), potem
+  tworzy `User(role=agent)` z losowym hasłem + `AgentToken`; zwraca raw token raz.
+  Transakcja: `add_all` + `flush` (id do audytu) → audyt → pojedynczy `commit`
+  (kolizja unikalnej nazwy agenta = wyjątek, nic nie zacommitowane).
 - `GET /agent_tokens` — lista tokenów filtrowana po `owner_user_id`, `response_model`
   bez pola `token`.
 - `DELETE /agent_tokens/{id}` — revoke własnego tokena; `WHERE id AND owner_user_id`
@@ -104,10 +106,10 @@ spójnie z ADR-0050. Zero migration churn dla istniejącej `data/szop.db`.
   agent = klient HTTP, jeden mechanizm uprawnień, jeden audit trail").
 - **MCP server (C1)** używa raw tokena jako bearer przez `szop_client` HTTP — nie
   łączy się z DB bezpośrednio.
-- **Odroczone (poza tym ADR):** UI zarządzania tokenami; quota/rate-limit liczby
-  agentów/tokenów per owner (REVIEW_2026-06-28 — niskie ryzyko, backlog C1);
-  redakcja sekretów z **body** requestu (gdy kiedyś trafi do `params_json`);
-  CSRF/UX potwierdzeń jeśli włączymy CORS lub UI; consent-gated writes (ADR-0024).
+- **Odroczone (poza tym ADR):** UI zarządzania tokenami; czasowe rate-limit
+  requestów endpointu mintowania; redakcja sekretów z **body** requestu (gdy
+  kiedyś trafi do `params_json`); CSRF/UX potwierdzeń jeśli włączymy CORS lub UI;
+  consent-gated writes (ADR-0024).
 
 ## Alternatywy odrzucone
 

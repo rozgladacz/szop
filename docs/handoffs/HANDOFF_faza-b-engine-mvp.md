@@ -11,6 +11,86 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## DONE - 2026-06-28T21:17:25+02:00 - C1 quota aktywnych agent-tokenow per owner
+
+**Zakres pracy:** drobne utwardzenie zakończonego C1 agent-token API:
+limit liczby aktywnych (niecofniętych i niewygasłych) tokenów per owner przed
+utworzeniem kolejnego tokenu. To zamyka low-backlog z poprzedniego security review
+bez ruszania B4 battle API, MCP servera ani UI.
+
+**Wybór zadania:** kontynuacja istniejącego `faza-b-engine-mvp` i ostatniego
+zakresu C1 minimalizuje ryzyko konfliktu z równoległymi agentami. Zmiana jest
+samodzielna, nie wymaga decyzji usera, przybliża bezpieczne API pod B4/C MCP i
+nie dotyka zasad gry ani pozycji `LOCKED`.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - użycie istniejących kolumn `owner_user_id`,
+  `revoked_at`, `expires_at`.
+- Backend payload/API: `app/routers/agent_tokens.py` - walidacja quota przy
+  `POST /agent_tokens`.
+- JS render / CSS / template: N/A.
+- Testy: `tests/test_agent_tokens_router.py` - regresja limitu i brak efektów
+  ubocznych po odrzuceniu.
+- Dokumentacja: ten HANDOFF; jeśli kontrakt API wymaga doprecyzowania, ADR-0025
+  lub roadmap/architecture zostaną zsynchronizowane.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Dodatkowe
+zapytanie `COUNT` dotyczy wyłącznie administracyjnego `POST /agent_tokens`; brak
+wpływu na istniejące endpointy UI, listy rozpisek lub pętle silnika.
+
+**Plan:**
+- [x] 1. Potwierdzić wzorce routera/testów i encoding gate dla dotkniętych `.py`.
+- [x] 2. Dodać helper quota w routerze przed generowaniem sekretu/agenta.
+- [x] 3. Dodać testy: limit aktywnych tokenów, cofnięte/wygasłe nie blokują.
+- [x] 4. Uruchomić targeted pytest i pełny `pytest -q` fallback z `-X utf8`.
+- [x] 5. Call-site check + manual `/simplify`, `/review`, `/security-review`,
+  diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED`: Dywersant, raw combat rolls
+i `models_mode=per_copy` pozostają nietykane.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-28T21:02:35+02:00: Bootstrap wykonany przez pamięć automatyzacji,
+  `.agents/skills/load-context/SKILL.md`, `AGENTS.md`, `HANDOFF.md`, oba aktywne
+  handoffy, `docs/handoffs/README.md`, `docs/roadmap.md`, `docs/planning.md`,
+  `docs/testing.md`, `docs/developing.md`. Working tree: tylko zastana
+  `.claude/settings.local.json`.
+- 2026-06-28T21:02:35+02:00: `rg` call-site/context potwierdził, że
+  `app/routers/agent_tokens.py` jest jedynym miejscem tworzenia tokenów, a
+  `require_agent_scope` ma tylko testowych konsumentów. Limit można wpiąć lokalnie
+  w `create_agent_token`.
+- 2026-06-28T21:05:00+02:00: Encoding gate dla
+  `app/routers/agent_tokens.py` i `tests/test_agent_tokens_router.py` przeszedł
+  (`utf8-ok`) po eskalacji `.venv` poza sandboxem; sandboxowy Python zwrócił
+  `WindowsApps`/`Odmowa dostępu`.
+- 2026-06-28T21:08:00+02:00: Dodano lokalny limit
+  `_MAX_ACTIVE_TOKENS_PER_OWNER = 20` w `app/routers/agent_tokens.py`. Limit
+  liczy tylko tokeny ownera z `revoked_at IS NULL` i `expires_at > now`, przed
+  wygenerowaniem raw sekretu oraz przed utworzeniem `User(role=agent)`. Testy
+  pokrywają przekroczenie quota bez efektów ubocznych oraz ignorowanie tokenów
+  cofniętych/wygasłych.
+- 2026-06-28T21:10:00+02:00: Targeted
+  `tests/test_agent_tokens_router.py tests/test_agent_token_security.py`:
+  **20 passed**, 183 warnings. Zsynchronizowano kontrakt w ADR-0025,
+  `docs/architecture.md` i `docs/roadmap.md`: quota aktywnych tokenów nie jest
+  już deferred; deferred zostaje tylko czasowe rate-limit mintowania.
+- 2026-06-28T21:13:00+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **1991 passed**, 2510 warnings.
+- 2026-06-28T21:17:25+02:00: Manual `/simplify` wykonał 1 redukcję: usunięto
+  osobny helper `_active_token_count` i zostawiono jedno lokalne
+  `_enforce_active_token_quota`. Po zmianie re-run targeted:
+  **20 passed**, 183 warnings; re-run pełny: **1991 passed**, 2510 warnings.
+  Call-site check: `create_agent_token` ma wywołania tylko w routerze/testach,
+  `require_agent_scope` i istniejące endpointy UI bez wpływu. Manual `/review`:
+  0 bugów korektności; quota jest przed generowaniem sekretu, `flush` i audytem.
+  Manual `/security-review`: owner-scope zachowany, cudze tokeny bez oracle,
+  odrzucone przekroczenie quota nie tworzy `User(role=agent)`, `AgentToken` ani
+  `AgentAuditLog`; raw token nadal tylko w udanym `POST`. `git diff --check`
+  bez błędów (tylko ostrzeżenia CRLF dla docs i zastanej `.claude`). Realne
+  pytania do usera: brak. Następny zakres techniczny pozostaje B4 battle API
+  lub MCP server/ADR-0021.
+
 ## DONE - 2026-06-28 (sesja autonomiczna, doc-only) - ADR-0025 spisany (rola agent + scoped tokens)
 
 Drugi task tej sesji: **ADR-0025** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted)

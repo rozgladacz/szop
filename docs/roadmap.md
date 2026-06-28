@@ -252,7 +252,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### C1. Infrastruktura (3 tyg)
 - [ ] `mcp_server/{server.py, config.py}` — MCP Python SDK, rejestracja narzędzi
-- [x] Endpointy tokenów — **DONE 2026-06-28**: `POST /agent_tokens`, `GET /agent_tokens`, `DELETE /agent_tokens/{id}`. JSON API dla zalogowanego ownera; tworzy dedykowanego `User.role="agent"` bez hasła użytkowego, zapisuje tylko `AgentToken.token_hash`, zwraca raw bearer token tylko raz, listuje/cofa wyłącznie tokeny ownera i audytuje create/revoke bez sekretów. Brak UI; konsumenci B4/MCP nadal osobny zakres.
+- [x] Endpointy tokenów — **DONE 2026-06-28**: `POST /agent_tokens`, `GET /agent_tokens`, `DELETE /agent_tokens/{id}`. JSON API dla zalogowanego ownera; tworzy dedykowanego `User.role="agent"` bez hasła użytkowego, zapisuje tylko `AgentToken.token_hash`, zwraca raw bearer token tylko raz, limituje ownera do 20 aktywnych tokenów, listuje/cofa wyłącznie tokeny ownera i audytuje create/revoke bez sekretów. Brak UI; konsumenci B4/MCP nadal osobny zakres.
 - [x] Middleware `require_agent_scope(scope_name)` — **DONE 2026-06-27**: `app/security.py` hash bearer tokena (`sha256:`), lookup `AgentToken.token_hash`, scope JSON (`*` albo konkretny scope), odrzucenie expired/revoked/non-agent i `AgentAuditLog` z redakcją sekretów z query/path params. 8 testów. Konsumenci B4/MCP jeszcze niepodpięci.
 - [ ] `AgentProposal` model + `POST /agent_proposals`, `POST /agent_proposals/{id}/approve`
 - [ ] Frontend: approval UI "[Agent chce X] [Zezwól] [Odrzuć]"

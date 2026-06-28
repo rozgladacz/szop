@@ -29,8 +29,9 @@ weryfikuje bearer token przez hash, sprawdza scope (`*` albo konkretny scope),
 odrzuca tokeny wygasłe/cofnięte oraz zapisuje `AgentAuditLog` z redakcją
 sekretów w parametrach. `app/routers/agent_tokens.py` udostępnia JSON API
 owner-only: `POST /agent_tokens` generuje raw bearer token tylko raz i zapisuje
-wyłącznie hash, `GET /agent_tokens` listuje własne tokeny bez sekretów, a
-`DELETE /agent_tokens/{id}` cofa własny token. Pełny kontrakt: [ADR-0025](adr/0025-agent-scoped-tokens.md).
+wyłącznie hash, egzekwując limit 20 aktywnych tokenów ownera; `GET /agent_tokens`
+listuje własne tokeny bez sekretów, a `DELETE /agent_tokens/{id}` cofa własny
+token. Pełny kontrakt: [ADR-0025](adr/0025-agent-scoped-tokens.md).
 Konsumenci B4/MCP pozostają osobnym zakresem.
 
 ## Dokumentacja reguł gry — read-only

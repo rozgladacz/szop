@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app import models
@@ -45,12 +45,30 @@ def _create_token(
     owner: models.User,
     *,
     scopes: list[str] | None = None,
+    expires_in_days: int = 30,
 ) -> agent_tokens.AgentTokenCreated:
     return agent_tokens.create_agent_token(
-        agent_tokens.AgentTokenCreate(scopes=scopes or ["battle:read"]),
+        agent_tokens.AgentTokenCreate(
+            scopes=scopes or ["battle:read"],
+            expires_in_days=expires_in_days,
+        ),
         db=session,
         current_user=owner,
     )
+
+
+def _count_rows(session: Session, model: type[object]) -> int:
+    count = session.execute(select(func.count()).select_from(model)).scalar_one()
+    return int(count or 0)
+
+
+def _count_agent_users(session: Session) -> int:
+    count = session.execute(
+        select(func.count(models.User.id)).where(
+            models.User.role == models.USER_ROLE_AGENT
+        )
+    ).scalar_one()
+    return int(count or 0)
 
 
 def test_create_agent_token_returns_raw_secret_once_and_persists_only_hash() -> None:
@@ -105,6 +123,46 @@ def test_list_agent_tokens_filters_owner_and_never_returns_raw_secret() -> None:
     assert [token.id for token in tokens] == [own_token.id]
     assert tokens[0].scopes == ["battle:read"]
     assert not hasattr(tokens[0], "token")
+
+
+def test_create_agent_token_rejects_active_token_quota_without_side_effects() -> None:
+    session = _build_session()
+    owner = _seed_user(session)
+    for _ in range(agent_tokens._MAX_ACTIVE_TOKENS_PER_OWNER):
+        _create_token(session, owner)
+    before_tokens = _count_rows(session, models.AgentToken)
+    before_agent_users = _count_agent_users(session)
+    before_audit_logs = _count_rows(session, models.AgentAuditLog)
+
+    with pytest.raises(HTTPException) as exc_info:
+        _create_token(session, owner)
+
+    assert exc_info.value.status_code == 409
+    assert "active agent tokens" in exc_info.value.detail
+    assert _count_rows(session, models.AgentToken) == before_tokens
+    assert _count_agent_users(session) == before_agent_users
+    assert _count_rows(session, models.AgentAuditLog) == before_audit_logs
+
+
+def test_create_agent_token_quota_ignores_revoked_and_expired_tokens() -> None:
+    session = _build_session()
+    owner = _seed_user(session)
+    created = [
+        _create_token(session, owner)
+        for _ in range(agent_tokens._MAX_ACTIVE_TOKENS_PER_OWNER)
+    ]
+    revoked = session.get(models.AgentToken, created[0].id)
+    expired = session.get(models.AgentToken, created[1].id)
+    assert revoked is not None
+    assert expired is not None
+    revoked.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+    expired.expires_at = datetime(2000, 1, 1)
+    session.commit()
+
+    response = _create_token(session, owner)
+
+    assert response.id not in {token.id for token in created}
+    assert response.revoked_at is None
 
 
 def test_revoke_agent_token_only_for_owner_and_is_idempotent() -> None:

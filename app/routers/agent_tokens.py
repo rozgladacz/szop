@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -18,6 +18,7 @@ router = APIRouter(prefix="/agent_tokens", tags=["agent_tokens"])
 
 _DEFAULT_EXPIRY_DAYS = 30
 _MAX_EXPIRY_DAYS = 365
+_MAX_ACTIVE_TOKENS_PER_OWNER = 20
 _MAX_SCOPES = 20
 _SCOPE_RE = re.compile(r"^(?:\*|[a-z][a-z0-9_.:-]{0,63})$")
 
@@ -94,6 +95,25 @@ def _scopes_from_json(scope_json: str) -> list[str]:
     return sorted(key for key, value in payload.items() if value is True)
 
 
+def _enforce_active_token_quota(db: Session, owner_user_id: int, now: datetime) -> None:
+    count = db.execute(
+        select(func.count(models.AgentToken.id)).where(
+            models.AgentToken.owner_user_id == owner_user_id,
+            models.AgentToken.revoked_at.is_(None),
+            models.AgentToken.expires_at > now,
+        )
+    ).scalar_one()
+    if int(count or 0) < _MAX_ACTIVE_TOKENS_PER_OWNER:
+        return
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=(
+            f"At most {_MAX_ACTIVE_TOKENS_PER_OWNER} active agent tokens are "
+            "allowed per user."
+        ),
+    )
+
+
 def _new_agent_username(db: Session, owner_user_id: int) -> str:
     for _ in range(16):
         suffix = secrets.token_urlsafe(6).replace("-", "_")[:8]
@@ -159,6 +179,8 @@ def create_agent_token(
     current_user: models.User = Depends(get_current_user()),
 ) -> AgentTokenCreated:
     scopes = _validate_scopes(payload.scopes)
+    now = _now()
+    _enforce_active_token_quota(db, current_user.id, now)
     raw_token = secrets.token_urlsafe(32)
     agent_user = models.User(
         username=_new_agent_username(db, current_user.id),
@@ -171,7 +193,7 @@ def create_agent_token(
         owner_user_id=current_user.id,
         token_hash=hash_agent_token(raw_token),
         scope_json=_scope_json(scopes),
-        expires_at=_now() + timedelta(days=payload.expires_in_days),
+        expires_at=now + timedelta(days=payload.expires_in_days),
     )
     db.add_all([agent_user, agent_token])
     db.flush()
