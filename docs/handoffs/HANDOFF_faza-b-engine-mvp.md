@@ -3,13 +3,91 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-06-29 (C3 find_exploit_candidates rewalidacja + commit DONE)
+> **Ostatnia aktualizacja:** 2026-06-29 (C3 lookup_rule leaf-CLI DONE — wszystkie 6 narzędzi C3 gotowe)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-06-29 - C3 `lookup_rule` leaf-CLI (resolver `pkt X` + wyszukiwanie)
+
+> **Status:** slice domknięty. Targeted `tests/test_lookup_rule.py` **29 passed**;
+> pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2036 passed**
+> (2007 + 29), 2840 warnings, zero regresji. Smoke CLI na realnym `SZOP_Rozjemca.md`:
+> `lookup_rule.py 14.d.iv` (kontratak + kontekst Szarży), `lookup_rule.py 20`
+> (Przegrupowanie + 6 podpunktów), `--search osłona` → pkt 19, `11.b.iv` (3 myślniki
+> w tekście rodzica), bad ref → exit 1. **TYM SAMYM wszystkie 6 narzędzi C3
+> „Narzędzia MCP" są DONE** (`lookup_rule`/`explain_ability`/`validate_loadout`/
+> `simulate_engagement`/`score_list`/`find_exploit_candidates`). Commit obejmuje
+> 4 pliki: `scripts/lookup_rule.py` (NEW), `tests/test_lookup_rule.py` (NEW 29),
+> `scripts/README.md`, `docs/roadmap.md`, ten HANDOFF.
+
+**Zakres pracy:** ostatni niezrobiony deliverable C3 „Narzędzia MCP"
+(`lookup_rule(query)`) jako skrypt-liść (ADR-0013). Wersja **strukturalna**:
+parser hierarchicznej numeracji `SZOP_Rozjemca.md` (punkty 0–27, `N.`→`a.`→`i.`)
+→ (1) resolver referencji `pkt X` (np. `14.d.iv`, `5.f`) zwracający dokładny
+tekst punktu + kontekst rodzica + podpunkty, (2) wyszukiwanie słów kluczowych
+(fold akcentów) zwracające ranking pasujących `pkt`. Bezpośrednio wspiera
+workflow agentów (AGENTS [REQUIRED] #8: cytuj `pkt X` ze źródła). Pełna wersja
+RAG (embeddingi nad DOCX, sqlite-vec) pozostaje gated na C2.
+
+**Wybór zadania:** zamyka ostatni leaf-CLI z pięciu rodzeństwa C3
+(`explain_ability`/`validate_loadout`/`simulate_engagement`/`score_list`/
+`find_exploit_candidates` DONE); wzorzec w pełni ustalony, zero interakcji z
+userem, bezzależnościowe, mieści się w oknie. Kontynuacja parenta minimalizuje
+ryzyko kolizji z równoległymi agentami.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A.
+- Backend payload/API: N/A — skrypt-liść CLI, bez routerów.
+- JS render / CSS / template: N/A.
+- CLI/scripts: `scripts/lookup_rule.py` (NEW), `scripts/README.md` (sekcja C3).
+- Testy: `tests/test_lookup_rule.py` (NEW — czysty parser/resolver/search +
+  tryby CLI, bez DB/sieci; fixtura tekstowa + smoke na realnym pliku reguł).
+- Dokumentacja: `docs/roadmap.md` (C3 checkbox), `scripts/README.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. CLI parsuje jeden
+plik reguł (~210 linii) w pamięci; brak nowych query w requestach UI.
+
+**Plan:**
+- [x] 1. Napisać `scripts/lookup_rule.py` (parser + resolve_ref + search + CLI).
+- [x] 2. Testy `tests/test_lookup_rule.py` (czyste funkcje + tryby CLI + smoke real).
+- [x] 3. Weryfikacja: targeted pytest, pełny `pytest -q`, smoke CLI na realnym pliku.
+- [x] 4. DoD: `/simplify`; `/review`/`/security-review` warunkowo; doc sync; diff review.
+- [x] 5. Zaktualizować HANDOFF/roadmap/README finalnym statusem.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED` (Dywersant, raw combat rolls,
+`models_mode=per_copy`) nietykane. Pełny RAG (semantyczny) = C2, świadomie odłożony.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-29: `scripts/lookup_rule.py` (NEW, stdlib only) — `parse_rules(text)`
+  parsuje hierarchię po wcięciu tabami (0=punkt, 1=litera, 2=rzymski); linie
+  głębsze (myślniki 4. poziomu, pkt 11.b.iv) i bez poprawnej etykiety doklejane
+  jako kontynuacja tekstu bieżącego punktu. `normalize_ref` (zdejmuje „pkt",
+  końcową kropkę, wewnętrzne spacje), `resolve_ref`, `search_rules` (fold NFKD +
+  casefold, wszystkie tokeny jako substring, ranking po liczbie wystąpień,
+  remis = kolejność dokumentu). Render czytelny (kontekst rodzica → punkt →
+  podpunkty) + `--json` (schema `szop.lookup_rule/v1`). CLI: `<ref>`/`--search`/
+  `--list`/`--limit`/`--json`/`--rules-file`; exit 0/1/2 spójnie z rodzeństwem.
+- 2026-06-29: Edge case'y potwierdzone empirycznie ze źródła w tej sesji:
+  separator SPACJĄ po etykiecie (pkt 20.e `SZOP_Rozjemca.md:148`), tab WEWNĄTRZ
+  tekstu (pkt 14.e `:111`), myślniki 4. poziomu (pkt 11.b.iv `:79-81`). Fixtura
+  testowa odwzorowuje wszystkie trzy.
+- 2026-06-29: Pierwszy targeted ujawnił `SyntaxError` — użyłem prostego `"` jako
+  danych w stringu `"..."` (AGENTS [CRITICAL] #4 w odwrotną stronę). Fix:
+  typograficzny `”` (U+201D) jako dane. Po fixie targeted **29 passed**.
+- 2026-06-29: `/simplify` — 1 redukcja (wspólny helper `_print_json` zamiast 3×
+  `json.dumps(..., ensure_ascii=False, indent=2)`). Re-run targeted **29 passed**.
+  `/review`/`/security-review` pominięte warunkowo: skrypt-liść stdlib-only,
+  read-only parse jednego pliku reguł, brak DB/auth/HTTP/SSOT-mutacji/hot-path,
+  brak dynamicznego eval/exec/SQL; pełne pokrycie (parser/resolver/search/CLI +
+  smoke real). Call-site check: nowe symbole tylko w skrypcie/testach; nazwa
+  `parse_rules` istnieje też w `app/services/army_rules.py`, ale to inny moduł
+  (skrypt ładowany standalone przez importlib) — brak kolizji namespace.
+- 2026-06-29: `git diff --check` bez błędów (tylko CRLF dla docs i zastanej
+  `.claude/settings.local.json`, której nie dotykam). Realne pytania do usera: brak.
 
 ## DONE - 2026-06-29T06:14+02:00 - rewalidacja i commit C3 `find_exploit_candidates`
 

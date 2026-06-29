@@ -496,6 +496,32 @@ python scripts/find_exploit_candidates.py 3 --json
 > po armii, round-robin, JSON/tekst oraz błędy CLI
 > (`tests/test_find_exploit_candidates.py`).
 
+### `lookup_rule.py` (C3)
+
+Strukturalny lookup reguł przebiegu gry z `app/static/docs/SZOP_Rozjemca.md`
+(SSOT reguł silnika). Parsuje hierarchiczną numerację (punkty 0–27, poziomy
+`N.` → `a.` → `i.`; myślnikowe podpunkty 4. poziomu doklejane do tekstu rodzica)
+i udostępnia dwa tryby: **resolver referencji** `pkt X` (zwraca dokładny tekst
+punktu + kontekst rodzica + podpunkty) oraz **wyszukiwanie słów kluczowych**
+(fold akcentów, substring — dla form odmienionych szukaj rdzenia, np. `osłon`).
+Wspiera workflow agentów (AGENTS [REQUIRED] #8 — cytuj `pkt X` ze źródła).
+Leaf-CLI dla roadmap C3; pełny RAG semantyczny nad DOCX to Strumień C2
+(odłożony). Zdolności mają osobne narzędzie (`explain_ability.py`).
+
+```powershell
+python scripts/lookup_rule.py 14.d.iv
+python scripts/lookup_rule.py "pkt 5.f"
+python scripts/lookup_rule.py 20
+python scripts/lookup_rule.py --search osłon --limit 5
+python scripts/lookup_rule.py --list
+python scripts/lookup_rule.py 14.d.iv --json
+```
+
+> Bezzależnościowy (tylko stdlib), zero DB/sieci. Testy pokrywają parser
+> (poziomy, myślniki, separator spacją, tab w tekście), normalizację referencji,
+> resolver, wyszukiwanie (fold akcentów + ranking), tryby CLI/JSON i smoke na
+> realnym pliku reguł (`tests/test_lookup_rule.py`).
+
 ### `explain_ability.py` (C3)
 
 Strukturalny lookup zdolności po slug albo nazwie PL z katalogu SSOT
