@@ -476,6 +476,26 @@ python scripts/score_list.py 10 --army "Gwardia"  # pole z jednej armii
 > (self/`--vs`/`--army`), determinizm, parity z `simulate_engagement` oraz błędy
 > CLI (`tests/test_score_list.py`).
 
+### `find_exploit_candidates.py` (C3)
+
+Turniej istniejących rozpisek jednej armii z bazy (`Army.id`): każda para rozpisek
+gra N gier przez `simulate_engagement` (`LocalClient.simulate_roster_ids`), a wynik
+agreguje ranking kandydatów do ręcznej weryfikacji wg `win_rate / points * 100`
+(`wr/100pkt`, ten sam sygnał co `exploit_hunt`, ale bez generowania transient
+rosterów). To leaf-CLI dla roadmap C3; pełny MCP-tool/HTTP wrapper czeka na C1/B4.
+Skrypt nie zapisuje wyników (poza bootstrapem schematu `init_db()` jak aplikacja).
+
+```powershell
+python scripts/find_exploit_candidates.py --list
+python scripts/find_exploit_candidates.py 3 -n 20 --bot priority --seed 3
+python scripts/find_exploit_candidates.py 3 --json
+```
+
+> **Uwaga:** wymaga armii z ≥2 istniejącymi rozpiskami w `data/szop.db`. Testy
+> używają seeded in-memory SQLite i pokrywają ranking `win_rate/points`, filtrowanie
+> po armii, round-robin, JSON/tekst oraz błędy CLI
+> (`tests/test_find_exploit_candidates.py`).
+
 ### `explain_ability.py` (C3)
 
 Strukturalny lookup zdolności po slug albo nazwie PL z katalogu SSOT

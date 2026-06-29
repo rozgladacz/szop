@@ -3,13 +3,156 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-06-28 (weryfikacja C1 agent token endpoints)
+> **Ostatnia aktualizacja:** 2026-06-29 (C3 find_exploit_candidates rewalidacja + commit DONE)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-06-29T06:14+02:00 - rewalidacja i commit C3 `find_exploit_candidates`
+
+**Zakres pracy:** domknąć zastany, niezatwierdzony slice C3
+`find_exploit_candidates(army_id)` przez ponowny diff review, testy, smoke i commit
+wyłącznie plików tego slice'a. Nie zaczynam B4/MCP ani nowego zakresu, bo working
+tree ma już kompletny leaf-CLI z poprzedniej sesji. `.claude/settings.local.json`
+pozostaje lokalną, zastaną zmianą poza zakresem.
+
+**Wybór zadania:** kontynuacja istniejącego parenta minimalizuje ryzyko konfliktu z
+równoległymi agentami i kończy konkretny krok roadmapy C3 bez interakcji z userem.
+Następne B4/MCP jest większym strumieniem, a `LOCKED` (Dywersant, raw combat rolls,
+`models_mode=per_copy`) pozostają nietykane.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - bez zmian schematu; CLI czyta istniejące `Army`/`Roster`.
+- Backend payload/API: N/A - brak routerów, tylko leaf-CLI.
+- JS render / CSS / template: N/A.
+- Testy: targeted `tests/test_find_exploit_candidates.py` + powiązane C3 + pełny pytest.
+- Dokumentacja: ten HANDOFF, `docs/roadmap.md`, `scripts/README.md`, review file.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Rewalidowany CLI robi
+offline round-robin; nie dodaje query do requestów UI ani pętli renderu.
+
+**Plan:**
+- [x] 1. Przejrzeć zastany diff i potwierdzić, że zakres dotyczy tylko C3.
+- [x] 2. Uruchomić targeted C3 i pełny pytest.
+- [x] 3. Wykonać call-site check, smoke real DB, manual `/simplify`/`/review`/`/security-review`.
+- [x] 4. Zacommitować wybrane pliki slice'a bez `.claude/settings.local.json`.
+- [x] 5. Zaktualizować HANDOFF i memory finalnym statusem.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Realne decyzje użytkownika nie są potrzebne
+dla rewalidacji/commita. Przyszły HTTP/MCP wrapper nadal czeka na C1/B4.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-29T06:04+02:00: `git status --short` pokazuje niezatwierdzony slice
+  `find_exploit_candidates` (`scripts/find_exploit_candidates.py`,
+  `tests/test_find_exploit_candidates.py`, `docs/handoffs/code-review/REVIEW_2026-06-29.md`,
+  `scripts/README.md`, `docs/roadmap.md`, ten HANDOFF) oraz zastaną
+  `.claude/settings.local.json`. Diff kodu jest zgodny z opisem C3: leaf-CLI
+  deleguje pary do `simulate_engagement`, ranking liczy `win_rate/points`, brak
+  routerów i brak zapisu wyników do DB.
+- 2026-06-29T06:06+02:00: Targeted C3 po eskalacji `.venv` poza sandboxem
+  (WindowsApps/Odmowa dostępu w sandboxie):
+  `tests/test_find_exploit_candidates.py tests/test_score_list.py tests/test_simulate_engagement.py`
+  **40 passed**, 797 warnings.
+- 2026-06-29T06:08+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` po eskalacji:
+  **2007 passed**, 2840 warnings.
+- 2026-06-29T06:13+02:00: Call-site check: nowe symbole
+  `find_exploit_candidates`, `rank_candidates`, `CandidateScore`, `PairResult`,
+  `results_to_payload`, `candidate_rosters` występują tylko w nowym skrypcie,
+  testach i dokumentacji/review. `git diff --check` bez błędów (tylko ostrzeżenia
+  CRLF dla dotkniętych docs i zastanej `.claude`). Smoke real DB:
+  `find_exploit_candidates.py --list` exit 0 (Gwardia id=1 ma 6 rozpisek) oraz
+  `find_exploit_candidates.py 1 -n 1 --bot priority --top 3` exit 0 w 13.6s.
+- 2026-06-29T06:14+02:00: Manual `/simplify`: bez zmian kodu; po wcześniejszym
+  review redundancja `if scores:` jest już usunięta. Manual `/review`: 0 bugów
+  korektności; agregacja obustronna i sortowanie pokryte testami, a seed per-para
+  jest praktycznie rozłączny względem `PLAYER_SEED_OFFSET`. Manual
+  `/security-review`: brak auth/sekretów/dynamicznego SQL, DB read-only poza
+  standardowym bootstrapem schematu; przyszły HTTP/MCP wrapper nadal wymaga
+  scope/consent w C1/B4. Commit obejmuje wyłącznie pliki slice'a C3; zastana
+  `.claude/settings.local.json` pozostaje poza zakresem i poza commitem.
+
+## DONE - 2026-06-29T01:24+02:00 - C3 `find_exploit_candidates(army)` leaf-CLI
+
+Sesja autonomiczna. Implementuję ostatni nieзrobiony deliverable C3 „Narzędzia MCP":
+`find_exploit_candidates(army_id)` jako skrypt-liść (ADR-0013). Decyzja usera
+2026-06-26 rozstrzygnięta: turniej kandydatów do ręcznej weryfikacji (nie
+automatyczna diagnoza exploitu). Round-robin nad ISTNIEJĄCYMI rozpiskami JEDNEJ
+armii z DB → ranking wg `win_rate` i `win_rate/points` (exploit_score, jak
+`exploit_hunt`). Reuse `simulate_engagement` pairing (SSOT). Read-only DB,
+`user_id=None`. Zakres: `scripts/find_exploit_candidates.py` (NEW),
+`tests/test_find_exploit_candidates.py` (NEW), `scripts/README.md`, `docs/roadmap.md`.
+Różni się od `exploit_hunt` (losowe efemeryczne rozpiski z jednostek) i `score_list`
+(jedna rozpiska vs pole). `LOCKED` (Dywersant, raw combat rolls, `models_mode=per_copy`)
+nietykane.
+
+**Aktualizacja 2026-06-29T01:02:42+02:00:** kontynuuje istniejacy zakres
+`find_exploit_candidates`. Przed kodem sprawdzam wzorce `score_list`,
+`simulate_engagement`, `exploit_hunt`, testy skryptow C3 oraz call-site'y
+funkcji, ktore beda reuzyte.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - tylko odczyt istniejacych `Army`/`Roster`.
+- Backend payload/API: N/A - skrypt-lisc, bez endpointu.
+- JS render / CSS / template: N/A.
+- Testy: nowy targeted `tests/test_find_exploit_candidates.py`, plus pelny pytest.
+- Dokumentacja: `scripts/README.md`, `docs/roadmap.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Skrypt CLI robi
+offline turniej nad istniejacymi rozpiskami jednej armii; koszty symulacji sa
+kontrolowane parametrem `--games`, a DB jest czytana raz do zebrania kandydatow.
+
+**Plan:**
+- [x] 1. Przeczytac wzorce CLI/testow i potwierdzic reuse SSOT.
+- [x] 2. Zaimplementowac `scripts/find_exploit_candidates.py` jako cienki wrapper
+  nad `simulate_engagement`/`LocalClient`, bez zapisu do DB.
+- [x] 3. Dodac regresje dla rankingu, filtrow, JSON/markdown i bledow CLI.
+- [x] 4. Zsynchronizowac `scripts/README.md` i `docs/roadmap.md`.
+- [x] 5. Weryfikacja: targeted pytest, pelny pytest, call-site check, manual
+  `/simplify`, manual `/review` jesli diff >50 linii, diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. `LOCKED`: Dywersant, raw combat rolls
+i `models_mode=per_copy` pozostaja nietykane.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-29T01:10+02:00: Przeczytano `score_list.py`,
+  `simulate_engagement.py`, `exploit_hunt.py` oraz ich testy. Najmniejszy reuse:
+  nowy skrypt robi round-robin istniejacych rozpisek jednej armii, a pojedyncze
+  pary deleguje do `simulate_engagement` (czyli do `LocalClient.simulate_roster_ids`
+  i adaptera ORM->engine). Ranking = `win_rate / points * 100`, jak
+  `exploit_hunt.RosterScore.exploit_score`, ale bez generowania transient rosterow.
+- 2026-06-29T01:18+02:00: Pierwszy targeted pytest nowego pliku odpalony poza
+  sandboxem (standardowy problem WindowsApps). Wynik: 1 failure w asercji testu
+  `rank_candidates` - dane testowe tworzyly remis `exploit_score`; poprawiam
+  scenariusz testowy, nie logike produkcyjna.
+- 2026-06-29T01:13+02:00: `scripts/find_exploit_candidates.py` i
+  `tests/test_find_exploit_candidates.py` dodane. Targeted
+  `tests/test_find_exploit_candidates.py`: 16 passed, 330 warnings.
+- 2026-06-29T01:14+02:00: Zsynchronizowano `docs/roadmap.md` (C3 checkbox DONE)
+  i `scripts/README.md` (sekcja uzycia + testy). Zaczynam weryfikacje C3 i pelny
+  pytest.
+- 2026-06-29T01:15+02:00: Powiazany targeted C3
+  `tests/test_find_exploit_candidates.py tests/test_score_list.py tests/test_simulate_engagement.py`:
+  40 passed, 797 warnings.
+- 2026-06-29T01:24+02:00: Pelny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  2007 passed, 2840 warnings. Call-site check: `find_exploit_candidates`,
+  `rank_candidates`, `CandidateScore`, `PairResult`, `results_to_payload`,
+  `candidate_rosters` uzywane tylko w nowym skrypcie/testach/docs; nowy call-site
+  `simulate_engagement` jest `scripts/find_exploit_candidates.py` i deleguje do
+  juz przetestowanej sciezki. `git diff --check` bez bledow (tylko CRLF warnings,
+  plus zastana `.claude/settings.local.json`). Smoke real DB: `--list` exit 0
+  (Gwardia ma 6 rozpisek); `Gwardia -n 1 --bot priority --top 3` exit 0 w 13.4s.
+  Proba smoke z `--bot random` na tej samej armii przekroczyla 3 min i zostala
+  ubita przez timeout; nie zostal proces w tle. Manual `/simplify`: 0 zmian,
+  agregacja zostaje cienka nad `simulate_engagement`. Manual `/review`: 0 bugow;
+  diff >50 linii pokryty 16 testami nowego modulu + pelna suita. Manual
+  `/security-review`: brak dynamicznego SQL, DB tylko read-only przez SQLAlchemy,
+  brak sekretow/auth, `user_id=None` zgodne z narzedziem balansu; przyszly HTTP/MCP
+  wrapper nadal musi dodac scope/consent w C1/B4. Realne pytania do usera: brak.
 
 ## DONE - 2026-06-28T21:17:25+02:00 - C1 quota aktywnych agent-tokenow per owner
 
@@ -1148,6 +1291,10 @@ python -c "from app.services.rulesets.loader import load_b_mvp_exclusions; print
 - **C3 `find_exploit_candidates(army_id)`:** mozna robic przez turniej; wynik to
   kandydaci do recznej weryfikacji, nie automatyczny wyrok o exploicie. Priorytet
   nizszy niz postep w wiernosci silnika.
+  - DONE 2026-06-29 (`scripts/find_exploit_candidates.py` + 16 testow). Code-review
+    2026-06-29 (`docs/handoffs/code-review/REVIEW_2026-06-29.md`): 0 bugow, 1 nit
+    (redundantny guard `if scores:`) naprawiony inline. Schemat seedow per-para
+    zweryfikowany jako rozlaczny wzgl. `PLAYER_SEED_OFFSET`.
 - **C3 `validate_loadout(payload)`:** zaakceptowany kierunek diff-validatora:
   read-only leaf CLI pokazujacy raw->normalized, odrzucone/sklampowane selekcje
   i koszt, z reuse istniejacego quote/normalize SSOT.
