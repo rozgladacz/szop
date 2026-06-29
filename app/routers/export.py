@@ -75,6 +75,7 @@ def _army_spell_entries(
             continue
         entry = {
             "cost": int(payload.get("cost") or 0),
+            "difficulty": int(payload.get("difficulty") or 4),
             "label": label,
             "description": (payload.get("description") or "").strip(),
         }

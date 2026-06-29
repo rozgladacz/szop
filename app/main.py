@@ -16,7 +16,7 @@ from . import models
 from .config import DEBUG, SECRET_KEY, SESSION_HTTPS_ONLY, TRUSTED_HOSTS
 from .db import get_db, init_db
 from .paths import STATIC_DIR, TEMPLATES_DIR
-from .routers import admin, armories, armies, auth, export, export_xlsx, rosters, users
+from .routers import admin, armories, armies, auth, collections, export, export_xlsx, rosters, users
 from .security import get_current_user
 from .services import costs
 
@@ -100,6 +100,7 @@ app.include_router(auth.router)
 app.include_router(armories.router)
 app.include_router(armies.router)
 app.include_router(rosters.router)
+app.include_router(collections.router)
 app.include_router(export.router)
 app.include_router(export_xlsx.router)
 app.include_router(users.router)

@@ -122,8 +122,9 @@ def test_spell_weapon_cost_preview_matches_internal_formula() -> None:
         payload = _json_payload(response)
 
         # Verify against the internal helper directly (it applies lock-on internally)
-        expected_cost = armies_router._spell_weapon_cost(None, form_values)
+        expected_token, expected_point = armies_router._spell_weapon_cost(None, form_values)
 
-        assert payload["spell_cost"] == expected_cost
+        assert payload["spell_cost"] == expected_token
+        assert payload["point_cost"] == expected_point
     finally:
         session.close()

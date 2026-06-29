@@ -1,0 +1,420 @@
+{% extends "base.html" %}
+{% block title %}Kolekcja — {{ unit.name }} - SZOP{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+  <div>
+    <a class="btn btn-outline-secondary btn-sm me-2" href="/collections?army_id={{ army_id }}">← Wróć</a>
+    <h2 class="d-inline mb-0">Kolekcja: {{ unit.name }}</h2>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- Lista posiadanych modeli -->
+  <div class="col-12 col-xl-7">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Posiadane modele</h5>
+        <div id="collection-cards-list">
+          {% if cards %}
+            {% for card in cards %}
+            <div class="card mb-2 collection-card" id="collection-card-{{ card.id }}"
+                 data-card-id="{{ card.id }}"
+                 data-card="{{ card | tojson | forceescape }}">
+              <div class="card-body py-2 px-3">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <span class="badge bg-secondary me-2">{{ card.count }} szt.</span>
+                    {% if card.label %}<strong>{{ card.label }}</strong>{% else %}<span class="text-muted fst-italic">bez nazwy</span>{% endif %}
+                    {% if card.summary %}<div class="text-muted small mt-1">{{ card.summary }}</div>{% endif %}
+                    {% if card.slots %}
+                    <div class="mt-1">
+                      {% for slot in card.slots %}
+                      <span class="badge bg-info text-dark me-1">{{ slot.name }}: {{ slot.selected_weapon_name }}</span>
+                      {% endfor %}
+                    </div>
+                    {% endif %}
+                  </div>
+                  <div class="d-flex gap-1 ms-2 flex-shrink-0">
+                    <button class="btn btn-outline-secondary btn-sm" type="button"
+                            data-edit-card="{{ card.id }}" title="Edytuj">✏️</button>
+                    <form method="post" action="/collections/models/{{ card.id }}/delete"
+                          class="d-inline delete-form" data-card-id="{{ card.id }}">
+                      <button class="btn btn-outline-danger btn-sm" type="submit" title="Usuń">✕</button>
+                    </form>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          {% else %}
+          <p class="text-muted" id="empty-collection-msg">Brak modeli w kolekcji. Dodaj pierwszy poniżej.</p>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Formularz dodawania/edycji -->
+  <div class="col-12 col-xl-5">
+    <div class="card" id="collection-form-card">
+      <div class="card-body">
+        <h5 class="card-title" id="collection-form-title">Dodaj modele</h5>
+        <form id="collection-add-form" method="post"
+              action="/collections/units/{{ unit.id }}/models/add"
+              data-add-url="/collections/units/{{ unit.id }}/models/add">
+
+          <div class="mb-3">
+            <label class="form-label" for="model-label">Nazwa modelu <span class="text-muted">(opcjonalna)</span></label>
+            <input class="form-control form-control-sm" id="model-label" name="label"
+                   placeholder="np. Zwiadowca z Meltagun" />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label" for="model-count">Liczba identycznych modeli</label>
+            <input class="form-control form-control-sm" id="model-count" name="count"
+                   type="number" min="1" value="1" />
+          </div>
+
+          {% if weapon_opts %}
+          <div class="mb-3">
+            <label class="form-label">Wyposażenie <span class="text-muted small">(ile egz. per model)</span></label>
+            <div class="row g-2">
+              {% for w in weapon_opts %}
+              <div class="col-12">
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text" style="min-width:10rem">{{ w.name }}</span>
+                  <input type="number" class="form-control weapon-input"
+                         name="weapon_{{ w.id }}"
+                         id="weapon_{{ w.id }}"
+                         data-weapon-id="{{ w.id }}"
+                         data-default="{{ w.default_count if w.is_default else 0 }}"
+                         min="0" max="10"
+                         value="{{ w.default_count if w.is_default else 0 }}" />
+                </div>
+              </div>
+              {% endfor %}
+            </div>
+          </div>
+          {% endif %}
+
+          {% if ability_opts %}
+          <div class="mb-3">
+            <label class="form-label">Zdolności</label>
+            {% for a in ability_opts %}
+            <div class="form-check">
+              <input class="form-check-input ability-input" type="checkbox"
+                     name="ability_{{ a.key }}" id="ability_chk_{{ loop.index0 }}"
+                     data-ability-key="{{ a.key }}" value="1" />
+              <label class="form-check-label" for="ability_chk_{{ loop.index0 }}">
+                {{ a.name }}
+                <span class="badge bg-light text-secondary border">{{ a.type }}</span>
+              </label>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <div class="mb-3">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="magnetyzacja-toggle"
+                     name="magnetyzacja" value="1" />
+              <label class="form-check-label" for="magnetyzacja-toggle">
+                Magnetyzacja (wymienne elementy)
+              </label>
+            </div>
+          </div>
+
+          <div id="magnetyzacja-section" class="d-none mb-3">
+            <label class="form-label">Sloty magnetyzacji</label>
+            <div id="slots-container"></div>
+            <button type="button" class="btn btn-outline-secondary btn-sm mt-2" id="add-slot-btn">
+              + Dodaj slot
+            </button>
+            <div class="form-text">
+              Każdy slot = jeden wymienny element (np. broń pokładowa). Zaznacz możliwe opcje i wskaż aktualnie zamontowaną.
+            </div>
+          </div>
+
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary btn-sm" type="submit" id="form-submit-btn">Dodaj</button>
+            <button class="btn btn-outline-secondary btn-sm d-none" type="button" id="form-cancel-btn">Anuluj</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  const weaponOpts = {{ weapon_opts | tojson }};
+  const addForm   = document.getElementById('collection-add-form');
+  const cardsList = document.getElementById('collection-cards-list');
+  const formTitle = document.getElementById('collection-form-title');
+  const submitBtn = document.getElementById('form-submit-btn');
+  const cancelBtn = document.getElementById('form-cancel-btn');
+  const magToggle = document.getElementById('magnetyzacja-toggle');
+  const magSection = document.getElementById('magnetyzacja-section');
+  const slotsContainer = document.getElementById('slots-container');
+
+  let slotIndex = 0;
+  let editMode  = false;
+  let editId    = null;
+
+  // ── Magnetyzacja toggle ─────────────────────────────────────────────────────
+  magToggle.addEventListener('change', () => {
+    magSection.classList.toggle('d-none', !magToggle.checked);
+  });
+
+  // ── Slot builder ────────────────────────────────────────────────────────────
+  function buildSlotEl(idx, slotData) {
+    const optionsIds   = slotData ? (slotData.option_weapon_ids || []) : [];
+    const selectedId   = slotData ? (slotData.selected_weapon_id || '') : '';
+    const slotName     = slotData ? (slotData.name || '') : '';
+
+    const cbs = weaponOpts.map(w => {
+      const chk = optionsIds.includes(w.id) ? 'checked' : '';
+      return `<div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="slot_options_${idx}" value="${w.id}" id="so_${idx}_${w.id}" ${chk}/>
+        <label class="form-check-label" for="so_${idx}_${w.id}">${escHtml(w.name)}</label>
+      </div>`;
+    }).join('');
+
+    const selOpts = weaponOpts.map(w => {
+      const s = String(selectedId) === String(w.id) ? 'selected' : '';
+      return `<option value="${w.id}" ${s}>${escHtml(w.name)}</option>`;
+    }).join('');
+
+    const el = document.createElement('div');
+    el.className = 'card mb-2 slot-entry';
+    el.dataset.slotIdx = idx;
+    el.innerHTML = `
+      <div class="card-body py-2 px-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <span class="small fw-bold slot-label">Slot ${idx + 1}</span>
+          <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1 remove-slot-btn">✕</button>
+        </div>
+        <input type="text" class="form-control form-control-sm mb-2" name="slot_name_${idx}"
+               placeholder="Nazwa slotu (np. Broń pokładowa)" value="${escAttr(slotName)}" required />
+        <div class="small text-muted mb-1">Możliwe opcje:</div>
+        ${cbs || '<span class="text-muted small">Brak broni dla tego oddziału</span>'}
+        <div class="mt-2">
+          <label class="form-label small mb-1">Aktualnie zamontowana:</label>
+          <select class="form-select form-select-sm" name="slot_selected_${idx}">
+            <option value=""${!selectedId ? ' selected' : ''}>— nic —</option>
+            ${selOpts}
+          </select>
+        </div>
+      </div>`;
+    el.querySelector('.remove-slot-btn').addEventListener('click', () => {
+      el.remove();
+      renumberSlots();
+    });
+    return el;
+  }
+
+  function renumberSlots() {
+    slotsContainer.querySelectorAll('.slot-entry').forEach((el, i) => {
+      el.dataset.slotIdx = i;
+      el.querySelector('.slot-label').textContent = `Slot ${i + 1}`;
+      el.querySelectorAll('[name]').forEach(inp => {
+        inp.name = inp.name.replace(/_\d+$/, `_${i}`);
+      });
+      el.querySelectorAll('[id]').forEach(inp => {
+        const oldId = inp.id;
+        inp.id = oldId.replace(/^so_\d+_/, `so_${i}_`);
+        const lbl = el.querySelector(`[for="${oldId}"]`);
+        if (lbl) lbl.setAttribute('for', inp.id);
+      });
+    });
+    slotIndex = slotsContainer.querySelectorAll('.slot-entry').length;
+  }
+
+  document.getElementById('add-slot-btn').addEventListener('click', () => {
+    slotsContainer.appendChild(buildSlotEl(slotIndex, null));
+    slotIndex++;
+  });
+
+  // ── AJAX submit (add or update) ─────────────────────────────────────────────
+  addForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submitBtn.disabled = true;
+    const formData = new FormData(addForm);
+    try {
+      const resp = await fetch(addForm.action, {
+        method: 'POST', body: formData,
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      if (!resp.ok) { location.reload(); return; }
+      const data = await resp.json();
+      if (!data.ok) { location.reload(); return; }
+
+      if (editMode && editId) {
+        const existing = document.getElementById(`collection-card-${editId}`);
+        if (existing) {
+          const newEl = buildCardEl(data.card);
+          existing.replaceWith(newEl);
+        }
+        exitEditMode();
+      } else {
+        document.getElementById('empty-collection-msg')?.remove();
+        cardsList.appendChild(buildCardEl(data.card));
+        resetForm();
+      }
+    } catch (err) {
+      console.error(err);
+      location.reload();
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  cancelBtn.addEventListener('click', exitEditMode);
+
+  function exitEditMode() {
+    editMode = false;
+    editId   = null;
+    addForm.action = addForm.dataset.addUrl;
+    formTitle.textContent = 'Dodaj modele';
+    submitBtn.textContent = 'Dodaj';
+    cancelBtn.classList.add('d-none');
+    resetForm();
+  }
+
+  function resetForm() {
+    document.getElementById('model-label').value = '';
+    document.getElementById('model-count').value = '1';
+    document.querySelectorAll('.weapon-input').forEach(inp => {
+      inp.value = inp.dataset.default || '0';
+    });
+    document.querySelectorAll('.ability-input').forEach(inp => {
+      inp.checked = false;
+    });
+    magToggle.checked = false;
+    magSection.classList.add('d-none');
+    slotsContainer.innerHTML = '';
+    slotIndex = 0;
+  }
+
+  // ── Delete ──────────────────────────────────────────────────────────────────
+  cardsList.addEventListener('submit', async (e) => {
+    if (!e.target.classList.contains('delete-form')) return;
+    e.preventDefault();
+    if (!confirm('Usunąć ten wpis z kolekcji?')) return;
+    const form   = e.target;
+    const cardId = form.dataset.cardId;
+    try {
+      const resp = await fetch(form.action, {
+        method: 'POST',
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      if (!resp.ok) { location.reload(); return; }
+      const data = await resp.json();
+      if (!data.ok) { location.reload(); return; }
+      document.getElementById(`collection-card-${cardId}`)?.remove();
+      if (!cardsList.querySelector('.collection-card')) {
+        cardsList.innerHTML = '<p class="text-muted" id="empty-collection-msg">Brak modeli w kolekcji. Dodaj pierwszy poniżej.</p>';
+      }
+    } catch { location.reload(); }
+  });
+
+  // ── Edit ────────────────────────────────────────────────────────────────────
+  cardsList.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-edit-card]');
+    if (!btn) return;
+    const cardId = btn.dataset.editCard;
+    const cardEl = document.getElementById(`collection-card-${cardId}`);
+    if (!cardEl) return;
+
+    let card;
+    try { card = JSON.parse(cardEl.dataset.card); } catch { return; }
+
+    editMode = true;
+    editId   = cardId;
+    addForm.action = `/collections/models/${cardId}/update`;
+    formTitle.textContent = 'Edytuj model';
+    submitBtn.textContent = 'Zapisz';
+    cancelBtn.classList.remove('d-none');
+
+    // pre-fill fields
+    document.getElementById('model-label').value = card.label || '';
+    document.getElementById('model-count').value = card.count || 1;
+
+    const weapons = (card.loadout && card.loadout.weapons) || {};
+    document.querySelectorAll('.weapon-input').forEach(inp => {
+      const wid = inp.dataset.weaponId;
+      inp.value = weapons[wid] !== undefined ? weapons[wid] : (inp.dataset.default || '0');
+    });
+
+    const abilities = (card.loadout && card.loadout.abilities) || {};
+    document.querySelectorAll('.ability-input').forEach(inp => {
+      const key = inp.dataset.abilityKey;
+      inp.checked = !!abilities[key];
+    });
+
+    // slots
+    slotsContainer.innerHTML = '';
+    slotIndex = 0;
+    if (card.slots && card.slots.length) {
+      magToggle.checked = true;
+      magSection.classList.remove('d-none');
+      card.slots.forEach(slot => {
+        slotsContainer.appendChild(buildSlotEl(slotIndex, slot));
+        slotIndex++;
+      });
+    } else {
+      magToggle.checked = false;
+      magSection.classList.add('d-none');
+    }
+
+    document.getElementById('collection-form-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
+  // ── Card element builder ────────────────────────────────────────────────────
+  function buildCardEl(card) {
+    const el = document.createElement('div');
+    el.className  = 'card mb-2 collection-card';
+    el.id         = `collection-card-${card.id}`;
+    el.dataset.cardId = card.id;
+    el.dataset.card   = JSON.stringify(card);
+
+    const labelHtml = card.label
+      ? `<strong>${escHtml(card.label)}</strong>`
+      : `<span class="text-muted fst-italic">bez nazwy</span>`;
+    const summaryHtml = card.summary
+      ? `<div class="text-muted small mt-1">${escHtml(card.summary)}</div>` : '';
+    const slotsHtml = (card.slots && card.slots.length)
+      ? `<div class="mt-1">${card.slots.map(s =>
+          `<span class="badge bg-info text-dark me-1">${escHtml(s.name)}: ${escHtml(s.selected_weapon_name)}</span>`
+        ).join('')}</div>` : '';
+
+    el.innerHTML = `
+      <div class="card-body py-2 px-3">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <span class="badge bg-secondary me-2">${card.count} szt.</span>
+            ${labelHtml}${summaryHtml}${slotsHtml}
+          </div>
+          <div class="d-flex gap-1 ms-2 flex-shrink-0">
+            <button class="btn btn-outline-secondary btn-sm" type="button"
+                    data-edit-card="${card.id}" title="Edytuj">✏️</button>
+            <form method="post" action="/collections/models/${card.id}/delete"
+                  class="d-inline delete-form" data-card-id="${card.id}">
+              <button class="btn btn-outline-danger btn-sm" type="submit" title="Usuń">✕</button>
+            </form>
+          </div>
+        </div>
+      </div>`;
+    return el;
+  }
+
+  function escHtml(s) {
+    return String(s).replace(/[&<>"']/g, c =>
+      ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+  }
+  function escAttr(s) { return escHtml(s); }
+}());
+</script>
+{% endblock %}

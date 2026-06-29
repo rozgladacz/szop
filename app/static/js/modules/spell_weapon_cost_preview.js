@@ -1,8 +1,9 @@
 (function initSZOPSpellWeaponCostPreviewModule(globalScope) {
 // ============================================================
 // SECTION: SPELL WEAPON COST PREVIEW
-// initSpellWeaponCostPreview — podgląd kosztu broni zaklęcia,
-// wywołuje POST /armies/{id}/spells/weapon-cost-preview
+// initSpellWeaponCostPreview — podgląd kosztu broni zaklęcia.
+// Wywołuje POST /armies/{id}/spells/weapon-cost-preview, renderuje
+// radio buttony trudności (jakości ataku) z kosztem żetonowym każdej opcji.
 // ============================================================
 function initSpellWeaponCostPreview() {
   document.querySelectorAll('form[data-spell-weapon-form]').forEach((form) => {
@@ -16,8 +17,14 @@ function initSpellWeaponCostPreview() {
       return;
     }
 
+    const frameEl = form.querySelector('[data-spell-quality-frame]');
+    const optionsEl = form.querySelector('[data-spell-quality-options]');
+    const pointEl = form.querySelector('[data-spell-weapon-point-cost]');
+    const defaultQuality = String((frameEl && frameEl.dataset.defaultQuality) || '4');
+
     let spellPreviewTimer = null;
     let spellPreviewController = null;
+    let lastData = {};
 
     const collectTraits = () => {
       const hidden = form.querySelector('#weapon-abilities');
@@ -46,6 +53,11 @@ function initSpellWeaponCostPreview() {
       }
     };
 
+    const selectedQuality = () => {
+      const checked = form.querySelector('input[name="quality"]:checked');
+      return checked ? checked.value : defaultQuality;
+    };
+
     const collectFormValues = () => {
       const rangeInput = form.querySelector('input[name="range"]');
       const attacksInput = form.querySelector('input[name="attacks"]');
@@ -54,8 +66,61 @@ function initSpellWeaponCostPreview() {
         range: rangeInput ? rangeInput.value : '',
         attacks: attacksInput ? attacksInput.value : '',
         ap: apInput ? apInput.value : '',
+        quality: selectedQuality(),
         abilities: collectTraits(),
       };
+    };
+
+    const updateDisplaysFor = (quality) => {
+      const tokens = (lastData && lastData.tokens) || {};
+      const points = (lastData && lastData.points) || {};
+      costValueEl.textContent = tokens[quality] != null ? String(tokens[quality]) : '—';
+      if (pointEl) {
+        pointEl.textContent = points[quality] != null ? String(points[quality]) : '—';
+      }
+    };
+
+    const renderQualityOptions = (data, keepQuality) => {
+      lastData = data || {};
+      if (!optionsEl) {
+        const cost = data && data.spell_cost;
+        if (cost != null) {
+          costValueEl.textContent = String(cost);
+        }
+        const point = data && data.point_cost;
+        if (pointEl && point != null) {
+          pointEl.textContent = String(point);
+        }
+        return;
+      }
+      const tokens = (data && data.tokens) || {};
+      const diffs = Object.keys(tokens).sort((a, b) => Number(a) - Number(b));
+      optionsEl.innerHTML = '';
+      if (diffs.length === 0) {
+        return;
+      }
+      const want = String(keepQuality || defaultQuality);
+      const chosen = diffs.includes(want) ? want : diffs[0];
+      diffs.forEach((d) => {
+        const id = `spell-quality-${d}`;
+        const wrap = document.createElement('div');
+        wrap.className = 'form-check';
+        const radio = document.createElement('input');
+        radio.className = 'form-check-input';
+        radio.type = 'radio';
+        radio.name = 'quality';
+        radio.value = d;
+        radio.id = id;
+        radio.checked = d === chosen;
+        const label = document.createElement('label');
+        label.className = 'form-check-label text-nowrap';
+        label.setAttribute('for', id);
+        label.textContent = `${d}+ — ${tokens[d]} żet.`;
+        wrap.appendChild(radio);
+        wrap.appendChild(label);
+        optionsEl.appendChild(wrap);
+      });
+      updateDisplaysFor(chosen);
     };
 
     const updatePreview = () => {
@@ -66,6 +131,7 @@ function initSpellWeaponCostPreview() {
         spellPreviewController.abort();
         spellPreviewController = null;
       }
+      const keep = selectedQuality();
       spellPreviewTimer = window.setTimeout(() => {
         spellPreviewTimer = null;
         const formValues = collectFormValues();
@@ -78,15 +144,12 @@ function initSpellWeaponCostPreview() {
           credentials: 'same-origin',
           signal,
         })
-          .then((res) => res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`)))
+          .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
           .then((data) => {
             if (spellPreviewController && spellPreviewController.signal === signal) {
               spellPreviewController = null;
             }
-            const cost = data?.spell_cost;
-            if (cost != null) {
-              costValueEl.textContent = String(cost);
-            }
+            renderQualityOptions(data, keep);
           })
           .catch((err) => {
             if (err && err.name === 'AbortError') {
@@ -103,6 +166,11 @@ function initSpellWeaponCostPreview() {
       form.addEventListener(eventName, (event) => {
         const target = event.target;
         if (!(target instanceof Element)) {
+          return;
+        }
+        if (target.matches('input[name="quality"]')) {
+          // Switching difficulty only re-reads the cached per-difficulty map.
+          updateDisplaysFor(target.value);
           return;
         }
         if (

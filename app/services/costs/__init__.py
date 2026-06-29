@@ -130,6 +130,17 @@ from ._engine import (
     weapon_cost_components,
 )
 
+# Spell (Mag) token-cost helpers -------------------------------------------
+from ._engine import (
+    SPELL_DIFFICULTY_DEFAULT,
+    SPELL_DIFFICULTY_MAX,
+    SPELL_DIFFICULTY_MIN,
+    cast_chance,
+    clamp_spell_difficulty,
+    spell_ability_token_cost,
+    spell_weapon_token_cost,
+)
+
 # Unit-level aggregation ---------------------------------------------------
 from ._engine import (
     ability_link_loadout_key,
@@ -214,6 +225,14 @@ __all__ = [
     "base_model_cost",
     "weapon_cost",
     "weapon_cost_components",
+    # spell (Mag) token cost
+    "SPELL_DIFFICULTY_DEFAULT",
+    "SPELL_DIFFICULTY_MAX",
+    "SPELL_DIFFICULTY_MIN",
+    "cast_chance",
+    "clamp_spell_difficulty",
+    "spell_ability_token_cost",
+    "spell_weapon_token_cost",
     # unit aggregation
     "normalize_roster_unit_loadout",
     "unit_default_weapons",

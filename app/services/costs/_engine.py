@@ -71,7 +71,7 @@ BRUTALNY_AP_COST = {-1: 0.0, 0: 0.01, 1: 0.02, 2: 0.1, 3: 0.2, 4: 0.3, 5: 0.4}
 
 TRANSPORT_MULTIPLIERS = [
     ({"samolot"}, 4.0),
-    ({"latajacy"}, 1.5),
+    ({"skok"}, 1.5),
     ({"szybki", "zwinny"}, 1.25),
 ]
 
@@ -227,6 +227,37 @@ from .abilities import (  # noqa: E402, F401
     base_model_cost,
     passive_cost,
 )
+
+# ============================================================
+# SECTION: SPELL (Mag) HELPERS
+# Koszt zetonowy mocy z listy zaklec armii zalezy od trudnosci rzucenia.
+# szansa(D) = (7 - D) / 6 dla D w [2, 6]; zdolnosc: ceil(pkt * szansa / 10);
+# atak (bron): ceil(koszt_broni_o_jakosci_D / 10).  (SZOP s.5)
+# ============================================================
+SPELL_DIFFICULTY_MIN = 2
+SPELL_DIFFICULTY_MAX = 6
+SPELL_DIFFICULTY_DEFAULT = 4
+
+
+def clamp_spell_difficulty(difficulty: int | None) -> int:
+    try:
+        value = int(difficulty)
+    except (TypeError, ValueError):
+        return SPELL_DIFFICULTY_DEFAULT
+    return max(SPELL_DIFFICULTY_MIN, min(SPELL_DIFFICULTY_MAX, value))
+
+
+def cast_chance(difficulty: int) -> float:
+    return (7 - clamp_spell_difficulty(difficulty)) / 6.0
+
+
+def spell_ability_token_cost(point_cost: float, difficulty: int) -> int:
+    return int(math.ceil(max(float(point_cost), 0.0) * cast_chance(difficulty) / 5.0))
+
+
+def spell_weapon_token_cost(weapon_point_cost: float) -> int:
+    return int(math.ceil(max(float(weapon_point_cost), 0.0) / 5.0))
+
 
 # ============================================================
 # SECTION: WEAPON & BASE MODEL COST  (extracted to weapons.py)

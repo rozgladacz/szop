@@ -671,15 +671,31 @@ def _weapon_spell_base_details(weapon: models.Weapon) -> tuple[str, str]:
     return base_label.strip(), description.strip()
 
 
-def _weapon_spell_details(weapon: models.Weapon) -> tuple[str, str, int]:
+def _weapon_spell_details(
+    weapon: models.Weapon, difficulty: int = costs.SPELL_DIFFICULTY_DEFAULT
+) -> tuple[str, str, int]:
     base_label, description = _weapon_spell_base_details(weapon)
-    cost_value = costs.weapon_cost(weapon, unit_quality=4)
-    cost = int(math.ceil(max(cost_value, 0.0) / 7.0))
+    # use_cached=False: the spell cost must scale with the chosen difficulty,
+    # never return the weapon's armory cache (only valid for quality 4).
+    cost_value = costs.weapon_cost(
+        weapon,
+        unit_quality=costs.clamp_spell_difficulty(difficulty),
+        use_cached=False,
+    )
+    cost = costs.spell_weapon_token_cost(cost_value)
     return base_label, description, cost
 
 
+def _ability_spell_point_cost(ability: models.Ability, value: str | None) -> float:
+    if ability.cost_hint is not None and not costs.ability_uses_order_like_cost(ability):
+        return float(ability.cost_hint)
+    return costs.ability_cost_from_name(ability.name or "", value)
+
+
 def _ability_spell_details(
-    ability: models.Ability, value: str | None
+    ability: models.Ability,
+    value: str | None,
+    difficulty: int = costs.SPELL_DIFFICULTY_DEFAULT,
 ) -> tuple[str, str, int]:
     slug = ability_registry.ability_slug(ability)
     definition = ability_catalog.find_definition(slug) if slug else None
@@ -693,11 +709,8 @@ def _ability_spell_details(
         value,
         ability.description if ability else None,
     )
-    if ability.cost_hint is not None and not costs.ability_uses_order_like_cost(ability):
-        base_cost = float(ability.cost_hint)
-    else:
-        base_cost = costs.ability_cost_from_name(ability.name or "", value)
-    cost = int(math.ceil(max(base_cost, 0.0) / 15.0))
+    base_cost = _ability_spell_point_cost(ability, value)
+    cost = costs.spell_ability_token_cost(base_cost, difficulty)
     return base_label.strip(), description, cost
 
 
@@ -709,13 +722,15 @@ def _spell_page_context(
     *,
     error: str | None = None,
     info: str | None = None,
+    editing_spell: models.ArmySpell | None = None,
 ) -> dict:
     spells = list(getattr(army, "spells", []) or [])
     spells.sort(key=lambda item: ((getattr(item, "position", 0) or 0), getattr(item, "id", 0) or 0))
     for spell in spells:
         if getattr(spell, "kind", "") != "weapon" or not getattr(spell, "weapon", None):
             continue
-        base_label, description, cost = _weapon_spell_details(spell.weapon)
+        difficulty = costs.clamp_spell_difficulty(spell.cast_difficulty)
+        base_label, description, cost = _weapon_spell_details(spell.weapon, difficulty)
         spell.base_label = base_label
         spell.description = description
         spell.cost = cost
@@ -735,6 +750,9 @@ def _spell_page_context(
         "remaining_slots": remaining_slots,
         "name_max_length": models.ARMY_SPELL_NAME_MAX_LENGTH,
         "passive_definitions": passive_definitions_for_army(army),
+        "spell_difficulties": list(range(costs.SPELL_DIFFICULTY_MIN, costs.SPELL_DIFFICULTY_MAX + 1)),
+        "spell_difficulty_default": costs.SPELL_DIFFICULTY_DEFAULT,
+        "editing_spell": editing_spell,
         "error": error,
         "info": info,
     }
@@ -747,6 +765,15 @@ def _passive_payload(unit: models.Unit | None) -> list[dict]:
     defense = getattr(unit, "defense", 4) or 4
     toughness = getattr(unit, "toughness", 1) or 1
     default_weapons = unit.default_weapons if unit else []
+    custom_names: dict[str, str] = {}
+    raw_cn = getattr(unit, "passive_custom_names_json", None) if unit else None
+    if raw_cn:
+        try:
+            parsed = json.loads(raw_cn)
+            if isinstance(parsed, dict):
+                custom_names = {k: v for k, v in parsed.items() if isinstance(v, str) and v}
+        except json.JSONDecodeError:
+            pass
     result: list[dict] = []
     for item in payload:
         if not item:
@@ -760,6 +787,12 @@ def _passive_payload(unit: models.Unit | None) -> list[dict]:
             name, value, quality=quality, defense=defense, toughness=toughness,
             weapons=default_weapons,
         )
+        slug = str(item.get("slug") or "").strip()
+        val_str = str(value or "").strip()
+        key = f"{slug}={val_str}" if val_str else slug
+        cn = custom_names.get(key)
+        if cn:
+            item["custom_name"] = cn
         result.append(item)
     return result
 
@@ -937,6 +970,33 @@ def _ensure_spell_weapon_has_lock_on(items: list[dict]) -> list[dict]:
     )
     return normalized
 
+def _normalize_spell_weapon_ability_items(items: list) -> list[dict]:
+    # Accept either dict trait entries (form parse) or plain trait strings
+    # (the cost-preview JS sends strings); return the dict shape helpers expect.
+    result: list[dict] = []
+    for entry in items or []:
+        if isinstance(entry, dict):
+            result.append(entry)
+            continue
+        if not isinstance(entry, str):
+            continue
+        text = entry.strip()
+        if not text:
+            continue
+        base, value = _spell_trait_base_and_value(text)
+        slug = SPELL_WEAPON_SYNONYMS.get(base, base.replace(" ", "_"))
+        result.append(
+            {
+                "slug": slug or "__custom__",
+                "value": value,
+                "label": text,
+                "raw": text,
+                "description": "",
+            }
+        )
+    return result
+
+
 def _parse_spell_weapon_ability_payload(text: str | None) -> list[dict]:
     if not text:
         return []
@@ -989,7 +1049,11 @@ def _serialize_spell_weapon_tags(items: list[dict]) -> str:
     return ", ".join(entries)
 
 
-def _spell_weapon_form_values(weapon: models.Weapon | None) -> dict:
+def _spell_weapon_form_values(
+    weapon: models.Weapon | None,
+    difficulty: int = costs.SPELL_DIFFICULTY_DEFAULT,
+) -> dict:
+    quality = costs.clamp_spell_difficulty(difficulty)
     if not weapon:
         return {
             "name": "",
@@ -998,6 +1062,7 @@ def _spell_weapon_form_values(weapon: models.Weapon | None) -> dict:
             "ap": "0",
             "notes": "",
             "abilities": [],
+            "quality": quality,
         }
     return {
         "name": weapon.effective_name,
@@ -1006,39 +1071,68 @@ def _spell_weapon_form_values(weapon: models.Weapon | None) -> dict:
         "ap": str(weapon.effective_ap),
         "notes": weapon.effective_notes or "",
         "abilities": _ensure_spell_weapon_has_lock_on(_spell_weapon_tags_payload(weapon.effective_tags)),
+        "quality": quality,
     }
 
 
-def _spell_weapon_cost(
+def _spell_weapon_for_cost(
     weapon: models.Weapon | None, form_values: dict | None
-) -> int | None:
-    if not form_values and weapon:
-        _, _, cost = _weapon_spell_details(weapon)
-        return cost
-
+) -> models.Weapon | None:
+    # The weapon to cost: the stored one when no form is posted, otherwise a
+    # temp weapon built once from the form payload (reused across difficulties).
     if not form_values:
-        return None
-
+        return weapon
     try:
         attacks_value = _spell_parse_optional_float(form_values.get("attacks"))
         ap_value = _spell_parse_optional_int(form_values.get("ap"))
     except ValueError:
         return None
-
-    attacks = 1.0 if attacks_value is None else attacks_value
-    ap = 0 if ap_value is None else ap_value
-    weapon_tags = _serialize_spell_weapon_tags(_ensure_spell_weapon_has_lock_on(form_values.get("abilities") or []))
-
-    temp_weapon = models.Weapon(
+    weapon_tags = _serialize_spell_weapon_tags(
+        _ensure_spell_weapon_has_lock_on(
+            _normalize_spell_weapon_ability_items(form_values.get("abilities") or [])
+        )
+    )
+    return models.Weapon(
         name=form_values.get("name", ""),
         range=str(form_values.get("range", "") or "").strip(),
-        attacks=attacks,
-        ap=ap,
+        attacks=1.0 if attacks_value is None else attacks_value,
+        ap=0 if ap_value is None else ap_value,
         tags=weapon_tags or None,
         notes=str(form_values.get("notes") or "").strip() or None,
     )
-    cost_value = costs.weapon_cost(temp_weapon, unit_quality=4)
-    return int(math.ceil(max(cost_value, 0.0) / 7.0))
+
+
+def _spell_weapon_token_and_point(
+    weapon: models.Weapon, difficulty: int
+) -> tuple[int, int]:
+    cost_value = costs.weapon_cost(weapon, unit_quality=difficulty, use_cached=False)
+    return costs.spell_weapon_token_cost(cost_value), int(round(cost_value))
+
+
+def _spell_weapon_cost(
+    weapon: models.Weapon | None, form_values: dict | None
+) -> tuple[int | None, int | None]:
+    target = _spell_weapon_for_cost(weapon, form_values)
+    if target is None:
+        return None, None
+    difficulty = costs.clamp_spell_difficulty((form_values or {}).get("quality"))
+    return _spell_weapon_token_and_point(target, difficulty)
+
+
+def _spell_weapon_cost_map(
+    weapon: models.Weapon | None, form_values: dict | None
+) -> tuple[dict[str, int], dict[str, int]]:
+    # Build the weapon once, then cost it at every difficulty (2..6).
+    target = _spell_weapon_for_cost(weapon, form_values)
+    tokens: dict[str, int] = {}
+    points: dict[str, int] = {}
+    if target is None:
+        return tokens, points
+    for difficulty in range(costs.SPELL_DIFFICULTY_MIN, costs.SPELL_DIFFICULTY_MAX + 1):
+        token, point = _spell_weapon_token_and_point(target, difficulty)
+        tokens[str(difficulty)] = token
+        points[str(difficulty)] = point
+    return tokens, points
 
 
 def _spell_weapon_form_context(
@@ -1050,6 +1144,7 @@ def _spell_weapon_form_context(
     form_values: dict,
     error: str | None = None,
 ) -> dict:
+    token_cost, point_cost = _spell_weapon_cost(weapon, form_values)
     return {
         "request": request,
         "user": user,
@@ -1063,7 +1158,10 @@ def _spell_weapon_form_context(
         "error": error,
         "cancel_url": f"/armies/{army.id}/spells",
         "allow_variants": False,
-        "spell_cost": _spell_weapon_cost(weapon, form_values),
+        "spell_cost": token_cost,
+        "spell_point_cost": point_cost,
+        "spell_difficulties": list(range(costs.SPELL_DIFFICULTY_MIN, costs.SPELL_DIFFICULTY_MAX + 1)),
+        "spell_quality": costs.clamp_spell_difficulty((form_values or {}).get("quality")),
     }
 
 
@@ -1396,6 +1494,22 @@ def _apply_unit_form_data(
         final_passives = sanitized_passives
 
     unit.flags = utils.passive_payload_to_flags(final_passives)
+
+    custom_names: dict[str, str] = {}
+    for item in sanitized_passives:
+        raw_custom = item.get("custom_name")
+        if not isinstance(raw_custom, str):
+            continue
+        custom = raw_custom.strip()
+        if not custom:
+            continue
+        slug = str(item.get("slug") or "").strip()
+        value = str(item.get("value") or "").strip()
+        key = f"{slug}={value}" if value else slug
+        custom_names[key] = custom
+    unit.passive_custom_names_json = (
+        json.dumps(custom_names, ensure_ascii=False) if custom_names else None
+    )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -1738,8 +1852,50 @@ def spell_weapon_cost_preview(
         raise HTTPException(status_code=404)
     _ensure_army_view_access(army, current_user)
     form_values = payload if isinstance(payload, dict) else {}
-    spell_cost = _spell_weapon_cost(None, form_values)
-    return JSONResponse({"spell_cost": spell_cost})
+    tokens, points = _spell_weapon_cost_map(None, form_values)
+    selected = str(costs.clamp_spell_difficulty(form_values.get("quality")))
+    return JSONResponse(
+        {
+            "spell_cost": tokens.get(selected),
+            "point_cost": points.get(selected),
+            "tokens": tokens,
+            "points": points,
+        }
+    )
+
+
+@router.post("/{army_id}/spells/ability-cost-preview")
+def spell_ability_cost_preview(
+    army_id: int,
+    payload: dict | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    army = db.get(models.Army, army_id)
+    if not army:
+        raise HTTPException(status_code=404)
+    _ensure_army_view_access(army, current_user)
+    data = payload if isinstance(payload, dict) else {}
+    ability = None
+    raw_id = data.get("ability_id")
+    if raw_id not in (None, ""):
+        try:
+            ability = db.get(models.Ability, int(raw_id))
+        except (TypeError, ValueError):
+            ability = None
+    if not ability or ability.type != "active":
+        return JSONResponse({"point_cost": 0, "tokens": {}})
+    slug = ability_registry.ability_slug(ability)
+    if slug in FORBIDDEN_SPELL_SLUGS:
+        return JSONResponse({"point_cost": 0, "tokens": {}})
+    raw_value = data.get("value")
+    value = str(raw_value).strip()[:120] if raw_value not in (None, "") else None
+    point_cost = _ability_spell_point_cost(ability, value)
+    tokens = {
+        str(d): costs.spell_ability_token_cost(point_cost, d)
+        for d in range(costs.SPELL_DIFFICULTY_MIN, costs.SPELL_DIFFICULTY_MAX + 1)
+    }
+    return JSONResponse({"point_cost": int(round(max(point_cost, 0.0))), "tokens": tokens})
 
 
 @router.get("/{army_id}/spells", response_class=HTMLResponse)
@@ -1814,6 +1970,7 @@ def create_spell_weapon(
     ap: str = Form("0"),
     abilities: str | None = Form(None),
     notes: str | None = Form(None),
+    quality: str = Form("4"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
@@ -1836,6 +1993,7 @@ def create_spell_weapon(
         "ap": ap,
         "notes": notes or "",
         "abilities": ability_items,
+        "quality": costs.clamp_spell_difficulty(quality),
     }
     cleaned_name = name.strip()
     if not cleaned_name:
@@ -1892,7 +2050,8 @@ def create_spell_weapon(
     weapon.cached_cost = costs.weapon_cost(weapon)
     db.add(weapon)
 
-    base_label, description, cost = _weapon_spell_details(weapon)
+    difficulty = costs.clamp_spell_difficulty(quality)
+    base_label, description, cost = _weapon_spell_details(weapon, difficulty)
     custom_text = _normalized_custom_name(cleaned_name)
     spell = models.ArmySpell(
         army=army,
@@ -1901,6 +2060,7 @@ def create_spell_weapon(
         base_label=base_label,
         description=description,
         cost=cost,
+        cast_difficulty=difficulty,
         position=_next_spell_position(army),
         custom_name=custom_text or None,
     )
@@ -1937,6 +2097,18 @@ def edit_spell_weapon_form(
         raise HTTPException(status_code=404)
     _ensure_army_edit_access(army, current_user)
     weapon = _get_spell_weapon(db, army, weapon_id)
+    linked_spell = (
+        db.execute(
+            select(models.ArmySpell)
+            .where(models.ArmySpell.army_id == army.id)
+            .where(models.ArmySpell.weapon_id == weapon.id)
+        )
+        .scalars()
+        .first()
+    )
+    difficulty = costs.clamp_spell_difficulty(
+        getattr(linked_spell, "cast_difficulty", None) if linked_spell else None
+    )
 
     return templates.TemplateResponse(
         "armory_weapon_form.html",
@@ -1945,7 +2117,7 @@ def edit_spell_weapon_form(
             army,
             current_user,
             weapon=weapon,
-            form_values=_spell_weapon_form_values(weapon),
+            form_values=_spell_weapon_form_values(weapon, difficulty),
         ),
     )
 
@@ -1961,6 +2133,7 @@ def update_spell_weapon(
     ap: str = Form("0"),
     abilities: str | None = Form(None),
     notes: str | None = Form(None),
+    quality: str = Form("4"),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
@@ -1980,6 +2153,7 @@ def update_spell_weapon(
         "ap": ap,
         "notes": notes or "",
         "abilities": ability_items,
+        "quality": costs.clamp_spell_difficulty(quality),
     }
 
     cleaned_name = name.strip()
@@ -2034,7 +2208,8 @@ def update_spell_weapon(
     weapon.armory = army.armory
     weapon.cached_cost = costs.weapon_cost(weapon)
 
-    base_label, description, cost = _weapon_spell_details(weapon)
+    difficulty = costs.clamp_spell_difficulty(quality)
+    base_label, description, cost = _weapon_spell_details(weapon, difficulty)
     normalized_name = _normalized_custom_name(cleaned_name)
     linked_spells = (
         db.execute(
@@ -2050,11 +2225,51 @@ def update_spell_weapon(
         spell.base_label = base_label
         spell.description = description
         spell.cost = cost
+        spell.cast_difficulty = difficulty
 
     db.commit()
     return RedirectResponse(
         url=f"/armies/{army.id}/spells",
         status_code=303,
+    )
+
+
+def _resolve_ability_spell_fields(
+    db: Session, ability_id: int, ability_value: str | None, cast_difficulty: int
+) -> tuple[dict | None, str | None]:
+    # Shared validation/derivation for add + edit of ability spells.
+    ability = db.get(models.Ability, ability_id)
+    if not ability or ability.type != "active":
+        return None, "Nieprawidłowa zdolność."
+    slug = ability_registry.ability_slug(ability)
+    if slug in FORBIDDEN_SPELL_SLUGS:
+        return None, "Zdolność nie może być użyta jako moc."
+    definition = ability_catalog.find_definition(slug) if slug else None
+    requires_value = bool(definition and definition.value_label)
+    raw_value = (ability_value or "").strip()
+    if requires_value and not raw_value:
+        return None, "Zdolność wymaga podania wartości."
+    if definition and definition.value_choices:
+        valid_values: set[str] = set()
+        for choice in definition.value_choices:
+            choice_value = choice.get("value") if isinstance(choice, dict) else choice
+            if choice_value is not None:
+                valid_values.add(str(choice_value))
+        if valid_values and raw_value and raw_value not in valid_values:
+            return None, "Wybrano nieprawidłową wartość zdolności."
+    value_text = raw_value[:120] if raw_value else None
+    difficulty = costs.clamp_spell_difficulty(cast_difficulty)
+    base_label, description, cost = _ability_spell_details(ability, value_text, difficulty)
+    return (
+        {
+            "ability": ability,
+            "value_text": value_text,
+            "difficulty": difficulty,
+            "base_label": base_label,
+            "description": description,
+            "cost": cost,
+        },
+        None,
     )
 
 
@@ -2065,6 +2280,7 @@ def add_army_spell_ability(
     ability_id: int = Form(...),
     ability_value: str | None = Form(None),
     custom_name: str | None = Form(None),
+    cast_difficulty: int = Form(4),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
@@ -2077,78 +2293,91 @@ def add_army_spell_ability(
     if capacity_response is not None:
         return capacity_response
 
-    ability = db.get(models.Ability, ability_id)
-    if not ability or ability.type != "active":
-        context = _spell_page_context(
-            request,
-            army,
-            current_user,
-            db,
-            error="Nieprawidłowa zdolność.",
-        )
+    fields, error = _resolve_ability_spell_fields(
+        db, ability_id, ability_value, cast_difficulty
+    )
+    if error:
+        context = _spell_page_context(request, army, current_user, db, error=error)
         return templates.TemplateResponse("army_spells.html", context, status_code=400)
 
-    slug = ability_registry.ability_slug(ability)
-    if slug in FORBIDDEN_SPELL_SLUGS:
-        context = _spell_page_context(
-            request,
-            army,
-            current_user,
-            db,
-            error="Zdolność nie może być użyta jako moc.",
-        )
-        return templates.TemplateResponse("army_spells.html", context, status_code=400)
-
-    definition = ability_catalog.find_definition(slug) if slug else None
-    requires_value = bool(definition and definition.value_label)
-    raw_value = (ability_value or "").strip()
-    if requires_value and not raw_value:
-        context = _spell_page_context(
-            request,
-            army,
-            current_user,
-            db,
-            error="Zdolność wymaga podania wartości.",
-        )
-        return templates.TemplateResponse("army_spells.html", context, status_code=400)
-
-    if definition and definition.value_choices:
-        valid_values: set[str] = set()
-        for choice in definition.value_choices:
-            if isinstance(choice, dict):
-                choice_value = choice.get("value")
-            else:
-                choice_value = choice
-            if choice_value is not None:
-                valid_values.add(str(choice_value))
-        if valid_values and raw_value and raw_value not in valid_values:
-            context = _spell_page_context(
-                request,
-                army,
-                current_user,
-                db,
-                error="Wybrano nieprawidłową wartość zdolności.",
-            )
-            return templates.TemplateResponse(
-                "army_spells.html", context, status_code=400
-            )
-
-    value_text = raw_value[:120] if raw_value else None
-    base_label, description, cost = _ability_spell_details(ability, value_text)
     custom_text = _normalized_custom_name(custom_name)
     spell = models.ArmySpell(
         army=army,
         kind="ability",
-        ability=ability,
-        ability_value=value_text,
-        base_label=base_label,
-        description=description,
-        cost=cost,
+        ability=fields["ability"],
+        ability_value=fields["value_text"],
+        base_label=fields["base_label"],
+        description=fields["description"],
+        cost=fields["cost"],
+        cast_difficulty=fields["difficulty"],
         position=_next_spell_position(army),
         custom_name=custom_text or None,
     )
     db.add(spell)
     _resequence_spells(army)
+    db.commit()
+    return RedirectResponse(
+        url=f"/armies/{army.id}/spells",
+        status_code=303,
+    )
+
+
+@router.get("/{army_id}/spells/abilities/{spell_id}/edit", response_class=HTMLResponse)
+def edit_army_spell_ability_form(
+    army_id: int,
+    spell_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    army = db.get(models.Army, army_id)
+    if not army:
+        raise HTTPException(status_code=404)
+    _ensure_army_edit_access(army, current_user)
+    spell = db.get(models.ArmySpell, spell_id)
+    if not spell or spell.army_id != army.id or spell.kind != "ability":
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        "army_spells.html",
+        _spell_page_context(request, army, current_user, db, editing_spell=spell),
+    )
+
+
+@router.post("/{army_id}/spells/abilities/{spell_id}/update")
+def update_army_spell_ability(
+    army_id: int,
+    spell_id: int,
+    request: Request,
+    ability_id: int = Form(...),
+    ability_value: str | None = Form(None),
+    custom_name: str | None = Form(None),
+    cast_difficulty: int = Form(4),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    army = db.get(models.Army, army_id)
+    if not army:
+        raise HTTPException(status_code=404)
+    _ensure_army_edit_access(army, current_user)
+    spell = db.get(models.ArmySpell, spell_id)
+    if not spell or spell.army_id != army.id or spell.kind != "ability":
+        raise HTTPException(status_code=404)
+    fields, error = _resolve_ability_spell_fields(
+        db, ability_id, ability_value, cast_difficulty
+    )
+    if error:
+        context = _spell_page_context(
+            request, army, current_user, db, error=error, editing_spell=spell
+        )
+        return templates.TemplateResponse("army_spells.html", context, status_code=400)
+    custom_text = _normalized_custom_name(custom_name)
+    spell.ability = fields["ability"]
+    spell.ability_value = fields["value_text"]
+    spell.base_label = fields["base_label"]
+    spell.description = fields["description"]
+    spell.cost = fields["cost"]
+    spell.cast_difficulty = fields["difficulty"]
+    spell.custom_name = custom_text or None
     db.commit()
     return RedirectResponse(
         url=f"/armies/{army.id}/spells",

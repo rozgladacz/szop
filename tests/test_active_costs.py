@@ -50,7 +50,7 @@ def test_order_like_abilities_ignore_cost_hint_for_dynamic_cost() -> None:
     )
     link = models.UnitAbility(unit=unit, ability=ability, params_json='{"value":"wolny"}')
 
-    assert costs.ability_cost(link, [], toughness=1) == -10.0
+    assert costs.ability_cost(link, [], toughness=1) == -6.0
 
 
 def test_non_order_like_ability_still_uses_cost_hint() -> None:
@@ -77,3 +77,25 @@ def test_order_like_cost_detection_normalizes_slug_from_config() -> None:
     )
 
     assert costs.ability_uses_order_like_cost(ability) is True
+
+
+def test_demoralizacja_cost_is_25():
+    assert costs.ability_cost_from_name("Demoralizacja") == 25.0
+
+
+def test_mag_cost_scales_with_toughness():
+    # X * clamp(T, 6, 18)  (polowa poprzedniego X * clamp(2T, 12, 36))
+    assert costs.ability_cost_from_name("Mag", "2", toughness=1) == 12.0
+    assert costs.ability_cost_from_name("Mag", "2", toughness=8) == 16.0
+    assert costs.ability_cost_from_name("Mag", "2", toughness=18) == 36.0
+
+
+def test_rozkaz_sign_depends_on_kierunek():
+    # T=6 -> T_eff = clamp(8, 8, 24) = 8; Furia "+" -> 10, Tarcza "-" -> 6
+    assert costs.ability_cost_from_name("Rozkaz", "furia", toughness=6) == 30.0
+    assert costs.ability_cost_from_name("Rozkaz", "tarcza", toughness=6) == 7.5
+
+
+def test_klatwa_and_oznaczenie_use_x_for_toughness_6():
+    assert costs.ability_cost_from_name("Klątwa", "wolny", toughness=1) == -6.0
+    assert costs.ability_cost_from_name("Oznaczenie", "furia", toughness=6) == 18.0

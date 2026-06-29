@@ -41,7 +41,9 @@ def test_spell_page_context_recalculates_weapon_spell_cost() -> None:
         context = armies._spell_page_context(request, army, user, session)
 
         [refreshed] = context['spells']
-        expected_cost = int(math.ceil(max(armies.costs.weapon_cost(weapon, unit_quality=4), 0.0) / 7.0))
+        expected_cost = armies.costs.spell_weapon_token_cost(
+            armies.costs.weapon_cost(weapon, unit_quality=4)
+        )
         assert refreshed.cost == expected_cost
         assert refreshed.base_label != 'stary'
         assert refreshed.description != 'stary opis'

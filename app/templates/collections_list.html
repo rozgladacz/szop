@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Kolekcja - SZOP{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h2 class="mb-0">Kolekcja</h2>
+</div>
+
+<div class="row g-4">
+  <div class="col-12 col-md-4 col-xl-3">
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Wybierz armię</h5>
+        {% if armies %}
+        <div class="list-group list-group-flush">
+          {% for army in armies %}
+          <a
+            class="list-group-item list-group-item-action{% if selected_army and selected_army.id == army.id %} active{% endif %}"
+            href="/collections?army_id={{ army.id }}"
+          >
+            {{ army.name }}
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">Brak dostępnych armii. <a href="/armies">Utwórz armię</a>.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-12 col-md-8 col-xl-9">
+    {% if selected_army %}
+    <div class="card">
+      <div class="card-body">
+        <h5 class="card-title">Oddziały — {{ selected_army.name }}</h5>
+        {% if unit_summaries %}
+        <div class="list-group list-group-flush">
+          {% for item in unit_summaries %}
+          <a
+            class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+            href="/collections/units/{{ item.unit.id }}"
+          >
+            <span>{{ item.unit.name }}</span>
+            <span class="badge {% if item.owned_count > 0 %}bg-success{% else %}bg-secondary{% endif %} rounded-pill">
+              {{ item.owned_count }} szt.
+            </span>
+          </a>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">Brak oddziałów w tej armii.</p>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="card">
+      <div class="card-body text-muted">
+        <p class="mb-0">Wybierz armię z listy po lewej, aby zobaczyć oddziały i zarządzać kolekcją.</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

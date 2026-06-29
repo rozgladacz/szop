@@ -81,7 +81,7 @@ def passive_cost(
         return 0.5 * tou
     if slug == "niezgrabny":
         return -0.5 * tou
-    if slug == "latajacy":
+    if slug == "skok":
         return 1.0 * tou
     if slug == "samolot":
         return 3.0 * tou
@@ -357,7 +357,8 @@ def ability_cost_components_from_name(
             extra = 8.0 if abs(aura_range - 12.0) < 1e-6 else 0.0
             base_result = passive_cost(ability_slug, _aura_eff_tou(extra), True)
     elif desc.startswith("mag"):
-        base_result = 8.0 * extract_number(value or name)
+        mag_tou = float(toughness) if toughness is not None else 6.0
+        base_result = extract_number(value or name) * max(6.0, min(18.0, mag_tou))
     elif desc == "przekaznik":
         base_result = 4.0
     elif desc == "koordynacja":
@@ -372,14 +373,28 @@ def ability_cost_components_from_name(
         base_result = 45.0
     elif slug == "usprawnienie":
         base_result = 60.0
+    elif slug == "demoralizacja":
+        base_result = 25.0
     elif desc.startswith("rozkaz") or desc.startswith("klatwa") or desc.startswith("oznaczenie"):
         ability_ref = value or (desc.split(":", 1)[1].strip() if ":" in desc else "")
+        is_rozkaz = desc.startswith("rozkaz")
+        # Rozkaz skaluje sie z wytrzymaloscia nosiciela: Aura dla T_eff +/- 2
+        # (znak z psujacej cechy rozkaz_kierunek). Klatwa/Oznaczenie liczone
+        # "jak X dla 6 wytrzymalosci" -> staly mnoznik 6 (bez skalowania nosicielem).
         if ability_ref.startswith("mistrzostwo:"):
             w_slug = ability_ref[len("mistrzostwo:"):].strip()
-            base_result = _mistrzostwo_aura_cost(w_slug) * _aura_eff_tou(2.0)
+            # Mistrzostwo ma psujaca ceche "+" -> T_eff + 2 dla Rozkazu.
+            eff_tou = (_aura_eff_tou() + 2.0) if is_rozkaz else 6.0
+            base_result = _mistrzostwo_aura_cost(w_slug) * eff_tou
         else:
             ability_slug = ability_catalog.slug_for_name(ability_ref) or ability_identifier(ability_ref)
-            base_result = passive_cost(ability_slug, _aura_eff_tou(2.0), True)
+            if is_rozkaz:
+                target_def = ability_catalog.find_definition(ability_slug)
+                sign = -2.0 if (target_def and target_def.rozkaz_kierunek == "-") else 2.0
+                eff_tou = _aura_eff_tou() + sign
+            else:
+                eff_tou = 6.0
+            base_result = passive_cost(ability_slug, eff_tou, True)
     elif desc == "radio":
         base_result = 3.0
     elif slug == "ociezalosc":

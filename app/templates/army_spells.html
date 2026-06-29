@@ -30,6 +30,7 @@
             <th style="width: 4rem;">#</th>
             <th>Nazwa i opis</th>
             <th style="width: 8rem;">Rodzaj</th>
+            <th style="width: 6rem;">Trudność</th>
             <th style="width: 6rem;">Koszt</th>
             <th style="width: 16rem;">Nazwa</th>
             <th style="width: 6rem;"></th>
@@ -94,6 +95,7 @@
               {{ spell.kind }}
               {% endif %}
             </td>
+            <td>{{ spell.cast_difficulty }}+</td>
             <td>{{ spell.cost }}</td>
             <td>
               {% if spell.kind == 'weapon' %}
@@ -114,6 +116,14 @@
             </td>
             <td>
               <div class="d-flex justify-content-end gap-2">
+                {% if spell.kind == 'ability' %}
+                <a
+                  class="btn btn-outline-secondary btn-sm"
+                  href="/armies/{{ army.id }}/spells/abilities/{{ spell.id }}/edit"
+                >
+                  Edytuj
+                </a>
+                {% endif %}
                 {% if spell.kind == 'weapon' and spell.weapon_id and spell.weapon and spell.weapon.army_id == army.id %}
                 <a
                   class="btn btn-outline-secondary btn-sm"
@@ -142,19 +152,26 @@
   </div>
 </div>
 
-{% if remaining_slots > 0 %}
+{% if remaining_slots > 0 or editing_spell %}
 <div class="card">
   <div class="card-body">
-    <h5 class="card-title">Dodaj nową moc</h5>
+    <h5 class="card-title">{% if editing_spell %}Edytuj moc{% else %}Dodaj nową moc{% endif %}</h5>
+    {% if editing_spell %}
+    <p class="text-muted">Edytujesz istniejącą moc — zmień zdolność, trudność lub nazwę i zapisz.</p>
+    {% else %}
     <p class="text-muted">Pozostało miejsc: {{ remaining_slots }}.</p>
+    {% endif %}
     <div class="row g-4">
       <div class="col-md-6">
         <h6>Zdolność aktywna</h6>
         <form
           method="post"
-          action="/armies/{{ army.id }}/spells/add-ability"
+          action="{% if editing_spell %}/armies/{{ army.id }}/spells/abilities/{{ editing_spell.id }}/update{% else %}/armies/{{ army.id }}/spells/add-ability{% endif %}"
           class="vstack gap-3"
           data-spell-ability-form
+          data-army-id="{{ army.id }}"
+          data-default-difficulty="{% if editing_spell %}{{ editing_spell.cast_difficulty }}{% else %}{{ spell_difficulty_default }}{% endif %}"
+          {% if editing_spell %}data-initial-value="{{ editing_spell.ability_value or '' }}"{% endif %}
           {% if passive_definitions %}data-passive-ability-list-id="army-spell-passive-abilities"{% endif %}
         >
           <div>
@@ -170,6 +187,7 @@
                 data-requires-value="{{ 'true' if ability.requires_value else 'false' }}"
                 data-value-choices='{{ ability.value_choices | tojson }}'
                 data-value-kind="{{ ability.value_kind or '' }}"
+                {% if editing_spell and ability.ability_id == editing_spell.ability_id %}selected{% endif %}
               >
                 {{ ability.display_name }}
               </option>
@@ -195,6 +213,11 @@
             />
             <div class="form-text text-muted d-none" data-ability-value-description></div>
           </div>
+          <div class="d-none" data-spell-ability-cost-block>
+            <label class="form-label d-block">Trudność rzucenia (szansa)</label>
+            <div class="form-text mb-2">Koszt w punktach: <strong data-spell-ability-point-cost>—</strong></div>
+            <div class="d-flex flex-wrap gap-3" data-spell-ability-difficulty-options></div>
+          </div>
           <div>
             <label class="form-label" for="ability-custom-name">Nazwa własna (opcjonalnie)</label>
             <input
@@ -204,10 +227,14 @@
               type="text"
               maxlength="{{ name_max_length }}"
               placeholder="Np. Przyśpieszenie"
+              value="{% if editing_spell %}{{ editing_spell.normalized_custom_name }}{% endif %}"
             />
           </div>
-          <div>
-            <button class="btn btn-primary" type="submit">Dodaj zdolność</button>
+          <div class="d-flex gap-2">
+            <button class="btn btn-primary" type="submit">{% if editing_spell %}Zapisz zmiany{% else %}Dodaj zdolność{% endif %}</button>
+            {% if editing_spell %}
+            <a class="btn btn-outline-secondary" href="/armies/{{ army.id }}/spells">Anuluj</a>
+            {% endif %}
           </div>
         </form>
         {% if passive_definitions %}
@@ -218,6 +245,7 @@
         </datalist>
         {% endif %}
       </div>
+      {% if not editing_spell %}
       <div class="col-md-6">
         <h6>Trafienie z broni</h6>
         <p class="text-muted mb-3">
@@ -225,6 +253,7 @@
         </p>
         <a class="btn btn-primary" href="/armies/{{ army.id }}/spells/weapons/new">Nowa broń</a>
       </div>
+      {% endif %}
     </div>
   </div>
 </div>

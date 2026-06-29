@@ -190,9 +190,28 @@
             <input type="hidden" id="weapon-abilities" name="abilities" value='{{ form_values.abilities | tojson }}' />
             <div class="form-text">Dodaj zdolności z listy. Wpisz wartość dla pozycji oznaczonych (X).</div>
           </div>
-          {% if spell_cost is defined and spell_cost is not none %}
+          {% if spell_difficulties is defined %}
+          <div class="card bg-light mb-3" data-spell-quality-frame data-default-quality="{{ spell_quality }}">
+            <div class="card-body">
+              <h6 class="card-title">Jakość (szansa) ataku</h6>
+              <div class="d-flex gap-4 mb-2">
+                <div>
+                  <div class="text-muted small">Koszt w punktach</div>
+                  <strong data-spell-weapon-point-cost>{{ spell_point_cost if spell_point_cost is not none else '—' }}</strong>
+                </div>
+                <div>
+                  <div class="text-muted small">Koszt w żetonach</div>
+                  <strong data-spell-weapon-cost>{{ spell_cost if spell_cost is not none else '—' }}</strong>
+                </div>
+              </div>
+              <label class="form-label d-block">Trudność rzucenia (szansa)</label>
+              <div class="d-flex flex-wrap gap-3" data-spell-quality-options></div>
+              <div class="form-text mt-2">Wybierz jakość (szansę) ataku. Wyższa trudność (mniejsza szansa) obniża koszt żetonowy mocy.</div>
+            </div>
+          </div>
+          {% elif spell_cost is defined and spell_cost is not none %}
           <div class="alert alert-info" role="alert">
-            Aktualny koszt zaklęcia broni: <strong data-spell-weapon-cost>{{ spell_cost }}</strong> pkt.
+            Aktualny koszt zaklęcia broni: <strong data-spell-weapon-cost>{{ spell_cost }}</strong> żet.
           </div>
           {% endif %}
           <div class="mb-3">

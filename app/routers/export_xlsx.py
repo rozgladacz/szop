@@ -131,14 +131,16 @@ def _append_roster_sheet(
     sheet.append(total_row)
     if spells:
         sheet.append([])
-        spell_header = ["Koszt mocy", "Zaklęcie"]
+        spell_header = ["Koszt mocy", "Trudność", "Zaklęcie"]
         for index, value in enumerate(spell_header):
             text = "" if value is None else str(value)
             column_widths[index] = max(column_widths[index], len(text))
         sheet.append(spell_header)
         for spell in spells:
+            difficulty = spell.get("difficulty")
             row = [
                 spell.get("cost"),
+                f"{difficulty}+" if difficulty is not None else "",
                 spell.get("label"),
             ]
             for index, value in enumerate(row):

@@ -23,40 +23,6 @@ _VIRTUAL_SLUG_MAP: dict[str, str] = {
     "oznaczenie_mistrzostwo": "oznaczenie",
 }
 ABILITY_NAME_MAX_LENGTH = 60
-EXCLUDED_AURA_SLUGS: set[str] = {
-    "zasadzka",
-    "zwiadowca",
-    "nieruchomy",
-    "samolot",
-    "dobrze_strzela",
-    "zle_strzela",
-    "roj",
-    "zwrot",
-    "bohater",
-    "ochroniarz",
-    "transport",
-    "sekcje",
-    "rezerwa",
-    "odwody",
-}
-
-EXCLUDED_ORDER_AND_MARK_SLUGS: set[str] = {
-    "zasadzka",
-    "zwiadowca",
-    "samolot",
-    "dobrze_strzela",
-    "zle_strzela",
-    "roj",
-    "zwrot",
-    "bohater",
-    "ochroniarz",
-    "transport",
-    "sekcje",
-    "rezerwa",
-    "odwody",
-    "zdobywca",
-}
-
 EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS: set[str] = {
     "rozprysk",
     "zabojczy",
@@ -66,16 +32,13 @@ EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS: set[str] = {
     "szturmowa",
 }
 
-EXCLUDED_AURA_AND_ORDER_SLUGS: set[str] = {
-    *EXCLUDED_AURA_SLUGS,
-    *EXCLUDED_ORDER_AND_MARK_SLUGS,
-    "otwarty_transport",
-    "platforma_strzelecka",
-    "strach",
-    "waagh",
-    "odrodzenie",
-    "wrak",
-    "mistrzostwo",
+# Filtrowanie pickerow Aura / Rozkaz / Klatwa / Oznaczenie jest data-driven:
+# tagi aura_tak / rozkaz_tak / klatwa_tak / oznaczenie_tak w AbilityDefinition
+# (tabela psujacych cech, SZOP s.5). Mistrzostwo obslugiwane osobnym wpisem.
+_ORDER_TAG_ATTR: dict[str, str] = {
+    "rozkaz": "rozkaz_tak",
+    "klatwa": "klatwa_tak",
+    "oznaczenie": "oznaczenie_tak",
 }
 
 
@@ -200,16 +163,18 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
         w for w in ability_catalog.definitions_by_type("weapon")
         if w.slug not in EXCLUDED_MISTRZOSTWO_WEAPON_SLUGS
     ]
+    mistrzostwo_def = ability_catalog.find_definition("mistrzostwo")
     payload: list[dict] = []
     for definition in definitions:
         entry = ability_catalog.to_dict(definition)
         entry["value_kind"] = None
-        if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
+        if definition.slug in _ORDER_TAG_ATTR:
+            order_tag_attr = _ORDER_TAG_ATTR[definition.slug]
             order_definitions = [
                 passive
                 for passive in passive_definitions
-                if passive.slug not in EXCLUDED_AURA_AND_ORDER_SLUGS
-                and passive.slug not in EXCLUDED_ORDER_AND_MARK_SLUGS
+                if getattr(passive, order_tag_attr, False)
+                and passive.slug != "mistrzostwo"
             ]
             entry["value_choices"] = [
                 {
@@ -234,8 +199,8 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
             aura_definitions = [
                 passive
                 for passive in passive_definitions
-                if passive.slug not in EXCLUDED_AURA_AND_ORDER_SLUGS
-                and passive.slug not in EXCLUDED_AURA_SLUGS
+                if passive.aura_tak
+                and passive.slug != "mistrzostwo"
             ]
             entry["value_choices"] = [
                 {
@@ -286,7 +251,11 @@ def definition_payload(session: Session, ability_type: str) -> list[dict]:
                 m_entry["value_kind"] = "weapon"
                 m_entry["cost_hint"] = 0.0
                 payload.append(m_entry)
-        if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
+        if (
+            definition.slug in _ORDER_TAG_ATTR
+            and mistrzostwo_def is not None
+            and getattr(mistrzostwo_def, _ORDER_TAG_ATTR[definition.slug], False)
+        ):
             m_entry = dict(entry)
             m_entry["slug"] = f"{definition.slug}_mistrzostwo"
             m_entry["name"] = f"{definition.name}: Mistrzostwo"

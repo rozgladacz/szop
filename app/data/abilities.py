@@ -10,7 +10,7 @@ from __future__ import annotations
 # Edycja bloków bez opisów: Edit tool OK – single-quoted delimitery.
 # ------------------------------------------------------------------
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, List, Sequence
 import re
 import unicodedata
@@ -28,6 +28,14 @@ class AbilityDefinition:
     value_type: str | None = None  # "number" or "text"
     value_choices: Sequence[str] | None = None
     blocked: bool = False
+    # Tabela psujacych cech (SZOP s.5) -- ktore pasywne kwalifikuja sie jako
+    # baza wariantu Aura / Rozkaz / Klatwa / Oznaczenie oraz znak +/- Rozkazu.
+    aura_tak: bool = False
+    rozkaz_tak: bool = False
+    rozkaz_kierunek: str | None = None  # "+" | "-" | None
+    klatwa_tak: bool = False
+    oznaczenie_tak: bool = False
+    zakres: str | None = None  # "model" | "pozytywna" | "negatywna"
 
     def display_name(self) -> str:
         if self.value_label:
@@ -131,8 +139,8 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Na trudnym i niebezpiecznym terenie wykonuje dodatkowy test trudnego terenu.",
     ),
     AbilityDefinition(
-        slug="latajacy",
-        name="Latający",
+        slug="skok",
+        name="Skok",
         type="passive",
         description="Ignoruje teren i jednostki podczas ruchu. Wciąż jest uznawany za przechodzący przez punkt końcowy.",
     ),
@@ -143,9 +151,9 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description=(
             "Nie możesz aktywować oddziału bez tej zdolności, jeżeli masz nieaktywowany oddział z nią. "
             "Jako pierwszą akcję musi wykonać ruch i przemieścić się 30–36” w jednej linii. "
-            "Nie może kontrolować punktów, szarżować, ani być celem szarży. "
+            "Nie może kontrolować punktów, szarżować, ani być celem szarży i broni Niebezpośredniej. "
             "Nie blokuje ruchu, ani widzenia innych jednostek. "
-            "Ma osłonę, a jednostki strzelające do niego mają -12” zasięgu. Wysoki, Latający, Zwinny. "
+            "Ma osłonę, a jednostki strzelające do niego mają -12” zasięgu. Wysoki, Skok, Zwinny. "
             "Jeżeli jest Przyszpilony, odrzuca ten stan i wykonuje test trudnego terenu."
         ),
     ),
@@ -441,7 +449,9 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         type="active",
         description=(
             "Otrzymuje X żetonów mocy na początku każdej rundy, do maksymalnie 2X. Magowie w oddziale współdzielą żetony. "
-            "Wydaj tyle żetonów, ile wynosi koszt czaru i rzuć kością. Przy wyniku 4+ rozstrzygnij jego efekt. Jedna próba na czar na aktywację. "
+            "Armia ma wspólną listę 6 zdolności lub ataków. "
+            "W momencie gdy możesz skorzystać z jednej z nich, wydaj przypisaną liczbę żetonów "
+            "i wykonaj test o przypisanej trudności. Przy sukcesie rozstrzygnij jego efekt. Jedna próba na czar na aktywację. "
         ),
         value_label="X",
         value_type="number",
@@ -525,6 +535,15 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         value_label="Zdolność",
         value_type="text",
     ),
+    AbilityDefinition(
+        slug="demoralizacja",
+        name="Demoralizacja",
+        type="active",
+        description=(
+            "Raz na rundę możesz przerwać, aby wrogi oddział "
+            f"w zasięgu 12{INCH} wykonał test Przegrupowania."
+        ),
+    ),
     # Aura abilities
     AbilityDefinition(
         slug="aura",
@@ -590,7 +609,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="niebezposredni",
         name="Niebezpośredni",
         type="weapon",
-        description="Nie wymaga linii wzroku. Nie może atakować celów Latających.",
+        description="Nie wymaga linii wzroku.",
     ),
     AbilityDefinition(
         slug="artyleria",
@@ -723,6 +742,48 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Naturalne 6 na trafienie ranią bez rzutu na obronę.",
     ),
 
+]
+
+
+_PASSIVE_DAMAGE_TAGS: dict[str, dict] = {
+    "bastion": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', oznaczenie_tak=True, zakres='pozytywna'),
+    "cierpliwy": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='model'),
+    "delikatny": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', klatwa_tak=True, zakres='model'),
+    "dywersant": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', oznaczenie_tak=True, zakres='pozytywna'),
+    "furia": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', oznaczenie_tak=True, zakres='model'),
+    "harcownik": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', zakres='pozytywna'),
+    "instynkt": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', klatwa_tak=True, zakres='negatywna'),
+    "kontra": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='pozytywna'),
+    "skok": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', zakres='pozytywna'),
+    "maskowanie": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='pozytywna'),
+    "mistrzostwo": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', oznaczenie_tak=True, zakres='pozytywna'),
+    "niestrudzony": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', oznaczenie_tak=True, zakres='pozytywna'),
+    "nieruchomy": dict(klatwa_tak=True, zakres='negatywna'),
+    "nieustraszony": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='pozytywna'),
+    "niewrazliwy": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', zakres='model'),
+    "niezgrabny": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', klatwa_tak=True, zakres='negatywna'),
+    "okopany": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='pozytywna'),
+    "ostrozny": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', oznaczenie_tak=True, zakres='model'),
+    "parowanie": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='pozytywna'),
+    "przygotowanie": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', oznaczenie_tak=True, zakres='model'),
+    "stracency": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='pozytywna'),
+    "straznik": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', zakres='pozytywna'),
+    "szybki": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', zakres='pozytywna'),
+    "wolny": dict(aura_tak=True, klatwa_tak=True, zakres='negatywna'),
+    "tarcza": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='-', zakres='model'),
+    "zdobywca": dict(aura_tak=True, zakres='pozytywna'),
+    "zwinny": dict(aura_tak=True, rozkaz_tak=True, rozkaz_kierunek='+', zakres='pozytywna'),
+}
+
+_unknown_tag_slugs = set(_PASSIVE_DAMAGE_TAGS) - {_d.slug for _d in ABILITY_DEFINITIONS}
+if _unknown_tag_slugs:
+    # Not an assert: picker filtering depends on these tags, and -O strips asserts.
+    raise ValueError(
+        "_PASSIVE_DAMAGE_TAGS zawiera slug bez definicji: " + str(_unknown_tag_slugs)
+    )
+ABILITY_DEFINITIONS = [
+    replace(_d, **_PASSIVE_DAMAGE_TAGS[_d.slug]) if _d.slug in _PASSIVE_DAMAGE_TAGS else _d
+    for _d in ABILITY_DEFINITIONS
 ]
 
 
@@ -905,6 +966,12 @@ def to_dict(definition: AbilityDefinition) -> dict:
         "value_type": definition.value_type,
         "requires_value": definition.value_label is not None,
         "value_choices": list(definition.value_choices) if definition.value_choices else [],
+        "aura_tak": definition.aura_tak,
+        "rozkaz_tak": definition.rozkaz_tak,
+        "rozkaz_kierunek": definition.rozkaz_kierunek,
+        "klatwa_tak": definition.klatwa_tak,
+        "oznaczenie_tak": definition.oznaczenie_tak,
+        "zakres": definition.zakres,
     }
 
 

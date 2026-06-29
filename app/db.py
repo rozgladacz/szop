@@ -366,6 +366,11 @@ def _migrate_schema() -> None:
                         "REFERENCES unit_groups(id)"
                     )
                 )
+            if "passive_custom_names_json" not in column_names:
+                logger.info("Adding passive_custom_names_json column to units table")
+                connection.execute(
+                    text("ALTER TABLE units ADD COLUMN passive_custom_names_json TEXT")
+                )
 
         if "roster_units" in table_names:
             columns = inspector.get_columns("roster_units")
@@ -419,6 +424,17 @@ def _migrate_schema() -> None:
                     )
                 )
                 _initialize_unit_ability_positions(connection)
+
+        if "army_spells" in table_names:
+            columns = inspector.get_columns("army_spells")
+            column_names = {column["name"] for column in columns}
+            if "cast_difficulty" not in column_names:
+                logger.info("Adding cast_difficulty column to army_spells table")
+                connection.execute(
+                    text(
+                        "ALTER TABLE army_spells ADD COLUMN cast_difficulty INTEGER NOT NULL DEFAULT 4"
+                    )
+                )
 
 
 

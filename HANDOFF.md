@@ -11,14 +11,23 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| _(brak aktywnych wątków)_ | | | |
+| [HANDOFF_kolekcja](docs/handoffs/HANDOFF_kolekcja.md) | Faza 1: CRUD fizycznych modeli w kolekcji użytkownika (bazy danych + UI) | `app/models.py`, `app/routers/collections.py`, `app/templates/collection_unit_detail.html` | In progress |
+| [HANDOFF_demoralizacja-mag](docs/handoffs/HANDOFF_demoralizacja-mag.md) | Demoralizacja + koszt Maga + koszty/tabela Rozkaz-Klątwa-Oznaczenie + UI trudności zaklęć | `app/data/abilities.py`, `app/services/costs/abilities.py`, `app/services/ability_registry.py`, `app/routers/armies.py`, `app/models.py`, `app/db.py`, `app/templates/army_spells.html` | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| _(brak)_ | | |
+| `app/models.py` | kolekcja | +CollectionModel, +CollectionModelSlot |
+| `app/routers/collections.py` | kolekcja | nowy router (NEW) |
+| `app/templates/collection_unit_detail.html` | kolekcja | nowy szablon (NEW) |
+| `app/models.py` | demoralizacja-mag | +`ArmySpell.cast_difficulty` (zmiana rozłączna z kolekcją) |
+| `app/data/abilities.py` | demoralizacja-mag | Demoralizacja + tagi psujących cech + opis Maga |
+| `app/services/costs/abilities.py` | demoralizacja-mag | koszty Mag/Rozkaz/Klątwa/Oznaczenie/Demoralizacja |
+| `app/services/ability_registry.py` | demoralizacja-mag | filtrowanie pickerów tag-driven |
+| `app/routers/armies.py` | demoralizacja-mag | spell details + add-ability + weapon preview + ability-cost-preview |
+| `app/templates/army_spells.html` | demoralizacja-mag | UI wyboru trudności + kolumna Trudność |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 

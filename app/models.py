@@ -50,6 +50,9 @@ class User(TimestampMixin, Base):
     abilities: Mapped[List["Ability"]] = relationship(
         "Ability", back_populates="owner", cascade="all, delete-orphan"
     )
+    collection_models: Mapped[List["CollectionModel"]] = relationship(
+        "CollectionModel", back_populates="owner", cascade="all, delete-orphan"
+    )
 
 
 class RuleSet(TimestampMixin, Base):
@@ -257,6 +260,7 @@ class ArmySpell(TimestampMixin, Base):
     base_label: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     cost: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cast_difficulty: Mapped[int] = mapped_column(Integer, default=4, nullable=False)
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     custom_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
 
@@ -297,6 +301,7 @@ class ArmySpell(TimestampMixin, Base):
     def export_payload(self) -> dict[str, object]:
         return {
             "cost": int(self.cost or 0),
+            "difficulty": int(self.cast_difficulty or 4),
             "label": self.export_label,
             "description": (self.description or "").strip(),
         }
@@ -327,6 +332,7 @@ class Unit(TimestampMixin, Base):
     defense: Mapped[int] = mapped_column(Integer, nullable=False)
     toughness: Mapped[int] = mapped_column(Integer, nullable=False)
     flags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    passive_custom_names_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     default_weapon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("weapons.id"), nullable=True)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey("units.id"), nullable=True)
     army_id: Mapped[int] = mapped_column(ForeignKey("armies.id"), nullable=False)
@@ -514,6 +520,44 @@ class RosterUnit(TimestampMixin, Base):
     )
 
 
+class CollectionModel(TimestampMixin, Base):
+    __tablename__ = "collection_models"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    unit_id: Mapped[int] = mapped_column(ForeignKey("units.id"), nullable=False)
+    label: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    loadout_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    owner: Mapped["User"] = relationship(back_populates="collection_models")
+    unit: Mapped["Unit"] = relationship()
+    slots: Mapped[List["CollectionModelSlot"]] = relationship(
+        back_populates="collection_model",
+        cascade="all, delete-orphan",
+        order_by="CollectionModelSlot.position",
+    )
+
+
+class CollectionModelSlot(TimestampMixin, Base):
+    __tablename__ = "collection_model_slots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    collection_model_id: Mapped[int] = mapped_column(
+        ForeignKey("collection_models.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    option_weapon_ids_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    selected_weapon_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("weapons.id"), nullable=True
+    )
+    position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    collection_model: Mapped["CollectionModel"] = relationship(back_populates="slots")
+    selected_weapon: Mapped[Optional["Weapon"]] = relationship()
+
+
 for cls in [
     User,
     RuleSet,
@@ -527,6 +571,8 @@ for cls in [
     Roster,
     RosterUnit,
     ArmySpell,
+    CollectionModel,
+    CollectionModelSlot,
 ]:
     event.listen(cls, "before_insert", touch_timestamps)
     event.listen(cls, "before_update", touch_timestamps)

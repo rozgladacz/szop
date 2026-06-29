@@ -12,6 +12,114 @@ function initSpellAbilityForms() {
     const valueInput = form.querySelector('[data-ability-value-input]');
     const valueDescription = form.querySelector('[data-ability-value-description]');
     const passiveListId = form.dataset.passiveAbilityListId || '';
+    const armyId = form.dataset.armyId || '';
+    const costBlock = form.querySelector('[data-spell-ability-cost-block]');
+    const pointCostEl = form.querySelector('[data-spell-ability-point-cost]');
+    const difficultyOptionsEl = form.querySelector('[data-spell-ability-difficulty-options]');
+    const defaultDifficulty = String(form.dataset.defaultDifficulty || '4');
+    let costTimer = null;
+    let costController = null;
+
+    function selectedDifficulty() {
+      const checked = form.querySelector('input[name="cast_difficulty"]:checked');
+      return checked ? checked.value : defaultDifficulty;
+    }
+
+    function renderAbilityCost(data, keepDifficulty) {
+      if (!costBlock || !difficultyOptionsEl) {
+        return;
+      }
+      const tokens = (data && data.tokens) || {};
+      const diffs = Object.keys(tokens).sort((a, b) => Number(a) - Number(b));
+      if (diffs.length === 0) {
+        costBlock.classList.add('d-none');
+        difficultyOptionsEl.innerHTML = '';
+        return;
+      }
+      costBlock.classList.remove('d-none');
+      if (pointCostEl) {
+        pointCostEl.textContent = data && data.point_cost != null ? String(data.point_cost) : '—';
+      }
+      const want = String(keepDifficulty || defaultDifficulty);
+      difficultyOptionsEl.innerHTML = '';
+      diffs.forEach((d, idx) => {
+        const id = `cast-diff-${idx}-${d}`;
+        const wrap = document.createElement('div');
+        wrap.className = 'form-check';
+        const radio = document.createElement('input');
+        radio.className = 'form-check-input';
+        radio.type = 'radio';
+        radio.name = 'cast_difficulty';
+        radio.value = d;
+        radio.id = id;
+        radio.checked = d === want;
+        const label = document.createElement('label');
+        label.className = 'form-check-label text-nowrap';
+        label.setAttribute('for', id);
+        label.textContent = `${d}+ — ${tokens[d]} żet.`;
+        wrap.appendChild(radio);
+        wrap.appendChild(label);
+        difficultyOptionsEl.appendChild(wrap);
+      });
+    }
+
+    function currentAbilityValue() {
+      if (valueSelect && !valueSelect.classList.contains('d-none')) {
+        return valueSelect.value || '';
+      }
+      if (valueInput && !valueInput.classList.contains('d-none')) {
+        return valueInput.value || '';
+      }
+      return '';
+    }
+
+    function fetchAbilityCost() {
+      if (!abilitySelect || !armyId || !costBlock) {
+        return;
+      }
+      const abilityId = abilitySelect.value;
+      if (!abilityId) {
+        costBlock.classList.add('d-none');
+        if (difficultyOptionsEl) {
+          difficultyOptionsEl.innerHTML = '';
+        }
+        return;
+      }
+      const keep = selectedDifficulty();
+      const value = currentAbilityValue();
+      if (costTimer) {
+        window.clearTimeout(costTimer);
+      }
+      if (costController) {
+        costController.abort();
+        costController = null;
+      }
+      costTimer = window.setTimeout(() => {
+        costTimer = null;
+        costController = new AbortController();
+        const signal = costController.signal;
+        fetch(`/armies/${armyId}/spells/ability-cost-preview`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+          body: JSON.stringify({ ability_id: abilityId, value }),
+          credentials: 'same-origin',
+          signal,
+        })
+          .then((res) => (res.ok ? res.json() : Promise.reject(new Error(`HTTP ${res.status}`))))
+          .then((data) => {
+            if (costController && costController.signal === signal) {
+              costController = null;
+            }
+            renderAbilityCost(data, keep);
+          })
+          .catch((err) => {
+            if (err && err.name === 'AbortError') {
+              return;
+            }
+            console.error('Nie udało się pobrać kosztu mocy', err);
+          });
+      }, 250);
+    }
 
     function resetValueDescription() {
       if (valueDescription) {
@@ -183,12 +291,37 @@ function initSpellAbilityForms() {
       }
     }
 
+    function applyInitialValue() {
+      const initialValue = form.dataset.initialValue || '';
+      if (!initialValue) {
+        return;
+      }
+      if (valueSelect && !valueSelect.classList.contains('d-none')) {
+        valueSelect.value = initialValue;
+        updateValueDescriptionFromSelect();
+      } else if (valueInput && !valueInput.classList.contains('d-none')) {
+        valueInput.value = initialValue;
+      }
+    }
+
     if (abilitySelect) {
-      abilitySelect.addEventListener('change', handleAbilityChange);
+      abilitySelect.addEventListener('change', () => {
+        handleAbilityChange();
+        fetchAbilityCost();
+      });
       handleAbilityChange();
+      // Edit mode: a pre-selected ability needs its stored value restored once.
+      applyInitialValue();
+      fetchAbilityCost();
     }
     if (valueSelect) {
-      valueSelect.addEventListener('change', updateValueDescriptionFromSelect);
+      valueSelect.addEventListener('change', () => {
+        updateValueDescriptionFromSelect();
+        fetchAbilityCost();
+      });
+    }
+    if (valueInput) {
+      valueInput.addEventListener('input', fetchAbilityCost);
     }
   });
 }

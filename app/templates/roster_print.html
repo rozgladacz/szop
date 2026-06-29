@@ -159,7 +159,7 @@
     <h4>Lista zaklęć</h4>
     <ul class="list-unstyled mb-0">
       {% for spell in spell_entries %}
-      <li><strong>{{ spell.cost }}</strong>: {{ spell.label }}</li>
+      <li><strong>{{ spell.cost }}</strong> żet. ({{ spell.difficulty }}+): {{ spell.label }}</li>
       {% endfor %}
     </ul>
   </div>
