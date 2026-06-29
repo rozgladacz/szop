@@ -1,9 +1,9 @@
 # HANDOFF — kolekcja
 
-> **Wątek:** Faza 1 nowej funkcji "Kolekcja" — śledzenie fizycznych modeli użytkownika z wyposażeniem i magnetyzacją.
-> **Status:** In progress
+> **Wątek:** Kolekcja — śledzenie fizycznych modeli użytkownika i integracja z rozpiską. Faza 1 (CRUD) zakończona i scommitowana; Faza 2 (integracja z rozpiską) w toku, etap 2a gotowy.
+> **Status:** In progress (Faza 2)
 > **Utworzony:** 2026-06-17
-> **Ostatnia aktualizacja:** 2026-06-17
+> **Ostatnia aktualizacja:** 2026-06-29
 
 ## Cel
 
@@ -58,7 +58,39 @@ Użytkownik chce móc rejestrować posiadane fizyczne modele (miniatury) per odd
 - [x] `/simplify` — usunięto: dead code `_require_login`, `form_data` zmienną, wasted query reload, unreachable `name is None`; wyciągnięto `_parse_form_multi`; uproszczono `_safe_int` → inline loop
 - [x] `/security-review` — znaleziono i naprawiono: IDOR w `GET /collections/units/{unit_id}` (brak sprawdzenia army ownership); fix: HTTPException 403 jeśli army.owner_id ≠ current_user.id
 - [x] Re-run `pytest -q` po `/simplify` + `/security-review` — 222/222 passed
-- [ ] Diff review przed commitem
+- [x] Diff review przed commitem — scommitowane w `199858b` ("Pomieszany", razem z innymi wątkami)
+
+---
+
+## Faza 2 — integracja z rozpiską (etapowo, dopasowanie wariantowe)
+
+Plan: `~/.claude/plans/nowa-funkcjonalno-kolekcja-chcemy-wiggly-shore.md`. Decyzja: dopasowanie **wyliczane**; schemat dotyka tylko 2b (`RosterUnit.composed_models_json`). Dwa kierunki: **suma→modele** (2a/derived) i **modele→suma** (2b/compose, główna wartość).
+
+### Etap 2a — Wskaźnik pokrycia (badge) — WYCOFANY
+- Zbudowany (serwis `collection_match.py` + badge na karcie + 12 testów), ale **badge wycofany** na życzenie usera (2026-06-29): „plakietki" zaśmiecały listę „Oddziały w rozpisce". Pokrycie/modele mają być w prawym panelu za przyciskiem „Tryb modeli" (→ 2b).
+- Zostaje: **serwis `app/services/collection_match.py`** (`model_variant_signature`, `build_collection_index`, `roster_needs`, `coverage_for_item`, + helpery 2b) + testy. Martwa logika pokrycia w `edit_roster` i badge w `roster_edit.html` usunięte.
+
+### Etap 2b — Komponowanie oddziału z modeli (modele→suma, WRITE) ✅ v1 GOTOWE
+Decyzja UX usera (2026-06-29): „Tryb modeli" w prawym panelu **zastępuje** edytor (przełącznik), ale **nagłówek (nazwa, Jakość/Obrona/Wytrzymałość) i zdolności pasywne zostają**. v1 bez proxy (komponujemy tylko z posiadanych modeli).
+- [x] Kolumna `RosterUnit.composed_models_json` (TEXT, nullable) + migracja `app/db.py` (ALTER TABLE).
+- [x] `collection_match`: `collection_model_effective_weapons` (broń bazowa + zamontowane sloty), `fetch_owned_models`, `describe_owned_models`.
+- [x] `update_roster_unit`: + Form `composed_models_json` (zapis dla głównego oddziału; czyszczenie przy zwykłej edycji; guard `isinstance(str)` na sentinel `Form`).
+- [x] Endpoint `GET /rosters/{id}/units/{ru_id}/collection-models` → JSON {models, composed, current_loadout, weapon_names, coverage}. Owner isolation + view-access.
+- [x] `roster_edit.html`: przycisk „Tryb modeli" (`data-roster-models-toggle`), panel `data-roster-models-panel`, sekcje `data-models-hide` (liczność/aktywne/aury/wyposażenie; pasywne+nagłówek zostają).
+- [x] `roster_collection_models.js` (NEW, samodzielny IIFE): wybór ilości per model, podgląd agregatu (count + broń), zapis przez update (broń + `mode=total` + `composed_models_json`) → reload. Rejestracja w `base.html`.
+- [x] `tests/test_collection_match.py`: +`describe_owned_models`, +`fetch_owned_models` (izolacja). pytest 253/253.
+- [x] Weryfikacja statyczna: `node --check` modułu OK, Jinja OK, app import + serwowanie strony/modułu OK.
+- [ ] **Smoke przeglądarkowy** (wybór modeli buduje oddział, koszt, reload, round-trip) — do wykonania ręcznie (wymaga lokalnych danych: rozpiska + modele w kolekcji).
+- [ ] `/simplify` + `/security-review` (nowy endpoint owner-iso + zapis user-input) — przed commitem.
+- [ ] Diff review + commit.
+
+**v1 ograniczenia / do 2b.1:** brak proxy (tylko posiadane modele); broń agregowana, aktywne/aury/pasywne zachowane z bieżącego loadoutu (nie pochodzą z modeli); zmiana wyboru oddziału w trybie modeli wraca do trybu klasycznego.
+
+**Follow-up z `/simplify` (altitude, do 2b.1):** agregacja broni liczona po stronie JS, serwer ją tylko re-waliduje (`_sanitize_loadout`). Docelowo backend powinien liczyć loadout autorytatywnie z `composed_models_json` (JS = tylko podgląd). Nie jest to luka bezpieczeństwa (sanitize waliduje ID broni; zawyżone liczniki dotykają tylko własnej rozpiski usera), ale czystsza architektura. ~2h, nowy endpoint + testy. Pozostałe uwagi `/simplify` odrzucone jako niepoprawne (uproszczenia flag JS `savedSomething`/`pendingChanges` zepsułyby reset per-sesja / okno debounce) lub poza diffem (ekstrakcje do Fazy 1).
+
+### Etap 2c — Eliminowanie fizycznych modeli w Stanie Bitewnym (localStorage) — TODO
+- [ ] Sloty egzemplarzy z `composed_models_json` w kontekście `roster_battle_state` (`export.py`).
+- [ ] `battle_state.js`: `eliminatedSlots`, render egzemplarzy, styl `.is-defeated`, synchronizacja z `activeModels`.
 
 ## Pliki dotknięte
 

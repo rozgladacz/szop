@@ -29,7 +29,7 @@ from ..data.strategic_cards import (
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user
-from ..services import ability_registry, costs, utils
+from ..services import ability_registry, collection_match, costs, utils
 from ..services.roster_grouping import group_available_units, group_roster_items
 from ..services.rules import unit_is_hero
 
@@ -1159,6 +1159,7 @@ def update_roster_unit(
     count: int = Form(...),
     loadout_json: str | None = Form(None),
     custom_name: str | None = Form(None),
+    composed_models_json: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
@@ -1262,6 +1263,16 @@ def update_roster_unit(
         if ru.id == roster_unit.id:
             ru.custom_name = custom_name.strip() if custom_name else None
             ru.count = roster_unit.count
+            # Kolekcja 2b: zapis kompozycji modeli przychodzi tylko z „Trybu
+            # modeli". Zwykła edycja (brak pola) ⇒ czyścimy kompozycję, bo
+            # ręczna zmiana loadoutu rozjeżdża się z wybranym zestawem modeli.
+            # isinstance(str): odporność na sentinel Form(None) przy wywołaniu
+            # funkcji wprost (poza FastAPI) w testach.
+            ru.composed_models_json = (
+                composed_models_json
+                if isinstance(composed_models_json, str) and composed_models_json
+                else None
+            )
     affected_ids = {ru.id for ru in affected_units if ru.id is not None}
     precomputed_costs: dict[int, float] = {}
     for ru in affected_units:
@@ -1330,6 +1341,71 @@ def update_roster_unit(
     return RedirectResponse(
         url=f"/rosters/{roster.id}?selected={roster_unit.id}",
         status_code=303,
+    )
+
+
+@router.get("/{roster_id}/units/{roster_unit_id}/collection-models")
+def roster_unit_collection_models(
+    roster_id: int,
+    roster_unit_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    """Modele kolekcji użytkownika dla danego oddziału — dane „Trybu modeli" (2b)."""
+    roster = db.get(models.Roster, roster_id)
+    roster_unit = (
+        db.execute(
+            select(models.RosterUnit)
+            .options(
+                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
+            )
+            .where(models.RosterUnit.id == roster_unit_id)
+        )
+        .scalars()
+        .first()
+    )
+    if not roster or roster_unit is None or roster_unit.roster_id != roster.id:
+        raise HTTPException(status_code=404)
+    _ensure_roster_view_access(roster, current_user)
+
+    unit = roster_unit.unit
+    weapon_names: dict[int, str] = {}
+    for link in getattr(unit, "weapon_links", []) or []:
+        if link.weapon_id is not None and link.weapon is not None:
+            weapon_names[int(link.weapon_id)] = link.weapon.effective_name
+    if unit.default_weapon_id is not None and unit.default_weapon is not None:
+        weapon_names.setdefault(
+            int(unit.default_weapon_id), unit.default_weapon.effective_name
+        )
+
+    owned = collection_match.fetch_owned_models(db, current_user.id, unit.id)
+    models_payload = collection_match.describe_owned_models(owned, weapon_names)
+    owned_total = sum(item["count"] for item in models_payload)
+
+    composed: Any = []
+    if roster_unit.composed_models_json:
+        try:
+            composed = json.loads(roster_unit.composed_models_json)
+        except (json.JSONDecodeError, TypeError):
+            composed = []
+
+    # Aktualny loadout z DB (autorytatywne aktywne/aury/pasywne) — „Tryb modeli"
+    # podmienia tylko broń + tryb, resztę zachowuje przy zapisie kompozycji.
+    current_loadout: Any = {}
+    if roster_unit.extra_weapons_json:
+        try:
+            current_loadout = json.loads(roster_unit.extra_weapons_json)
+        except (json.JSONDecodeError, TypeError):
+            current_loadout = {}
+
+    return JSONResponse(
+        {
+            "models": models_payload,
+            "composed": composed,
+            "current_loadout": current_loadout,
+            "weapon_names": {str(wid): name for wid, name in weapon_names.items()},
+            "coverage": {"owned": owned_total, "needed": roster_unit.count},
+        }
     )
 
 

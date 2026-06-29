@@ -401,6 +401,11 @@ def _migrate_schema() -> None:
                         "REFERENCES roster_units(id) ON DELETE SET NULL"
                     )
                 )
+            if "composed_models_json" not in column_names:
+                logger.info("Adding composed_models_json column to roster_units table")
+                connection.execute(
+                    text("ALTER TABLE roster_units ADD COLUMN composed_models_json TEXT")
+                )
             connection.execute(
                 text(
                     "CREATE INDEX IF NOT EXISTS idx_roster_units_parent_id "

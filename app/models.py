@@ -501,6 +501,10 @@ class RosterUnit(TimestampMixin, Base):
     cached_cost: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     custom_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Kolekcja Faza 2b: lista wybranych CollectionModel (id + ilość), z których
+    # skomponowano ten oddział. NULL ⇒ oddział nie jest komponowany z modeli
+    # (tryb klasyczny). Loadout/koszt liczone normalnie z extra_weapons_json.
+    composed_models_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     parent_roster_unit_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("roster_units.id", ondelete="SET NULL"), nullable=True
     )

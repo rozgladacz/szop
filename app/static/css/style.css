@@ -370,3 +370,10 @@ tbody .spell-row-chosen { background: #fff3cd !important; }
   border-left-width: 6px;
   font-size: 1.1rem;
 }
+
+/* Kolekcja „Tryb modeli": klasyczny edytor staje się kontekstem read-only,
+   żeby jego autosave nie nadpisał skomponowanej broni. */
+.roster-models-readonly {
+  pointer-events: none;
+  opacity: 0.55;
+}

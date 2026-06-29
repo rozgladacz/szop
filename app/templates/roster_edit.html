@@ -355,6 +355,8 @@
           <h5 class="card-title mb-0">Dostosuj oddział</h5>
           {% if can_edit %}
           <div class="d-none d-flex flex-wrap gap-2" data-roster-editor-actions>
+            <button type="button" class="btn btn-outline-primary btn-sm" data-roster-models-toggle
+                    aria-pressed="false">Tryb modeli</button>
             <form method="post" data-roster-editor-duplicate>
               <button class="btn btn-outline-secondary btn-sm" type="submit">Duplikuj oddział</button>
             </form>
@@ -388,7 +390,7 @@
           {% if can_edit %}
           <form method="post" class="d-flex flex-column flex-grow-1" data-roster-editor-form>
             <input type="hidden" name="custom_name" data-roster-editor-custom-name />
-            <div class="mb-3">
+            <div class="mb-3" data-models-hide>
               <label class="form-label" for="roster-editor-count">Modele</label>
               <input
                 class="form-control"
@@ -405,15 +407,15 @@
                 <div class="fw-semibold small text-uppercase text-muted">Zdolności pasywne</div>
                 <div class="roster-ability-list" data-roster-editor-passives></div>
               </div>
-              <div class="mb-0" data-roster-section>
+              <div class="mb-0" data-roster-section data-models-hide>
                 <div class="fw-semibold small text-uppercase text-muted">Zdolności aktywne</div>
                 <div class="roster-ability-list" data-roster-editor-actives></div>
               </div>
-              <div class="mb-0" data-roster-section>
+              <div class="mb-0" data-roster-section data-models-hide>
                 <div class="fw-semibold small text-uppercase text-muted">Aury</div>
                 <div class="roster-ability-list" data-roster-editor-auras></div>
               </div>
-              <div class="mb-0" data-roster-section>
+              <div class="mb-0" data-roster-section data-models-hide>
                 <div class="fw-semibold small text-uppercase text-muted">Wyposażenie oddziału</div>
                 <div class="roster-ability-list" data-roster-editor-loadout></div>
               </div>
@@ -423,6 +425,7 @@
               <div class="text-muted small" data-roster-editor-save-state></div>
             </div>
           </form>
+          <div class="d-none flex-grow-1 d-flex flex-column" data-roster-models-panel></div>
           {% else %}
           <div class="flex-grow-1 d-flex flex-column gap-3">
             <div data-roster-section>
