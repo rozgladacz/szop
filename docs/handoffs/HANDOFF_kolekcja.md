@@ -89,6 +89,18 @@ Decyzja UX usera (2026-06-29): „Tryb modeli" w prawym panelu **zastępuje** ed
 
 **Follow-up z `/simplify` (altitude, do 2b.1):** agregacja broni liczona po stronie JS, serwer ją tylko re-waliduje (`_sanitize_loadout`). Docelowo backend powinien liczyć loadout autorytatywnie z `composed_models_json` (JS = tylko podgląd). Nie jest to luka bezpieczeństwa (sanitize waliduje ID broni; zawyżone liczniki dotykają tylko własnej rozpiski usera), ale czystsza architektura. ~2h, nowy endpoint + testy. Pozostałe uwagi `/simplify` odrzucone jako niepoprawne (uproszczenia flag JS `savedSomething`/`pendingChanges` zepsułyby reset per-sesja / okno debounce) lub poza diffem (ekstrakcje do Fazy 1).
 
+### Etap 2b.1 + 2b.2 — rozszerzenia kompozycji ✅ GOTOWE (commit `6830c92`)
+Cztery braki zgłoszone przez usera przed 2c + dopracowanie UI.
+- [x] **Agregacja serwerowa** (`compose_loadout`): gdy `update_roster_unit` dostaje `composed_models_json`, backend liczy broń+aktywne/aury+liczność autorytatywnie z selekcji; pasywne z klienta. Rozwiązuje follow-up F5.
+- [x] **Zdolności z modeli**: `compose_loadout` agreguje aktywne/aury (bare id) z wybranych modeli i z proxy.
+- [x] **Wspólna dostępność** (w obrębie rozpiski): `used_in_other_units` — `available` = posiadane − użyte w innych oddziałach; limit miękki (nadwyżka = proxy).
+- [x] **Pasywne w panelu**: reuse `window.SZOPRosterRendering.renderPassiveEditor`; klasyczna sekcja pasywnych ukryta (jeden edytor).
+- [x] **Derywacja v2** (`derive_composition`): zdolności-first → broń nie-podstawowa → podstawowa → dopełnienie; proxy z „domyślnego modelu" + brakująca zdolność + podmiana broni (`len(pw)>1`), bez zawyżania liczności.
+- [x] **UI 2b.2**: ukrycie klasycznego formularza (luka w szerokim układzie), kolejność pasywne→podgląd→modele, brak linii przy braku nazwy, zdolności w opisie modelu (`broń • zdolności`), proxy ze zdolnościami round-trip.
+- [x] `composed_models_json` v2: `{id,qty}` (owned) | `{id:null, weapons, abilities, qty}` (proxy).
+- [x] DoD: pytest 266/266, `node --check`, `/simplify` (parsery, selectinload, cache, docstringi), commit `6830c92`. `/security-review` pominięty (decyzja usera — brak nowej powierzchni: ten sam endpoint + owner-iso co w 2b).
+- **Ograniczenia / do dalej:** aury parametryzowane kolapsują do bare id; proxy swap-vs-add to heurystyka (`len(pw)>1`) — do dostrojenia per oddział jeśli trzeba; ręczne „Dodaj proxy" tylko broń (bez zdolności).
+
 ### Etap 2c — Eliminowanie fizycznych modeli w Stanie Bitewnym (localStorage) — TODO
 - [ ] Sloty egzemplarzy z `composed_models_json` w kontekście `roster_battle_state` (`export.py`).
 - [ ] `battle_state.js`: `eliminatedSlots`, render egzemplarzy, styl `.is-defeated`, synchronizacja z `activeModels`.
