@@ -254,7 +254,14 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] `mcp_server/{server.py, config.py}` — MCP Python SDK, rejestracja narzędzi
 - [x] Endpointy tokenów — **DONE 2026-06-28**: `POST /agent_tokens`, `GET /agent_tokens`, `DELETE /agent_tokens/{id}`. JSON API dla zalogowanego ownera; tworzy dedykowanego `User.role="agent"` bez hasła użytkowego, zapisuje tylko `AgentToken.token_hash`, zwraca raw bearer token tylko raz, limituje ownera do 20 aktywnych tokenów, listuje/cofa wyłącznie tokeny ownera i audytuje create/revoke bez sekretów. Brak UI; konsumenci B4/MCP nadal osobny zakres.
 - [x] Middleware `require_agent_scope(scope_name)` — **DONE 2026-06-27**: `app/security.py` hash bearer tokena (`sha256:`), lookup `AgentToken.token_hash`, scope JSON (`*` albo konkretny scope), odrzucenie expired/revoked/non-agent i `AgentAuditLog` z redakcją sekretów z query/path params. 8 testów. Konsumenci B4/MCP jeszcze niepodpięci.
-- [ ] `AgentProposal` model + `POST /agent_proposals`, `POST /agent_proposals/{id}/approve`
+- [x] `AgentProposal` model + backend JSON endpointy — **backend slice DONE 2026-06-29**:
+  `POST /agent_proposals` (agent bearer scope `agent_proposals:create` tworzy
+  propozycję `pending` owner-scoped), `GET /agent_proposals` (owner listuje
+  własne propozycje, najnowsze pierwsze), `POST /agent_proposals/{id}/approve`
+  (owner zatwierdza własną propozycję idempotentnie) + `POST
+  /agent_proposals/{id}/reject` (owner odrzuca własną propozycję idempotentnie).
+  Decyzja zapisuje status/`decided_at`, ale **nie wykonuje jeszcze akcji
+  domenowej**; wykonawca zatwierdzonych propozycji zostaje w B4/MCP.
 - [ ] Frontend: approval UI "[Agent chce X] [Zezwól] [Odrzuć]"
 - [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy). ADR-0021 (MCP jako klient publicznego API) i ADR-0024 (Consent-gated writes) nadal otwarte (warstwa konsumenta/zapisów za zgodą).
 

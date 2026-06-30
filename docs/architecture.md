@@ -32,7 +32,13 @@ owner-only: `POST /agent_tokens` generuje raw bearer token tylko raz i zapisuje
 wyłącznie hash, egzekwując limit 20 aktywnych tokenów ownera; `GET /agent_tokens`
 listuje własne tokeny bez sekretów, a `DELETE /agent_tokens/{id}` cofa własny
 token. Pełny kontrakt: [ADR-0025](adr/0025-agent-scoped-tokens.md).
-Konsumenci B4/MCP pozostają osobnym zakresem.
+`app/routers/agent_proposals.py` dodaje backendowy consent gate dla przyszłych
+zapisów agentów: bearer scope `agent_proposals:create` tworzy owner-scoped
+`AgentProposal(status="pending")`, owner przez sesję użytkownika listuje własne
+propozycje przez `GET /agent_proposals`, zatwierdza `POST
+/agent_proposals/{id}/approve` albo odrzuca `POST /agent_proposals/{id}/reject`.
+Decyzja zapisuje status i audit, ale nie wykonuje jeszcze akcji domenowej.
+Konsumenci B4/MCP oraz UI zatwierdzania pozostają osobnym zakresem.
 
 ## Dokumentacja reguł gry — read-only
 

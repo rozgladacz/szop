@@ -24,6 +24,9 @@ ARMY_SPELL_NAME_MAX_LENGTH = 60
 USER_ROLE_USER = "user"
 USER_ROLE_AGENT = "agent"
 USER_ROLE_ADMIN = "admin"
+AGENT_PROPOSAL_STATUS_PENDING = "pending"
+AGENT_PROPOSAL_STATUS_APPROVED = "approved"
+AGENT_PROPOSAL_STATUS_REJECTED = "rejected"
 
 
 class TimestampMixin:
@@ -94,6 +97,38 @@ class AgentAuditLog(Base):
 
     user: Mapped[Optional[User]] = relationship(foreign_keys=[user_id])
     agent_user: Mapped[Optional[User]] = relationship(foreign_keys=[agent_user_id])
+
+
+class AgentProposal(TimestampMixin, Base):
+    __tablename__ = "agent_proposals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    agent_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False, index=True
+    )
+    token_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("agent_tokens.id"), nullable=True, index=True
+    )
+    action: Mapped[str] = mapped_column(String(120), nullable=False)
+    summary: Mapped[str] = mapped_column(String(500), nullable=False)
+    payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default=AGENT_PROPOSAL_STATUS_PENDING, nullable=False
+    )
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    decided_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True, index=True
+    )
+
+    owner_user: Mapped[User] = relationship(foreign_keys=[owner_user_id])
+    agent_user: Mapped[User] = relationship(foreign_keys=[agent_user_id])
+    token: Mapped[Optional[AgentToken]] = relationship(foreign_keys=[token_id])
+    decided_by_user: Mapped[Optional[User]] = relationship(
+        foreign_keys=[decided_by_user_id]
+    )
 
 
 class RuleSet(TimestampMixin, Base):
@@ -645,6 +680,7 @@ for cls in [
     ArmySpell,
     Battle,
     AgentToken,
+    AgentProposal,
 ]:
     event.listen(cls, "before_insert", touch_timestamps)
     event.listen(cls, "before_update", touch_timestamps)

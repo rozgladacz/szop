@@ -11,6 +11,242 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## DONE - 2026-06-30T06:15+02:00 - C1 odrzucanie `AgentProposal`
+
+**Zakres pracy:** mały backendowy follow-up po liście propozycji: dodać
+owner-only `POST /agent_proposals/{id}/reject`, żeby backendowy kontrakt zgody
+miał oba rozstrzygnięcia wymagane przez przyszły UI `[Zezwól] [Odrzuć]`.
+Endpoint ma działać tylko dla właściciela propozycji, być idempotentny dla już
+odrzuconych propozycji i nie wykonywać akcji domenowej.
+
+**Wybór zadania:** kontynuacja już otwartego, niezatwierdzonego zakresu
+`AgentProposal` minimalizuje ryzyko konfliktu z równoległymi agentami i domyka
+jedno brakujące rozstrzygnięcie backendowego consent gate przed frontendem/B4.
+Nie wymaga decyzji użytkownika, nie dotyka `LOCKED` (Dywersant, raw combat rolls,
+`models_mode=per_copy`) ani reguł gry.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - używa istniejącego `AgentProposal.status="rejected"`.
+- Backend payload/API: `app/routers/agent_proposals.py` (`POST .../reject`).
+- JS render / CSS / template: N/A - brak UI w tym slice.
+- Testy: `tests/test_agent_proposals_router.py` (router registration, owner scope,
+  idempotencja, konflikt approved->reject).
+- Dokumentacja: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Endpoint robi
+pojedynczy owner-scoped SELECT po id i jeden UPDATE tylko przy pierwszym odrzuceniu;
+brak nowych query w istniejących requestach UI, kosztach albo pętli silnika.
+
+**Plan:**
+- [x] 1. Wykonać encoding gate i przeczytać lokalne wzorce proposal routera/testów.
+- [x] 2. Dodać reject endpoint + testy owner/idempotency/conflict.
+- [x] 3. Zsynchronizować `docs/roadmap.md` i `docs/architecture.md`.
+- [x] 4. Weryfikacja: targeted pytest, pełny pytest.
+- [x] 5. DoD: call-site check, manual `/simplify`, manual `/review` (auth/API),
+  manual `/security-review` (owner scope + DB update), diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Frontend approval UI i executor
+zatwierdzonych propozycji zostają `READY`/osobne zakresy.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-30T06:03:04+02:00: Bootstrap wykonany ręcznym odpowiednikiem
+  `/load-context`: przeczytano memory automatyzacji (brak treści), `AGENTS.md`,
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, oba aktywne HANDOFF-y,
+  `docs/handoffs/README.md`, `docs/roadmap.md`, `docs/planning.md`,
+  `docs/testing.md`, `docs/developing.md` oraz aktualny diff. Working tree ma
+  zastany backendowy slice `AgentProposal` i lokalną `.claude/settings.local.json`;
+  pracuję wyłącznie na kontynuacji `AgentProposal`.
+- 2026-06-30T06:05+02:00: Encoding gate dla
+  `app/routers/agent_proposals.py` i `tests/test_agent_proposals_router.py` OK
+  po eskalacji `.venv` (sandbox blokował WindowsApps). Call-site search pokazał,
+  że `AGENT_PROPOSAL_STATUS_REJECTED` już istnieje, ale brak publicznego
+  endpointu odrzucania.
+- 2026-06-30T06:09+02:00: Dodano `POST /agent_proposals/{id}/reject` jako
+  owner-scoped decyzję symetryczną do approve. Wspólny helper obsługuje lookup
+  po ownerze, idempotencję dla docelowego statusu i konflikt dla przejść
+  approved↔rejected. Testy rozszerzone o rejestrację route, owner-only reject,
+  idempotencję reject i konflikt `approved -> reject`.
+- 2026-06-30T06:11+02:00: `docs/roadmap.md` i `docs/architecture.md`
+  zsynchronizowane: backendowy `AgentProposal` kontrakt obejmuje create/list/
+  approve/reject. ADR-0024 nadal otwarte, bo executor domenowy i konsumenci B4/MCP
+  nie są częścią tego slice'a.
+- 2026-06-30T06:14+02:00: Targeted C1
+  `tests/test_agent_proposals_router.py tests/test_agent_tokens_router.py tests/test_agent_token_security.py`
+  **29 passed**, 237 warnings.
+- 2026-06-30T06:15+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2045 passed**, 2894 warnings. Call-site check: `reject_agent_proposal`,
+  `_get_owned_proposal`, `_decide_proposal`, `AGENT_PROPOSAL_STATUS_REJECTED`
+  i `/reject` występują tylko w routerze/testach/modelu oraz dokumentacji.
+  `git diff --check` bez błędów (tylko ostrzeżenia CRLF dla docs i zastanej
+  `.claude`); osobny `rg "[ \t]+$"` na dotkniętych plikach bez trafień.
+  Manual `/simplify`: bez zmian. Manual `/review`: 0 bugów korektności w zakresie
+  reject endpointu; przejścia statusu są idempotentne tylko dla statusu docelowego,
+  a przejścia approved↔rejected zwracają 409. Manual `/security-review`: reject
+  wymaga sesji użytkownika przez `get_current_user()`, filtruje
+  `owner_user_id == current_user.id`, cudza propozycja = 404, nie przyjmuje body,
+  nie wykonuje akcji domenowej i audytuje tylko metadane bez payloadu/sekretów.
+  Realne pytania do usera: brak; frontend approval UI i executor zatwierdzonych
+  propozycji pozostają `READY`/osobne zakresy.
+
+## DONE - 2026-06-30T01:13+02:00 - C1 lista `AgentProposal` dla ownera
+
+**Zakres pracy:** mały backendowy follow-up po slice `AgentProposal`: dodać
+owner-only `GET /agent_proposals`, żeby przyszły approval UI i konsumenci B4/MCP
+mieli odczyt pending/decided propozycji bez bezpośredniego dostępu do DB. Endpoint
+ma zwracać tylko propozycje zalogowanego ownera, najnowsze pierwsze, przez ten sam
+model publiczny co create/approve. Brak wykonywania akcji domenowej.
+
+**Wybór zadania:** kontynuacja gotowego consent gate z 2026-06-29; najmniejszy
+brakujący element backendowy przed frontendowym approval UI. Nie wymaga decyzji
+usera, nie dotyka `LOCKED` (Dywersant, raw combat rolls, `models_mode=per_copy`),
+nie wchodzi w pełny B4 router, MCP SDK ani RAG.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - używa istniejącego `AgentProposal`.
+- Backend payload/API: `app/routers/agent_proposals.py` (`GET /agent_proposals`).
+- JS render / CSS / template: N/A - brak UI w tym slice.
+- Testy: `tests/test_agent_proposals_router.py` (router registration, owner scope,
+  sortowanie, payload publiczny).
+- Dokumentacja: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Endpoint robi
+jedno owner-scoped SELECT po małej tabeli propozycji; brak nowych query w istniejących
+requestach UI, kosztach albo pętli silnika.
+
+**Plan:**
+- [x] 1. Przeczytać aktualny diff i wzorce token/proposal routera.
+- [x] 2. Dodać list endpoint + testy owner scoping/sortowania.
+- [x] 3. Zsynchronizować `docs/roadmap.md` i `docs/architecture.md`.
+- [x] 4. Weryfikacja: encoding gate, targeted pytest, pełny pytest.
+- [x] 5. DoD: call-site check, manual `/simplify`, manual `/review` (auth/API),
+  manual `/security-review` (owner scope + DB read), diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Frontend approval UI i wykonawca
+zatwierdzonych propozycji zostają `READY`/osobne zakresy.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-30T01:03:46+02:00: Bootstrap wykonany przez lokalny odpowiednik
+  `/load-context`: przeczytano memory automatyzacji, `AGENTS.md`,
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, oba aktywne HANDOFF-y,
+  `docs/handoffs/README.md`, `docs/roadmap.md`, `docs/planning.md`,
+  `docs/testing.md`, `docs/developing.md`, `docs/architecture.md`. Working tree
+  zawiera niezatwierdzony backendowy slice `AgentProposal` z poprzedniej sesji
+  oraz zastaną `.claude/settings.local.json`; nie usuwam cudzych zmian.
+- 2026-06-30T01:06:56+02:00: Dodano `GET /agent_proposals` w routerze jako
+  owner-scoped SELECT po `AgentProposal.owner_user_id`, sortowany po
+  `created_at desc, id desc`, bez efektów ubocznych. Testy rozszerzone o
+  rejestrację metody GET oraz owner scoping/listowanie pending+approved bez
+  wycieku cudzych propozycji.
+- 2026-06-30T01:08:12+02:00: `docs/roadmap.md` i `docs/architecture.md`
+  zsynchronizowane: backendowy `AgentProposal` kontrakt obejmuje teraz
+  create/list/approve. ADR-0024 nadal otwarte, bo executor zapisów domenowych
+  i konsumenci B4/MCP nie są częścią tego slice'a.
+- 2026-06-30T01:09:04+02:00: Pierwszy targeted C1 zatrzymał się na teście
+  `test_list_agent_proposals_is_owner_scoped_and_newest_first`: helper testowy
+  używał stałego `RAW_TOKEN`, więc drugi owner w tej samej in-memory DB łamał
+  unikalność `AgentToken.token_hash`. To błąd fixtury testowej ujawniony przez
+  nowy scenariusz multi-owner; poprawka: token testowy unikalny per owner.
+- 2026-06-30T01:11:37+02:00: Encoding gate dla
+  `app/routers/agent_proposals.py` i `tests/test_agent_proposals_router.py` OK
+  (po eskalacji `.venv`, bo sandbox blokuje WindowsApps). Targeted C1:
+  `tests/test_agent_proposals_router.py tests/test_agent_tokens_router.py tests/test_agent_token_security.py`
+  **27 passed**, 222 warnings. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2043 passed**, 2879 warnings.
+- 2026-06-30T01:13:33+02:00: Call-site check: `list_agent_proposals` występuje
+  tylko w routerze i teście; `agent_proposals` route rejestrowane przez
+  `app/main.py`/`app/routers/__init__.py`; docs zaktualizowane. `git diff --check`
+  bez błędów (tylko ostrzeżenia CRLF dla docs i zastanej `.claude`). Dodatkowe
+  `rg "[ \t]+$"` na untracked router/test nie znalazło trailing whitespace.
+  Manual `/simplify`: bez zmian. Manual `/review`: 0 bugów korektności w zakresie
+  list endpointu. Manual `/security-review`: listing wymaga sesji usera przez
+  `get_current_user()`, filtruje `owner_user_id == current_user.id`, nie ujawnia
+  cudzych propozycji, nie przyjmuje parametrów query, nie zapisuje do DB i nie
+  loguje payloadów/sekretów. Realne pytania do usera: brak; frontend approval UI,
+  reject endpoint i executor domenowy pozostają `READY`/osobne małe zakresy.
+
+## DONE - 2026-06-29T21:20+02:00 - C1 `AgentProposal` backend consent gate
+
+**Zakres pracy:** addytywny backendowy slice C1 po endpointach tokenów:
+model `AgentProposal` + minimalne JSON endpointy `POST /agent_proposals`
+(agent bearer token tworzy propozycję zapisu) i
+`POST /agent_proposals/{id}/approve` (owner zatwierdza sesją użytkownika).
+Zatwierdzenie w tym slice **nie wykonuje akcji domenowej** - tylko zapisuje
+zgodę/status do późniejszego konsumenta B4/MCP. Frontend approval UI pozostaje
+osobnym checkboxem roadmapy.
+
+**Wybór zadania:** to najmniejszy następny krok po gotowych tokenach C1, który
+przybliża dwufalowy kierunek B API + C MCP bez wchodzenia w pełny B4 router,
+MCP SDK ani RAG. Nie dotyka zasad gry ani pozycji `LOCKED` (Dywersant, raw combat
+rolls, `models_mode=per_copy`).
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: `app/models.py` (`AgentProposal`) + standardowe
+  `Base.metadata.create_all`; ręczna `_migrate_schema` tylko jeśli testy pokażą
+  potrzebę dla istniejącej SQLite.
+- Backend payload/API: nowy router `app/routers/agent_proposals.py`,
+  rejestracja w `app/main.py` i `app/routers/__init__.py`.
+- JS render / CSS / template: N/A - brak UI w tym slice.
+- Testy: nowy `tests/test_agent_proposals_router.py` + targeted C1.
+- Dokumentacja: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Endpointy robią
+pojedyncze owner-scoped operacje na małej tabeli propozycji; brak nowych query w
+istniejących requestach UI, kosztach lub pętli silnika.
+
+**Plan:**
+- [x] 1. Przeczytać wzorce `AgentToken`, auth dependency, router registration i testy.
+- [x] 2. Dodać model, router, rejestrację i testy minimalnego kontraktu.
+- [x] 3. Zsynchronizować roadmap/architecture.
+- [x] 4. Weryfikacja: encoding gate, targeted pytest, pełny pytest.
+- [x] 5. DoD: call-site check, manual `/simplify`, manual `/review` (diff >50/auth),
+  manual `/security-review` (auth + user input -> DB), diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla backendowego consent gate. Przyszły
+wykonawca zatwierdzonych propozycji (konkretne akcje B4/MCP) i UI listy/approve
+pozostają `READY`/osobne zakresy, nie blokują tego slice'a.
+
+**Wykonane kroki / odkrycia:**
+- 2026-06-29T21:05:19+02:00: Bootstrap: memory automatyzacji nie istniała;
+  przeczytano `AGENTS.md`, `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`,
+  oba aktywne HANDOFF-y, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/developing.md`,
+  `docs/architecture.md`. `aideas-knowledge-base` jest `Ready for archive` i
+  blokuje tylko `AIdeas/`; working tree ma wyłącznie zastaną
+  `.claude/settings.local.json`, której nie dotykam.
+- 2026-06-29T21:05:19+02:00: Wzorzec C1: `AgentToken` ma owner-only endpointy,
+  bearer-token dependency `require_agent_scope(scope_name)` zapisuje audit i
+  zwraca `AgentPrincipal(owner_user_id, agent_user_id, token_id, scopes)`.
+  Minimalny scope dla tworzenia propozycji w tym slice: `agent_proposals:create`.
+- 2026-06-29T21:12+02:00: Dodano addytywny model `AgentProposal`, router
+  `app/routers/agent_proposals.py`, rejestrację w `app/main.py`/`routers.__init__`
+  i testy `tests/test_agent_proposals_router.py`. Kontrakt: agent z bearer
+  scope `agent_proposals:create` tworzy `pending`; owner zatwierdza własne
+  propozycje idempotentnie; zatwierdzenie zapisuje status/`decided_at`, nie
+  wykonuje domenowego write. Targeted C1:
+  `tests/test_agent_proposals_router.py tests/test_agent_tokens_router.py tests/test_agent_token_security.py`
+  **26 passed**, 208 warnings.
+- 2026-06-29T21:14+02:00: `docs/roadmap.md` oznacza backendowy `AgentProposal`
+  slice jako DONE, ale frontend approval UI i wykonawca zatwierdzonych propozycji
+  pozostają osobnymi zakresami. `docs/architecture.md` dopisuje consent gate pod
+  uprawnieniami agentów; ADR-0024 nie jest oznaczany jako Accepted, bo dotyczy
+  jeszcze warstwy wykonawczej B4/MCP.
+- 2026-06-29T21:20+02:00: Encoding gate dla dotkniętych `.py` **OK**.
+  Pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2042 passed**, 2865 warnings. Call-site check: `AgentProposal`,
+  `agent_proposals`, `CREATE_PROPOSAL_SCOPE`, `create_agent_proposal`,
+  `approve_agent_proposal` występują tylko w nowym modelu/routerze/testach,
+  rejestracji `app.main`/`routers.__init__` i docs. `git diff --check` bez
+  błędów (tylko ostrzeżenia CRLF dla docs oraz zastanej `.claude`).
+  Manual `/simplify`: bez zmian. Manual `/review`: 0 bugów korektności;
+  zatwierdzenie jest idempotentne i nie wykonuje akcji domenowej. Manual
+  `/security-review`: create wymaga bearer scope `agent_proposals:create`,
+  approve filtruje po `owner_user_id`, cudza propozycja = 404, audyt nie kopiuje
+  payloadu propozycji ani sekretów; payload jest parametryzowanym JSON w ORM,
+  bez dynamicznego SQL. Realne pytania do usera: brak; UI approval i executor
+  zatwierdzonych propozycji są `READY`/osobne zakresy.
+
 ## DONE - 2026-06-29 - C3 `lookup_rule` leaf-CLI (resolver `pkt X` + wyszukiwanie)
 
 > **Status:** slice domknięty. Targeted `tests/test_lookup_rule.py` **29 passed**;
