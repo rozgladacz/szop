@@ -80,9 +80,10 @@ Decyzja UX usera (2026-06-29): „Tryb modeli" w prawym panelu **zastępuje** ed
 - [x] `roster_collection_models.js` (NEW, samodzielny IIFE): wybór ilości per model, podgląd agregatu (count + broń), zapis przez update (broń + `mode=total` + `composed_models_json`) → reload. Rejestracja w `base.html`.
 - [x] `tests/test_collection_match.py`: +`describe_owned_models`, +`fetch_owned_models` (izolacja). pytest 253/253.
 - [x] Weryfikacja statyczna: `node --check` modułu OK, Jinja OK, app import + serwowanie strony/modułu OK.
-- [ ] **Smoke przeglądarkowy** (wybór modeli buduje oddział, koszt, reload, round-trip) — do wykonania ręcznie (wymaga lokalnych danych: rozpiska + modele w kolekcji).
-- [ ] `/simplify` + `/security-review` (nowy endpoint owner-iso + zapis user-input) — przed commitem.
-- [ ] Diff review + commit.
+- [x] **Smoke przeglądarkowy** — user potwierdził: „Jest ok w tym etapie" (2026-06-29). Poprawki z testu: autosave po zmianie, brak reloadu per zmiana (zaznaczenie zostaje), usunięte dolne przyciski, klasyczny edytor read-only w trybie modeli (konflikt autosave'ów).
+- [x] `/simplify` — zastosowano klasę CSS `.roster-models-readonly` zamiast inline-style; reszta odrzucona (uproszczenia flag JS niepoprawne, ekstrakcje poza diffem); follow-up: agregacja serwerowa (wyżej).
+- [x] `/security-review` — CLEAN. Dwa wstępne findingi (IDOR composed_models_json, weapon-injection) odfiltrowane 2/10: pierwszy echo'wany/inert, drugi pre-existing + self-affecting.
+- [x] Commit `9390cd7` na `Rozwoj`.
 
 **v1 ograniczenia / do 2b.1:** brak proxy (tylko posiadane modele); broń agregowana, aktywne/aury/pasywne zachowane z bieżącego loadoutu (nie pochodzą z modeli); zmiana wyboru oddziału w trybie modeli wraca do trybu klasycznego.
 
