@@ -115,10 +115,10 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [x] `AgentAuditLog` — `(user_id?, agent_user_id?, route, params_json, timestamp)` (DONE 2026-06-26)
 - [!] Migracja Alembic: `XXX_add_battle_models.py` — N/A: projekt nie używa Alembic; nowe tabele addytywne przez `create_all`.
 
-**Runtime dataclass'y — czysty Python (`app/services/engine/state.py`):**
-- [ ] `UnitBlob(frozen=True)` — `(id, owner_player, position, radius_inches, models_alive, wounds_remaining, passives, status_flags)` — semantyka wounds jak istniejący „Stan bitewny"
-- [ ] `BattleState(frozen=True)` — `(round, active_player, activations_remaining, blobs, terrain, pending_effects, pending_interrupts, score)`
-- [ ] `TerrainCircle(frozen=True)`, `TerrainLine(frozen=True)`
+**Runtime dataclass'y — czysty Python (`app/services/engine/state.py`):** — **DONE w B3** (zaimplementowane jako prereq rule executora; `frozen=True, slots=True`)
+- [x] `UnitBlob(frozen=True)` — `app/services/engine/state.py:127`; semantyka wounds jak istniejący „Stan bitewny" (rozszerzony w B3.9/rules-resync o `melee_weapons`/`ranged_weapons`, `wounds_eliminating`, `location: Lokalizacja`)
+- [x] `BattleState(frozen=True)` — `app/services/engine/state.py:199` (z `initial_toughness_snapshot` B3.9.c + `effective_move_inches` helper)
+- [x] `TerrainCircle(frozen=True)`, `TerrainLine(frozen=True)` — `app/services/engine/state.py:67`/`:76` (+ `Position`, `Objective`, `WeaponProfile` w tym samym module)
 
 **Event definitions (`app/services/engine/events.py`):** — **DONE** (B3.0.3, 16 typów)
 - [x] Frozen dataclass per event type (16: Move/Shot/Melee/ModelKilled/MoraleTest/Effect/Interrupt/RoundEnded/StatusAdded/StatusRemoved/MeleeBalanceReset/MutexCollision/ObjectiveControlChanged/InitiativePassed/AbilityOverrideApplied/AbilityOverridesCleared)
