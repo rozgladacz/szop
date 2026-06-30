@@ -1,10 +1,11 @@
-// Kolekcja Faza 2b — „Tryb modeli" w prawym panelu edytora rozpiski.
+// Kolekcja Faza 2b/2b.1 — „Tryb modeli" w prawym panelu edytora rozpiski.
 // Samodzielny moduł (nie sięga do domknięcia roster_editor.js): czyta aktywny
-// oddział z DOM, pobiera modele kolekcji użytkownika dla tego oddziału i pozwala
-// SKOMPONOWAĆ oddział przez wybór egzemplarzy (modele → suma). Zapis jest
-// AUTOMATYCZNY po każdej zmianie (debounce), z aktualizacją kosztu w miejscu —
-// bez przeładowania. Wyjście z trybu (górny przycisk) przeładowuje raz z
-// zachowaniem zaznaczenia, aby zsynchronizować klasyczny edytor.
+// oddział z DOM, pobiera modele kolekcji dla tego oddziału i pozwala SKOMPONOWAĆ
+// oddział z egzemplarzy (modele → suma). Broń/aktywne/aury/liczność liczy
+// AUTORYTATYWNIE backend z selekcji; tutaj wysyłamy selekcję + pasywne. Zapis
+// automatyczny (debounce), aktualizacja kosztu w miejscu. Limit modeli miękki:
+// nadwyżka ponad „dostępne" = proxy tego wariantu; nowe wpisy proxy dla broni
+// nieposiadanej. Pasywne edytowalne (reuse renderPassiveEditor).
 (function () {
   const SAVE_DEBOUNCE_MS = 400;
 
@@ -25,28 +26,33 @@
     let modelsMode = false;
     let activeItem = null;
     let rosterUnitId = '';
-    let data = null; // odpowiedź endpointu
-    const selections = new Map(); // collection_model_id (str) -> qty
+    let data = null;                 // odpowiedź endpointu
+    const selections = new Map();    // collection_model_id (str) -> qty (może > available = proxy)
+    let proxies = [];                // [{weapons: {wid: cnt}, qty}] — proxy wariantów nieposiadanych
+    const passiveMap = new Map();    // slug -> 0/1
 
     let saveTimer = null;
     let saveController = null;
     let saveSeq = 0;
     let appliedSeq = 0;
-    let pendingChanges = false; // zmiana niewysłana jeszcze do serwera
-    let savedSomething = false; // czy w tej sesji trybu coś zapisano
+    let pendingChanges = false;
+    let savedSomething = false;
 
     const hideEls = () => Array.from(editor.querySelectorAll('[data-models-hide]'));
     const getActiveItem = () => root.querySelector('[data-roster-item].active');
+    const weaponName = (wid) => ((data && data.weapon_names) || {})[String(wid)] || `Broń #${wid}`;
+    const abilityName = (aid) => ((data && data.ability_names) || {})[String(aid)] || `Zdolność #${aid}`;
+    const availableOf = (m) => Number(m.available != null ? m.available : m.count) || 0;
 
-    // W trybie modeli klasyczny formularz (m.in. wciąż widoczne zdolności
-    // pasywne) jest read-only — inaczej jego własny autosave nadpisałby
-    // skomponowaną broń nieaktualnym stanem sprzed kompozycji.
-    function setClassicReadonly(on) {
+    // W trybie modeli chowamy CAŁY klasyczny formularz (jego puste, rozciągliwe
+    // `flex-grow-1` sekcje zostawiałyby lukę pod statystykami w szerokim układzie).
+    // Etykietę custom-name (w nagłówku, poza formularzem) robimy read-only — jej
+    // edycja odpaliłaby autosave klasycznego edytora ze starym loadoutem.
+    function setClassicHidden(on) {
       const classicForm = editor.querySelector('[data-roster-editor-form]');
       const customLabel = editor.querySelector('[data-roster-editor-custom-label]');
-      [classicForm, customLabel].forEach((el) => {
-        if (el) el.classList.toggle('roster-models-readonly', on);
-      });
+      if (classicForm) classicForm.classList.toggle('d-none', on);
+      if (customLabel) customLabel.classList.toggle('roster-models-readonly', on);
     }
 
     function restoreClassicSections() {
@@ -57,9 +63,11 @@
       panel.classList.add('d-none');
       panel.innerHTML = '';
       hideEls().forEach((el) => el.classList.remove('d-none'));
-      setClassicReadonly(false);
+      setClassicHidden(false);
       data = null;
       selections.clear();
+      proxies = [];
+      passiveMap.clear();
       activeItem = null;
       rosterUnitId = '';
     }
@@ -69,13 +77,10 @@
         window.clearTimeout(saveTimer);
         saveTimer = null;
       }
-      // Dokończ ostatnią niewysłaną zmianę zanim przeładujemy.
       if (pendingChanges && aggregate().count > 0) {
         await doSave();
       }
       if (savedSomething && rosterUnitId) {
-        // Reload z zaznaczeniem edytowanego oddziału — synchronizuje klasyczny
-        // edytor z nowym loadoutem i zachowuje zaznaczenie.
         window.location.href = `/rosters/${rosterId}?selected=${rosterUnitId}`;
         return;
       }
@@ -99,7 +104,7 @@
       toggle.classList.add('active');
       toggle.textContent = 'Tryb klasyczny';
       hideEls().forEach((el) => el.classList.add('d-none'));
-      setClassicReadonly(true);
+      setClassicHidden(true);
       panel.classList.remove('d-none');
       panel.innerHTML = '<div class="text-muted small">Wczytywanie modeli…</div>';
       try {
@@ -113,86 +118,153 @@
         panel.innerHTML = '<div class="text-danger small">Nie udało się wczytać modeli kolekcji.</div>';
         return;
       }
+      // Wstępna selekcja: zapisana kompozycja lub derywacja suma→modele (z serwera).
       selections.clear();
+      proxies = [];
       (Array.isArray(data.composed) ? data.composed : []).forEach((entry) => {
-        if (entry && entry.id != null) {
-          selections.set(String(entry.id), Math.max(0, parseInt(entry.qty, 10) || 0));
+        if (!entry) return;
+        const qty = Math.max(0, parseInt(entry.qty, 10) || 0);
+        if (qty <= 0) return;
+        if (entry.id != null) {
+          selections.set(String(entry.id), (selections.get(String(entry.id)) || 0) + qty);
+        } else {
+          proxies.push({
+            weapons: entry.weapons && typeof entry.weapons === 'object' ? entry.weapons : {},
+            abilities: Array.isArray(entry.abilities) ? entry.abilities : [],
+            qty,
+          });
         }
       });
+      passiveMap.clear();
+      const passiveState = (data.passive_state && typeof data.passive_state === 'object') ? data.passive_state : {};
+      Object.entries(passiveState).forEach(([slug, val]) => passiveMap.set(String(slug), val ? 1 : 0));
       renderPanel();
     }
 
     function aggregate() {
       let count = 0;
       const weapons = {};
-      const models = (data && data.models) || [];
-      models.forEach((m) => {
+      const add = (wid, n) => { weapons[wid] = (weapons[wid] || 0) + n; };
+      ((data && data.models) || []).forEach((m) => {
         const qty = selections.get(String(m.id)) || 0;
         if (qty <= 0) return;
         count += qty;
-        Object.entries(m.weapons || {}).forEach(([wid, c]) => {
-          weapons[wid] = (weapons[wid] || 0) + qty * (Number(c) || 0);
-        });
+        Object.entries(m.weapons || {}).forEach(([wid, c]) => add(wid, qty * (Number(c) || 0)));
+      });
+      proxies.forEach((p) => {
+        const qty = Math.max(0, parseInt(p.qty, 10) || 0);
+        if (qty <= 0) return;
+        count += qty;
+        Object.entries(p.weapons || {}).forEach(([wid, c]) => add(wid, qty * (Number(c) || 0)));
       });
       return { count, weapons };
     }
 
     function aggregateSummary(weapons) {
-      const names = (data && data.weapon_names) || {};
       const parts = Object.keys(weapons)
         .sort((a, b) => Number(a) - Number(b))
-        .map((wid) => {
-          const name = names[wid] || `Broń #${wid}`;
-          const c = weapons[wid];
-          return c > 1 ? `${name} ×${c}` : name;
-        });
+        .map((wid) => (weapons[wid] > 1 ? `${weaponName(wid)} ×${weapons[wid]}` : weaponName(wid)));
       return parts.length ? parts.join(', ') : '—';
     }
 
-    function renderPanel() {
+    function ownedRowsHtml() {
       const models = (data && data.models) || [];
-      const coverage = (data && data.coverage) || { owned: 0, needed: 0 };
-      const agg = aggregate();
-
-      let rows = '';
       if (!models.length) {
-        rows = '<div class="alert alert-info py-2 px-3 small mb-3">'
-          + 'Brak modeli tego oddziału w Twojej kolekcji. '
-          + 'Dodaj je w zakładce <a href="/collections">Kolekcja</a>.'
-          + '</div>';
-      } else {
-        rows = models.map((m) => {
-          const qty = selections.get(String(m.id)) || 0;
-          const label = m.label ? escapeHtml(m.label) : '<span class="text-muted fst-italic">bez nazwy</span>';
-          return `
-            <div class="d-flex align-items-center gap-2 border rounded p-2 mb-2">
-              <div class="flex-grow-1">
-                <div class="small fw-semibold">${label}</div>
-                <div class="text-muted small">${escapeHtml(m.summary || '—')}</div>
-              </div>
-              <div class="d-flex align-items-center gap-1 flex-shrink-0">
-                <input type="number" class="form-control form-control-sm" style="width:4.5rem"
-                       min="0" max="${m.count}" value="${qty}"
-                       data-models-qty="${m.id}" aria-label="Liczba modeli" />
-                <span class="text-muted small">/ ${m.count}</span>
-              </div>
-            </div>`;
-        }).join('');
+        return '<div class="alert alert-info py-2 px-3 small mb-2">'
+          + 'Brak modeli tego oddziału w kolekcji. Dodaj je w zakładce '
+          + '<a href="/collections">Kolekcja</a> lub użyj proxy poniżej.</div>';
       }
+      return models.map((m) => {
+        const qty = selections.get(String(m.id)) || 0;
+        const avail = availableOf(m);
+        const overflow = Math.max(qty - avail, 0);
+        const labelLine = m.label ? `<div class="small fw-semibold">${escapeHtml(m.label)}</div>` : '';
+        const proxyTag = overflow > 0
+          ? ` <span class="badge text-bg-warning" title="Sztuki ponad dostępne traktowane jako proxy">proxy +${overflow}</span>`
+          : '';
+        return `
+          <div class="d-flex align-items-center gap-2 border rounded p-2 mb-2">
+            <div class="flex-grow-1">
+              ${labelLine}
+              <div class="text-muted small">${escapeHtml(m.summary || '—')}${proxyTag}</div>
+            </div>
+            <div class="d-flex align-items-center gap-1 flex-shrink-0">
+              <input type="number" class="form-control form-control-sm" style="width:4.5rem"
+                     min="0" value="${qty}" data-models-qty="${m.id}" aria-label="Liczba modeli" />
+              <span class="text-muted small">/ ${avail}</span>
+            </div>
+          </div>`;
+      }).join('');
+    }
 
+    function proxyRowsHtml() {
+      const opts = Object.keys((data && data.weapon_names) || {})
+        .map((wid) => `<option value="${wid}">${escapeHtml(weaponName(wid))}</option>`)
+        .join('');
+      const list = proxies.map((p, i) => {
+        const wsum = aggregateSummary(
+          Object.fromEntries(Object.entries(p.weapons || {}).map(([w, c]) => [w, Number(c) || 0])),
+        );
+        const abilSum = (p.abilities || []).map(abilityName).join(', ');
+        const detail = abilSum ? `${escapeHtml(wsum)} • ${escapeHtml(abilSum)}` : escapeHtml(wsum);
+        return `
+          <div class="d-flex align-items-center gap-2 border border-dashed rounded p-2 mb-2" data-proxy-row="${i}">
+            <div class="flex-grow-1">
+              <div class="small fw-semibold">Proxy <span class="badge text-bg-secondary">brak w kolekcji</span></div>
+              <div class="text-muted small">${detail}</div>
+            </div>
+            <div class="d-flex align-items-center gap-1 flex-shrink-0">
+              <input type="number" class="form-control form-control-sm" style="width:4.5rem"
+                     min="0" value="${p.qty}" data-proxy-qty="${i}" aria-label="Liczba proxy" />
+              <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" data-proxy-remove="${i}" title="Usuń">✕</button>
+            </div>
+          </div>`;
+      }).join('');
+      return `
+        ${list}
+        <div class="d-flex align-items-center gap-2 mt-1">
+          <select class="form-select form-select-sm" style="max-width:14rem" data-proxy-weapon>
+            <option value="">— bez broni —</option>
+            ${opts}
+          </select>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add>+ Dodaj proxy</button>
+        </div>`;
+    }
+
+    function renderPanel() {
+      const agg = aggregate();
       panel.innerHTML = `
-        <div class="mb-2 text-muted small">
-          Posiadasz <strong>${coverage.owned}</strong> modeli tego oddziału;
-          rozpiska liczy <strong>${coverage.needed}</strong>.
-        </div>
-        <div class="flex-grow-1" data-models-list>${rows}</div>
-        <div class="border-top pt-2 mt-2">
+        <div class="fw-semibold small text-uppercase text-muted mb-1">Zdolności pasywne</div>
+        <div data-models-passives class="mb-2"></div>
+        <div class="py-2 mb-2 border-top border-bottom">
           <div class="small">Skomponowany oddział:
             <strong data-models-preview-count>${agg.count}</strong> modeli
+            <span class="text-muted ms-1" data-models-status></span>
           </div>
           <div class="text-muted small" data-models-preview-weapons>${escapeHtml(aggregateSummary(agg.weapons))}</div>
-          <div class="text-muted small mt-1" data-models-status></div>
-        </div>`;
+        </div>
+        <div class="fw-semibold small text-uppercase text-muted mb-1">Modele</div>
+        <div data-models-list>${ownedRowsHtml()}</div>
+        <div class="fw-semibold small text-uppercase text-muted mt-2 mb-1">Proxy (uzupełnienie braków)</div>
+        <div data-proxy-list>${proxyRowsHtml()}</div>`;
+      renderPassives(agg.count);
+    }
+
+    function renderPassives(modelCount) {
+      const container = panel.querySelector('[data-models-passives]');
+      const rendering = window.SZOPRosterRendering || {};
+      if (!container || typeof rendering.renderPassiveEditor !== 'function') {
+        if (container) container.innerHTML = '<span class="text-muted small">—</span>';
+        return;
+      }
+      rendering.renderPassiveEditor(
+        container,
+        (data && data.passive_items) || [],
+        passiveMap,
+        modelCount != null ? modelCount : aggregate().count,
+        true,
+        () => scheduleSave(),
+      );
     }
 
     function setStatus(text, isError) {
@@ -223,17 +295,13 @@
           const name = activeItem.getAttribute('data-unit-name') || '';
           if (title) title.textContent = `${unit.count}x ${name}`;
         }
-        if (unit.loadout_json) {
-          activeItem.setAttribute('data-loadout', unit.loadout_json);
-        }
-        if (cost != null) activeItem.setAttribute('data-unit-cost', String(cost));
+        if (unit.loadout_json) activeItem.setAttribute('data-loadout', unit.loadout_json);
+        activeItem.setAttribute('data-unit-cost', String(cost));
       }
       const editorCost = root.querySelector('[data-roster-editor-cost]');
       if (editorCost && cost != null) editorCost.textContent = String(cost);
       const totalEl = root.querySelector('[data-roster-total]');
-      if (totalEl && payload.total_cost != null) {
-        totalEl.textContent = String(payload.total_cost);
-      }
+      if (totalEl && payload.total_cost != null) totalEl.textContent = String(payload.total_cost);
       if (window.SZOPRosterWarnings && typeof window.SZOPRosterWarnings.recompute === 'function') {
         window.SZOPRosterWarnings.recompute();
       }
@@ -248,30 +316,36 @@
       }, SAVE_DEBOUNCE_MS);
     }
 
+    function buildSelectionPayload() {
+      const out = [];
+      selections.forEach((qty, id) => {
+        if (qty > 0) out.push({ id: Number(id), qty });
+      });
+      proxies.forEach((p) => {
+        const qty = Math.max(0, parseInt(p.qty, 10) || 0);
+        if (qty > 0) out.push({ id: null, weapons: p.weapons || {}, abilities: p.abilities || [], qty });
+      });
+      return out;
+    }
+
     async function doSave() {
       if (!rosterUnitId) return;
       const agg = aggregate();
       if (agg.count <= 0) {
-        // Pusty wybór — nie zapisujemy (oddział nie może mieć 0 modeli).
         setStatus('Wybierz co najmniej jeden model.');
         return;
       }
+      // Broń/aktywne/aury liczy serwer z selekcji; wysyłamy tylko pasywne w loadout.
       const baseLoadout = (data && data.current_loadout && typeof data.current_loadout === 'object')
         ? { ...data.current_loadout }
         : {};
-      baseLoadout.weapons = agg.weapons;
-      baseLoadout.mode = 'total';
-
-      const composed = [];
-      selections.forEach((qty, id) => {
-        if (qty > 0) composed.push({ id: Number(id), qty });
-      });
+      baseLoadout.passive = Object.fromEntries(passiveMap);
 
       const form = new FormData();
       form.set('count', String(agg.count));
       form.set('loadout_json', JSON.stringify(baseLoadout));
       form.set('custom_name', activeItem ? (activeItem.getAttribute('data-unit-custom-name') || '') : '');
-      form.set('composed_models_json', JSON.stringify(composed));
+      form.set('composed_models_json', JSON.stringify(buildSelectionPayload()));
 
       const seq = ++saveSeq;
       pendingChanges = false;
@@ -303,32 +377,60 @@
 
     toggle.addEventListener('click', (event) => {
       event.preventDefault();
-      if (modelsMode) {
-        exitModelsMode();
-      } else {
-        enterModelsMode();
+      if (modelsMode) exitModelsMode(); else enterModelsMode();
+    });
+
+    // Zmiany ilości (modele owned + proxy) — input.
+    panel.addEventListener('input', (event) => {
+      const ownedInput = event.target.closest('[data-models-qty]');
+      if (ownedInput) {
+        let qty = parseInt(ownedInput.value, 10);
+        if (!Number.isFinite(qty) || qty < 0) { qty = 0; ownedInput.value = '0'; }
+        selections.set(String(ownedInput.getAttribute('data-models-qty')), qty);
+        refreshAfterChange();
+        return;
+      }
+      const proxyInput = event.target.closest('[data-proxy-qty]');
+      if (proxyInput) {
+        const i = parseInt(proxyInput.getAttribute('data-proxy-qty'), 10);
+        let qty = parseInt(proxyInput.value, 10);
+        if (!Number.isFinite(qty) || qty < 0) { qty = 0; proxyInput.value = '0'; }
+        if (proxies[i]) proxies[i].qty = qty;
+        refreshAfterChange();
       }
     });
 
-    panel.addEventListener('input', (event) => {
-      const input = event.target.closest('[data-models-qty]');
-      if (!input) return;
-      const id = input.getAttribute('data-models-qty');
-      let qty = parseInt(input.value, 10);
-      if (!Number.isFinite(qty) || qty < 0) qty = 0;
-      const max = parseInt(input.getAttribute('max'), 10);
-      if (Number.isFinite(max) && qty > max) {
-        qty = max;
-        input.value = String(qty);
+    // Dodawanie/usuwanie proxy — click.
+    panel.addEventListener('click', (event) => {
+      const addBtn = event.target.closest('[data-proxy-add]');
+      if (addBtn) {
+        const sel = panel.querySelector('[data-proxy-weapon]');
+        const wid = sel ? sel.value : '';
+        proxies.push({ weapons: wid ? { [String(wid)]: 1 } : {}, abilities: [], qty: 1 });
+        renderPanel();
+        scheduleSave();
+        return;
       }
-      selections.set(String(id), qty);
+      const removeBtn = event.target.closest('[data-proxy-remove]');
+      if (removeBtn) {
+        const i = parseInt(removeBtn.getAttribute('data-proxy-remove'), 10);
+        if (i >= 0 && i < proxies.length) {
+          proxies.splice(i, 1);
+          renderPanel();
+          scheduleSave();
+        }
+      }
+    });
+
+    // Aktualizuje podgląd + licznik pasywnych (cost delta) bez pełnego re-renderu
+    // listy (zachowuje focus w polach ilości), po czym planuje zapis.
+    function refreshAfterChange() {
       updatePreview();
       scheduleSave();
-    });
+    }
 
-    // Przełączenie na INNY oddział w trybie modeli: dokończ ewentualny zapis w
-    // tle i wróć do klasyka BEZ przeładowania — roster_editor sam zhydratyzuje
-    // nowo wybrany oddział z aktualnego data-loadout (zaktualizowanego in-place).
+    // Przełączenie na INNY oddział w trybie modeli: dokończ zapis w tle i wróć do
+    // klasyka bez przeładowania (roster_editor zhydratyzuje nowy wybór).
     root.addEventListener('click', (event) => {
       if (!modelsMode) return;
       const item = event.target.closest('[data-roster-item]');

@@ -1179,6 +1179,8 @@ def update_roster_unit(
         raise HTTPException(status_code=404)
     _ensure_roster_edit_access(roster, current_user)
     roster_unit.count = max(int(count), 1)
+    # Lista albo None (None ⇒ brak kompozycji → zwykła ścieżka klienta).
+    composed_selection = collection_match.parse_selection(composed_models_json) or None
     unit_data_cache: dict[int, dict[str, Any]] = {}
     unit_payloads: dict[int, dict[str, Any]] = {}
 
@@ -1221,6 +1223,20 @@ def update_roster_unit(
         passive_items = payload["passive_items"]
         if ru.id == roster_unit.id:
             parsed_loadout = _parse_loadout_json(loadout_json)
+            if composed_selection is not None:
+                # Kolekcja 2b.1: oddział komponowany z modeli — broń/aktywne/aury
+                # i liczność liczone AUTORYTATYWNIE z selekcji (modele→suma).
+                # Pasywne zostają z loadoutu klienta (edytowane w panelu modeli).
+                owned_by_id = {
+                    m.id: m
+                    for m in collection_match.fetch_owned_models(
+                        db, current_user.id, ru.unit_id
+                    )
+                }
+                parsed_loadout, composed_count = collection_match.compose_loadout(
+                    ru.unit, composed_selection, parsed_loadout, owned_by_id
+                )
+                ru.count = max(int(composed_count), 1)
             loadout = _sanitize_loadout(
                 ru.unit,
                 ru.count,
@@ -1263,15 +1279,12 @@ def update_roster_unit(
         if ru.id == roster_unit.id:
             ru.custom_name = custom_name.strip() if custom_name else None
             ru.count = roster_unit.count
-            # Kolekcja 2b: zapis kompozycji modeli przychodzi tylko z „Trybu
-            # modeli". Zwykła edycja (brak pola) ⇒ czyścimy kompozycję, bo
-            # ręczna zmiana loadoutu rozjeżdża się z wybranym zestawem modeli.
-            # isinstance(str): odporność na sentinel Form(None) przy wywołaniu
-            # funkcji wprost (poza FastAPI) w testach.
+            # Kolekcja 2b: zapis kompozycji tylko gdy selekcja jest poprawna
+            # (z „Trybu modeli"). Zwykła edycja (brak/niepoprawne pole) ⇒
+            # czyścimy kompozycję, bo ręczna zmiana loadoutu rozjeżdża się z
+            # wybranym zestawem modeli.
             ru.composed_models_json = (
-                composed_models_json
-                if isinstance(composed_models_json, str) and composed_models_json
-                else None
+                composed_models_json if composed_selection is not None else None
             )
     affected_ids = {ru.id for ru in affected_units if ru.id is not None}
     precomputed_costs: dict[int, float] = {}
@@ -1352,7 +1365,17 @@ def roster_unit_collection_models(
     current_user: models.User = Depends(get_current_user()),
 ):
     """Modele kolekcji użytkownika dla danego oddziału — dane „Trybu modeli" (2b)."""
-    roster = db.get(models.Roster, roster_id)
+    # Eager-load roster_units — `used_in_other_units` iteruje je do liczenia
+    # wspólnej dostępności (unik lazy-load).
+    roster = (
+        db.execute(
+            select(models.Roster)
+            .options(selectinload(models.Roster.roster_units))
+            .where(models.Roster.id == roster_id)
+        )
+        .scalars()
+        .first()
+    )
     roster_unit = (
         db.execute(
             select(models.RosterUnit)
@@ -1377,20 +1400,27 @@ def roster_unit_collection_models(
         weapon_names.setdefault(
             int(unit.default_weapon_id), unit.default_weapon.effective_name
         )
+    ability_names: dict[int, str] = {}
+    for link in getattr(unit, "abilities", []) or []:
+        if link.ability_id is not None and link.ability is not None:
+            ability_names[int(link.ability_id)] = link.ability.name
 
     owned = collection_match.fetch_owned_models(db, current_user.id, unit.id)
-    models_payload = collection_match.describe_owned_models(owned, weapon_names)
+    models_payload = collection_match.describe_owned_models(owned, weapon_names, ability_names)
     owned_total = sum(item["count"] for item in models_payload)
 
-    composed: Any = []
-    if roster_unit.composed_models_json:
-        try:
-            composed = json.loads(roster_unit.composed_models_json)
-        except (json.JSONDecodeError, TypeError):
-            composed = []
+    # Wspólna dostępność (2b.1d): odejmij sztuki użyte w INNYCH oddziałach tej
+    # rozpiski o tym samym unit_id. Limit miękki — nadwyżka ponad „available" to
+    # proxy (UI pozwala przekraczać).
+    used_elsewhere = collection_match.used_in_other_units(roster, unit.id, roster_unit.id)
+    available_map: dict[int, int] = {}
+    for item in models_payload:
+        avail = max(int(item["count"]) - used_elsewhere.get(item["id"], 0), 0)
+        item["available"] = avail
+        available_map[item["id"]] = avail
 
-    # Aktualny loadout z DB (autorytatywne aktywne/aury/pasywne) — „Tryb modeli"
-    # podmienia tylko broń + tryb, resztę zachowuje przy zapisie kompozycji.
+    # Aktualny loadout z DB (autorytatywne pasywne) — „Tryb modeli" podmienia
+    # broń/aktywne/aury z modeli, pasywne zachowuje (edytowalne w panelu).
     current_loadout: Any = {}
     if roster_unit.extra_weapons_json:
         try:
@@ -1398,15 +1428,34 @@ def roster_unit_collection_models(
         except (json.JSONDecodeError, TypeError):
             current_loadout = {}
 
-    return JSONResponse(
-        {
-            "models": models_payload,
-            "composed": composed,
-            "current_loadout": current_loadout,
-            "weapon_names": {str(wid): name for wid, name in weapon_names.items()},
-            "coverage": {"owned": owned_total, "needed": roster_unit.count},
-        }
-    )
+    # Selekcja: zapisana kompozycja, albo derywacja suma→modele (2b.1c).
+    composed: Any
+    if roster_unit.composed_models_json:
+        try:
+            composed = json.loads(roster_unit.composed_models_json)
+        except (json.JSONDecodeError, TypeError):
+            composed = []
+        if not isinstance(composed, list):
+            composed = []
+    else:
+        composed = collection_match.derive_composition(
+            unit, current_loadout, roster_unit.count, owned, available_map
+        )
+
+    # Pasywne (2b.1e): lista dostępnych + bieżący stan z loadoutu.
+    unit_payload = _unit_payload_cached(unit, {}, {})
+    passive_state = current_loadout.get("passive") if isinstance(current_loadout, dict) else {}
+
+    return JSONResponse(_json_safe({
+        "models": models_payload,
+        "composed": composed,
+        "current_loadout": current_loadout,
+        "weapon_names": {str(wid): name for wid, name in weapon_names.items()},
+        "ability_names": {str(aid): name for aid, name in ability_names.items()},
+        "passive_items": unit_payload.get("passive_items", []),
+        "passive_state": passive_state if isinstance(passive_state, dict) else {},
+        "coverage": {"owned": owned_total, "needed": roster_unit.count},
+    }))
 
 
 @router.post("/{roster_id}/units/{roster_unit_id}/quote")

@@ -377,3 +377,8 @@ tbody .spell-row-chosen { background: #fff3cd !important; }
   pointer-events: none;
   opacity: 0.55;
 }
+
+/* Wpis proxy (model spoza kolekcji) — wyróżnik wizualny. */
+.border-dashed {
+  border-style: dashed !important;
+}
