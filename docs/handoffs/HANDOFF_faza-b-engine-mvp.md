@@ -11,6 +11,32 @@ Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `S
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
 
+## DONE - 2026-06-30 - C1 odczyt pojedynczej `AgentProposal` (owner)
+
+**Zakres:** owner-scoped `GET /agent_proposals/{id}` domykający kontrakt REST
+consent-gate (create/list/**get**/approve/reject). Read-only, reuse
+`_get_owned_proposal` + `_public_proposal`; cudza/nieistniejąca = 404. Pod UI
+detalu/poll statusu propozycji. Bez nowego scope ani decyzji usera; nie dotyka
+`LOCKED` (Dywersant, raw combat rolls, `models_mode=per_copy`) ani reguł gry.
+
+**Warstwy:** backend `app/routers/agent_proposals.py` (+`get_agent_proposal`);
+testy `tests/test_agent_proposals_router.py` (route GET registration, owner fetch,
+404 cudza + 404 nieistniejąca, brak audytu/mutacji przy odczycie); docs
+`docs/roadmap.md`, `docs/architecture.md`. Data model/JS/CSS: N/A.
+
+**Performance gate:** poza hot path; pojedynczy owner-scoped SELECT po id.
+
+**Weryfikacja:** targeted `tests/test_agent_proposals_router.py` **10 passed**;
+pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2046 passed**
+(2045 + 1), zero regresji. Call-site check: `get_agent_proposal` tylko w
+routerze i teście. DoD: `/simplify` 0 zmian (czysty reuse helperów); `/review`
+0 bugów korektności (odczyt mirror approve/reject, 404 dla cudzej/missing, brak
+audytu/mutacji); `/security-review` — wymaga sesji `get_current_user()`, filtruje
+`owner_user_id == current_user.id`, cudza = 404, brak body/zapisu/dynamicznego SQL.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Frontend approval UI i executor
+zatwierdzonych propozycji (ADR-0024, akcje B4/MCP) pozostają osobnymi zakresami.
+
 ## DONE - 2026-06-30T06:15+02:00 - C1 odrzucanie `AgentProposal`
 
 **Zakres pracy:** mały backendowy follow-up po liście propozycji: dodać

@@ -35,8 +35,9 @@ token. Pełny kontrakt: [ADR-0025](adr/0025-agent-scoped-tokens.md).
 `app/routers/agent_proposals.py` dodaje backendowy consent gate dla przyszłych
 zapisów agentów: bearer scope `agent_proposals:create` tworzy owner-scoped
 `AgentProposal(status="pending")`, owner przez sesję użytkownika listuje własne
-propozycje przez `GET /agent_proposals`, zatwierdza `POST
-/agent_proposals/{id}/approve` albo odrzuca `POST /agent_proposals/{id}/reject`.
+propozycje przez `GET /agent_proposals`, czyta pojedynczą przez `GET
+/agent_proposals/{id}`, zatwierdza `POST /agent_proposals/{id}/approve` albo
+odrzuca `POST /agent_proposals/{id}/reject` (cudza/nieistniejąca = 404).
 Decyzja zapisuje status i audit, ale nie wykonuje jeszcze akcji domenowej.
 Konsumenci B4/MCP oraz UI zatwierdzania pozostają osobnym zakresem.
 

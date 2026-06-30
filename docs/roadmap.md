@@ -257,7 +257,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `AgentProposal` model + backend JSON endpointy — **backend slice DONE 2026-06-29**:
   `POST /agent_proposals` (agent bearer scope `agent_proposals:create` tworzy
   propozycję `pending` owner-scoped), `GET /agent_proposals` (owner listuje
-  własne propozycje, najnowsze pierwsze), `POST /agent_proposals/{id}/approve`
+  własne propozycje, najnowsze pierwsze), `GET /agent_proposals/{id}` (owner
+  czyta pojedynczą; cudza/nieistniejąca = 404), `POST /agent_proposals/{id}/approve`
   (owner zatwierdza własną propozycję idempotentnie) + `POST
   /agent_proposals/{id}/reject` (owner odrzuca własną propozycję idempotentnie).
   Decyzja zapisuje status/`decided_at`, ale **nie wykonuje jeszcze akcji

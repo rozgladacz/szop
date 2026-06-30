@@ -107,6 +107,7 @@ def test_agent_proposals_router_is_registered_in_app() -> None:
     assert "/agent_proposals" in route_paths
     assert "GET" in methods_by_path["/agent_proposals"]
     assert "POST" in methods_by_path["/agent_proposals"]
+    assert "GET" in methods_by_path["/agent_proposals/{proposal_id}"]
     assert "/agent_proposals/{proposal_id}/approve" in route_paths
     assert "/agent_proposals/{proposal_id}/reject" in route_paths
 
@@ -214,6 +215,48 @@ def test_list_agent_proposals_is_owner_scoped_and_newest_first() -> None:
     assert listed[0].payload == {"roster_id": 8, "changes": [{"field": "name"}]}
     assert listed[1].status == models.AGENT_PROPOSAL_STATUS_APPROVED
     assert listed[1].decided_at == approved.decided_at
+
+
+def test_get_agent_proposal_is_owner_scoped() -> None:
+    session = _build_session()
+    owner, agent, token, principal = _seed_agent_principal(session)
+    other_owner = _seed_user(session, username="other")
+    created = agent_proposals.create_agent_proposal(
+        _create_payload(payload={"roster_id": 9, "changes": []}),
+        db=session,
+        principal=principal,
+    )
+
+    fetched = agent_proposals.get_agent_proposal(
+        created.id,
+        db=session,
+        current_user=owner,
+    )
+
+    assert fetched.id == created.id
+    assert fetched.owner_user_id == owner.id
+    assert fetched.agent_user_id == agent.id
+    assert fetched.token_id == token.id
+    assert fetched.status == models.AGENT_PROPOSAL_STATUS_PENDING
+    assert fetched.payload == {"roster_id": 9, "changes": []}
+
+    with pytest.raises(HTTPException) as exc_info:
+        agent_proposals.get_agent_proposal(
+            created.id,
+            db=session,
+            current_user=other_owner,
+        )
+    assert exc_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_info:
+        agent_proposals.get_agent_proposal(
+            created.id + 999,
+            db=session,
+            current_user=owner,
+        )
+    assert missing_info.value.status_code == 404
+    # czysty odczyt nie audytuje ani nie zmienia statusu
+    assert _audit_actions(session) == ["create"]
 
 
 def test_approve_agent_proposal_is_owner_only_and_idempotent() -> None:

@@ -216,6 +216,20 @@ def list_agent_proposals(
     return [_public_proposal(proposal) for proposal in proposals]
 
 
+@router.get("/{proposal_id}", response_model=AgentProposalPublic)
+def get_agent_proposal(
+    proposal_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+) -> AgentProposalPublic:
+    proposal = _get_owned_proposal(
+        db,
+        proposal_id=proposal_id,
+        owner_user_id=current_user.id,
+    )
+    return _public_proposal(proposal)
+
+
 @router.post("/{proposal_id}/approve", response_model=AgentProposalPublic)
 def approve_agent_proposal(
     proposal_id: int,
