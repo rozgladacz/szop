@@ -15,7 +15,8 @@ Mapa zaleznosci po Fazie III podzialu `app/static/js/app.js`. Moduly sa klasyczn
 9. `editor_renderers.js`
 10. `roster_adders.js`
 11. istniejace stuby: `ability_picker.js`, `weapon_picker.js`, `roster_editor.js`, `armory_tree.js`
-12. `app.js`
+12. `agent_proposals.js`
+13. `app.js`
 
 ## Kontrakty
 
@@ -36,6 +37,7 @@ Mapa zaleznosci po Fazie III podzialu `app/static/js/app.js`. Moduly sa klasyczn
 | `loadout_state.js` | `SZOPRosterRendering.formatPoints` | `SZOPLoadoutState` with loadout state create/clone/serialize/ensure helpers, labels, mode helpers | roster editor closure, `editor_renderers.js`, Node frontend tests |
 | `editor_renderers.js` | `SZOPRosterRendering`, `SZOPLoadoutState`, `SZOPTextParsing` | `SZOPEditorRenderers.renderAbilityEditor`, `renderWeaponEditor`, `toggleSectionVisibility` | roster editor closure, Node frontend tests |
 | `roster_adders.js` | DOM/fetch roster add endpoint | `SZOPRosterAdders.initRosterAdders` | `initRosterEditor` in `app.js` |
+| `agent_proposals.js` | DOM, fetch endpointy `/agent_proposals` | `SZOPAgentProposals`, alias `initAgentProposals` | self-init na panelu home `data-agent-proposals-panel`; Node frontend tests |
 
 ## Call-site checklist per PR
 

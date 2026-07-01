@@ -31,6 +31,27 @@
   </div>
 </div>
 
+<section
+  class="card mb-4"
+  data-agent-proposals-panel
+  data-proposals-endpoint="/agent_proposals"
+>
+  <div class="card-body">
+    <div class="d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-2 mb-3">
+      <h2 class="h4 mb-0">Propozycje agentów</h2>
+      <span class="badge rounded-pill text-bg-secondary" data-agent-proposals-count>Ładowanie</span>
+    </div>
+    <div
+      class="alert alert-danger py-2 mb-3 d-none"
+      role="alert"
+      data-agent-proposals-alert
+    ></div>
+    <div class="list-group" data-agent-proposals-list>
+      <div class="list-group-item text-muted">Ładowanie propozycji...</div>
+    </div>
+  </div>
+</section>
+
 <div class="row">
   <div class="col-lg-6">
     <h4>Ostatnie rozpiski</h4>

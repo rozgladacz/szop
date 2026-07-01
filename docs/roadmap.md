@@ -263,7 +263,11 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   /agent_proposals/{id}/reject` (owner odrzuca własną propozycję idempotentnie).
   Decyzja zapisuje status/`decided_at`, ale **nie wykonuje jeszcze akcji
   domenowej**; wykonawca zatwierdzonych propozycji zostaje w B4/MCP.
-- [ ] Frontend: approval UI "[Agent chce X] [Zezwól] [Odrzuć]"
+- [x] Frontend: approval UI — **DONE 2026-06-30**:
+  `app/static/js/modules/agent_proposals.js` + panel na stronie głównej ownera
+  pobiera `GET /agent_proposals`, pokazuje status/payload i pozwala wykonać
+  `Zezwól`/`Odrzuć` przez istniejące endpointy approve/reject. Bez executora
+  domenowego; zatwierdzona propozycja nadal tylko zapisuje consent.
 - [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy). ADR-0021 (MCP jako klient publicznego API) i ADR-0024 (Consent-gated writes) nadal otwarte (warstwa konsumenta/zapisów za zgodą).
 
 ### C2. RAG (3 tyg)

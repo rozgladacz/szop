@@ -3,13 +3,196 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-06-29 (C3 lookup_rule leaf-CLI DONE — wszystkie 6 narzędzi C3 gotowe)
+> **Ostatnia aktualizacja:** 2026-07-01T21:10:53+02:00 (DONE — commit hygiene C1 frontend approval UI)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-07-01T21:10:53+02:00 - C1 frontend UI commit hygiene
+
+**Zakres pracy:** rezweryfikować i zacommitować wyłącznie zakończony slice
+C1 frontend approval UI dla `AgentProposal`, który jest już opisany jako DONE
+poniżej, ale nadal leży w working tree. Nie otwierać nowego zakresu kodowego
+przed domknięciem tego diffu. Nie dotykać równoległych zmian AIDEAS
+(`HANDOFF.md`, usunięty `HANDOFF_aideas-knowledge-base.md`) ani lokalnej
+`.claude/settings.local.json`.
+
+**Wybór zadania:** to najbezpieczniejsza kontynuacja aktywnego parenta
+`faza-b-engine-mvp`: utrwala mały krok toru B/C (owner może rozstrzygać
+propozycje agentów w UI) bez mieszania nowej pracy z niezacommitowanym diffem.
+Nie dotyka `LOCKED` (Dywersant, raw combat rolls, `models_mode=per_copy`) ani
+reguł gry.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak nowych zmian; używa istniejącego
+  `AgentProposal`.
+- Backend payload/API: N/A - bez zmian kontraktu, tylko istniejące endpointy
+  list/approve/reject.
+- JS render: rezweryfikacja `app/static/js/modules/agent_proposals.js`.
+- CSS/template: rezweryfikacja panelu home i ładowania modułu.
+- Testy: targeted frontend+router oraz pełny pytest przed commitem.
+- Dokumentacja: ten HANDOFF; commit obejmie już przygotowane
+  `docs/architecture.md`, `docs/frontend_js_modules.md`, `docs/roadmap.md`.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i pętlami kosztów.
+Brak nowych query względem już zaimplementowanego UI; commit hygiene nie zmienia
+runtime.
+
+**Plan:**
+- [x] 1. Oddzielić diff C1 UI od równoległych zmian AIDEAS/.claude i sprawdzić call sites.
+- [x] 2. Uruchomić targeted testy C1 frontend/router.
+- [x] 3. Uruchomić pełny pytest.
+- [x] 4. Wykonać DoD: `git diff --check`, manual `/simplify`, manual `/review`
+  (JS diff >50), manual `/security-review` (UI wywołuje owner-scoped DB write
+  przez istniejące endpointy).
+- [x] 5. Zacommitować wyłącznie pliki C1 UI i zaktualizować status tego wpisu.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Browser smoke na `127.0.0.1` był
+zablokowany w poprzednim runie przez politykę środowiska; utrzymuję Node smoke
+jako kompensację i nie obchodzę blokady.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-01T21:03+02:00: Working tree rozdzielony logicznie: C1 UI obejmuje
+  `app/templates/{base,index}.html`, `app/static/js/modules/agent_proposals.js`,
+  `tests/test_agent_proposals_frontend.py`, `docs/{architecture,frontend_js_modules,roadmap}.md`
+  i ten HANDOFF. Równoległe zmiany AIDEAS (`HANDOFF.md`, usunięty
+  `HANDOFF_aideas-knowledge-base.md`) oraz `.claude/settings.local.json`
+  zostają poza zakresem i poza commitem.
+- 2026-07-01T21:05+02:00: Encoding gate dla
+  `tests/test_agent_proposals_frontend.py` OK. Targeted
+  `tests/test_agent_proposals_frontend.py tests/test_agent_proposals_router.py`:
+  **13 passed**, 63 warnings. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2049 passed**, 2900 warnings.
+- 2026-07-01T21:10+02:00: DoD commit-hygiene zakończony przed commitem:
+  `git diff --check` bez błędów (tylko ostrzeżenia CRLF), trailing whitespace
+  na plikach zakresu bez trafień, call-site sweep `agent_proposals` bez
+  nieoczekiwanych konsumentów. Manual `/simplify`: brak zmian. Manual
+  `/review`: 0 bugów korektności w zakresie commitowanego UI. Manual
+  `/security-review`: brak nowych endpointów/SQL; moduł używa `textContent` dla
+  danych propozycji, `innerHTML` tylko do czyszczenia listy, fetch
+  `same-origin`, a write przechodzi przez istniejące owner-scoped approve/reject.
+  Commit ma objąć wyłącznie pliki C1 UI; równoległe AIDEAS/.claude zostają poza
+  zakresem.
+
+## DONE - 2026-07-01T19:06:55+02:00 - C1 frontend approval UI dla `AgentProposal`
+
+**Zakres pracy:** mały frontendowy follow-up po backendowym consent gate:
+panel na stronie głównej zalogowanego ownera, który pobiera `GET
+/agent_proposals`, pokazuje statusy i pozwala wykonać `approve`/`reject` dla
+pozycji `pending`. Nie wykonuje akcji domenowej i nie zmienia backendowego
+kontraktu; executor zatwierdzonych propozycji zostaje osobnym zakresem ADR-0024.
+
+**Wybór zadania:** kontynuacja aktywnego wątku `faza-b-engine-mvp` i gotowego
+backendu C1. To najmniejszy krok przybliżający dwufalowy kierunek B API + C MCP:
+owner może realnie rozstrzygać propozycje agentów bez wchodzenia w duży B4 router,
+MCP SDK, RAG ani executor zapisów. Nie dotyka `LOCKED` (Dywersant, raw combat
+rolls, `models_mode=per_copy`) ani reguł gry.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - używa istniejącego `AgentProposal`.
+- Backend payload/API: bez zmian kontraktu; frontend konsumuje istniejące
+  `GET /agent_proposals`, `POST /agent_proposals/{id}/approve|reject`.
+- JS render: nowy moduł `app/static/js/modules/agent_proposals.js`, no-op poza
+  panelem.
+- CSS/template: `app/templates/index.html` (panel) + `app/templates/base.html`
+  (ładowanie modułu); Bootstrap bez nowych zależności.
+- Testy: Node/jsdom-free test modułu frontendu + targeted backend C1; smoke JS
+  ścieżek Zbrojownia / Edytor Armii / Rozpiski po zmianie modułu JS.
+- Dokumentacja: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Panel działa
+tylko na stronie głównej po zalogowaniu i wykonuje jeden owner-scoped fetch do
+małej tabeli propozycji; brak nowych query w kosztach, listach rozpisek lub
+pętlach silnika.
+
+**Plan:**
+- [x] 1. Przeczytać wzorce template/JS/testów i doprecyzować minimalny kontrakt UI.
+- [x] 2. Dodać panel + moduł JS z renderem, loading/error/empty state i akcjami.
+- [x] 3. Dodać testy frontendu i zsynchronizować roadmap/architecture.
+- [!] 4. Weryfikacja: targeted pytest/Node i pełny pytest OK; browser smoke JS
+  zablokowany przez politykę środowiska dla `127.0.0.1`, zastąpiony dodatkowym
+  Node smoke renderu DOM.
+- [x] 5. DoD: call-site check, manual `/simplify`, manual `/review` (diff >50 + JS),
+  manual `/security-review` (user action -> DB przez istniejące endpointy), diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Browser smoke wymaga środowiska z
+dostępem przeglądarki do `127.0.0.1`. Executor zatwierdzonych propozycji i pełny
+B4/MCP pozostają `READY`/osobne zakresy; `LOCKED` decyzje poniżej pozostają
+nietykane.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-01T18:53:10+02:00: Przejęcie rozpoczętego slice'a z working tree.
+  Zakres tej sesji: dokończyć weryfikację i DoD dla frontendowego approval UI
+  `AgentProposal`, naprawiając tylko konkretne problemy znalezione w testach lub
+  manualnym przeglądzie. Warstwy bez zmian względem planu: JS render +
+  template/docs/testy; data model i backend kontrakt bez zmian; performance gate
+  nadal poza `/quote` i `/rosters/{id}`. Przeczytano memory automatyzacji
+  (brak), `AGENTS.md`, `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`,
+  oba aktywne HANDOFF-y, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/developing.md`,
+  `docs/app-js-guide.md`, aktualny diff i call-site grep `agent_proposals`.
+- 2026-07-01T18:58+02:00: Targeted
+  `tests/test_agent_proposals_frontend.py tests/test_agent_proposals_router.py`
+  **12 passed**. Sandbox nadal blokuje `.venv` przez WindowsApps, więc test
+  uruchomiono poza sandboxem po zgodzie. Dodatkowy check routingu: `/` w
+  `app/main.py` przekierowuje niezalogowanych do `/auth/login`, więc panel nie
+  montuje owner-only fetcha na stronie publicznej.
+- 2026-07-01T19:00+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2048 passed**, 2900 warnings. Następny podetap: smoke JS na dev serverze dla
+  home/Zbrojownia/Edytor Armii/Rozpiski i panelu `AgentProposal`.
+- 2026-07-01T19:06+02:00: Dev server uruchomił się na
+  `http://127.0.0.1:8765` (startup OK; `/` daje 303 do `/auth/login`), ale
+  browser smoke został zablokowany przez politykę środowiska dla `127.0.0.1`.
+  Nie obchodzę blokady alternatywną przeglądarką. Dostępna weryfikacja JS:
+  Node smoke modułu w `tests/test_agent_proposals_frontend.py` + pełny pytest.
+- 2026-07-01T19:02+02:00: Przed podetapem uzupełniającym wykonano encoding gate
+  dla `tests/test_agent_proposals_frontend.py` (OK). Zakres: dodać Node smoke
+  renderu DOM modułu z minimalnym stubem dokumentu, żeby pokryć empty/pending
+  render bez użycia zablokowanej przeglądarki.
+- 2026-07-01T19:03+02:00: Uzupełniono
+  `tests/test_agent_proposals_frontend.py` o Node smoke `renderAgentProposals`
+  (empty state, pending count, akcje approve/reject, payload). Targeted:
+  `tests/test_agent_proposals_frontend.py` **3 passed**.
+- 2026-07-01T19:05+02:00: Finalny re-run pełnego pytest po zmianie testu:
+  **2049 passed**, 2900 warnings. `git diff --check` bez błędów (tylko
+  ostrzeżenia CRLF), `rg "[ \t]+$"` na dotkniętych plikach bez trafień.
+  Call-site check: moduł ładowany wyłącznie w `base.html`, panel montowany w
+  `index.html`, publiczne `SZOPAgentProposals`/`initAgentProposals` używane
+  przez self-init i testy; poza panelem moduł jest no-op. Serwer smoke
+  zatrzymany, port 8765 bez listenera.
+- 2026-07-01T19:06:55+02:00: Manual `/simplify`: brak zmian — helpers są
+  lokalne i nie duplikują logiki backendowej. Manual `/review`: 0 bugów
+  korektności w zakresie UI; render używa `textContent`, pending actions
+  blokują przyciski podczas requestu i aktualizują lokalną listę wynikiem
+  endpointu. Manual `/security-review`: brak nowych endpointów i dynamicznego
+  SQL; fetch jest same-origin z istniejącymi owner-scoped endpointami, payload i
+  summary nie trafiają do `innerHTML`, brak logowania sekretów. Re-run pytest po
+  DoD niepotrzebny, bo finalne zmiany są tylko dokumentacyjne w HANDOFF.
+- 2026-06-30T21:04:15+02:00: Bootstrap wykonany ręcznie zgodnie z
+  `/load-context`: memory automatyzacji puste, przeczytano `AGENTS.md`,
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, oba aktywne HANDOFF-y,
+  `docs/handoffs/README.md`, `docs/roadmap.md`, `docs/planning.md`,
+  `docs/testing.md`, `docs/developing.md`, `docs/app-js-guide.md` i
+  `docs/architecture.md`. `aideas-knowledge-base` jest Ready for archive i
+  blokuje tylko `AIdeas/`. Working tree ma zastaną `.claude/settings.local.json`;
+  nie dotykam jej.
+- 2026-06-30T21:08+02:00: Wzorce UI: `base.html` ładuje moduły IIFE globalnie,
+  a `index.html` jest stroną startową po zalogowaniu. Wybrany kształt: panel
+  `data-agent-proposals-panel` na home, moduł `agent_proposals.js` ładowany w
+  `base.html`, no-op poza panelem, bez edycji closure `app.js`.
+- 2026-06-30T21:12+02:00: Dodano panel `Propozycje agentów` w `index.html`
+  oraz moduł `agent_proposals.js`: fetch listy, empty/error/loading state, DOM
+  rendering przez `textContent`, szczegóły payloadu w `<details>`, akcje
+  `Zezwól`/`Odrzuć` przez istniejące endpointy approve/reject. `base.html`
+  ładuje moduł globalnie; poza panelem moduł nie robi zmian w DOM.
+- 2026-06-30T21:15+02:00: Dodano `tests/test_agent_proposals_frontend.py`
+  (template mount + Node smoke eksportów modułu) oraz zsynchronizowano
+  `docs/roadmap.md`, `docs/architecture.md`, `docs/frontend_js_modules.md`.
 
 ## DONE - 2026-06-30 - C1 odczyt pojedynczej `AgentProposal` (owner)
 

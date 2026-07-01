@@ -39,7 +39,10 @@ propozycje przez `GET /agent_proposals`, czyta pojedynczą przez `GET
 /agent_proposals/{id}`, zatwierdza `POST /agent_proposals/{id}/approve` albo
 odrzuca `POST /agent_proposals/{id}/reject` (cudza/nieistniejąca = 404).
 Decyzja zapisuje status i audit, ale nie wykonuje jeszcze akcji domenowej.
-Konsumenci B4/MCP oraz UI zatwierdzania pozostają osobnym zakresem.
+`app/static/js/modules/agent_proposals.js` renderuje na stronie głównej panel
+owner-only approval UI: fetch listy, statusy, payload w `<details>` oraz akcje
+`Zezwól`/`Odrzuć` wywołujące istniejące endpointy approve/reject. Konsumenci
+B4/MCP oraz executor zatwierdzonych propozycji pozostają osobnym zakresem.
 
 ## Dokumentacja reguł gry — read-only
 
