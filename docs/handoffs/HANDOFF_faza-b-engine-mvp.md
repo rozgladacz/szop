@@ -3,13 +3,170 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-01T21:10:53+02:00 (DONE — commit hygiene C1 frontend approval UI)
+> **Ostatnia aktualizacja:** 2026-07-02T06:16:00+02:00 (DONE — B4 event-log API commit hygiene)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-07-02T06:16:00+02:00 - B4 event-log API commit hygiene
+
+**Zakres pracy:** nie rozszerzać funkcjonalnie gotowego slice'a B4. Zweryfikować
+niezacommitowany diff read-only `GET /battles/{id}/events?since=N`, oddzielić go
+od równoległych lokalnych zmian AIDEAS/.claude, powtórzyć wymagane testy i
+utrwalić tylko pliki slice'a.
+
+**Wybór zadania:** po bootstrapie working tree zawiera już gotowy, opisany niżej
+slice B4 read-only event-log API. To najbezpieczniejsza kontynuacja parenta:
+porządkuje rozpoczęty krok dwufalowego planu B API + C MCP, bez dokładania
+nowego zakresu na niestabilnym diffie i bez dotykania `LOCKED` (Dywersant, raw
+combat rolls, `models_mode=per_copy`).
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - bez zmian schemy, używa istniejących `Battle` i
+  `BattleEvent`.
+- Backend payload/API: re-weryfikacja istniejącego routera `app/routers/battles.py`
+  i rejestracji w `app/main.py`/`app/routers/__init__.py`.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: targeted `tests/test_battles_router.py`, agent-token/persistence
+  regresje, pełny pytest przed commitem.
+- Dokumentacja/HANDOFF: ten wpis oraz finalne oznaczenie statusu.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Brak nowych
+query w istniejących requestach; commit hygiene nie zmienia runtime.
+
+**Plan:**
+- [x] 1. Sprawdzić diff i oddzielić pliki B4 od równoległych zmian.
+- [x] 2. Uruchomić targeted testy B4/auth/persistence i pełny pytest.
+- [x] 3. Wykonać call-site check oraz manual `/simplify`/`/review`/`/security-review`.
+- [x] 4. Zacommitować wyłącznie pliki B4 i zaktualizować status tego wpisu.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Równoległe zmiany `.claude`,
+`HANDOFF.md` i usunięty `HANDOFF_aideas-knowledge-base.md` pozostają poza
+zakresem tej sesji.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-02T06:05+02:00: Bootstrap wykonany ręcznie zgodnie z `/load-context`:
+  memory automatyzacji puste, przeczytano `AGENTS.md`, canonical
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md` i `docs/developing.md`. Working tree
+  ma niezacommitowany slice B4 oraz niezwiązane zmiany AIDEAS/.claude; zakres
+  tej sesji to re-weryfikacja i commit tylko slice'a B4.
+- 2026-07-02T06:08+02:00: Diff B4 obejmuje `app/routers/battles.py`,
+  `tests/test_battles_router.py`, rejestrację routera w `app/main.py` i
+  `app/routers/__init__.py` oraz sync `docs/architecture.md`/`docs/roadmap.md`.
+  Równoległe zmiany `.claude/settings.local.json`, `HANDOFF.md` i usunięty
+  `HANDOFF_aideas-knowledge-base.md` zostają poza zakresem. Targeted
+  `tests/test_battles_router.py tests/test_agent_token_security.py tests/test_engine_persistence.py`
+  **25 passed**, 321 warnings. Pełny pytest startuje jako następny podetap.
+- 2026-07-02T06:11+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2056 passed**, 2928 warnings. Następny podetap: call-site/diff hygiene i
+  ręczny DoD review.
+- 2026-07-02T06:13+02:00: Call-site check: `battles.router` rejestrowany tylko
+  w `app/main.py`; `get_battle_events`, `_battle_reader`,
+  `_get_accessible_battle`, `_public_event` i `BATTLE_READ_SCOPE` mają wyłącznie
+  lokalne/testowe użycia; scope `battle:read` jest zgodny z istniejącymi testami
+  tokenów i ADR-0025. `git diff --check` bez błędów (tylko znane ostrzeżenia
+  CRLF), trailing whitespace check na plikach B4 bez trafień. Manual
+  `/simplify`: brak zmian. Manual `/review`: 0 bugów korektności w zakresie
+  read-only endpointu. Manual `/security-review`: brak body i dynamicznego SQL,
+  cudza/missing bitwa = 404, bearer wymaga `battle:read`, write ogranicza się do
+  istniejącego audytu agent-token.
+- 2026-07-02T06:16+02:00: Commit hygiene zakończony; commit `<this>` ma objąć
+  wyłącznie pliki B4 (`app/routers/battles.py`,
+  `tests/test_battles_router.py`, rejestrację routera, roadmap/architecture i
+  ten HANDOFF). Zmiany `.claude`, `HANDOFF.md` oraz usunięty handoff AIDEAS
+  pozostają poza zakresem.
+
+## DONE - 2026-07-02T01:17:51+02:00 - B4 read-only event-log API
+
+**Zakres pracy:** pierwszy mały slice B4: `GET /battles/{id}/events?since=N`
+zwraca zapisany event-log bitwy z tabeli `battle_events`. Endpoint jest
+read-only, owner/participant scoped i dopuszcza sesję użytkownika albo agent
+bearer token ze scope `battle:read`. Nie tworzy bitew, nie przyjmuje akcji i nie
+zmienia event-store.
+
+**Wybór zadania:** po C1 `AgentProposal` UI najbliższy mały krok dwufalowego
+kierunku B API + C MCP to bezpieczny odczyt eventów. Opiera się na już gotowym
+B2 event-store i przybliża przyszły `szop_client.HttpClient` oraz MCP polling bez
+wchodzenia w duży router akcji, invite'y, snapshoty ani executor zatwierdzonych
+propozycji. Nie dotyka `LOCKED` (Dywersant, raw combat rolls,
+`models_mode=per_copy`) ani reguł gry.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - używa istniejących `Battle` i `BattleEvent`.
+- Backend payload/API: nowy router `app/routers/battles.py`, rejestracja w
+  `app/main.py`/`app/routers/__init__.py`, Pydantic response dla event-logu.
+- JS render / CSS / template: N/A - brak UI w tym slice.
+- Testy: nowy `tests/test_battles_router.py` dla rejestracji, filtrowania
+  `since`, owner scoping, agent scope, 401/403/404.
+- Dokumentacja: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote` i `/rosters/{id}`. Endpoint robi
+jeden SELECT bitwy po id z participant filter i jeden uporządkowany SELECT
+eventów po `(battle_id, sequence)` przez istniejący FK/index + unique constraint.
+Brak nowych query w istniejących requestach i brak wpływu na kalkulator kosztów.
+
+**Plan:**
+- [x] 1. Wykonać encoding gate i przeczytać wzorce routerów/persistence/testów.
+- [x] 2. Dodać read-only router `battles` z auth session-or-agent i response model.
+- [x] 3. Dodać testy B4 event-log API.
+- [x] 4. Zsynchronizować roadmap/architecture.
+- [x] 5. Weryfikacja: targeted pytest, pełny pytest, call-site check.
+- [x] 6. DoD: manual `/simplify`, manual `/review` (auth/API), manual
+  `/security-review` (auth + user/agent access do DB), diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla read-only event-logu. Create
+battle, actions, interrupts, simulate/replay, invite'y, snapshoty i `HttpClient`
+pozostają osobnymi zakresami B4/B5.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-02T01:04+02:00: Encoding gate dla `app/main.py` i
+  `app/routers/__init__.py` OK po eskalacji `.venv` (sandbox blokuje
+  WindowsApps). Przeczytano wzorce `agent_tokens`, `agent_proposals`,
+  `security.require_agent_scope`, `engine.persistence` i testy routerów.
+- 2026-07-02T01:07+02:00: Dodano `app/routers/battles.py` z read-only
+  `GET /battles/{battle_id}/events?since=N`. Auth: bearer token wygrywa nad
+  sesją i wymaga scope `battle:read`; bez bearer tokena wymagana jest sesja.
+  Dostęp jest filtrowany do `p1_user_id`/`p2_user_id` ownera/sesji, cudza albo
+  brakująca bitwa = 404. Response serializuje engine eventy przez
+  `event_to_json`; bez zapisu do DB poza istniejącym audytem agent-token.
+  Dodano `tests/test_battles_router.py` dla rejestracji, `since`, owner scope,
+  agent scope/audit i odmów 401/403/404.
+- 2026-07-02T01:09+02:00: Targeted
+  `tests/test_battles_router.py` **7 passed**, 31 warnings. Następny podetap:
+  synchronizacja roadmap/architecture z pierwszym read-only slice B4.
+- 2026-07-02T01:10+02:00: `docs/roadmap.md` oznacza B4 jako `[~]` tylko dla
+  read-only polling endpointu `GET /battles/{id}/events`; create/action/invite/
+  simulate/replay i SSE pozostają otwarte. `docs/architecture.md` opisuje
+  participant-scoped read endpoint, scope `battle:read` i reuse `load_events`.
+- 2026-07-02T01:12+02:00: Szerszy targeted
+  `tests/test_battles_router.py tests/test_agent_token_security.py tests/test_engine_persistence.py`
+  **25 passed**, 321 warnings. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2056 passed**, 2928 warnings.
+- 2026-07-02T01:15+02:00: Manual `/simplify` wprowadził 1 redukcję:
+  `BattleReader` niesie tylko `user_id`, bo `agent_user_id`/`token_id` były
+  martwe po standardowym audycie w `require_agent_scope`. Po tej zmianie re-run
+  targeted **25 passed**, 321 warnings oraz pełny pytest **2056 passed**, 2928
+  warnings.
+- 2026-07-02T01:17+02:00: Call-site check: `battles.router` jest rejestrowany
+  tylko w `app/main.py`; `get_battle_events`, `_battle_reader`,
+  `_get_accessible_battle` i `_public_event` mają wyłącznie lokalne/testowe
+  użycia; `battle:read` jest zgodny z istniejącymi testami tokenów i ADR-0025.
+  `git diff --check` bez błędów (tylko znane ostrzeżenia CRLF dla docs/.claude);
+  trailing whitespace check na dotkniętych plikach bez trafień. Manual
+  `/review`: 0 bugów korektności w zakresie read-only endpointu; `since`
+  deleguje do `load_events`, response używa `event_to_json`, cudza/missing bitwa
+  = 404. Manual `/security-review`: endpoint nie przyjmuje body, nie robi write
+  poza istniejącym `AgentAuditLog`, nie ma dynamicznego SQL, bearer wymaga scope
+  `battle:read`, a dostęp jest filtrowany po `p1_user_id`/`p2_user_id` ownera
+  tokena albo sesji. Zastane zmiany `.claude`, `HANDOFF.md` i usunięty
+  `HANDOFF_aideas-knowledge-base.md` są poza zakresem i nietykane.
 
 ## DONE - 2026-07-01T21:10:53+02:00 - C1 frontend UI commit hygiene
 

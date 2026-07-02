@@ -218,9 +218,20 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 > **B2 ORM schema impact:** `BattleEvent.payload_json` per unit +`location: Lokalizacja` +`wounds_eliminating: int`; `ModelKilled` +`eliminated: bool`; `Shot/MeleeResolved` +`wounds_eliminating: int`; nowy event `MutexCollision`. Zamrożone — zero migration churn.
 
 ### B4. API (3 tyg)
-- [ ] `app/routers/battles.py` — endpointy: `POST /battles/invite`, `POST /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `GET /battles/{id}/events`, `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST /battles/{id}/replay`
-- [ ] Auth: tylko gracze bitwy (nie trzecia osoba); agent wymaga scope
-- [ ] Pydantic schemas w `app/schemas.py` — BattleState, BattleEvent, Action (polimorficzne)
+- [~] `app/routers/battles.py` — **pierwszy read-only slice DONE 2026-07-02**:
+  `GET /battles/{id}/events?since=N` zwraca zapisany event-log z B2
+  event-store przez `persistence.load_events` + `event_to_json`. Pozostałe
+  endpointy nadal otwarte: `POST /battles/invite`, `POST
+  /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `POST
+  /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST
+  /battles/{id}/simulate`, `POST /battles/{id}/replay`.
+- [~] Auth: slice event-logu ma participant scope (`p1_user_id`/`p2_user_id`;
+  cudza/nieistniejąca = 404) oraz agent bearer scope `battle:read` z audytem
+  `AgentAuditLog`. Write endpoints i invite'y nadal wymagają osobnego
+  security-review.
+- [~] Pydantic schemas w `app/schemas.py` — lokalny response model event-logu
+  (`BattleEventsPublic`) w routerze gotowy; shared `BattleState`, `BattleEvent`
+  i polimorficzne `Action` nadal otwarte.
 - [ ] Optimistic locking na `BattleEvent.sequence` — zapobiega race condition
 
 ### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
@@ -236,7 +247,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### B6. Prezentacja (opcjonalne, 3–4 tyg) — **CLI replay slice DONE 2026-06-15** (wątek `faza-b-6-replay`, ADR-0013)
 - [x] `scripts/battle_replay.py` — CLI terminal output: narracja PL per event (16 typów), grupowanie w rundy (delimiter `RoundEnded`), podsumowanie (wynik celów pkt 5.f + rozkład typów + zwycięzca). Rdzeń = czyste funkcje (`format_event`/`render_battle_log`, bez I/O). Dwa źródła: `--fixture`/`--map` (reuse `balance_simulate` SSOT + `simulate_from_rosters`, ADR-0032) oraz `--from-db <id>` (`persistence.load_events`, ADR-0050, read-only). Render z samego event-logu (bez rekonstrukcji stanu — jednolite dla obu trybów). 16 testów. Skrypt-liść (zero zmian w rdzeniu). **Odłożone:** bogatszy widok stanu (po N-tym evencie via `apply_events`) — narracja per-event wystarcza MVP.
-- [ ] SSE stream `GET /battles/{id}/events` — wymaga B4 API
+- [ ] SSE stream `GET /battles/{id}/events` — polling B4 read endpoint DONE
+  2026-07-02; prawdziwy stream SSE nadal otwarty
 - [ ] `app/static/js/modules/battle_canvas.js` — minimalny 2D canvas (Konva.js lub goły Canvas)
 - [x] ADR-0013: Engine headless-first, UI opcjonalne (Accepted)
 

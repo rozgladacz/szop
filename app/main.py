@@ -23,6 +23,7 @@ from .routers import (
     armories,
     armies,
     auth,
+    battles,
     export,
     export_xlsx,
     rosters,
@@ -116,6 +117,7 @@ app.include_router(export_xlsx.router)
 app.include_router(users.router)
 app.include_router(agent_tokens.router)
 app.include_router(agent_proposals.router)
+app.include_router(battles.router)
 app.include_router(admin.router)
 
 
