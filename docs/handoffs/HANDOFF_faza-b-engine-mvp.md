@@ -3,13 +3,165 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-02T06:16:00+02:00 (DONE — B4 event-log API commit hygiene)
+> **Ostatnia aktualizacja:** 2026-07-03T01:10:04+02:00 (DONE — B5 HttpClient polling commit hygiene)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-07-03T01:10:04+02:00 - B5 HttpClient polling commit hygiene
+
+**Zakres pracy:** nie rozszerzać funkcjonalnie zakończonego slice'a
+`szop_client.HttpClient.get_events`. Zweryfikować niezatwierdzony diff po runie
+2026-07-02, odseparować go od niezwiązanych lokalnych zmian
+`.claude`/AIDEAS/HANDOFF meta, powtórzyć wymagane testy i utrwalić tylko pliki
+slice'a. Jeśli przegląd znajdzie realny drobny problem w slice'ie, naprawić go w
+tym samym zakresie.
+
+**Wybór zadania:** working tree zawiera gotowy, opisany niżej follow-up po B4
+event-log API, ale nie jest on utrwalony. Najbezpieczniejsza kontynuacja
+dwufalowego kierunku B API + C MCP to domknięcie tej higieny zamiast dokładania
+nowego routera/endpointu na niestabilnym diffie. Zakres nie dotyka `LOCKED`
+(Dywersant, raw combat rolls, `models_mode=per_copy`) ani reguł gry.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak zmian schemy i DB.
+- Backend payload/API: brak zmian endpointu; re-weryfikacja klienta HTTP
+  konsumującego istniejący `BattleEventsPublic`.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: targeted `tests/test_clients_http.py tests/test_battles_router.py`;
+  pełny pytest przed deklaracją DONE.
+- Dokumentacja/HANDOFF: ten wpis; roadmap/architecture tylko w zakresie już
+  przygotowanego syncu B5 polling.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i pętlami
+renderującymi. Re-weryfikowany klient wykonuje jedno żądanie HTTP na wywołanie
+`get_events`; brak nowych query po stronie aplikacji.
+
+**Plan:**
+- [x] 1. Sprawdzić diff i call sites, oddzielając pliki slice'a od zmian obcych.
+- [x] 2. Uruchomić targeted testy klient/router.
+- [x] 3. Uruchomić pełny pytest.
+- [x] 4. Wykonać DoD: call-site check, `git diff --check`, manual `/simplify`,
+  manual `/review`, manual `/security-review`, diff review.
+- [x] 5. Zacommitować wyłącznie pliki slice'a i zaktualizować status tego wpisu.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego zakresu. Pełny `HttpClient`
+zgodny z `GameClient` nadal `WAITING(prereq)` na kolejne endpointy B4.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-03T01:02+02:00: Bootstrap wykonany ręcznie zgodnie z
+  `/load-context`: przeczytano memory automatyzacji, `AGENTS.md`, canonical
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/developing.md` oraz stan
+  working tree. Zastane niezwiązane zmiany `.claude/settings.local.json`,
+  `HANDOFF.md` i usunięty `HANDOFF_aideas-knowledge-base.md` pozostają poza
+  zakresem.
+- 2026-07-03T01:03+02:00: Diff/call-site sweep potwierdza izolację slice'a:
+  `HttpClient`/`HttpRequest`/`HttpResponse` są użyte tylko w `szop_client`
+  exporcie, `tests/test_clients_http.py` i dokumentacji; `get_events` ma
+  istniejącą ścieżkę `LocalClient` oraz nową ścieżkę HTTP, bez zmian w
+  routerze. Sandboxowa próba `.venv` trafiła w znany WindowsApps
+  `Odmowa dostępu`; testy będą uruchamiane z `.venv` poza sandboxem i `-X utf8`.
+- 2026-07-03T01:04+02:00: Targeted
+  `tests/test_clients_http.py tests/test_battles_router.py` **12 passed**,
+  31 warnings.
+- 2026-07-03T01:05+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2061 passed**, 2928 warnings.
+- 2026-07-03T01:06+02:00: DoD przed commitem: `git diff --check` bez błędów
+  (tylko znane ostrzeżenia CRLF dla docs), trailing whitespace na plikach
+  slice'a bez trafień. Manual `/simplify`: brak zmian. Manual `/review`: 0
+  bugów korektności w zakresie commitowanego klienta; ścieżka HTTP robi jedno
+  żądanie i dekoduje eventy przez `json_to_event`. Manual `/security-review`:
+  token tylko w nagłówku Authorization, brak logowania sekretów, brak DB-write i
+  dynamicznego SQL po stronie klienta. Diff review potwierdza, że zmiany
+  `.claude`, meta `HANDOFF.md` i usunięty handoff AIDEAS są poza zakresem.
+- 2026-07-03T01:10+02:00: Commit hygiene zakończony; commit obejmuje wyłącznie
+  pliki slice'a B5 (`szop_client/http.py`, `szop_client/__init__.py`,
+  `tests/test_clients_http.py`, sync roadmap/architecture i ten HANDOFF).
+  Zastane zmiany `.claude`, `HANDOFF.md` oraz usunięty handoff AIDEAS pozostają
+  poza zakresem.
+
+## DONE - 2026-07-02T21:17:15+02:00 - B5 HttpClient event polling
+
+**Zakres pracy:** mały follow-up po B4 read-only event-log API: dodać
+`szop_client.HttpClient.get_events(battle_id, since=0)` jako klienta HTTP dla
+istniejącego `GET /battles/{id}/events?since=N`. Slice jest read-only i nie
+implementuje jeszcze `create_battle`, `get_state`, `take_action` ani `simulate`,
+bo te endpointy B4 nie istnieją.
+
+**Wybór zadania:** kontynuacja dwufalowego kierunku B API + C MCP. Po zamknięciu
+B4 polling endpointu najbezpieczniejszy mały krok to konsument tego kontraktu w
+`szop_client`, bez wchodzenia w duży router akcji, invite'y, snapshoty, MCP SDK
+ani RAG. Nie dotyka `LOCKED` (Dywersant, raw combat rolls,
+`models_mode=per_copy`) ani reguł gry.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak zmian schemy i DB.
+- Backend payload/API: brak zmian endpointu; klient konsumuje obecny payload
+  `BattleEventsPublic` i deserializuje eventy przez engine SSOT `json_to_event`.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: nowe focused testy klienta HTTP z fake transportem; targeted pytest
+  `tests/test_clients_http.py` plus regresja `tests/test_battles_router.py`.
+- Dokumentacja/HANDOFF: roadmap/architecture oraz ten wpis.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i pętlami kosztów.
+Klient robi dokładnie jedno żądanie HTTP na wywołanie `get_events`; brak nowych
+query po stronie istniejących requestów aplikacji.
+
+**Plan:**
+- [x] 1. Wykonać encoding gate i doczytać wzorce klienta/testów.
+- [x] 2. Dodać `szop_client/http.py` z minimalnym read-only `get_events`.
+- [x] 3. Dodać testy klienta HTTP i eksport pakietu.
+- [x] 4. Zsynchronizować roadmap/architecture.
+- [x] 5. Weryfikacja: targeted pytest, pełny pytest, call-site check.
+- [x] 6. DoD: manual `/simplify`, warunkowy `/review` (nowy klient + payload),
+  manual `/security-review` (bearer token/HTTP errors), diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice'a. Pełna zgodność
+`HttpClient` z całym `GameClient` pozostaje `WAITING(prereq)` na kolejne endpointy
+B4 (`POST /battles`, `GET /battles/{id}`, akcje/symulacje).
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-02T21:03+02:00: Bootstrap wykonany ręcznie zgodnie z
+  `/load-context`: memory automatyzacji brak, przeczytano `AGENTS.md`,
+  canonical `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/developing.md` oraz stan
+  working tree. Zastane zmiany `.claude`, `HANDOFF.md` i usunięty handoff
+  AIDEAS są poza zakresem. Wybrano read-only `HttpClient.get_events` jako mały
+  follow-up po B4 endpointzie.
+- 2026-07-02T21:08+02:00: Encoding gate dla istniejących plików Pythona OK po
+  użyciu `.venv` poza sandboxem (WindowsApps blokuje alias). Dodano
+  `szop_client/http.py` (stdlib `urllib`, wstrzykiwany transport do testów,
+  deserializacja przez `json_to_event`), eksport w `szop_client/__init__.py` i
+  `tests/test_clients_http.py` dla URL/headerów, deserializacji eventów,
+  braku tokena, walidacji `since`, statusów HTTP i malformed payload.
+- 2026-07-02T21:12+02:00: Targeted
+  `tests/test_clients_http.py tests/test_battles_router.py` **12 passed**,
+  31 warnings. `docs/roadmap.md` i `docs/architecture.md` zsynchronizowane:
+  `HttpClient` oznaczony jako read-only polling slice DONE, pełny `GameClient`
+  HTTP i pakowanie nadal czekają na kolejne endpointy B4.
+- 2026-07-02T21:17+02:00: Po manualnym `/simplify` poprawiono docstring
+  `szop_client/__init__.py`, żeby nie sugerował, że częściowy `HttpClient` jest
+  już pełnym zamiennikiem `GameClient`. Re-run targeted
+  `tests/test_clients_http.py tests/test_battles_router.py` **12 passed**,
+  31 warnings. Pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x
+  --tb=short -q` **2061 passed**, 2928 warnings. Call-site check:
+  `HttpClient`/`HttpRequest`/`HttpResponse` użyte tylko w eksporcie pakietu,
+  testach i dokumentacji; `LocalClient.get_events` bez zmian. `git diff
+  --check` bez błędów (tylko znane ostrzeżenia CRLF dla zastanych plików),
+  trailing whitespace na dotkniętych plikach bez trafień. Manual `/review`:
+  0 bugów korektności; `get_events` robi jedno żądanie, waliduje `since`,
+  status HTTP i payload, a eventy dekoduje przez `json_to_event`. Manual
+  `/security-review`: token trafia wyłącznie do nagłówka Authorization, nie do
+  URL ani komunikatów błędów; brak sekretów w testowym fake transporcie; brak
+  dynamicznego SQL/DB-write po stronie klienta. Zastane zmiany `.claude`,
+  `HANDOFF.md` i usunięty handoff AIDEAS nadal poza zakresem.
 
 ## DONE - 2026-07-02T06:16:00+02:00 - B4 event-log API commit hygiene
 
