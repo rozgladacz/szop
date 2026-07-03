@@ -218,28 +218,29 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 > **B2 ORM schema impact:** `BattleEvent.payload_json` per unit +`location: Lokalizacja` +`wounds_eliminating: int`; `ModelKilled` +`eliminated: bool`; `Shot/MeleeResolved` +`wounds_eliminating: int`; nowy event `MutexCollision`. Zamrożone — zero migration churn.
 
 ### B4. API (3 tyg)
-- [~] `app/routers/battles.py` — **pierwszy read-only slice DONE 2026-07-02**:
-  `GET /battles/{id}/events?since=N` zwraca zapisany event-log z B2
-  event-store przez `persistence.load_events` + `event_to_json`. Pozostałe
-  endpointy nadal otwarte: `POST /battles/invite`, `POST
-  /battles/invite/{id}/accept`, `POST /battles`, `GET /battles/{id}`, `POST
-  /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST
-  /battles/{id}/simulate`, `POST /battles/{id}/replay`.
-- [~] Auth: slice event-logu ma participant scope (`p1_user_id`/`p2_user_id`;
-  cudza/nieistniejąca = 404) oraz agent bearer scope `battle:read` z audytem
-  `AgentAuditLog`. Write endpoints i invite'y nadal wymagają osobnego
-  security-review.
-- [~] Pydantic schemas w `app/schemas.py` — lokalny response model event-logu
-  (`BattleEventsPublic`) w routerze gotowy; shared `BattleState`, `BattleEvent`
-  i polimorficzne `Action` nadal otwarte.
+- [~] `app/routers/battles.py` — **read-only slices DONE 2026-07-02/03**:
+  `GET /battles/{id}` zwraca metadane bitwy z `battles` + `latest_sequence`
+  z event-store, a `GET /battles/{id}/events?since=N` zwraca zapisany event-log
+  przez `persistence.load_events` + `event_to_json`. Pozostałe endpointy nadal
+  otwarte: `POST /battles/invite`, `POST /battles/invite/{id}/accept`,
+  `POST /battles`, `POST /battles/{id}/actions`, `POST
+  /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST
+  /battles/{id}/replay`.
+- [~] Auth: read-only battle endpoints mają participant scope
+  (`p1_user_id`/`p2_user_id`; cudza/nieistniejąca = 404) oraz agent bearer scope
+  `battle:read` z audytem `AgentAuditLog`. Write endpoints i invite'y nadal
+  wymagają osobnego security-review.
+- [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych i
+  event-logu (`BattlePublic`, `BattleEventsPublic`) w routerze gotowe; shared
+  `BattleState`, `BattleEvent` i polimorficzne `Action` nadal otwarte.
 - [ ] Optimistic locking na `BattleEvent.sequence` — zapobiega race condition
 
-### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19 + HttpClient polling DONE 2026-07-02** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
+### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19 + HttpClient read-only DONE 2026-07-02/03** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
 
-> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient polling slice 2026-07-02:** `get_events` konsumuje B4 `GET /battles/{id}/events?since=N` i deserializuje eventy przez `json_to_event`; pełny `GameClient` HTTP i pakowanie nadal odłożone do kolejnych endpointów B4.
+> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient read-only slices 2026-07-02/03:** `get_battle_metadata` konsumuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events` konsumuje B4 `GET /battles/{id}/events?since=N` i deserializuje eventy przez `json_to_event`. Pełny `GameClient` HTTP i pakowanie nadal odłożone do kolejnych endpointów B4.
 
 - [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (+ `SimulationSummary`; `simulate` ma `deployment_zones` D5). `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
-- [~] `szop_client/http.py` — `HttpClient(base_url, token)` — read-only `get_events` DONE 2026-07-02; `create_battle`/`get_state`/`take_action`/`simulate` czekają na kolejne endpointy B4. Protocol strukturalny → pełny klient dołączy bez dziedziczenia.
+- [~] `szop_client/http.py` — `HttpClient(base_url, token)` — read-only `get_battle_metadata` DONE 2026-07-03 + `get_events` DONE 2026-07-02; `create_battle`/`get_state`/`take_action`/`simulate` czekają na kolejne endpointy B4. Protocol strukturalny → pełny klient dołączy bez dziedziczenia.
 - [x] `szop_client/local.py` — `LocalClient` in-process. Ścieżka **engine-dict** (rostery dict 1:1 z `build_initial_state`) + **ścieżka DB** (`LocalClient(session, user_id)` + `*_roster_ids`, most ORM→engine przez `roster_adapter`, read-only, ownership-scoped). DONE 2026-06-19.
 - [ ] `szop_client/setup.py` — `pip install -e` odłożone (sens dopiero z pełnym `HttpClient`; `LocalClient` z natury in-process z `app`).
 - [ ] `tests/test_clients_parity.py` — `HttpClient.simulate == LocalClient.simulate` odłożone do B4 simulate/action endpoints.

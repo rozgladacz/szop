@@ -1,8 +1,8 @@
-"""Read-only HTTP client slice for B4 battle event polling.
+"""Read-only HTTP client slices for B4 battle metadata and event polling.
 
 The full `GameClient` HTTP implementation is still waiting for the remaining
-B4 endpoints. This module deliberately implements only `get_events`, backed by
-the existing `GET /battles/{id}/events?since=N` API.
+B4 endpoints. This module deliberately implements only metadata fetch and
+`get_events`, backed by existing read-only B4 APIs.
 """
 
 from __future__ import annotations
@@ -36,6 +36,22 @@ class HttpResponse:
     body: bytes
 
 
+@dataclass(frozen=True, slots=True)
+class BattleMetadata:
+    """Participant-scoped metadata returned by `GET /battles/{id}`."""
+
+    battle_id: int
+    p1_user_id: int | None
+    p2_user_id: int | None
+    p1_roster_id: int | None
+    p2_roster_id: int | None
+    winner_user_id: int | None
+    current_round: int
+    rng_seed: int
+    status: str
+    latest_sequence: int
+
+
 Transport = Callable[[HttpRequest], HttpResponse]
 
 
@@ -52,7 +68,7 @@ class HttpClientTransportError(HttpClientError):
 
 
 class HttpClient:
-    """Minimal read-only HTTP client for battle event polling."""
+    """Minimal read-only HTTP client for battle metadata and event polling."""
 
     def __init__(
         self,
@@ -70,14 +86,40 @@ class HttpClient:
         self._timeout = timeout
         self._transport = transport or _urlopen_transport
 
+    def get_battle_metadata(self, battle_id: int) -> BattleMetadata:
+        """Return participant-scoped battle metadata from the B4 API."""
+        payload = self._get_json(
+            f"/battles/{battle_id}",
+            {},
+            error_label="GET battle metadata",
+        )
+        return _metadata_from_payload(payload)
+
     def get_events(self, battle_id: int, since: int = 0) -> tuple[BattleEvent, ...]:
         """Return battle events with `sequence > since` from the B4 polling API."""
         if since < 0:
             raise ValueError("since must be >= 0")
+        payload = self._get_json(
+            f"/battles/{battle_id}/events",
+            {"since": since},
+            error_label="GET battle events",
+        )
+        events = payload.get("events") if isinstance(payload, dict) else None
+        if not isinstance(events, list):
+            raise HttpClientError("GET battle events returned malformed payload")
+        return tuple(_event_from_public_payload(item) for item in events)
+
+    def _get_json(
+        self,
+        path: str,
+        query: dict[str, Any],
+        *,
+        error_label: str,
+    ) -> Any:
         response = self._transport(
             HttpRequest(
                 method="GET",
-                url=self._url(f"/battles/{battle_id}/events", {"since": since}),
+                url=self._url(path, query),
                 headers=self._headers(),
                 body=None,
                 timeout=self._timeout,
@@ -85,14 +127,10 @@ class HttpClient:
         )
         if not 200 <= response.status_code < 300:
             raise HttpClientError(
-                f"GET battle events failed with HTTP {response.status_code}",
+                f"{error_label} failed with HTTP {response.status_code}",
                 status_code=response.status_code,
             )
-        payload = _decode_json(response.body)
-        events = payload.get("events") if isinstance(payload, dict) else None
-        if not isinstance(events, list):
-            raise HttpClientError("GET battle events returned malformed payload")
-        return tuple(_event_from_public_payload(item) for item in events)
+        return _decode_json(response.body)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -101,6 +139,8 @@ class HttpClient:
         return headers
 
     def _url(self, path: str, query: dict[str, Any]) -> str:
+        if not query:
+            return f"{self._base_url}{path}"
         return f"{self._base_url}{path}?{urlencode(query)}"
 
 
@@ -109,6 +149,49 @@ def _decode_json(body: bytes) -> Any:
         return json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HttpClientError("HTTP response body is not valid JSON") from exc
+
+
+def _metadata_from_payload(payload: Any) -> BattleMetadata:
+    if not isinstance(payload, dict):
+        raise HttpClientError("GET battle metadata returned malformed payload")
+    try:
+        return BattleMetadata(
+            battle_id=_required_int(payload, "battle_id"),
+            p1_user_id=_optional_int(payload, "p1_user_id"),
+            p2_user_id=_optional_int(payload, "p2_user_id"),
+            p1_roster_id=_optional_int(payload, "p1_roster_id"),
+            p2_roster_id=_optional_int(payload, "p2_roster_id"),
+            winner_user_id=_optional_int(payload, "winner_user_id"),
+            current_round=_required_int(payload, "current_round"),
+            rng_seed=_required_int(payload, "rng_seed"),
+            status=_required_str(payload, "status"),
+            latest_sequence=_required_int(payload, "latest_sequence"),
+        )
+    except (KeyError, TypeError) as exc:
+        raise HttpClientError("GET battle metadata returned malformed payload") from exc
+
+
+def _required_int(payload: dict[str, Any], key: str) -> int:
+    value = payload[key]
+    if not isinstance(value, int):
+        raise TypeError(key)
+    return value
+
+
+def _optional_int(payload: dict[str, Any], key: str) -> int | None:
+    value = payload[key]
+    if value is None:
+        return None
+    if not isinstance(value, int):
+        raise TypeError(key)
+    return value
+
+
+def _required_str(payload: dict[str, Any], key: str) -> str:
+    value = payload[key]
+    if not isinstance(value, str):
+        raise TypeError(key)
+    return value
 
 
 def _event_from_public_payload(item: Any) -> BattleEvent:

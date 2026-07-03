@@ -8,7 +8,7 @@ wewnętrznym silnikiem. Public API:
 - `LocalClient` — implementacja in-process (headless). Ścieżka engine-dict +
   ścieżka DB (`LocalClient(session, user_id)` + metody `*_roster_ids`,
   most ORM→engine przez `roster_adapter`).
-- `HttpClient` — read-only HTTP polling `get_events` nad B4 event-log API.
+- `HttpClient` — read-only HTTP metadata + polling nad B4 battle API.
 - `SimulationSummary` — wynik batcha `simulate`.
 
 Pełny `HttpClient` zgodny z całym `GameClient` oraz pakowanie `pip install -e`
@@ -16,6 +16,7 @@ Pełny `HttpClient` zgodny z całym `GameClient` oraz pakowanie `pip install -e`
 """
 
 from szop_client.http import (
+    BattleMetadata,
     HttpClient,
     HttpClientError,
     HttpClientTransportError,
@@ -37,6 +38,7 @@ from szop_client.protocol import (
 
 __all__ = [
     "GameClient",
+    "BattleMetadata",
     "HttpClient",
     "HttpClientError",
     "HttpClientTransportError",

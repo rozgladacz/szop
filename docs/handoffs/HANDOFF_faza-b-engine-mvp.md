@@ -3,13 +3,246 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-03T01:10:04+02:00 (DONE — B5 HttpClient polling commit hygiene)
+> **Ostatnia aktualizacja:** 2026-07-04T01:16:00+02:00 (DONE — B4/B5 metadata commit hygiene)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-07-04T01:16:00+02:00 - B4/B5 metadata commit hygiene
+
+**Zakres pracy:** nie rozszerzać funkcjonalnie gotowych read-only slice'ów
+`GET /battles/{id}` i `HttpClient.get_battle_metadata`. Zweryfikować obecny diff,
+call sites i testy, oddzielić go od niezwiązanych lokalnych zmian
+`.claude`/AIDEAS/HANDOFF meta, a następnie utrwalić tylko pliki tych slice'ów.
+
+**Wybór zadania:** working tree zawiera zakończony i opisany zakres B4/B5
+metadata bez commita. Najbezpieczniejszy mały krok dla dwufalowego kierunku B API
++ B5/C MCP to domknięcie higieny zamiast dokładania kolejnego endpointu na
+niestabilnym diffie. Zakres nie dotyka reguł gry ani `LOCKED` (Dywersant, raw
+combat rolls, `models_mode=per_copy`).
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak zmian schemy i DB.
+- Backend payload/API: re-weryfikacja `BattlePublic`, `GET /battles/{id}` i
+  shared participant scope w `app/routers/battles.py`.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: targeted `tests/test_battles_router.py tests/test_clients_http.py` oraz
+  pełny pytest przed commitem.
+- Dokumentacja/HANDOFF: ten wpis oraz memory automacji po zakończeniu.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Metadata endpoint pozostaje jednym SELECT-em bitwy po id + jednym aggregate
+`max(sequence)` po `battle_id`; klient wykonuje jedno żądanie HTTP na wywołanie.
+
+**Plan:**
+- [x] 1. Sprawdzić diff, branch i call sites, separując pliki slice'a od zmian
+  obcych.
+- [x] 2. Uruchomić targeted testy klient/router.
+- [x] 3. Uruchomić pełny pytest.
+- [x] 4. DoD: manual `/simplify`, manual `/review`, manual `/security-review`,
+  `git diff --check`, diff review.
+- [x] 5. Zacommitować wyłącznie pliki slice'a i zaktualizować memory.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego zakresu. Pełny `HttpClient`
+(`create_battle`/`get_state`/`take_action`/`simulate`), write endpoints B4,
+invite'y i snapshot/state pozostają `WAITING(prereq)` na kolejne, większe zakresy.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-04T01:03+02:00: Bootstrap wykonany ręcznie zgodnie z `/load-context`:
+  przeczytano memory automacji, `AGENTS.md`, canonical
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/git-workflow.md` oraz stan
+  working tree. Zastane niezwiązane zmiany `.claude/settings.local.json`,
+  `HANDOFF.md` i usunięty `HANDOFF_aideas-knowledge-base.md` pozostają poza
+  zakresem.
+- 2026-07-04T01:06+02:00: Diff/call-site sweep potwierdza scope: B4 metadata
+  endpoint dodaje lokalne `BattlePublic`, `_public_battle`,
+  `_latest_event_sequence` i `get_battle`; shared `_get_accessible_battle` nadal
+  obsługuje oba read-only endpointy z tym samym participant scope. B5 klient
+  dodaje `BattleMetadata` i `get_battle_metadata`; `_get_json` jest wspólny dla
+  metadanych i eventów, a `_url` zachowuje query dla `get_events`. Publiczne
+  użycia są ograniczone do eksportu `szop_client`, testów i dokumentacji.
+- 2026-07-04T01:09+02:00: Targeted
+  `tests/test_battles_router.py tests/test_clients_http.py`: **18 passed**,
+  44 warnings. Pierwsza próba w sandboxie trafiła w znany WindowsApps
+  `Odmowa dostępu`; re-run poza sandboxem z `.venv` i `-X utf8` przeszedł.
+- 2026-07-04T01:11+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2067 passed**, 2941 warnings.
+- 2026-07-04T01:16+02:00: DoD zakończony. `git diff --check` bez błędów
+  (tylko znane ostrzeżenia CRLF). Manual `/simplify`: brak zmian; wspólny
+  `_get_json` redukuje duplikację HTTP status/decode dla dwóch metod klienta.
+  Manual `/review`: 0 bugów korektności; route `/{battle_id}` nie koliduje z
+  `/{battle_id}/events`, oba endpointy używają tego samego participant scope, a
+  metadata nie rekonstruuje ciężkiego `BattleState`. Manual `/security-review`:
+  bearer wymaga `battle:read`, cudza/brakująca bitwa = 404, brak body/zapisu i
+  dynamicznego SQL; token klienta trafia wyłącznie do nagłówka Authorization.
+  Diff review: commit obejmuje tylko pliki B4/B5 metadata slice'a; `.claude`,
+  główny `HANDOFF.md` i usunięty handoff AIDEAS pozostają poza zakresem.
+  Commit: `<this>`.
+
+## DONE - 2026-07-03T21:28:00+02:00 - B5 HttpClient battle metadata
+
+**Zakres pracy:** mały follow-up B5 po read-only B4 metadata endpointzie:
+`szop_client.HttpClient` ma pobierać metadane bitwy z `GET /battles/{id}`.
+Nie rekonstruuje `BattleState`, nie implementuje `create_battle`, `take_action`,
+write endpoints ani symulacji HTTP.
+
+**Wybór zadania:** bezpośrednia kontynuacja dwufalowego kierunku B API + C MCP.
+W working tree jest gotowy, zweryfikowany slice B4 `GET /battles/{id}`;
+najmniejszy samodzielny krok to klient tego kontraktu, analogicznie do
+wcześniejszego `HttpClient.get_events`. Zakres jest read-only, nie wymaga decyzji
+usera i nie dotyka `LOCKED` (Dywersant, raw combat rolls, `models_mode=per_copy`).
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak zmian schemy i DB.
+- Backend payload/API: brak zmian endpointu; klient konsumuje istniejący lokalny
+  response model `BattlePublic` z routera.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: focused `tests/test_clients_http.py` oraz regresja
+  `tests/test_battles_router.py`.
+- Dokumentacja/HANDOFF: roadmap/architecture oraz ten wpis.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Nowy klient wykonuje jedno żądanie HTTP na wywołanie; brak nowych query po
+stronie istniejących endpointów poza już opisanym B4 metadata endpointem.
+
+**Plan:**
+- [x] 1. Wykonać encoding gate i doczytać wzorce `HttpClient`/testów.
+- [x] 2. Dodać typ metadanych + metodę klienta i focused testy.
+- [x] 3. Zsynchronizować roadmap/architecture.
+- [x] 4. Weryfikacja: targeted pytest, pełny pytest, call-site check.
+- [x] 5. DoD: manual `/simplify`, manual `/review`, manual `/security-review`,
+  `git diff --check`, diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice'a. Pełny
+`HttpClient.get_state`, write endpoints, replay/simulate i właściwy HTTP
+`GameClient` zostają `WAITING(prereq)` na kolejne endpointy B4 oraz model
+snapshot/state.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-03T21:07+02:00: Bootstrap wykonany ręcznie zgodnie z `/load-context`:
+  memory automatyzacji brak, przeczytano `AGENTS.md`, canonical
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md` oraz stan working tree. Zastane zmiany
+  `.claude/settings.local.json`, `HANDOFF.md` i usunięty
+  `HANDOFF_aideas-knowledge-base.md` pozostają poza zakresem.
+- 2026-07-03T21:10+02:00: Encoding gate dla `szop_client/http.py`,
+  `szop_client/__init__.py` i `tests/test_clients_http.py` OK po eskalacji
+  `.venv` poza sandboxem (lokalny WindowsApps shim blokuje sandbox). Wzorce
+  klienta i testów potwierdzają mały read-only slice z wstrzykiwanym transportem.
+- 2026-07-03T21:16+02:00: Dodano `BattleMetadata` i
+  `HttpClient.get_battle_metadata(battle_id)` w `szop_client/http.py`, eksport w
+  `szop_client/__init__.py` oraz testy URL/headerów, dekodowania pól nullable,
+  HTTP error i malformed payload. Targeted
+  `tests/test_clients_http.py tests/test_battles_router.py`: **18 passed**,
+  44 warnings.
+- 2026-07-03T21:21+02:00: `docs/roadmap.md` i `docs/architecture.md`
+  zsynchronizowane: B5 `HttpClient` ma teraz dwa read-only slicey
+  (`get_battle_metadata` + `get_events`), pełny `GameClient` HTTP nadal czeka na
+  write/state/simulate endpoints B4.
+- 2026-07-03T21:24+02:00: Call-site check: `BattleMetadata` użyty w eksporcie,
+  testach i dokumentacji; `get_battle_metadata` jest nowym publicznym klientem
+  użytym tylko w testach i dokumentacji; prywatny `_get_json` obsługuje lokalnie
+  dwie metody klienta (`get_battle_metadata`, `get_events`); zmiana `_url`
+  zachowuje query dla `get_events`, a dla metadanych usuwa zbędne `?`. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2067 passed**, 2941 warnings.
+- 2026-07-03T21:28+02:00: DoD zakończony. `git diff --check` bez błędów
+  (tylko znane ostrzeżenia CRLF). Manual `/simplify`: brak zmian; prywatny
+  `_get_json` usuwa duplikację status/decode między dwoma metodami HTTP. Manual
+  `/review`: 0 bugów korektności; `get_events` zachowuje URL z query i
+  deserializację przez `json_to_event`, a metadata payload jest walidowany na
+  wymagane pola. Manual `/security-review`: token trafia wyłącznie do nagłówka
+  Authorization, brak logowania sekretów, brak DB-write/dynamicznego SQL po
+  stronie klienta. Diff review potwierdza, że `.claude/settings.local.json`,
+  główny `HANDOFF.md` i usunięty handoff AIDEAS pozostają poza zakresem. Brak
+  commita w tej sesji.
+
+## DONE - 2026-07-03T06:14:25+02:00 - B4 battle metadata endpoint
+
+**Zakres pracy:** kolejny mały read-only slice B4 po event-log pollingu:
+`GET /battles/{id}` ma zwracać participant-scoped metadane bitwy z tabeli
+`battles` oraz `latest_sequence` z event-store. Nie rekonstruuje jeszcze pełnego
+`BattleState`, nie tworzy bitew, nie przyjmuje akcji i nie zapisuje eventów.
+
+**Wybór zadania:** bezpośrednia kontynuacja dwufalowego kierunku B API + C MCP po
+`GET /battles/{id}/events` i `HttpClient.get_events`. Zakres jest mały,
+read-only i opiera się na istniejącym B2 event-store, bez wchodzenia w invite'y,
+akcje, snapshoty, MCP SDK, RAG ani decyzje `LOCKED`.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak zmian schemy i DB.
+- Backend payload/API: `app/routers/battles.py` - nowy response model metadanych
+  i endpoint `GET /battles/{id}` reuse istniejącego auth/participant scope.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: `tests/test_battles_router.py` dla rejestracji, owner scope,
+  `latest_sequence`, braku eventów i 404 dla cudzej/brakującej bitwy.
+- Dokumentacja/HANDOFF: roadmap/architecture oraz ten wpis.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Nowy endpoint wykonuje jeden SELECT bitwy po id z participant filter oraz jeden
+lekki aggregate SELECT `max(BattleEvent.sequence)` po `battle_id`; brak nowych
+query w istniejących endpointach.
+
+**Plan:**
+- [x] 1. Wykonać encoding gate i doczytać wzorce router/testów.
+- [x] 2. Dodać endpoint metadanych + focused testy.
+- [x] 3. Zsynchronizować roadmap/architecture.
+- [x] 4. Weryfikacja: targeted pytest, pełny pytest, call-site check.
+- [x] 5. DoD: manual `/simplify`, manual `/review`, manual `/security-review`,
+  `git diff --check`, diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice'a. Pełny
+`HttpClient.get_state`, create/action endpoints i replay/simulate zostają
+`WAITING(prereq)` na kolejne endpointy B4 oraz ewentualny model snapshot/state.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-03T06:02+02:00: Bootstrap wykonany ręcznie zgodnie z `/load-context`:
+  memory automatyzacji brak, przeczytano `AGENTS.md`, canonical
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/developing.md`,
+  `docs/architecture.md` oraz stan working tree. Zastane zmiany
+  `.claude/settings.local.json`, `HANDOFF.md` i usunięty
+  `HANDOFF_aideas-knowledge-base.md` pozostają poza zakresem.
+- 2026-07-03T06:05+02:00: Encoding gate dla `app/routers/battles.py` i
+  `tests/test_battles_router.py` OK po eskalacji `.venv` poza sandboxem
+  (lokalny shim WindowsApps zwraca `Odmowa dostępu` w sandboxie). Wzorce
+  router/testów potwierdzają reuse `_battle_reader` i `_get_accessible_battle`.
+- 2026-07-03T06:10+02:00: Dodano `BattlePublic` i `GET /battles/{id}` w
+  `app/routers/battles.py`. Endpoint reuse istniejący session-or-agent auth
+  (`battle:read`) i participant scope, zwraca metadane `Battle` oraz
+  `latest_sequence=max(BattleEvent.sequence)` bez rekonstrukcji `BattleState`.
+  Testy routera rozszerzone o rejestrację ścieżki, owner scope, pusty event-log
+  (`latest_sequence=0`) i 404 dla cudzej/brakującej bitwy. Targeted
+  `tests/test_battles_router.py tests/test_clients_http.py`: **15 passed**,
+  44 warnings.
+- 2026-07-03T06:14+02:00: `docs/roadmap.md` i `docs/architecture.md`
+  zsynchronizowane: B4 ma teraz dwa read-only endpointy (`GET /battles/{id}`
+  metadane + `GET /battles/{id}/events` polling). Write endpoints, replay,
+  simulate, invite'y i pełny `BattleState` pozostają otwarte.
+- 2026-07-03T06:14+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2064 passed**, 2941 warnings. Call-site check: `get_battle`,
+  `_public_battle` i `_latest_event_sequence` są nowe i lokalne dla routera;
+  `_get_accessible_battle` jest użyte przez oba read-only endpointy z tym samym
+  participant scope; `BATTLE_READ_SCOPE` bez zmiany semantyki. `git diff
+  --check` bez błędów (tylko znane ostrzeżenia CRLF). Working tree nadal ma
+  niezwiązane zmiany `.claude/settings.local.json`, `HANDOFF.md` i usunięty
+  `HANDOFF_aideas-knowledge-base.md` poza zakresem.
+- 2026-07-03T06:14+02:00: DoD zakończony. Manual `/simplify`: brak zmian.
+  Manual `/review`: 0 bugów korektności; endpoint jest addytywny i nie
+  koliduje z pollingiem eventów. Manual `/security-review`: reuse
+  `_battle_reader` + `_get_accessible_battle`, cudza/brakująca bitwa = 404,
+  bearer wymaga `battle:read`, brak body/zapisu/dynamicznego SQL; jedyny write
+  to istniejący audyt agent-token przy ścieżce bearer. Diff review potwierdza
+  scope tylko w plikach tego slice'a; brak commita w tej sesji.
 
 ## DONE - 2026-07-03T01:10:04+02:00 - B5 HttpClient polling commit hygiene
 

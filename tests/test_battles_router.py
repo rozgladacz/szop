@@ -114,8 +114,79 @@ def test_battles_router_is_registered_in_app() -> None:
         path = getattr(route, "path", "")
         methods_by_path.setdefault(path, set()).update(getattr(route, "methods", set()))
 
+    assert "/battles/{battle_id}" in route_paths
+    assert "GET" in methods_by_path["/battles/{battle_id}"]
     assert "/battles/{battle_id}/events" in route_paths
     assert "GET" in methods_by_path["/battles/{battle_id}/events"]
+
+
+def test_get_battle_returns_owner_scoped_metadata_with_latest_sequence() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    opponent = _seed_user(session, "opponent")
+    battle = _seed_battle(session, p1=owner, p2=opponent)
+    battle.current_round = 3
+    battle.rng_seed = 777
+    battle.status = "active"
+    session.commit()
+    session.refresh(battle)
+    _seed_events(session, battle)
+
+    response = battles.get_battle(
+        battle.id,
+        db=session,
+        reader=battles.BattleReader(user_id=owner.id),
+    )
+
+    assert response.battle_id == battle.id
+    assert response.p1_user_id == owner.id
+    assert response.p2_user_id == opponent.id
+    assert response.p1_roster_id is None
+    assert response.p2_roster_id is None
+    assert response.winner_user_id is None
+    assert response.current_round == 3
+    assert response.rng_seed == 777
+    assert response.status == "active"
+    assert response.latest_sequence == 2
+
+
+def test_get_battle_reports_zero_latest_sequence_for_empty_log() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    opponent = _seed_user(session, "opponent")
+    battle = _seed_battle(session, p1=owner, p2=opponent)
+
+    response = battles.get_battle(
+        battle.id,
+        db=session,
+        reader=battles.BattleReader(user_id=opponent.id),
+    )
+
+    assert response.latest_sequence == 0
+
+
+def test_get_battle_rejects_non_participant_and_missing_battle() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    opponent = _seed_user(session, "opponent")
+    stranger = _seed_user(session, "stranger")
+    battle = _seed_battle(session, p1=owner, p2=opponent)
+
+    with pytest.raises(HTTPException) as stranger_info:
+        battles.get_battle(
+            battle.id,
+            db=session,
+            reader=battles.BattleReader(user_id=stranger.id),
+        )
+    assert stranger_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_info:
+        battles.get_battle(
+            battle.id + 999,
+            db=session,
+            reader=battles.BattleReader(user_id=owner.id),
+        )
+    assert missing_info.value.status_code == 404
 
 
 def test_get_battle_events_returns_owner_scoped_event_log_with_since_filter() -> None:

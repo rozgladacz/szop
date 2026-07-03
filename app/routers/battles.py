@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -34,6 +34,19 @@ class BattleEventPublic(BaseModel):
 class BattleEventsPublic(BaseModel):
     battle_id: int
     events: list[BattleEventPublic]
+
+
+class BattlePublic(BaseModel):
+    battle_id: int
+    p1_user_id: int | None
+    p2_user_id: int | None
+    p1_roster_id: int | None
+    p2_roster_id: int | None
+    winner_user_id: int | None
+    current_round: int = Field(..., ge=0)
+    rng_seed: int
+    status: str
+    latest_sequence: int = Field(..., ge=0)
 
 
 def _authorization_header(request: Request) -> str | None:
@@ -86,6 +99,40 @@ def _public_event(event: EngineBattleEvent) -> BattleEventPublic:
         event_type=str(payload["event_type"]),
         payload=payload,
     )
+
+
+def _latest_event_sequence(db: Session, battle_id: int) -> int:
+    value = db.execute(
+        select(func.max(models.BattleEvent.sequence)).where(
+            models.BattleEvent.battle_id == battle_id
+        )
+    ).scalar_one()
+    return int(value or 0)
+
+
+def _public_battle(db: Session, battle: models.Battle) -> BattlePublic:
+    return BattlePublic(
+        battle_id=battle.id,
+        p1_user_id=battle.p1_user_id,
+        p2_user_id=battle.p2_user_id,
+        p1_roster_id=battle.p1_roster_id,
+        p2_roster_id=battle.p2_roster_id,
+        winner_user_id=battle.winner_user_id,
+        current_round=battle.current_round,
+        rng_seed=battle.rng_seed,
+        status=battle.status,
+        latest_sequence=_latest_event_sequence(db, battle.id),
+    )
+
+
+@router.get("/{battle_id}", response_model=BattlePublic)
+def get_battle(
+    battle_id: int,
+    db: Session = Depends(get_db),
+    reader: BattleReader = Depends(_battle_reader),
+) -> BattlePublic:
+    battle = _get_accessible_battle(db, battle_id=battle_id, reader=reader)
+    return _public_battle(db, battle)
 
 
 @router.get("/{battle_id}/events", response_model=BattleEventsPublic)
