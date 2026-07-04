@@ -18,7 +18,7 @@
 | Event types (frozen dataclass) | `app/services/engine/events.py` | `MoveExecuted`, `ShotResolved`, `MeleeResolved`, `ModelKilled`, `MoraleTestPassed`, `EffectApplied`, `InterruptTriggered`, `RoundEnded` |
 | `event_to_json()` / `json_to_event()` | `app/services/engine/events.py` | Serializacja do/z `BattleEvent.payload_json` |
 | `apply_events(events) → BattleState` | `app/services/engine/state.py` | Pure function — rekonstrukcja stanu z eventów |
-| `save_events(session, battle_id, events)` | `app/services/engine/persistence.py` | Append do BattleEvent (sequence przez `max(sequence) + 1` z optimistic locking) |
+| `save_events(session, battle_id, events, *, expected_latest_sequence=None)` | `app/services/engine/persistence.py` | Append do BattleEvent; eventy niosą własne `sequence`, a opcjonalny `expected_latest_sequence` daje optimistic precondition dla write endpointów |
 | `load_events(session, battle_id, since=0)` | `app/services/engine/persistence.py` | Odczyt z DB |
 | `resolver.apply(state, action, dice, ruleset, terrain)` | `app/services/engine/resolver.py` | **Pure function** — `(state, action, …) → (new_state, list[BattleEvent])`. Zero DB access. |
 

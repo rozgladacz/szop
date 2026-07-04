@@ -38,7 +38,12 @@ from app.services.engine.events import (  # noqa: E402
     MoveExecuted,
     StatusAdded,
 )
-from app.services.engine.persistence import load_events, save_events  # noqa: E402
+from app.services.engine.persistence import (  # noqa: E402
+    BattleEventSequenceConflict,
+    latest_event_sequence,
+    load_events,
+    save_events,
+)
 from app.services.engine.phases import (  # noqa: E402
     deployment_round,
     round_end_phase,
@@ -282,6 +287,96 @@ def test_same_sequence_different_battles_ok() -> None:
 
     assert load_events(session, b1.id) == [ev]
     assert load_events(session, b2.id) == [ev]
+
+
+def test_latest_event_sequence_returns_max_or_zero() -> None:
+    session = _build_session()
+    empty = _new_battle(session, seed=1)
+    filled = _new_battle(session, seed=2)
+    events = [
+        MoveExecuted(sequence=s, unit_id=1, from_pos=(0, 0), to_pos=(s, s))
+        for s in (1, 2, 3)
+    ]
+    save_events(session, filled.id, events)
+    session.commit()
+
+    assert latest_event_sequence(session, empty.id) == 0
+    assert latest_event_sequence(session, filled.id) == 3
+
+
+def test_save_events_with_expected_latest_sequence_appends_contiguous_tail() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    first = MoveExecuted(sequence=1, unit_id=1, from_pos=(0, 0), to_pos=(1, 1))
+    tail = [
+        StatusAdded(sequence=2, target_id=1, status="Aktywowany"),
+        MoveExecuted(sequence=3, unit_id=1, from_pos=(1, 1), to_pos=(2, 2)),
+    ]
+    save_events(session, battle.id, [first])
+    session.commit()
+
+    assert (
+        save_events(
+            session,
+            battle.id,
+            tail,
+            expected_latest_sequence=1,
+        )
+        == 2
+    )
+    session.commit()
+
+    assert load_events(session, battle.id) == [first, *tail]
+
+
+def test_save_events_with_stale_expected_latest_sequence_raises_without_append() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    first = MoveExecuted(sequence=1, unit_id=1, from_pos=(0, 0), to_pos=(1, 1))
+    stale_tail = [StatusAdded(sequence=1, target_id=1, status="Aktywowany")]
+    save_events(session, battle.id, [first])
+    session.commit()
+
+    with pytest.raises(BattleEventSequenceConflict) as exc_info:
+        save_events(
+            session,
+            battle.id,
+            stale_tail,
+            expected_latest_sequence=0,
+        )
+
+    assert exc_info.value.battle_id == battle.id
+    assert exc_info.value.expected_latest_sequence == 0
+    assert exc_info.value.actual_latest_sequence == 1
+    assert load_events(session, battle.id) == [first]
+
+
+def test_save_events_with_expected_latest_sequence_allows_empty_noop() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+
+    assert save_events(session, battle.id, [], expected_latest_sequence=0) == 0
+    assert latest_event_sequence(session, battle.id) == 0
+
+
+def test_save_events_with_expected_latest_sequence_requires_contiguous_tail() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    gap = [MoveExecuted(sequence=2, unit_id=1, from_pos=(0, 0), to_pos=(2, 2))]
+
+    with pytest.raises(ValueError, match="contiguous event sequences"):
+        save_events(session, battle.id, gap, expected_latest_sequence=0)
+
+    assert load_events(session, battle.id) == []
+
+
+def test_save_events_rejects_negative_expected_latest_sequence() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    event = MoveExecuted(sequence=1, unit_id=1, from_pos=(0, 0), to_pos=(1, 1))
+
+    with pytest.raises(ValueError, match="must be >= 0"):
+        save_events(session, battle.id, [event], expected_latest_sequence=-1)
 
 
 def test_load_since_filter() -> None:

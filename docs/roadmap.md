@@ -125,7 +125,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [x] `event_to_json()` + `json_to_event()` serializer (+ `_EVENT_REGISTRY` discriminator)
 
 **Persistence (`app/services/engine/persistence.py`):** — **DONE 2026-06-10** (ADR-0050)
-- [x] `save_events(session, battle_id, events, *, flush=True)` — append do BattleEvent (transakcyjnie neutralny)
+- [x] `save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` — append do BattleEvent (transakcyjnie neutralny) + optional optimistic precondition dla B4 write endpointów
 - [x] `load_events(session, battle_id, since=0)` — odczyt z db + rekonstrukcja przez `json_to_event`
 - [!] `create_snapshot()` — N/A w slice (MVP nie wywołuje snapshotów; `BattleSnapshot` model odroczony)
 
@@ -233,7 +233,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych i
   event-logu (`BattlePublic`, `BattleEventsPublic`) w routerze gotowe; shared
   `BattleState`, `BattleEvent` i polimorficzne `Action` nadal otwarte.
-- [ ] Optimistic locking na `BattleEvent.sequence` — zapobiega race condition
+- [~] Optimistic locking na `BattleEvent.sequence` — persistence helper DONE 2026-07-04 (`save_events(..., expected_latest_sequence=N)` + `BattleEventSequenceConflict`; DB `UniqueConstraint` nadal łapie race między check a INSERT); wire-in do przyszłych write endpointów B4 nadal otwarty
 
 ### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19 + HttpClient read-only DONE 2026-07-02/03** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
 

@@ -3,13 +3,97 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-04T01:16:00+02:00 (DONE — B4/B5 metadata commit hygiene)
+> **Ostatnia aktualizacja:** 2026-07-04T06:23:00+02:00 (DONE — B4 optimistic append guard)
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-07-04T06:23:00+02:00 - B4 optimistic append guard
+
+**Zakres pracy:** domknąć mały infrastrukturalny slice B4 pod przyszłe write
+endpointy: `app/services/engine/persistence.save_events` ma opcjonalnie
+weryfikować oczekiwany ostatni `BattleEvent.sequence` przed appendem. Istniejący
+`UniqueConstraint(battle_id, sequence)` zostaje ostatnią linią obrony na race;
+nowy precondition daje routerom B4 jawny konflikt bez projektowania dziś
+`POST /battles/{id}/actions`.
+
+**Wybór zadania:** roadmap B4 ma otwarte optimistic locking na sequence, a
+ostatnie sesje zamknęły read-only metadata/event-log. To najmniejszy kolejny
+krok w dwufalowym kierunku B API + B5/C MCP: przygotowuje bezpieczny zapis
+eventów, nie wymaga decyzji usera, nie dotyka UI, kosztów, klasyfikacji ani
+`LOCKED` (Dywersant, raw combat rolls, `models_mode=per_copy`).
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak zmian schemy; wykorzystanie istniejącego
+  `battle_events` i `UniqueConstraint(battle_id, sequence)`.
+- Backend payload/API: helper persistence, bez nowych endpointów i bez zmian
+  JSON kontraktów.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: targeted `tests/test_engine_persistence.py`; pełny pytest przed
+  deklaracją DONE.
+- Dokumentacja/HANDOFF: roadmap/architecture oraz ten wpis.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Nowy SELECT `max(sequence)` uruchamia się tylko gdy caller poda
+`expected_latest_sequence`; istniejące read-only endpointy i stare call sites nie
+dostają dodatkowego query.
+
+**Plan:**
+- [x] 1. Wykonać encoding gate, sprawdzić call sites i dodać wpis W TRAKCIE.
+- [x] 2. Dodać opcjonalny `expected_latest_sequence` + jawny wyjątek konfliktu.
+- [x] 3. Dodać testy: happy path, stale expected sequence, empty stream, brak
+  regresji unguarded append.
+- [x] 4. Zsynchronizować roadmap/architecture.
+- [x] 5. Weryfikacja: targeted pytest, pełny pytest, call-site check,
+  manual `/simplify`, manual `/review` (diff >50 linii / persistence), manual
+  `/security-review` N/A jeśli brak auth/user input, `git diff --check`, diff
+  review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego zakresu. Wire-in do
+`POST /battles/{id}/actions` zostaje `WAITING(prereq)` na projekt write
+endpointu B4.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-04T06:04+02:00: Bootstrap wykonany ręcznie zgodnie z `/load-context`:
+  memory automatyzacji brak, przeczytano `AGENTS.md`, canonical
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/developing.md`, stan roboczy i
+  bieżące B4/B5 pliki. Zastane niezwiązane zmiany `.claude/settings.local.json`,
+  główny `HANDOFF.md` i usunięty `HANDOFF_aideas-knowledge-base.md` pozostają
+  poza zakresem. Encoding gate dla `persistence.py` i
+  `tests/test_engine_persistence.py` przeszedł przez `.venv` poza sandboxem
+  (sandboxowy WindowsApps shim nadal daje `Odmowa dostępu`).
+- 2026-07-04T06:08+02:00: Dodano
+  `BattleEventSequenceConflict`, `latest_event_sequence()` i guarded
+  `save_events(expected_latest_sequence=...)`. Guard sprawdza aktualny max
+  sequence, a w guarded mode wymaga ciągłego ogona eventów od `expected+1`.
+  `app/routers/battles.py` reuse `latest_event_sequence()` dla metadanych,
+  bez zmiany payloadu. Testy regresyjne dodane, jeszcze przed uruchomieniem.
+- 2026-07-04T06:12+02:00: `docs/roadmap.md` i `docs/architecture.md`
+  zsynchronizowane: optimistic locking oznaczony jako persistence helper done,
+  a wire-in do przyszłych B4 write endpointów pozostaje otwarty.
+- 2026-07-04T06:23+02:00: Weryfikacja zakończona. Targeted
+  `tests/test_engine_persistence.py tests/test_battles_router.py`: **26
+  passed**, 323 warnings. Po manual `/simplify` usunięto zbędny routerowy
+  wrapper `_latest_event_sequence` i powtórzono targeted: **26 passed**, 323
+  warnings. Pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x
+  --tb=short -q` po finalnym kodzie: **2073 passed**, 2955 warnings. Call-site
+  check: stare wywołania `save_events` pozostają unguarded i nie dostają nowego
+  SELECT-a; przyszłe write endpointy mogą użyć
+  `expected_latest_sequence`; `latest_event_sequence` konsumuje router
+  metadanych i testy. Manual `/review`: 0 bugów korektności; precheck nie
+  dodaje eventów przed konfliktem, waliduje ciągły ogon i zostawia
+  `UniqueConstraint` jako fallback race między SELECT i INSERT. Manual
+  `/security-review`: N/A dla auth i user input; brak nowego endpointu,
+  sekretów, dynamicznego SQL i zapisu zależnego od payloadu HTTP. `git diff
+  --check` bez błędów (tylko znane ostrzeżenia CRLF). Diff review potwierdza
+  scope 8 plików slice'a; zastane `.claude/settings.local.json`, główny
+  `HANDOFF.md` i usunięty `HANDOFF_aideas-knowledge-base.md` pozostają poza
+  zakresem. Commit: `<this>`.
 
 ## DONE - 2026-07-04T01:16:00+02:00 - B4/B5 metadata commit hygiene
 

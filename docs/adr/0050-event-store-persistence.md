@@ -46,11 +46,17 @@ Jedyny moduł `engine/` dotykający ORM (architektura: „Game engine = czyste
 funkcje + event sourcing; ORM tylko do persistence"). Reszta silnika
 (state/phases/combat/...) pozostaje czysta.
 
-- `save_events(session, battle_id, events, *, flush=True) -> int` — append-only
-  INSERT per event. **Transakcyjnie neutralny** (NIE commituje — caller zarządza
-  transakcją). `flush=True` wymusza INSERT (egzekucja UniqueConstraint) bez
-  commitu. Import `app.models` lokalny w funkcji — unika cyklu
-  `engine → models → db` przy imporcie pakietu engine.
+- `save_events(session, battle_id, events, *, flush=True,
+  expected_latest_sequence=None) -> int` — append-only INSERT per event.
+  **Transakcyjnie neutralny** (NIE commituje — caller zarządza transakcją).
+  Eventy niosą własne `sequence`; gdy caller poda `expected_latest_sequence`,
+  helper sprawdza aktualny max sequence i wymaga ciągłego ogona od `expected+1`.
+  `flush=True` wymusza INSERT (egzekucja UniqueConstraint) bez commitu. Import
+  `app.models` lokalny w funkcji — unika cyklu `engine → models → db` przy
+  imporcie pakietu engine.
+- `latest_event_sequence(session, battle_id) -> int` — odczyt aktualnego końca
+  strumienia (`0` dla pustego logu), współdzielony przez B4 metadata i przyszłe
+  write endpointy.
 - `load_events(session, battle_id, since=0) -> list[BattleEvent]` — `select`
   WHERE `battle_id` i `sequence > since`, `ORDER BY sequence`; rekonstrukcja
   przez `json_to_event(json.loads(payload_json))`. `since=` wspiera inkrementalny
@@ -72,7 +78,8 @@ active_player.
 ## Konsekwencje
 
 - **B4 API odblokowane** — endpointy events/actions mają persystencję + optimistic
-  locking (UniqueConstraint). **B5 LocalClient** może zapisywać in-process.
+  precondition (`expected_latest_sequence`) oraz DB fallback (`UniqueConstraint`).
+  **B5 LocalClient** może zapisywać in-process.
 - **Brak Alembic** pozostaje świadomy: kolejne NOWE tabele = bezpieczne; zmiany
   kolumn istniejących tabel wymagają wpisu w `_migrate_schema` (db.py).
 - **Odroczone poza ten ADR:** `BattleInvite`, `BattleSnapshot`, faktyczny

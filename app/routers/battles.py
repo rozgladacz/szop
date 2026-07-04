@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -13,7 +13,7 @@ from ..db import get_db
 from ..security import get_current_user, require_agent_scope
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
-from ..services.engine.persistence import load_events
+from ..services.engine.persistence import latest_event_sequence, load_events
 
 router = APIRouter(prefix="/battles", tags=["battles"])
 
@@ -101,15 +101,6 @@ def _public_event(event: EngineBattleEvent) -> BattleEventPublic:
     )
 
 
-def _latest_event_sequence(db: Session, battle_id: int) -> int:
-    value = db.execute(
-        select(func.max(models.BattleEvent.sequence)).where(
-            models.BattleEvent.battle_id == battle_id
-        )
-    ).scalar_one()
-    return int(value or 0)
-
-
 def _public_battle(db: Session, battle: models.Battle) -> BattlePublic:
     return BattlePublic(
         battle_id=battle.id,
@@ -121,7 +112,7 @@ def _public_battle(db: Session, battle: models.Battle) -> BattlePublic:
         current_round=battle.current_round,
         rng_seed=battle.rng_seed,
         status=battle.status,
-        latest_sequence=_latest_event_sequence(db, battle.id),
+        latest_sequence=latest_event_sequence(db, battle.id),
     )
 
 
