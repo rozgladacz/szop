@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Generator
 
@@ -20,6 +20,17 @@ class Base(DeclarativeBase):
     pass
 
 
+def utcnow() -> datetime:
+    """Bieżący czas UTC jako **naive** datetime (bez tzinfo).
+
+    SSOT zastępujący przedawniony `datetime.utcnow()` (Py 3.12+). Kolumny
+    `DateTime` (bez `timezone=True`) przechowują i porównują naive datetimes
+    (np. `AgentToken.expires_at <= now`), więc zachowujemy naive — aware
+    zerwałoby porównania `TypeError`. Ta sama konwencja co `app/security.py`.
+    """
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 def get_db() -> Generator:
     db = SessionLocal()
     try:
@@ -37,7 +48,7 @@ def _ensure_default_armory(connection) -> int:
     if result is not None:
         return result
 
-    now = datetime.utcnow()
+    now = utcnow()
     connection.execute(
         text(
             """

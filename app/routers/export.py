@@ -4,7 +4,6 @@ import base64
 import binascii
 import io
 import textwrap
-from datetime import datetime
 import zlib
 from typing import Any
 
@@ -20,7 +19,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from ..data.abilities import ABILITY_DEFINITIONS
-from ..db import get_db
+from ..db import get_db, utcnow
 from ..paths import TEMPLATES_DIR
 from ..pdf_font_data import PDF_FONT_DATA
 from ..security import get_current_user
@@ -241,7 +240,7 @@ def roster_print(
             "roster_groups": roster_groups,
             "total_cost": total_cost,
             "total_cost_rounded": total_cost_rounded,
-            "generated_at": datetime.utcnow(),
+            "generated_at": utcnow(),
             "spell_entries": spell_entries,
             "army_rules": army_rules,
         },
@@ -421,7 +420,7 @@ def roster_export_list(
             "entries": entries,
             "total_cost": total_cost,
             "total_cost_rounded": total_cost_rounded,
-            "generated_at": datetime.utcnow(),
+            "generated_at": utcnow(),
             "spell_entries": spell_entries,
             "army_rules": army_rules,
         },
@@ -441,7 +440,7 @@ def roster_pdf(
         raise HTTPException(status_code=404)
     _ensure_roster_view_access(roster, current_user)
 
-    generated_at = datetime.utcnow()
+    generated_at = utcnow()
     total_cost, _ = costs.recalculate_roster_costs(roster)
     roster_items = _export_roster_unit_entries(db, roster)
     total_cost_rounded = utils.round_points(total_cost)

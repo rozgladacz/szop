@@ -17,7 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .db import Base
+from .db import Base, utcnow
 
 
 ARMY_SPELL_NAME_MAX_LENGTH = 60
@@ -30,12 +30,12 @@ AGENT_PROPOSAL_STATUS_REJECTED = "rejected"
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, nullable=False)
 
 
 def touch_timestamps(mapper, connection, target) -> None:  # pragma: no cover - SQLAlchemy hook
-    now = datetime.utcnow()
+    now = utcnow()
     if getattr(target, "created_at", None) is None:
         target.created_at = now
     target.updated_at = now
@@ -92,7 +92,7 @@ class AgentAuditLog(Base):
     route: Mapped[str] = mapped_column(String(200), nullable=False)
     params_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False, index=True
+        DateTime, default=utcnow, nullable=False, index=True
     )
 
     user: Mapped[Optional[User]] = relationship(foreign_keys=[user_id])
@@ -659,7 +659,7 @@ class BattleEvent(Base):
     event_type: Mapped[str] = mapped_column(String(40), nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime, default=utcnow, nullable=False
     )
 
     battle: Mapped[Battle] = relationship(back_populates="events")
