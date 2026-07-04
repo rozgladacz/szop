@@ -11,7 +11,6 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_aideas-knowledge-base](docs/handoffs/HANDOFF_aideas-knowledge-base.md) | Przygotowanie kopii i ekstraktów z aplikacji jako baza wiedzy dla ćwiczenia AIDEAS. | `AIdeas/Baza wiedzy/` | In progress |
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
 
 
@@ -54,6 +53,9 @@
 ---
 
 ## LOG SESJI
+
+### 2026-07-01 — aideas-knowledge-base (archived) — materiały AIDEAS wyłączone z pracy repo
+- Wątek pomocniczy AIDEAS zamknięty na polecenie usera. W repo zdjęto aktywną blokadę `AIdeas/Baza wiedzy/` i usunięto per-wątkowy handoff; `AIdeas/` pozostaje lokalnym materiałem szkoleniowym wyłączonym z trackingu. Materiały były poza aplikacją SZOP: prezentacje, baza wiedzy/upload pack oraz defensywny raport z logów Agent Arena; brak zmian kodu aplikacji i brak potrzeby pytest.
 
 ### 2026-06-30 — faza-b-engine-mvp (sesja autonomiczna) — commit slice C1 `AgentProposal` (create/list/approve/reject)
 - Domknięta higiena: zastany, w pełni ukończony i zweryfikowany w poprzednich sesjach dnia (HANDOFF entries 01:13 + 06:15) slice C1 `AgentProposal` (backend consent gate) leżał **niezacommitowany** w drzewie roboczym. Ta sesja re-zweryfikowała i zacommitowała wyłącznie pliki slice'a. Kontrakt: model `AgentProposal` (status pending/approved/rejected, payload_json + audit) + `POST /agent_proposals` (agent bearer scope `agent_proposals:create` → `pending` owner-scoped) + `GET /agent_proposals` (owner listuje własne, najnowsze pierwsze) + `POST /agent_proposals/{id}/approve|reject` (owner, idempotentne, 409 na konflikt approved↔rejected; **nie wykonuje akcji domenowej**). Cudza propozycja = 404; audyt bez payloadu/sekretów.
