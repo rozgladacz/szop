@@ -2,7 +2,6 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import Any, Mapping, Optional
 
 import bcrypt
@@ -12,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models
-from .db import get_db
+from .db import get_db, utcnow
 
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
@@ -179,7 +178,7 @@ def _authenticate_agent(
     token = db.execute(
         select(models.AgentToken).where(models.AgentToken.token_hash == token_hash)
     ).scalar_one_or_none()
-    now = datetime.now(UTC).replace(tzinfo=None)
+    now = utcnow()
     if token is None or token.revoked_at is not None or token.expires_at <= now:
         raise _unauthorized_agent()
 

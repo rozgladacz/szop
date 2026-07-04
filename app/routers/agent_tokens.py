@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 import secrets
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..db import get_db
+from ..db import get_db, utcnow
 from ..security import get_current_user, hash_agent_token, hash_password
 
 router = APIRouter(prefix="/agent_tokens", tags=["agent_tokens"])
@@ -42,10 +42,6 @@ class AgentTokenPublic(BaseModel):
 
 class AgentTokenCreated(AgentTokenPublic):
     token: str
-
-
-def _now() -> datetime:
-    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _validate_scopes(scopes: list[str]) -> list[str]:
@@ -179,7 +175,7 @@ def create_agent_token(
     current_user: models.User = Depends(get_current_user()),
 ) -> AgentTokenCreated:
     scopes = _validate_scopes(payload.scopes)
-    now = _now()
+    now = utcnow()
     _enforce_active_token_quota(db, current_user.id, now)
     raw_token = secrets.token_urlsafe(32)
     agent_user = models.User(
@@ -244,7 +240,7 @@ def revoke_agent_token(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     if token.revoked_at is None:
-        token.revoked_at = _now()
+        token.revoked_at = utcnow()
         _audit_token_management(
             db,
             owner_user_id=current_user.id,
