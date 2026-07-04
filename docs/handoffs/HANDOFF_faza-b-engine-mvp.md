@@ -3,7 +3,40 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-04T22:00+02:00 (commit hygiene — B4 sandbox battle creation utrwalony)
+> **Ostatnia aktualizacja:** 2026-07-04T22:30+02:00 (DONE — B5 `HttpClient.create_battle`)
+
+## DONE — 2026-07-04T22:30+02:00 — B5 `HttpClient.create_battle` (klient sandbox `POST /battles`)
+
+**Zakres:** naturalny follow-up po utrwaleniu B4 `POST /battles` (`ff3b08a`) —
+klient HTTP dla tego write-slice'a, wg wzorca `get_battle_metadata`/`get_events`.
+`HttpClient.create_battle(p1_roster_id, p2_roster_id, rng_seed=0,
+initiative_player=0)` woła `POST /battles` z JSON body + `Content-Type:
+application/json`, reuse `_metadata_from_payload` (endpoint zwraca `BattlePublic`,
+ta sama forma co metadata) → zwraca `BattleMetadata`. GET/POST zunifikowane
+przez współdzielony `_request_json(method, path, query, *, json_body,
+error_label)`; `_get_json` to cienki wrapper; `_headers(with_json_body=...)`
+dokłada `Content-Type` tylko dla body. Read/write klient, bez decyzji usera, bez
+`LOCKED`. `get_state`/`take_action`/`simulate` nadal `WAITING(prereq)` na kolejne
+endpointy B4.
+
+**Warstwy:** data model N/A; backend N/A (endpoint istnieje, klient tylko
+konsumuje); JS/CSS N/A; testy `tests/test_clients_http.py` (+2: POST body/headers/
+metadata, HTTP error); docs roadmap/architecture.
+
+**Weryfikacja:** encoding gate OK; targeted `tests/test_clients_http.py
+tests/test_battles_router.py` **24 passed**; pełny
+`.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2079 passed**,
+3074 warnings (2077 + 2 nowe). Call-site check: `_headers`/`_get_json`/
+`_request_json` wyłącznie wewnątrz `http.py`; `create_battle` w `local.py:202`
+to inna klasa (`LocalClient`). `/simplify`: refaktor unifikuje GET/POST, cienki
+`_get_json`. `/review`: 0 bugów — POST wysyła JSON body, 201 przechodzi status
+check, reuse `_metadata_from_payload`, błędy → `HttpClientError` ze status_code.
+`/security-review`: token tylko w nagłówku Authorization, body = same id
+rosterów (brak sekretów), brak DB-write/dynamicznego SQL po stronie klienta.
+Pliki commita: `szop_client/http.py`, `szop_client/__init__.py`,
+`tests/test_clients_http.py`, `docs/roadmap.md`, `docs/architecture.md`, ten
+HANDOFF. `.claude/settings.local.json` i `REVIEW_2026-07-04.md` (plik
+równoległego agenta) poza zakresem. Commit: `<this>`.
 
 ## DONE — 2026-07-04 — commit hygiene B4 `POST /battles` (KOLIZJA równoległa, rozwiązana)
 

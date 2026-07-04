@@ -1,8 +1,9 @@
-"""Read-only HTTP client slices for B4 battle metadata and event polling.
+"""HTTP client slices for the B4 battle API.
 
 The full `GameClient` HTTP implementation is still waiting for the remaining
-B4 endpoints. This module deliberately implements only metadata fetch and
-`get_events`, backed by existing read-only B4 APIs.
+B4 endpoints. This module implements the shipped slices: read-only metadata
+fetch (`get_battle_metadata`) and event polling (`get_events`), plus the
+sandbox write slice `create_battle` backed by `POST /battles`.
 """
 
 from __future__ import annotations
@@ -68,7 +69,7 @@ class HttpClientTransportError(HttpClientError):
 
 
 class HttpClient:
-    """Minimal read-only HTTP client for battle metadata and event polling."""
+    """Minimal HTTP client for battle metadata, event polling and sandbox create."""
 
     def __init__(
         self,
@@ -85,6 +86,29 @@ class HttpClient:
         self._token = token
         self._timeout = timeout
         self._transport = transport or _urlopen_transport
+
+    def create_battle(
+        self,
+        *,
+        p1_roster_id: int,
+        p2_roster_id: int,
+        rng_seed: int = 0,
+        initiative_player: int = 0,
+    ) -> BattleMetadata:
+        """Create a sandbox battle via `POST /battles` and return its metadata."""
+        payload = self._request_json(
+            "POST",
+            "/battles",
+            {},
+            json_body={
+                "p1_roster_id": p1_roster_id,
+                "p2_roster_id": p2_roster_id,
+                "rng_seed": rng_seed,
+                "initiative_player": initiative_player,
+            },
+            error_label="POST create battle",
+        )
+        return _metadata_from_payload(payload)
 
     def get_battle_metadata(self, battle_id: int) -> BattleMetadata:
         """Return participant-scoped battle metadata from the B4 API."""
@@ -116,12 +140,26 @@ class HttpClient:
         *,
         error_label: str,
     ) -> Any:
+        return self._request_json(
+            "GET", path, query, json_body=None, error_label=error_label
+        )
+
+    def _request_json(
+        self,
+        method: str,
+        path: str,
+        query: dict[str, Any],
+        *,
+        json_body: dict[str, Any] | None,
+        error_label: str,
+    ) -> Any:
+        body = None if json_body is None else json.dumps(json_body).encode("utf-8")
         response = self._transport(
             HttpRequest(
-                method="GET",
+                method=method,
                 url=self._url(path, query),
-                headers=self._headers(),
-                body=None,
+                headers=self._headers(with_json_body=json_body is not None),
+                body=body,
                 timeout=self._timeout,
             )
         )
@@ -132,8 +170,10 @@ class HttpClient:
             )
         return _decode_json(response.body)
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, *, with_json_body: bool = False) -> dict[str, str]:
         headers = {"Accept": "application/json"}
+        if with_json_body:
+            headers["Content-Type"] = "application/json"
         if self._token:
             headers["Authorization"] = f"Bearer {self._token}"
         return headers

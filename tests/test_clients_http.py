@@ -21,6 +21,78 @@ def _json_response(payload: dict) -> HttpResponse:
     )
 
 
+def _battle_public_payload(battle_id: int) -> dict:
+    return {
+        "battle_id": battle_id,
+        "p1_user_id": 10,
+        "p2_user_id": 10,
+        "p1_roster_id": 100,
+        "p2_roster_id": 200,
+        "winner_user_id": None,
+        "current_round": 1,
+        "rng_seed": 5,
+        "status": "active",
+        "latest_sequence": 4,
+    }
+
+
+def test_create_battle_posts_rosters_and_returns_metadata() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return HttpResponse(
+            status_code=201,
+            body=json.dumps(_battle_public_payload(77)).encode("utf-8"),
+        )
+
+    client = HttpClient("https://szop.example/api/", token="raw-token", transport=transport)
+
+    metadata = client.create_battle(
+        p1_roster_id=100,
+        p2_roster_id=200,
+        rng_seed=5,
+        initiative_player=1,
+    )
+
+    assert metadata == BattleMetadata(
+        battle_id=77,
+        p1_user_id=10,
+        p2_user_id=10,
+        p1_roster_id=100,
+        p2_roster_id=200,
+        winner_user_id=None,
+        current_round=1,
+        rng_seed=5,
+        status="active",
+        latest_sequence=4,
+    )
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url == "https://szop.example/api/battles"
+    assert request.headers["Content-Type"] == "application/json"
+    assert request.headers["Authorization"] == "Bearer raw-token"
+    assert json.loads(request.body.decode("utf-8")) == {
+        "p1_roster_id": 100,
+        "p2_roster_id": 200,
+        "rng_seed": 5,
+        "initiative_player": 1,
+    }
+
+
+def test_create_battle_raises_for_http_error_status() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return HttpResponse(status_code=404, body=b'{"detail":"missing"}')
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).create_battle(
+            p1_roster_id=1, p2_roster_id=2
+        )
+
+    assert exc_info.value.status_code == 404
+
+
 def test_get_battle_metadata_fetches_b4_metadata_endpoint() -> None:
     seen: list[HttpRequest] = []
 
