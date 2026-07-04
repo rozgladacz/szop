@@ -54,6 +54,12 @@
 
 ## LOG SESJI
 
+### 2026-07-04 — utcnow-ssot-auth (archived) — konsolidacja auth do `db.utcnow()`
+- Follow-up wątku `utcnow-deprecation` (ten sam dzień): pozostałe 2 kopie wyrażenia naive-UTC w plikach auth delegują teraz do SSOT `db.utcnow()`. `security.py:182` inline → `utcnow()`; `agent_tokens._now()` usunięty, 2 call-site'y → `utcnow()`. Nieużywane importy `datetime`/`UTC` (security) i `UTC` (agent_tokens) usunięte. Netto −5 linii, 3 kopie wyrażenia → 1 SSOT. Mechanicznie **no-op** (wartość naive-UTC byte-identyczna).
+- Pliki: `app/security.py`, `app/routers/agent_tokens.py`. Commit na `Faza_A`: `02c240e`.
+- Weryfikacja: pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2081 passed**; targeted `tests/test_agent_tokens_router.py tests/test_agent_token_security.py` **20 passed**. Call-site: `grep _now`/`grep now(UTC)` = 0 w plikach auth. DoD: `/simplify` (dedup 3→1 + usunięty wrapper `_now`); `/review` inline (mechaniczny reuse, wartość identyczna); **`/security-review` WYKONANY** — expiry/quota/creation/revoke używają identycznej wartości → zero zmian decyzji authz / cyklu życia tokena; brak nowego user-input→DB/dynamicznego SQL/sekretów. `git diff --check` czysto (tylko znane CRLF).
+- Doc updates: brak/N/A (czysta konsolidacja SSOT — helper już udokumentowany domyślnie; brak nowego pakietu/ADR/ENV/checkboxa).
+
 ### 2026-07-04 — utcnow-deprecation (archived) — migracja `datetime.utcnow()` → SSOT naive-UTC
 - Sesja autonomiczna, poza gorącym frontendem B4/B5 (świadomie, by uniknąć kolizji z równoległymi agentami w `battles.py`/`http.py`). Domknięty latentny dług: `datetime.utcnow()` jest deprecated (Py 3.12+, slated for removal) i zaśmiecał sygnał testów ~3074 warningami. Dodano SSOT `app/db.py::utcnow()` (naive UTC, `datetime.now(UTC).replace(tzinfo=None)` — ta sama konwencja co `app/security.py`); zmigrowano 9 przedawnionych sitów w `db.py`/`models.py`/`export.py`. **Naive zachowane świadomie** — kolumny `DateTime` (bez `timezone=True`) porównują naive (`AgentToken.expires_at <= now`); aware zerwałby `TypeError`. Pliki auth nietknięte (już non-deprecated). Warningi pytest **~3074 → 14** (reszta third-party `openpyxl`). Zero zmian zachowania (wartości byte-identyczne).
 - Pliki: `app/db.py`, `app/models.py`, `app/routers/export.py`, `tests/test_db_utcnow.py` (NEW 2). Commit na `Faza_A`: `dbcd052`.
