@@ -1400,10 +1400,7 @@ def roster_unit_collection_models(
         weapon_names.setdefault(
             int(unit.default_weapon_id), unit.default_weapon.effective_name
         )
-    ability_names: dict[int, str] = {}
-    for link in getattr(unit, "abilities", []) or []:
-        if link.ability_id is not None and link.ability is not None:
-            ability_names[int(link.ability_id)] = link.ability.name
+    ability_names = collection_match.unit_ability_display(unit)
 
     owned = collection_match.fetch_owned_models(db, current_user.id, unit.id)
     models_payload = collection_match.describe_owned_models(owned, weapon_names, ability_names)
@@ -2580,6 +2577,21 @@ def _expand_ability_labels(entries: list[dict]) -> list[str]:
     return labels
 
 
+def _expand_ability_ids(entries: list[dict]) -> list[int | None]:
+    """Gołe ability_id **równolegle** do `_expand_ability_labels` (ta sama kolejność
+    i rozwinięcie `× count`) — pozwala zmapować spłaszczoną etykietę na jej id
+    (np. do przekreślania zdolności po eliminacji modelu w Stanie Bitewnym)."""
+    ids: list[int | None] = []
+    for entry in entries:
+        if not entry:
+            continue
+        label = _ability_base_label(entry)
+        if label:
+            aid = _coerce_int(entry.get("ability_id"))
+            ids.extend([aid] * max(_coerce_int(entry.get("count"), 0), 1))
+    return ids
+
+
 def _ability_label_with_count(entry: dict) -> str:
     base_label = entry.get("label") or entry.get("raw") or entry.get("slug") or ""
     custom = str(entry.get("custom_name") or "").strip()
@@ -3577,6 +3589,8 @@ def _roster_unit_export_data(
     ]
     active_labels = _expand_ability_labels(selected_actives)
     aura_labels = _expand_ability_labels(selected_auras)
+    active_ability_ids = _expand_ability_ids(selected_actives)
+    aura_ability_ids = _expand_ability_ids(selected_auras)
     # Single quote call services both totals_map (when not pre-supplied)
     # and selected_total. Previous version called _internal_roster_unit_quote
     # twice with identical args — wasted ~40-80ms per unit on exports.
@@ -3633,6 +3647,8 @@ def _roster_unit_export_data(
         "passive_labels": [label for label in passive_labels if label],
         "active_labels": [label for label in active_labels if label],
         "aura_labels": [label for label in aura_labels if label],
+        "active_ability_ids": active_ability_ids,
+        "aura_ability_ids": aura_ability_ids,
         "active_descs": _build_descs(selected_actives),
         "aura_descs": _build_descs(selected_auras),
         "weapon_details": weapon_details,

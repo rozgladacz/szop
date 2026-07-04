@@ -24,7 +24,7 @@ from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..pdf_font_data import PDF_FONT_DATA
 from ..security import get_current_user
-from ..services import costs, utils
+from ..services import collection_match, costs, utils
 from ..services.roster_grouping import group_roster_items
 from .rosters import (
     _classification_map,
@@ -272,6 +272,65 @@ def roster_battle_state(
             weapon["traits_list"] = [
                 t.strip() for t in traits_raw.split(",") if t and t.strip()
             ]
+    # 2c: rozwiń kompozycję oddziałów komponowanych na grupy wariantów (tryb
+    # „Modele"). Musi być PRZED budową grup — modes potrzebują collection_groups.
+    composed_entries = [
+        e for e in roster_items
+        if getattr(e.get("instance"), "composed_models_json", None)
+    ]
+    if composed_entries:
+        composed_unit_ids = {e["instance"].unit_id for e in composed_entries}
+        owned_rows = (
+            db.execute(
+                select(models.CollectionModel)
+                .where(
+                    models.CollectionModel.owner_id == current_user.id,
+                    models.CollectionModel.unit_id.in_(composed_unit_ids),
+                )
+                .options(selectinload(models.CollectionModel.slots))
+            )
+            .scalars()
+            .unique()
+            .all()
+        )
+        owned_by_unit: dict[int, dict[int, models.CollectionModel]] = {}
+        for cm in owned_rows:
+            owned_by_unit.setdefault(cm.unit_id, {})[cm.id] = cm
+        # Mapy nazw/kosztów zależą tylko od Unit — licz raz na unit_id (kilka
+        # oddziałów tego samego typu może być komponowanych).
+        unit_maps: dict[int, tuple[dict, dict, dict]] = {}
+        for entry in composed_entries:
+            ru = entry["instance"]
+            unit = ru.unit
+            cached = unit_maps.get(unit.id)
+            if cached is None:
+                traits = costs.split_traits(getattr(unit, "flags", "") or "")
+                cached = (
+                    collection_match.unit_ability_display(unit),
+                    {
+                        int(link.weapon_id): costs.weapon_cost(link.weapon, unit.quality, traits)
+                        for link in getattr(unit, "weapon_links", []) or []
+                        if link.weapon_id is not None and link.weapon is not None
+                    },
+                    {
+                        int(link.ability_id): costs.ability_cost(link, traits, toughness=unit.toughness)
+                        for link in getattr(unit, "abilities", []) or []
+                        if link.ability_id is not None and link.ability is not None
+                    },
+                )
+                unit_maps[unit.id] = cached
+            ability_names, weapon_cost_map, ability_cost_map = cached
+            weapon_names = {
+                int(w["weapon_id"]): w["name"]
+                for w in entry.get("weapon_details", []) or []
+                if w.get("weapon_id") is not None
+            }
+            entry["collection_groups"] = collection_match.composition_groups(
+                collection_match.parse_selection(ru.composed_models_json),
+                owned_by_unit.get(unit.id, {}),
+                weapon_names, ability_names, weapon_cost_map, ability_cost_map,
+            )
+
     roster_groups = group_roster_items(roster_items, roster.army)
     army_rules_detail = _army_rule_detail(getattr(roster, "army", None))
     ability_descriptions: dict[str, str] = dict(_ABILITY_DESC_MAP)
@@ -346,10 +405,12 @@ def roster_battle_state(
         for member in group_members:
             for key in _mode_keys(member):
                 mode_set.add(key)
+            if member.get("collection_groups"):
+                mode_set.add("models")  # tryb „Modele" gdy oddział komponowany
         modes_ordered = sorted(
             mode_set,
             key=lambda k: (
-                0 if k == "equipment" else (1 if k == "melee" else 2),
+                0 if k == "equipment" else (1 if k == "models" else (2 if k == "melee" else 3)),
                 int(k.split(":", 1)[1]) if k.startswith("ranged:") else 0,
             ),
         )

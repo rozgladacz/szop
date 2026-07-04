@@ -10,10 +10,10 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import models
-from ..data import abilities as ability_catalog
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user
+from ..services import collection_match
 from ..services.costs import ability_link_loadout_key
 
 router = APIRouter(prefix="/collections", tags=["collections"])
@@ -66,27 +66,19 @@ def _weapon_options(unit: models.Unit) -> list[dict]:
 
 
 def _ability_options(unit: models.Unit) -> list[dict]:
+    # Nazwy display (z wartością, np. „Aura: Kontra") liczy wspólny
+    # collection_match.unit_ability_display — jedno źródło prawdy dla Kolekcji,
+    # kompozycji i Stanu Bitewnego.
+    names = collection_match.unit_ability_display(unit)
     opts = []
     for link in unit.abilities:
         if link.ability is None:
             continue
         key = ability_link_loadout_key(link)
-        value = None
-        if link.params_json:
-            try:
-                value = json.loads(link.params_json).get("value")
-            except (json.JSONDecodeError, TypeError):
-                pass
-        slug = ability_catalog.slug_for_name(link.ability.name)
-        definition = ability_catalog.find_definition(slug) if slug else None
-        if definition and value is not None:
-            display_name = ability_catalog.display_with_value(definition, str(value))
-        else:
-            display_name = link.ability.name
         opts.append({
             "key": key,
             "id": link.ability_id,
-            "name": display_name,
+            "name": names.get(key, link.ability.name),
             "type": link.ability.type,
         })
     return opts

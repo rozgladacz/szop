@@ -15,6 +15,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .. import models
+from ..data import abilities as ability_catalog
+from .costs import ability_link_loadout_key
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -56,15 +58,49 @@ def model_variant_signature(weapons: Any) -> str:
     return "|".join(f"{wid}:{multiset[wid]}" for wid in sorted(multiset))
 
 
-def collection_model_effective_weapons(cm: models.CollectionModel) -> dict[int, int]:
-    """Broń bazowa z loadoutu + aktualnie zamontowane bronie ze slotów magnetyzacji."""
+def _model_base_weapons(cm: models.CollectionModel) -> dict[int, int]:
+    """Broń bazowa modelu (z `loadout_json.weapons`, bez slotów magnetyzacji)."""
     try:
         loadout = json.loads(cm.loadout_json) if cm.loadout_json else {}
     except (json.JSONDecodeError, TypeError):
         loadout = {}
-    weapons = _weapon_multiset(loadout.get("weapons") if isinstance(loadout, dict) else None)
+    return _weapon_multiset(loadout.get("weapons") if isinstance(loadout, dict) else None)
+
+
+def _slot_option_ids(slot: models.CollectionModelSlot) -> set[int]:
+    """Dozwolone bronie slotu magnetyzacji (z `option_weapon_ids_json`)."""
+    try:
+        ids = json.loads(slot.option_weapon_ids_json) if slot.option_weapon_ids_json else []
+    except (json.JSONDecodeError, TypeError):
+        ids = []
+    if not isinstance(ids, list):
+        return set()
+    return {w for w in (_coerce_int(x) for x in ids) if w is not None}
+
+
+def collection_model_effective_weapons(
+    cm: models.CollectionModel, mounted: dict[str, Any] | None = None
+) -> dict[int, int]:
+    """Broń bazowa + zamontowane bronie ze slotów magnetyzacji.
+
+    ``mounted`` (opcjonalny override per-oddział, `{str(slot_id): weapon_id|null}`)
+    nadpisuje zamontowaną broń wybranego slotu — waliduje ją względem opcji slotu
+    (obca/nieznana → fallback do zapisanej `selected_weapon_id`; ``null`` = slot
+    pusty). Bez ``mounted`` używa zapisanej konfiguracji modelu (jak w Kolekcji).
+    """
+    weapons = _model_base_weapons(cm)
+    mounted_map = mounted if isinstance(mounted, dict) else None
     for slot in cm.slots:
         wid = slot.selected_weapon_id
+        if mounted_map is not None and str(slot.id) in mounted_map:
+            raw = mounted_map.get(str(slot.id))
+            if raw is None:
+                wid = None  # jawnie pusty slot
+            else:
+                chosen = _coerce_int(raw)
+                if chosen is not None and chosen in _slot_option_ids(slot):
+                    wid = chosen
+                # nieprawidłowa opcja → zostaje zapisana (izolacja przed obcą bronią)
         if wid is not None:
             weapons[int(wid)] = weapons.get(int(wid), 0) + 1
     return weapons
@@ -218,13 +254,15 @@ def fetch_owned_models(
 def describe_owned_models(
     collection_models: Iterable[models.CollectionModel],
     weapon_names: dict[int, str],
-    ability_names: dict[int, str] | None = None,
+    ability_names: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Formatuje modele do wyboru w „Trybie modeli": efektywna broń + zdolności.
 
     ``weapons`` to efektywne uzbrojenie (bazowe + zamontowane sloty) jako
-    ``{str(weapon_id): count}`` — frontend sumuje je do agregatu oddziału.
-    ``summary`` zawiera broń oraz (po „•") nazwy zdolności niesionych przez model.
+    ``{str(weapon_id): count}`` — podgląd dla modeli bez slotów; dla modeli ze
+    slotami frontend przelicza z ``base_weapons`` + wyborów ``slots``. ``summary``
+    zawiera broń oraz (po „•") nazwy zdolności. ``ability_names`` mapuje **pełny
+    klucz zdolności** → nazwa display (z wartością, np. „Aura: Kontra").
     """
     ability_names = ability_names or {}
     result: list[dict[str, Any]] = []
@@ -235,17 +273,36 @@ def describe_owned_models(
             name = weapon_names.get(wid, f"Broń #{wid}")
             cnt = weapons[wid]
             weapon_parts.append(f"{name} ×{cnt}" if cnt > 1 else name)
-        ability_labels = [
-            ability_names[bid] for bid in _model_ability_base_ids(cm) if bid in ability_names
-        ]
+        ability_labels = []
+        for k in _model_ability_keys(cm):
+            # Pełny klucz (z wartością); gdy nieznany (np. armia zmieniła wartość
+            # po rejestracji modelu) — fallback do nazwy po gołym id, spójnie z
+            # composition_groups (zamiast pomijać zdolność).
+            name = ability_names.get(k) or ability_names.get(k.split(":", 1)[0])
+            if name:
+                ability_labels.append(name)
         summary = ", ".join(weapon_parts) if weapon_parts else "—"
         if ability_labels:
             summary += " • " + ", ".join(ability_labels)
+        slots = [
+            {
+                "id": slot.id,
+                "name": slot.name,
+                "selected": slot.selected_weapon_id,
+                "options": [
+                    {"id": oid, "name": weapon_names.get(oid, f"Broń #{oid}")}
+                    for oid in sorted(_slot_option_ids(slot))
+                ],
+            }
+            for slot in cm.slots
+        ]
         result.append({
             "id": cm.id,
             "label": (cm.label or "").strip(),
             "count": int(cm.count or 0),
             "weapons": {str(wid): cnt for wid, cnt in weapons.items()},
+            "base_weapons": {str(wid): cnt for wid, cnt in _model_base_weapons(cm).items()},
+            "slots": slots,
             "abilities": ability_labels,
             "summary": summary,
         })
@@ -278,22 +335,64 @@ def _unit_ability_types(unit: models.Unit) -> dict[int, str]:
     return out
 
 
-def _model_ability_base_ids(cm: models.CollectionModel) -> list[int]:
-    """Bare ability_id niesione przez model (klucz `ability_link_loadout_key` → id)."""
+def _model_ability_keys(cm: models.CollectionModel) -> list[str]:
+    """Pełne klucze zdolności modelu (`ability_link_loadout_key`, np. `"50:kontra|6"`)."""
     try:
         loadout = json.loads(cm.loadout_json) if cm.loadout_json else {}
     except (json.JSONDecodeError, TypeError):
         loadout = {}
     abilities = loadout.get("abilities") if isinstance(loadout, dict) else None
-    ids: list[int] = []
+    keys: list[str] = []
     if isinstance(abilities, dict):
         for key, val in abilities.items():
-            if not val:
-                continue
-            bid = _coerce_int(str(key).split(":", 1)[0])
-            if bid is not None:
-                ids.append(bid)
+            if val:
+                keys.append(str(key))
+    return keys
+
+
+def _model_ability_base_ids(cm: models.CollectionModel) -> list[int]:
+    """Bare ability_id niesione przez model (pełny klucz → część przed `:`)."""
+    ids: list[int] = []
+    for key in _model_ability_keys(cm):
+        bid = _coerce_int(key.split(":", 1)[0])
+        if bid is not None:
+            ids.append(bid)
     return ids
+
+
+def unit_ability_display(unit: models.Unit) -> dict[str, str]:
+    """Mapa nazw zdolności oddziału do wyświetlania: ``{pełny_klucz: nazwa}``.
+
+    Nazwa uwzględnia wartość parametru (np. „Aura: Kontra" zamiast generycznego
+    „Aura: Zdolność") przez ``ability_catalog.display_with_value`` — spójnie z
+    ``collections._ability_options``. Dodatkowo wpis fallback ``{str(bare_id):
+    nazwa_generyczna}`` dla wyszukań po samym id (np. proxy bez wartości).
+    """
+    out: dict[str, str] = {}
+    for link in getattr(unit, "abilities", []) or []:
+        ability = getattr(link, "ability", None)
+        if ability is None:
+            continue
+        value = None
+        params = getattr(link, "params_json", None)
+        if params:
+            try:
+                value = json.loads(params).get("value")
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                value = None
+        slug = ability_catalog.slug_for_name(ability.name)
+        definition = ability_catalog.find_definition(slug) if slug else None
+        if definition is not None and value is not None:
+            display_name = ability_catalog.display_with_value(definition, str(value))
+        else:
+            display_name = ability.name
+        key = ability_link_loadout_key(link)
+        if key:
+            out[key] = display_name
+        bid = getattr(ability, "id", None)
+        if bid is not None:
+            out.setdefault(str(bid), ability.name)  # fallback po samym id → generyczna
+    return out
 
 
 def compose_loadout(
@@ -349,7 +448,7 @@ def compose_loadout(
             if cm is None:
                 continue  # obcy/nieznany model — pomijamy (izolacja właściciela)
             count += qty
-            for wid, c in collection_model_effective_weapons(cm).items():
+            for wid, c in collection_model_effective_weapons(cm, entry.get("mounted")).items():
                 weapons[str(wid)] = weapons.get(str(wid), 0) + qty * c
             _add_abilities(_model_ability_base_ids(cm), qty)
         else:
@@ -513,28 +612,41 @@ def derive_composition(
         _consume_weapons(pw)
         _consume_abilities(abilities)
 
-    # STEP 1: zdolności — model z pasującą zdolnością (preferuj z bronią obecną w
-    # oddziale); brak → proxy z domyślnego modelu + ta zdolność (+ szukana broń).
+    # FAZA A: NAJPIERW przypisz posiadane modele pokrywające zapotrzebowanie —
+    # w każdej iteracji bierz najlepszy (najpierw pokrycie zdolności, potem nakład
+    # broni). Dopiero potem proxy. Inaczej „pełne" proxy budowane z domyślnego
+    # modelu zjadałyby broń, której szukają modele mające tylko JEJ CZĘŚĆ (np.
+    # target {A,B}, posiadany ma tylko B → proxy z domyślnego {A,B} zżera B i
+    # posiadany nigdy nie zostaje użyty).
+    def _ability_cover(cm_id: int) -> int:
+        return sum(1 for aid in abilities_of[cm_id] if ability_target.get(aid, 0) > 0)
+
+    while assigned < count:
+        best_id = None
+        best_score = (0, 0)
+        for cm in owned_models:
+            if avail[cm.id] <= 0:
+                continue
+            score = (_ability_cover(cm.id), _overlap(cm.id))
+            if score > best_score:
+                best_score = score
+                best_id = cm.id
+        if best_id is None or best_score == (0, 0):
+            break  # żaden posiadany nie pokrywa już RESZTY zapotrzebowania
+        assign_owned(best_id)
+
+    # FAZA B: proxy dla RESZTY (zdolności → broń nie-podstawowa → podstawowa);
+    # posiadane są już wyczerpane dla pokrycia (Faza A).
     for aid in list(ability_target):
         while ability_target.get(aid, 0) > 0 and assigned < count:
-            cands = [cm.id for cm in owned_models if aid in abilities_of[cm.id] and avail[cm.id] > 0]
-            if cands:
-                assign_owned(max(cands, key=_overlap))
-            else:
-                add_proxy(ability=aid, weapon=_sought_nondefault_weapon())
-
-    # STEP 2-3: broń nie-podstawowa najpierw, potem podstawowa.
+            add_proxy(ability=aid, weapon=_sought_nondefault_weapon())
     ordered_weapons = sorted(w for w in weapon_target if w not in default_wids)
     ordered_weapons += sorted(w for w in weapon_target if w in default_wids)
     for wid in ordered_weapons:
         while weapon_target.get(wid, 0) > 0 and assigned < count:
-            cands = [cm.id for cm in owned_models if wid in weapons_of[cm.id] and avail[cm.id] > 0]
-            if cands:
-                assign_owned(max(cands, key=_overlap))
-            else:
-                add_proxy(ability=None, weapon=wid)
+            add_proxy(ability=None, weapon=wid)
 
-    # STEP 4: dopełnij liczność posiadanymi (overlap) albo domyślnymi proxy.
+    # FAZA C: dopełnij liczność pozostałymi posiadanymi (overlap 0) albo proxy.
     while assigned < count:
         cands = [cm.id for cm in owned_models if avail[cm.id] > 0]
         if cands:
@@ -545,3 +657,75 @@ def derive_composition(
     selection: list[dict[str, Any]] = [{"id": cid, "qty": q} for cid, q in sel.items() if q > 0]
     selection.extend(proxy_entries)
     return selection
+
+
+# ── Faza 2c: grupy wariantów do trybu „Modele" w Stanie Bitewnym ────────────
+
+def composition_groups(
+    selection: Iterable[dict[str, Any]],
+    owned_by_id: dict[int, models.CollectionModel],
+    weapon_names: dict[int, str],
+    ability_names: dict[str, str],
+    weapon_cost_map: dict[int, float],
+    ability_cost_map: dict[int, float],
+) -> list[dict[str, Any]]:
+    """Grupuje kompozycję (`parse_selection`) po WARIANCIE (broń + zdolności) do
+    widoku „Modele" w Stanie Bitewnym; sortuje **rosnąco po koszcie wariantu**.
+
+    Każda grupa: ``{key, weapons:{str(wid):per_model_cnt}, abilities:[aid],
+    summary, count, cost}``. `key` — stabilny podpis wariantu (klucz stanu JS).
+    `cost` = Σ broń×koszt + Σ koszt zdolności (do sortowania i zdejmowania
+    najtańszego). Izolacja właściciela przez `owned_by_id` (obce id pomijane).
+    ``ability_names`` mapuje **pełny klucz zdolności** → nazwa display (z wartością).
+    """
+    groups: dict[str, dict[str, Any]] = {}
+    for entry in selection or []:
+        if not isinstance(entry, dict):
+            continue
+        qty = _coerce_int(entry.get("qty")) or 0
+        if qty <= 0:
+            continue
+        cm_id = _coerce_int(entry.get("id")) if entry.get("id") is not None else None
+        if cm_id is not None:
+            cm = owned_by_id.get(cm_id)
+            if cm is None:
+                continue  # obcy/nieznany model — pomijamy (izolacja właściciela)
+            weapons = collection_model_effective_weapons(cm, entry.get("mounted"))
+            # Pełne klucze (z wartością) rozróżniają warianty parametryzowane aur;
+            # `abilities` (gołe id) służą kosztowi i mapowaniu przekreśleń (#4).
+            display_keys = sorted(set(_model_ability_keys(cm)))
+        else:
+            weapons = _weapon_multiset(entry.get("weapons"))
+            display_keys = sorted(
+                {str(a) for a in (_coerce_int(x) for x in (entry.get("abilities") or [])) if a is not None}
+            )
+        bare_ids = sorted({
+            b for b in (_coerce_int(dk.split(":", 1)[0]) for dk in display_keys) if b is not None
+        })
+        key = f"{model_variant_signature(weapons)}#{','.join(display_keys)}"
+        grp = groups.get(key)
+        if grp is None:
+            wparts = []
+            for wid in sorted(weapons):
+                name = weapon_names.get(wid, f"Broń #{wid}")
+                cnt = weapons[wid]
+                wparts.append(f"{name} ×{cnt}" if cnt > 1 else name)
+            summary = ", ".join(wparts) if wparts else "—"
+            aparts = [
+                ability_names.get(dk) or f"Zdolność #{dk.split(':', 1)[0]}" for dk in display_keys
+            ]
+            if aparts:
+                summary += " • " + ", ".join(aparts)
+            cost = sum(weapon_cost_map.get(w, 0.0) * c for w, c in weapons.items())
+            cost += sum(ability_cost_map.get(a, 0.0) for a in bare_ids)
+            grp = {
+                "key": key,
+                "weapons": {str(w): c for w, c in weapons.items()},
+                "abilities": bare_ids,
+                "summary": summary,
+                "count": 0,
+                "cost": round(float(cost), 2),
+            }
+            groups[key] = grp
+        grp["count"] += qty
+    return sorted(groups.values(), key=lambda g: (g["cost"], g["summary"]))

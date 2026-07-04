@@ -201,7 +201,10 @@ def test_describe_owned_models_formats_weapons_and_summary() -> None:
             label="  Zwiadowca  ",
             count=3,
             loadout_json=json.dumps({"weapons": {"5": 2}}),
-            slots=[SimpleNamespace(selected_weapon_id=7)],
+            slots=[SimpleNamespace(
+                id=10, name="Wieżyczka",
+                option_weapon_ids_json=json.dumps([7]), selected_weapon_id=7,
+            )],
         ),
         SimpleNamespace(
             id=2,
@@ -219,12 +222,18 @@ def test_describe_owned_models_formats_weapons_and_summary() -> None:
         "label": "Zwiadowca",
         "count": 3,
         "weapons": {"5": 2, "7": 1},
+        "base_weapons": {"5": 2},
+        "slots": [{
+            "id": 10, "name": "Wieżyczka", "selected": 7,
+            "options": [{"id": 7, "name": "Miotacz"}],
+        }],
         "abilities": [],
         "summary": "Bolter ×2, Miotacz",
     }
     # brak broni → podsumowanie „—", brakująca nazwa broni → fallback
     assert out[1]["label"] == ""
     assert out[1]["summary"] == "—"
+    assert out[1]["base_weapons"] == {} and out[1]["slots"] == []
 
 
 def test_describe_owned_models_includes_ability_names() -> None:
@@ -235,9 +244,40 @@ def test_describe_owned_models_includes_ability_names() -> None:
             slots=[],
         ),
     ]
-    out = cm.describe_owned_models(doubles, {5: "Bolter"}, {50: "Medyk", 60: "Aura"})
-    assert out[0]["abilities"] == ["Medyk", "Aura"]
-    assert out[0]["summary"] == "Bolter • Medyk, Aura"
+    # ability_names keyed by FULL loadout key (z wartością)
+    out = cm.describe_owned_models(doubles, {5: "Bolter"}, {"50": "Medyk", "60:furia|6": "Aura: Furia"})
+    assert out[0]["abilities"] == ["Medyk", "Aura: Furia"]
+    assert out[0]["summary"] == "Bolter • Medyk, Aura: Furia"
+
+
+def test_unit_ability_display_uses_value_with_bare_fallback() -> None:
+    from app.services.costs import ability_link_loadout_key
+    link = SimpleNamespace(
+        ability=SimpleNamespace(id=60, name="Aura", type="aura"),
+        params_json=json.dumps({"value": "furia|6"}),
+    )
+    unit = SimpleNamespace(abilities=[link])
+    names = cm.unit_ability_display(unit)
+    key = ability_link_loadout_key(link)
+    # pełny klucz → nazwa z wartością; goły id → generyczna (fallback np. dla proxy)
+    assert "Furia" in names[key]
+    assert names["60"] == "Aura"
+
+
+def test_effective_weapons_mounted_override_validates_options() -> None:
+    slot = SimpleNamespace(
+        id=10, name="Wieżyczka",
+        option_weapon_ids_json=json.dumps([7, 8]), selected_weapon_id=7,
+    )
+    model = SimpleNamespace(loadout_json=json.dumps({"weapons": {"5": 1}}), slots=[slot])
+    # bez mounted → broń bazowa + zapisany slot (7)
+    assert cm.collection_model_effective_weapons(model) == {5: 1, 7: 1}
+    # mounted → inna dozwolona opcja (8)
+    assert cm.collection_model_effective_weapons(model, {"10": 8}) == {5: 1, 8: 1}
+    # mounted null → slot pusty
+    assert cm.collection_model_effective_weapons(model, {"10": None}) == {5: 1}
+    # mounted broń spoza opcji (9) → fallback do zapisanego (7), bez wstrzyknięcia
+    assert cm.collection_model_effective_weapons(model, {"10": 9}) == {5: 1, 7: 1}
 
 
 def test_describe_owned_models_unknown_weapon_name_fallback() -> None:
@@ -396,6 +436,23 @@ def test_compose_loadout_proxy_carries_abilities() -> None:
     assert loadout["active"] == {"50": 2}  # 50 to active w _compose_unit
 
 
+def test_derive_composition_owned_not_starved_by_proxy() -> None:
+    # Bug 2d: target broni domyślnej {182:1, 275:2}; posiadany model ma tylko 275
+    # (+ inną broń 209). „Pełne" proxy budowane z domyślnego modelu {182,275} NIE
+    # mogą zjeść 275 tak, by posiadany nigdy nie został użyty — Faza A (posiadane
+    # najpierw) musi go przypisać.
+    unit = SimpleNamespace(
+        default_weapon_id=182,
+        default_weapon_loadout=[(SimpleNamespace(id=182), 1), (SimpleNamespace(id=275), 2)],
+    )
+    owned = [_owned_model(3, {"275": 2, "209": 1})]
+    selection = cm.derive_composition(
+        unit, {"weapons": {"182": 1, "275": 2}, "mode": "per_model"}, 3, owned, {3: 1}
+    )
+    assert any(e.get("id") == 3 for e in selection), selection
+    assert sum(int(e["qty"]) for e in selection) == 3
+
+
 def test_derive_composition_matches_model_with_ability() -> None:
     unit = _compose_unit()
     with_ability = _owned_model(1, {"5": 1}, {"50": 1})
@@ -417,6 +474,31 @@ def test_derive_composition_proxy_for_missing_ability() -> None:
         unit, {"active": {"50": 1}, "weapons": {}, "mode": "total"}, 1, [], {}
     )
     assert selection == [{"id": None, "weapons": {}, "abilities": [50], "qty": 1}]
+
+
+def test_composition_groups_groups_by_variant_sorted_by_cost() -> None:
+    owned = {
+        1: _owned_model(1, {"5": 1}, {"50": 1}),  # Bolter + Medyk
+        2: _owned_model(2, {"7": 1}),             # Karabin
+    }
+    selection = [
+        {"id": 1, "qty": 2},
+        {"id": 2, "qty": 1},
+        {"id": None, "weapons": {"9": 1}, "abilities": [60], "qty": 1},  # proxy Plazma+Aura
+        {"id": 99, "qty": 5},  # obcy → pomijany
+    ]
+    groups = cm.composition_groups(
+        selection, owned,
+        weapon_names={5: "Bolter", 7: "Karabin", 9: "Plazma"},
+        ability_names={"50": "Medyk", "60": "Aura"},
+        weapon_cost_map={5: 2.0, 7: 1.0, 9: 5.0},
+        ability_cost_map={50: 3.0, 60: 4.0},
+    )
+    # sort rosnąco po koszcie: Karabin(1.0) < Bolter+Medyk(5.0) < Plazma+Aura(9.0)
+    assert [g["summary"] for g in groups] == ["Karabin", "Bolter • Medyk", "Plazma • Aura"]
+    assert [g["count"] for g in groups] == [1, 2, 1]
+    assert [g["cost"] for g in groups] == [1.0, 5.0, 9.0]
+    assert groups[1]["weapons"] == {"5": 1} and groups[1]["abilities"] == [50]
 
 
 def test_fetch_owned_models_isolates_owner_and_unit() -> None:

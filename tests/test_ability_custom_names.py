@@ -224,3 +224,20 @@ def test_passive_mistrzostwo_has_weapon_dropdown():
             f"excluded weapon slug {choice['value']!r} found in mistrzostwo value_choices"
         )
 
+
+def test_expand_ability_ids_parallel_to_labels() -> None:
+    # `_expand_ability_ids` musi być spójne 1:1 z `_expand_ability_labels`
+    # (ta sama kolejność + rozwinięcie `× count`) — na tym opiera się mapa
+    # id→toggle_key przekreślania zdolności po eliminacji (Stan Bitewny 2d).
+    entries = [
+        {"label": "Aura: Kontra", "ability_id": 60, "count": 2},
+        {"label": "Medyk", "ability_id": 50, "count": 1},
+        {"label": "", "ability_id": 99, "count": 3},  # brak etykiety → pomijane
+        {"custom_name": "Sztandar", "label": "Aura: Furia", "ability_id": 70, "count": 1},
+    ]
+    labels = rosters._expand_ability_labels(entries)
+    ids = rosters._expand_ability_ids(entries)
+    assert len(labels) == len(ids)
+    assert ids == [60, 60, 50, 70]
+    assert labels == ["Aura: Kontra", "Aura: Kontra", "Medyk", "Sztandar [Aura: Furia]"]
+

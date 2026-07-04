@@ -30,6 +30,7 @@
     const selections = new Map();    // collection_model_id (str) -> qty (może > available = proxy)
     let proxies = [];                // [{weapons: {wid: cnt}, qty}] — proxy wariantów nieposiadanych
     const passiveMap = new Map();    // slug -> 0/1
+    const mountedByModel = new Map(); // model id (str) -> {slotId(str): weapon_id|null} (override magnetyzacji, per-oddział)
 
     let saveTimer = null;
     let saveController = null;
@@ -68,6 +69,7 @@
       selections.clear();
       proxies = [];
       passiveMap.clear();
+      mountedByModel.clear();
       activeItem = null;
       rosterUnitId = '';
     }
@@ -87,8 +89,10 @@
       restoreClassicSections();
     }
 
-    async function enterModelsMode() {
-      const item = getActiveItem();
+    async function enterModelsMode(itemOverride) {
+      // itemOverride — jawny oddział (przy przełączaniu w Trybie modeli); domyślnie
+      // aktywny z listy (przy ręcznym włączeniu trybu).
+      const item = itemOverride || getActiveItem();
       if (!item) {
         window.alert('Najpierw wybierz oddział z listy.');
         return;
@@ -121,12 +125,27 @@
       // Wstępna selekcja: zapisana kompozycja lub derywacja suma→modele (z serwera).
       selections.clear();
       proxies = [];
+      // Domyślna magnetyzacja z zapisanej konfiguracji modelu (slot.selected).
+      mountedByModel.clear();
+      (data.models || []).forEach((m) => {
+        if (Array.isArray(m.slots) && m.slots.length) {
+          const d = {};
+          m.slots.forEach((slot) => { d[String(slot.id)] = slot.selected != null ? Number(slot.selected) : null; });
+          mountedByModel.set(String(m.id), d);
+        }
+      });
       (Array.isArray(data.composed) ? data.composed : []).forEach((entry) => {
         if (!entry) return;
         const qty = Math.max(0, parseInt(entry.qty, 10) || 0);
         if (qty <= 0) return;
         if (entry.id != null) {
           selections.set(String(entry.id), (selections.get(String(entry.id)) || 0) + qty);
+          // Override magnetyzacji z zapisanej kompozycji (per-oddział).
+          if (entry.mounted && typeof entry.mounted === 'object') {
+            const d = mountedByModel.get(String(entry.id)) || {};
+            Object.entries(entry.mounted).forEach(([sid, wid]) => { d[String(sid)] = wid != null ? Number(wid) : null; });
+            mountedByModel.set(String(entry.id), d);
+          }
         } else {
           proxies.push({
             weapons: entry.weapons && typeof entry.weapons === 'object' ? entry.weapons : {},
@@ -141,6 +160,22 @@
       renderPanel();
     }
 
+    // Efektywna broń modelu = bazowa + aktualnie wybrane sloty magnetyzacji.
+    // Dla modeli bez slotów zwraca gotowe `m.weapons` (serwer autorytatywny;
+    // ten podgląd tylko odzwierciedla bieżące wybory magnetyzacji na żywo).
+    function effectiveWeapons(m) {
+      if (!Array.isArray(m.slots) || !m.slots.length) return m.weapons || {};
+      const eff = {};
+      Object.entries(m.base_weapons || {}).forEach(([wid, c]) => { eff[wid] = (eff[wid] || 0) + (Number(c) || 0); });
+      const mounted = mountedByModel.get(String(m.id)) || {};
+      m.slots.forEach((slot) => {
+        let wid = mounted[String(slot.id)];
+        if (wid === undefined) wid = slot.selected;
+        if (wid != null) eff[String(wid)] = (eff[String(wid)] || 0) + 1;
+      });
+      return eff;
+    }
+
     function aggregate() {
       let count = 0;
       const weapons = {};
@@ -149,7 +184,7 @@
         const qty = selections.get(String(m.id)) || 0;
         if (qty <= 0) return;
         count += qty;
-        Object.entries(m.weapons || {}).forEach(([wid, c]) => add(wid, qty * (Number(c) || 0)));
+        Object.entries(effectiveWeapons(m)).forEach(([wid, c]) => add(wid, qty * (Number(c) || 0)));
       });
       proxies.forEach((p) => {
         const qty = Math.max(0, parseInt(p.qty, 10) || 0);
@@ -182,11 +217,26 @@
         const proxyTag = overflow > 0
           ? ` <span class="badge text-bg-warning" title="Sztuki ponad dostępne traktowane jako proxy">proxy +${overflow}</span>`
           : '';
+        // Sloty magnetyzacji — wybór zamontowanej broni (per-oddział).
+        const slotHtml = (Array.isArray(m.slots) ? m.slots : []).map((slot) => {
+          const mounted = mountedByModel.get(String(m.id)) || {};
+          let cur = mounted[String(slot.id)];
+          if (cur === undefined) cur = slot.selected;
+          const opts = [`<option value=""${cur == null ? ' selected' : ''}>— pusty —</option>`].concat(
+            (slot.options || []).map((o) =>
+              `<option value="${o.id}"${String(cur) === String(o.id) ? ' selected' : ''}>${escapeHtml(o.name)}</option>`),
+          ).join('');
+          return `<div class="d-flex align-items-center gap-1 mt-1">
+              <span class="text-muted small" style="min-width:5rem">${escapeHtml(slot.name)}</span>
+              <select class="form-select form-select-sm" style="max-width:11rem" data-slot-mounted="${m.id}:${slot.id}" aria-label="Magnetyzacja: ${escapeHtml(slot.name)}">${opts}</select>
+            </div>`;
+        }).join('');
         return `
           <div class="d-flex align-items-center gap-2 border rounded p-2 mb-2">
             <div class="flex-grow-1">
               ${labelLine}
               <div class="text-muted small">${escapeHtml(m.summary || '—')}${proxyTag}</div>
+              ${slotHtml}
             </div>
             <div class="d-flex align-items-center gap-1 flex-shrink-0">
               <input type="number" class="form-control form-control-sm" style="width:4.5rem"
@@ -228,6 +278,7 @@
             ${opts}
           </select>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add>+ Dodaj proxy</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add-weapon title="Dodaj wybraną broń do ostatniego modelu proxy (proxy z wieloma broniami)">+ Dodaj broń</button>
         </div>`;
     }
 
@@ -282,23 +333,27 @@
       if (weaponsEl) weaponsEl.textContent = aggregateSummary(agg.weapons);
     }
 
-    function applyCostUpdate(payload) {
+    function applyCostUpdate(payload, item) {
       if (!payload || typeof payload !== 'object') return;
+      // `item` = oddział, którego dotyczył zapis (może różnić się od aktywnego,
+      // gdy zapis dokończył się w tle po przełączeniu oddziału).
+      item = item || activeItem;
       const unit = payload.unit || {};
       const cost = unit.cached_cost;
-      if (activeItem && cost != null) {
-        const badge = activeItem.querySelector('[data-roster-unit-cost]');
+      if (item && cost != null) {
+        const badge = item.querySelector('[data-roster-unit-cost]');
         if (badge) badge.textContent = `${cost} pkt`;
         if (unit.count != null) {
-          activeItem.setAttribute('data-unit-count', String(unit.count));
-          const title = activeItem.querySelector('[data-roster-unit-title]');
-          const name = activeItem.getAttribute('data-unit-name') || '';
+          item.setAttribute('data-unit-count', String(unit.count));
+          const title = item.querySelector('[data-roster-unit-title]');
+          const name = item.getAttribute('data-unit-name') || '';
           if (title) title.textContent = `${unit.count}x ${name}`;
         }
-        if (unit.loadout_json) activeItem.setAttribute('data-loadout', unit.loadout_json);
-        activeItem.setAttribute('data-unit-cost', String(cost));
+        if (unit.loadout_json) item.setAttribute('data-loadout', unit.loadout_json);
+        item.setAttribute('data-unit-cost', String(cost));
       }
-      const editorCost = root.querySelector('[data-roster-editor-cost]');
+      // Koszt w otwartym edytorze aktualizuj tylko, gdy to nadal ten sam oddział.
+      const editorCost = item === activeItem ? root.querySelector('[data-roster-editor-cost]') : null;
       if (editorCost && cost != null) editorCost.textContent = String(cost);
       const totalEl = root.querySelector('[data-roster-total]');
       if (totalEl && payload.total_cost != null) totalEl.textContent = String(payload.total_cost);
@@ -319,7 +374,19 @@
     function buildSelectionPayload() {
       const out = [];
       selections.forEach((qty, id) => {
-        if (qty > 0) out.push({ id: Number(id), qty });
+        if (qty <= 0) return;
+        const entry = { id: Number(id), qty };
+        const model = ((data && data.models) || []).find((m) => String(m.id) === String(id));
+        if (model && Array.isArray(model.slots) && model.slots.length) {
+          const mounted = mountedByModel.get(String(id)) || {};
+          entry.mounted = {};
+          model.slots.forEach((slot) => {
+            let v = mounted[String(slot.id)];
+            if (v === undefined) v = slot.selected;
+            entry.mounted[String(slot.id)] = v != null ? Number(v) : null;
+          });
+        }
+        out.push(entry);
       });
       proxies.forEach((p) => {
         const qty = Math.max(0, parseInt(p.qty, 10) || 0);
@@ -335,6 +402,10 @@
         setStatus('Wybierz co najmniej jeden model.');
         return;
       }
+      // Snapshot celu — przełączenie oddziału może zmienić activeItem/rosterUnitId
+      // zanim ten (asynchroniczny) zapis się dokończy.
+      const targetItem = activeItem;
+      const targetUnitId = rosterUnitId;
       // Broń/aktywne/aury liczy serwer z selekcji; wysyłamy tylko pasywne w loadout.
       const baseLoadout = (data && data.current_loadout && typeof data.current_loadout === 'object')
         ? { ...data.current_loadout }
@@ -344,7 +415,7 @@
       const form = new FormData();
       form.set('count', String(agg.count));
       form.set('loadout_json', JSON.stringify(baseLoadout));
-      form.set('custom_name', activeItem ? (activeItem.getAttribute('data-unit-custom-name') || '') : '');
+      form.set('custom_name', targetItem ? (targetItem.getAttribute('data-unit-custom-name') || '') : '');
       form.set('composed_models_json', JSON.stringify(buildSelectionPayload()));
 
       const seq = ++saveSeq;
@@ -353,7 +424,7 @@
       saveController = new AbortController();
       setStatus('Zapisywanie…');
       try {
-        const resp = await fetch(`/rosters/${rosterId}/units/${rosterUnitId}/update`, {
+        const resp = await fetch(`/rosters/${rosterId}/units/${targetUnitId}/update`, {
           method: 'POST',
           body: form,
           headers: { Accept: 'application/json' },
@@ -364,9 +435,9 @@
         const payload = await resp.json();
         if (seq >= appliedSeq) {
           appliedSeq = seq;
-          applyCostUpdate(payload);
+          applyCostUpdate(payload, targetItem);
           savedSomething = true;
-          setStatus('Zapisano');
+          if (rosterUnitId === targetUnitId) setStatus('Zapisano');
         }
       } catch (err) {
         if (err && err.name === 'AbortError') return;
@@ -400,6 +471,17 @@
       }
     });
 
+    // Wybór zamontowanej broni (magnetyzacja) — change na <select>.
+    panel.addEventListener('change', (event) => {
+      const slotSel = event.target.closest('[data-slot-mounted]');
+      if (!slotSel) return;
+      const [mid, sid] = slotSel.getAttribute('data-slot-mounted').split(':');
+      const cur = mountedByModel.get(String(mid)) || {};
+      cur[String(sid)] = slotSel.value === '' ? null : Number(slotSel.value);
+      mountedByModel.set(String(mid), cur);
+      refreshAfterChange();
+    });
+
     // Dodawanie/usuwanie proxy — click.
     panel.addEventListener('click', (event) => {
       const addBtn = event.target.closest('[data-proxy-add]');
@@ -407,6 +489,23 @@
         const sel = panel.querySelector('[data-proxy-weapon]');
         const wid = sel ? sel.value : '';
         proxies.push({ weapons: wid ? { [String(wid)]: 1 } : {}, abilities: [], qty: 1 });
+        renderPanel();
+        scheduleSave();
+        return;
+      }
+      // Dodaj wybraną broń do OSTATNIEGO proxy (model proxy z wieloma broniami).
+      const addWeaponBtn = event.target.closest('[data-proxy-add-weapon]');
+      if (addWeaponBtn) {
+        const sel = panel.querySelector('[data-proxy-weapon]');
+        const wid = sel ? sel.value : '';
+        if (!wid) { setStatus('Wybierz broń do dodania.'); return; }
+        if (proxies.length) {
+          const last = proxies[proxies.length - 1];
+          last.weapons = last.weapons || {};
+          last.weapons[String(wid)] = (Number(last.weapons[String(wid)]) || 0) + 1;
+        } else {
+          proxies.push({ weapons: { [String(wid)]: 1 }, abilities: [], qty: 1 });
+        }
         renderPanel();
         scheduleSave();
         return;
@@ -429,8 +528,9 @@
       scheduleSave();
     }
 
-    // Przełączenie na INNY oddział w trybie modeli: dokończ zapis w tle i wróć do
-    // klasyka bez przeładowania (roster_editor zhydratyzuje nowy wybór).
+    // Przełączenie na INNY oddział w trybie modeli: dokończ zapis bieżącego w tle
+    // i ZOSTAŃ w Trybie modeli — wejdź w niego dla nowo wybranego oddziału (po
+    // tym, jak roster_editor zhydratyzuje wybór; stąd setTimeout 0).
     root.addEventListener('click', (event) => {
       if (!modelsMode) return;
       const item = event.target.closest('[data-roster-item]');
@@ -440,7 +540,7 @@
         saveTimer = null;
       }
       if (pendingChanges && aggregate().count > 0) doSave();
-      restoreClassicSections();
+      window.setTimeout(() => { if (modelsMode) enterModelsMode(item); }, 0);
     });
   }
 
