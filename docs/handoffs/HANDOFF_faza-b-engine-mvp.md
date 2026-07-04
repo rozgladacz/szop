@@ -3,13 +3,137 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-04T06:23:00+02:00 (DONE — B4 optimistic append guard)
+> **Ostatnia aktualizacja:** 2026-07-04T22:00+02:00 (commit hygiene — B4 sandbox battle creation utrwalony)
+
+## W TRAKCIE — 2026-07-04 (sesja autonomiczna) — commit hygiene B4 `POST /battles`
+
+Slice B4 sandbox battle creation (`POST /battles`, wpis DONE 21:21) leży
+niezacommitowany w working tree. Ta sesja domyka higienę: re-weryfikacja
+(targeted + pełny pytest), oddzielenie plików slice'a od zmian obcych
+(`.claude/settings.local.json`, główny `HANDOFF.md`, usunięty
+`HANDOFF_aideas-knowledge-base.md`), commit wyłącznie plików slice'a. Bez
+rozszerzania funkcjonalnego.
+
+> **Notatka z code-review 2026-07-04** (`docs/handoffs/code-review/REVIEW_2026-07-04.md`):
+> 0 bugów korektności, 14/14 testów zielonych. Jedna UWAGA behawioralna: `create_battle`
+> bierze wyłącznie `AdaptResult.units` i **cicho odrzuca** `dropped_excluded`,
+> `inert_incomplete` oraz `deferred_attached_heroes`. W praktyce roster z dołączonym
+> bohaterem tworzy bitwę bez tej jednostki, bez sygnału do wywołującego. To znany dług
+> MVP (heroes DEFEROWANE w slice 1), nie regresja — ale przy rozszerzaniu B4 rozważyć
+> zwrot/log tych pól, aby uniknąć cichej utraty jednostek.
 
 ## Cel
 
 Zbudować symulator pełnej bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + `SZOP_Zdolnosci.md` (mechaniki 77 zdolności). Engine headless-first (czyste funkcje + event sourcing), prezentacja opcjonalna. Pareto MVP: oddział = koło, brak orientacji modeli, ruch deklarowany (bez pathfindingu), LoS standardowy. 6 zdolności wykluczonych z MVP (Pareto trade-off; zob. `app/rulesets/v1/b_mvp_exclusions.yaml`).
 
 Plan długofalowy: [docs/roadmap.md#strumień-b](../roadmap.md). Strumień B odblokowany przez zamknięcie Strumienia A (YAML SSOT) i A4 (pipeline drift detection — `build/geometry_classification.md` jako informational input).
+
+## DONE - 2026-07-04T21:21:14+02:00 - B4 sandbox battle creation
+
+**Zakres pracy:** dodać najmniejszy write-slice B4: `POST /battles` tworzy
+sandboxową bitwę z dwóch rozpisek należących do tego samego ownera, zapisuje
+wiersz `Battle` oraz początkowy event-log rozstawienia przez istniejące SSOT
+adaptera ORM→engine i `persistence.save_events`. Nie implementuje invite'ów,
+akcji, interruptów, replay/simulate endpointów ani pełnej rekonstrukcji
+`BattleState` przez HTTP.
+
+**Wybór zadania:** po dzisiejszych slice'ach read-only i optimistic append guard
+roadmap B4 nadal ma otwarte `POST /battles`. Ten zakres jest mały,
+samodzielny, bez UI i bez decyzji usera: reuse istniejącego
+`roster_to_engine_roster`, `setup_phase`/`deployment_round` i `save_events`, a
+jednocześnie przygotowuje B4 pod późniejsze `POST /battles/{id}/actions` oraz
+B5 `HttpClient.create_battle`.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A - brak zmian schemy; użycie istniejących tabel
+  `battles` i `battle_events`.
+- Backend payload/API: `app/routers/battles.py` - request/response dla create,
+  owner-scoped roster lookup, auth sesją lub agent tokenem.
+- JS render / CSS / template: N/A - brak UI.
+- Testy: `tests/test_battles_router.py`; pełny pytest przed DONE.
+- Dokumentacja/HANDOFF: roadmap/architecture oraz ten wpis.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Endpoint wykonuje dwa SELECT-y rosterów po id+owner oraz jednorazową adaptację i
+INSERT-y startowego event-logu tylko przy jawnej operacji create; brak wpływu na
+read-only endpointy i stare call sites.
+
+**Plan:**
+- [x] 1. Encoding gate i doczytanie call sites/patternów auth.
+- [x] 2. Dodać `battle:create` actor dependency, request model i helper tworzenia
+  bitwy z dwóch własnych rosterów.
+- [x] 3. Dodać testy: sukces dla sesji, sukces dla agenta, 404 dla cudzej/brakującej
+  rozpiski, 403 dla tokena bez scope, zapis metadanych i event-logu.
+- [x] 4. Zsynchronizować roadmap/architecture.
+- [x] 5. Weryfikacja: targeted pytest, pełny pytest, call-site check, manual
+  `/simplify`, manual `/review` (diff >50 + auth/write), manual
+  `/security-review`, `git diff --check`, diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice'a. Invite'y, akcje,
+interrupty, replay/simulate i pełny HTTP `GameClient` zostają `WAITING(prereq)`
+na kolejne zakresy B4/B5.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-04T21:04+02:00: Bootstrap wykonany ręcznie zgodnie z `/load-context`:
+  memory automatyzacji brak, przeczytano `AGENTS.md`, canonical
+  `.agents/skills/load-context/SKILL.md`, `HANDOFF.md`, jedyny aktywny
+  `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`, `docs/roadmap.md`,
+  `docs/planning.md`, `docs/testing.md`, `docs/developing.md`, stan working
+  tree oraz bieżące B4/B5 pliki. Zastane niezwiązane zmiany
+  `.claude/settings.local.json`, główny `HANDOFF.md` i usunięty
+  `HANDOFF_aideas-knowledge-base.md` pozostają poza zakresem.
+- 2026-07-04T21:08+02:00: Encoding gate dla `app/routers/battles.py` i
+  `tests/test_battles_router.py` OK przez `.venv` poza sandboxem; pierwsza
+  próba w sandboxie trafiła w znany WindowsApps `Odmowa dostępu`. Wzorce auth:
+  read endpointy używają sesji albo agent bearer; create dostanie osobny scope
+  `battle:create` i będzie mapować agenta na `owner_user_id`.
+- 2026-07-04T21:16+02:00: Dodano `BattleCreate`, `BattleCreator`,
+  `POST /battles` oraz owner-scoped lookup rosterów. Endpoint tworzy aktywną
+  bitwę sandboxową z `p1_user_id == p2_user_id == owner`, adaptuje obie rozpiski
+  przez `roster_to_engine_roster`, wykonuje setup/deployment bez UI i zapisuje
+  event-log przez `save_events(..., expected_latest_sequence=0)`. Testy
+  routera rozszerzone o sukces sesyjny, sukces agentowy z audytem, brak scope
+  oraz brak/cudzą rozpiskę; jeszcze przed uruchomieniem.
+- 2026-07-04T21:20+02:00: Targeted `tests/test_battles_router.py`: **14
+  passed**, 163 warnings. Przechodzę do synchronizacji `docs/roadmap.md` i
+  `docs/architecture.md`.
+- 2026-07-04T21:19+02:00: `docs/roadmap.md` i `docs/architecture.md`
+  zsynchronizowane: B4 ma teraz owner-scoped `POST /battles` jako sandbox
+  create-slice z `battle:create`; invite'y, akcje, interrupty, simulate/replay
+  i pełny HTTP client pozostają `WAITING(prereq)`.
+- 2026-07-04T21:20+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`: **2077
+  passed**, 3074 warnings. Manual `/simplify` znalazł jedną sensowną redukcję:
+  wspólny helper wyboru ownera dla sesji vs bearer token między read/create
+  dependency; wdrażam i powtórzę testy.
+- 2026-07-04T21:21+02:00: Po `/simplify` targeted
+  `tests/test_battles_router.py`: **14 passed**, 163 warnings; pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`: **2077
+  passed**, 3074 warnings. Call-site check: nowy route `create_battle` jest
+  konsumowany tylko przez FastAPI/testy; istniejące `LocalClient.create_battle`
+  i `GameClient.create_battle` bez zmian; `save_events` stare call sites bez
+  nowego guarded mode, a `POST /battles` używa `expected_latest_sequence=0`.
+  Manual `/review`: 0 bugów korektności; bitwa jest tworzona dopiero po
+  udanej adaptacji/setup/deployment, 404 ukrywa cudzą i brakującą rozpiskę,
+  a event-log zapisuje ciągły startowy ogon. Manual `/security-review`: scope
+  `battle:create` oddzielony od `battle:read`, agent mapowany na
+  `owner_user_id`, oba rostery wymagają `owner_id == owner`, brak dynamicznego
+  SQL, brak sekretów w response, standardowy `AgentAuditLog` redaguje token.
+  `git diff --check` bez błędów (tylko znane ostrzeżenia CRLF). Diff review:
+  scope 5 plików slice'a; zastane `.claude/settings.local.json`, główny
+  `HANDOFF.md` i usunięty `HANDOFF_aideas-knowledge-base.md` pozostają poza
+  zakresem. Commit: brak w tej sesji.
+- 2026-07-04T22:? (sesja autonomiczna, commit hygiene): zastany, w pełni
+  zweryfikowany slice B4 sandbox create leżał niezacommitowany. Re-weryfikacja
+  bez zmian kodu: targeted `tests/test_battles_router.py
+  tests/test_engine_persistence.py` **30 passed**; pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2077
+  passed**, 3074 warnings (identyczny baseline). Zacommitowano wyłącznie 5
+  plików slice'a (`app/routers/battles.py`, `tests/test_battles_router.py`,
+  `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF). Zastane
+  `.claude/settings.local.json`, główny `HANDOFF.md` oraz usunięty
+  `HANDOFF_aideas-knowledge-base.md` (archiwizacja wątku AIDEAS) świadomie poza
+  tym commitem — osobny logiczny zakres. Commit: `<this>`.
 
 ## DONE - 2026-07-04T06:23:00+02:00 - B4 optimistic append guard
 

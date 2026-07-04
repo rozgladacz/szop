@@ -11,18 +11,33 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
+from ..services.agents.roster_adapter import roster_to_engine_roster
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
-from ..services.engine.persistence import latest_event_sequence, load_events
+from ..services.engine.persistence import latest_event_sequence, load_events, save_events
+from ..services.engine.phases import deployment_round, setup_phase
 
 router = APIRouter(prefix="/battles", tags=["battles"])
 
+BATTLE_CREATE_SCOPE = "battle:create"
 BATTLE_READ_SCOPE = "battle:read"
+
+
+@dataclass(frozen=True)
+class BattleCreator:
+    user_id: int
 
 
 @dataclass(frozen=True)
 class BattleReader:
     user_id: int
+
+
+class BattleCreate(BaseModel):
+    p1_roster_id: int = Field(..., ge=1)
+    p2_roster_id: int = Field(..., ge=1)
+    rng_seed: int = 0
+    initiative_player: int = Field(0, ge=0, le=1)
 
 
 class BattleEventPublic(BaseModel):
@@ -61,18 +76,50 @@ def _has_authorization_header(request: Request) -> bool:
     return bool(value and value.strip())
 
 
+def _authorized_owner_user_id(
+    *,
+    request: Request,
+    db: Session,
+    current_user: models.User | None,
+    agent_scope: str,
+) -> int:
+    if _has_authorization_header(request):
+        principal = require_agent_scope(agent_scope)(request=request, db=db)
+        return principal.owner_user_id
+
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    return current_user.id
+
+
+def _battle_creator(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User | None = Depends(get_current_user(optional=True)),
+) -> BattleCreator:
+    return BattleCreator(
+        user_id=_authorized_owner_user_id(
+            request=request,
+            db=db,
+            current_user=current_user,
+            agent_scope=BATTLE_CREATE_SCOPE,
+        )
+    )
+
+
 def _battle_reader(
     request: Request,
     db: Session = Depends(get_db),
     current_user: models.User | None = Depends(get_current_user(optional=True)),
 ) -> BattleReader:
-    if _has_authorization_header(request):
-        principal = require_agent_scope(BATTLE_READ_SCOPE)(request=request, db=db)
-        return BattleReader(user_id=principal.owner_user_id)
-
-    if current_user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-    return BattleReader(user_id=current_user.id)
+    return BattleReader(
+        user_id=_authorized_owner_user_id(
+            request=request,
+            db=db,
+            current_user=current_user,
+            agent_scope=BATTLE_READ_SCOPE,
+        )
+    )
 
 
 def _get_accessible_battle(
@@ -90,6 +137,20 @@ def _get_accessible_battle(
     if battle is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     return battle
+
+
+def _get_owned_roster(
+    db: Session, *, roster_id: int, owner_user_id: int
+) -> models.Roster:
+    roster = db.execute(
+        select(models.Roster).where(
+            models.Roster.id == roster_id,
+            models.Roster.owner_id == owner_user_id,
+        )
+    ).scalar_one_or_none()
+    if roster is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    return roster
 
 
 def _public_event(event: EngineBattleEvent) -> BattleEventPublic:
@@ -114,6 +175,46 @@ def _public_battle(db: Session, battle: models.Battle) -> BattlePublic:
         status=battle.status,
         latest_sequence=latest_event_sequence(db, battle.id),
     )
+
+
+@router.post("", response_model=BattlePublic, status_code=status.HTTP_201_CREATED)
+def create_battle(
+    payload: BattleCreate,
+    db: Session = Depends(get_db),
+    creator: BattleCreator = Depends(_battle_creator),
+) -> BattlePublic:
+    roster_p0 = _get_owned_roster(
+        db, roster_id=payload.p1_roster_id, owner_user_id=creator.user_id
+    )
+    roster_p1 = _get_owned_roster(
+        db, roster_id=payload.p2_roster_id, owner_user_id=creator.user_id
+    )
+    rosters = [
+        roster_to_engine_roster(roster_p0, owner_player=0).units,
+        roster_to_engine_roster(roster_p1, owner_player=1).units,
+    ]
+    state = setup_phase(
+        rosters,
+        terrain=(),
+        objectives=(),
+        initiative_player=payload.initiative_player,
+    )
+    state, deploy_events = deployment_round(state, ())
+    battle = models.Battle(
+        p1_user_id=creator.user_id,
+        p2_user_id=creator.user_id,
+        p1_roster_id=roster_p0.id,
+        p2_roster_id=roster_p1.id,
+        current_round=state.round,
+        rng_seed=payload.rng_seed,
+        status="active",
+    )
+    db.add(battle)
+    db.flush()
+    save_events(db, battle.id, deploy_events, expected_latest_sequence=0)
+    db.commit()
+    db.refresh(battle)
+    return _public_battle(db, battle)
 
 
 @router.get("/{battle_id}", response_model=BattlePublic)

@@ -15,7 +15,7 @@ from app.main import app
 from app.routers import battles
 from app.security import hash_agent_token, hash_password
 from app.services.engine.events import MoveExecuted, StatusAdded
-from app.services.engine.persistence import save_events
+from app.services.engine.persistence import load_events, save_events
 
 RAW_TOKEN = "battle-read-secret"
 
@@ -89,20 +89,89 @@ def _seed_agent_token(
     return token
 
 
+def _seed_roster(
+    session: Session,
+    *,
+    name: str,
+    owner_id: int,
+) -> models.Roster:
+    ruleset = models.RuleSet(name=f"Rules {name}")
+    armory = models.Armory(name=f"Armory {name}", owner_id=owner_id)
+    session.add_all([ruleset, armory])
+    session.flush()
+    army = models.Army(
+        name=f"Army {name}",
+        owner_id=owner_id,
+        ruleset=ruleset,
+        armory=armory,
+    )
+    session.add(army)
+    session.flush()
+    blade = models.Weapon(
+        armory=armory,
+        name=f"Ostrze {name}",
+        range="Walka wręcz",
+        attacks=1,
+        ap=0,
+    )
+    session.add(blade)
+    session.flush()
+    unit = models.Unit(
+        army=army,
+        name=f"Piechota {name}",
+        quality=4,
+        defense=5,
+        toughness=3,
+        typical_models=2,
+        position=0,
+        default_weapon=blade,
+    )
+    session.add(unit)
+    session.flush()
+    session.add(
+        models.UnitWeapon(
+            unit=unit,
+            weapon=blade,
+            is_default=True,
+            default_count=1,
+            is_primary=True,
+            position=0,
+        )
+    )
+    roster = models.Roster(name=f"Roster {name}", army=army, owner_id=owner_id)
+    session.add(roster)
+    session.flush()
+    session.add(
+        models.RosterUnit(
+            roster=roster,
+            unit=unit,
+            count=1,
+            position=0,
+        )
+    )
+    session.commit()
+    session.refresh(roster)
+    return roster
+
+
 def _fake_request(
     token: str | None = RAW_TOKEN,
     *,
     battle_id: int = 7,
     query_params: dict[str, str] | None = None,
+    method: str = "GET",
+    path: str | None = None,
+    path_params: dict[str, str] | None = None,
 ) -> SimpleNamespace:
     headers = {}
     if token is not None:
         headers["authorization"] = f"Bearer {token}"
+    route_path = path or f"/battles/{battle_id}/events"
     return SimpleNamespace(
         headers=headers,
-        method="GET",
-        url=SimpleNamespace(path=f"/battles/{battle_id}/events"),
-        path_params={"battle_id": str(battle_id)},
+        method=method,
+        url=SimpleNamespace(path=route_path),
+        path_params=path_params if path_params is not None else {"battle_id": str(battle_id)},
         query_params=query_params or {},
     )
 
@@ -116,8 +185,104 @@ def test_battles_router_is_registered_in_app() -> None:
 
     assert "/battles/{battle_id}" in route_paths
     assert "GET" in methods_by_path["/battles/{battle_id}"]
+    assert "/battles" in route_paths
+    assert "POST" in methods_by_path["/battles"]
     assert "/battles/{battle_id}/events" in route_paths
     assert "GET" in methods_by_path["/battles/{battle_id}/events"]
+
+
+def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    roster_a = _seed_roster(session, name="A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B", owner_id=owner.id)
+
+    response = battles.create_battle(
+        battles.BattleCreate(
+            p1_roster_id=roster_a.id,
+            p2_roster_id=roster_b.id,
+            rng_seed=777,
+        ),
+        db=session,
+        creator=battles.BattleCreator(user_id=owner.id),
+    )
+
+    battle = session.get(models.Battle, response.battle_id)
+    assert battle is not None
+    assert battle.p1_user_id == owner.id
+    assert battle.p2_user_id == owner.id
+    assert battle.p1_roster_id == roster_a.id
+    assert battle.p2_roster_id == roster_b.id
+    assert battle.current_round == 1
+    assert battle.rng_seed == 777
+    assert battle.status == "active"
+    events = load_events(session, battle.id)
+    assert events
+    assert response.latest_sequence == len(events)
+    assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+
+
+def test_create_battle_accepts_agent_scope_and_audits_request() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    roster_a = _seed_roster(session, name="A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B", owner_id=owner.id)
+    token = _seed_agent_token(
+        session,
+        owner=owner,
+        scopes={battles.BATTLE_CREATE_SCOPE: True},
+    )
+
+    creator = battles._battle_creator(
+        request=_fake_request(method="POST", path="/battles", path_params={}),
+        db=session,
+        current_user=None,
+    )
+    response = battles.create_battle(
+        battles.BattleCreate(p1_roster_id=roster_a.id, p2_roster_id=roster_b.id),
+        db=session,
+        creator=creator,
+    )
+
+    assert response.p1_user_id == owner.id
+    assert response.p2_user_id == owner.id
+    audit = session.execute(select(models.AgentAuditLog)).scalar_one()
+    assert audit.user_id == owner.id
+    assert audit.agent_user_id == token.agent_user_id
+    assert audit.route == "/battles"
+    payload = json.loads(audit.params_json)
+    assert payload["scope"] == battles.BATTLE_CREATE_SCOPE
+    assert payload["method"] == "POST"
+    assert payload["path_params"] == {}
+    assert RAW_TOKEN not in audit.params_json
+
+
+def test_create_battle_rejects_missing_and_cross_owner_rosters() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    other = _seed_user(session, "other")
+    own_roster = _seed_roster(session, name="own", owner_id=owner.id)
+    other_roster = _seed_roster(session, name="other", owner_id=other.id)
+
+    with pytest.raises(HTTPException) as cross_owner_info:
+        battles.create_battle(
+            battles.BattleCreate(
+                p1_roster_id=own_roster.id,
+                p2_roster_id=other_roster.id,
+            ),
+            db=session,
+            creator=battles.BattleCreator(user_id=owner.id),
+        )
+    assert cross_owner_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_info:
+        battles.create_battle(
+            battles.BattleCreate(p1_roster_id=own_roster.id, p2_roster_id=99999),
+            db=session,
+            creator=battles.BattleCreator(user_id=owner.id),
+        )
+    assert missing_info.value.status_code == 404
+    assert session.execute(select(models.Battle)).scalars().all() == []
 
 
 def test_get_battle_returns_owner_scoped_metadata_with_latest_sequence() -> None:
@@ -291,6 +456,33 @@ def test_battle_reader_rejects_missing_auth_and_missing_scope() -> None:
     with pytest.raises(HTTPException) as scope_info:
         battles._battle_reader(
             request=_fake_request(),
+            db=session,
+            current_user=None,
+        )
+    assert scope_info.value.status_code == 403
+    assert session.execute(select(models.AgentAuditLog)).scalar_one_or_none() is None
+
+
+def test_battle_creator_rejects_missing_auth_and_missing_scope() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+
+    with pytest.raises(HTTPException) as missing_info:
+        battles._battle_creator(
+            request=_fake_request(token=None, method="POST", path="/battles"),
+            db=session,
+            current_user=None,
+        )
+    assert missing_info.value.status_code == 401
+
+    _seed_agent_token(
+        session,
+        owner=owner,
+        scopes={battles.BATTLE_READ_SCOPE: True},
+    )
+    with pytest.raises(HTTPException) as scope_info:
+        battles._battle_creator(
+            request=_fake_request(method="POST", path="/battles"),
             db=session,
             current_user=None,
         )

@@ -218,18 +218,24 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 > **B2 ORM schema impact:** `BattleEvent.payload_json` per unit +`location: Lokalizacja` +`wounds_eliminating: int`; `ModelKilled` +`eliminated: bool`; `Shot/MeleeResolved` +`wounds_eliminating: int`; nowy event `MutexCollision`. Zamrożone — zero migration churn.
 
 ### B4. API (3 tyg)
-- [~] `app/routers/battles.py` — **read-only slices DONE 2026-07-02/03**:
+- [~] `app/routers/battles.py` — **read-only slices DONE 2026-07-02/03,
+  sandbox create DONE 2026-07-04**:
   `GET /battles/{id}` zwraca metadane bitwy z `battles` + `latest_sequence`
   z event-store, a `GET /battles/{id}/events?since=N` zwraca zapisany event-log
-  przez `persistence.load_events` + `event_to_json`. Pozostałe endpointy nadal
+  przez `persistence.load_events` + `event_to_json`. `POST /battles` tworzy
+  owner-scoped sandboxową bitwę z dwóch własnych rozpisek, adaptuje je przez
+  `roster_to_engine_roster`, wykonuje setup/deployment i zapisuje startowy
+  event-log przez `persistence.save_events(..., expected_latest_sequence=0)`;
+  invite'y i gra między różnymi ownerami nadal osobno. Pozostałe endpointy nadal
   otwarte: `POST /battles/invite`, `POST /battles/invite/{id}/accept`,
-  `POST /battles`, `POST /battles/{id}/actions`, `POST
-  /battles/{id}/interrupts`, `POST /battles/{id}/simulate`, `POST
-  /battles/{id}/replay`.
+  `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST
+  /battles/{id}/simulate`, `POST /battles/{id}/replay`.
 - [~] Auth: read-only battle endpoints mają participant scope
   (`p1_user_id`/`p2_user_id`; cudza/nieistniejąca = 404) oraz agent bearer scope
-  `battle:read` z audytem `AgentAuditLog`. Write endpoints i invite'y nadal
-  wymagają osobnego security-review.
+  `battle:read` z audytem `AgentAuditLog`. `POST /battles` ma osobny agent scope
+  `battle:create`, mapuje agenta na `owner_user_id` i wymaga obu rosterów z
+  `owner_id == owner`. Invite'y oraz pozostałe write endpointy nadal wymagają
+  osobnego security-review.
 - [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych i
   event-logu (`BattlePublic`, `BattleEventsPublic`) w routerze gotowe; shared
   `BattleState`, `BattleEvent` i polimorficzne `Action` nadal otwarte.
