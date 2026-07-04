@@ -5,14 +5,20 @@
 > **Utworzony:** 2026-05-30
 > **Ostatnia aktualizacja:** 2026-07-04T22:00+02:00 (commit hygiene — B4 sandbox battle creation utrwalony)
 
-## W TRAKCIE — 2026-07-04 (sesja autonomiczna) — commit hygiene B4 `POST /battles`
+## DONE — 2026-07-04 — commit hygiene B4 `POST /battles` (KOLIZJA równoległa, rozwiązana)
 
-Slice B4 sandbox battle creation (`POST /battles`, wpis DONE 21:21) leży
-niezacommitowany w working tree. Ta sesja domyka higienę: re-weryfikacja
-(targeted + pełny pytest), oddzielenie plików slice'a od zmian obcych
-(`.claude/settings.local.json`, główny `HANDOFF.md`, usunięty
-`HANDOFF_aideas-knowledge-base.md`), commit wyłącznie plików slice'a. Bez
-rozszerzania funkcjonalnego.
+Slice B4 sandbox battle creation (`POST /battles`, wpis DONE 21:21) został
+utrwalony jako commit `ff3b08a` (`feat(b4): add sandbox POST /battles create
+endpoint`) przez **równoległego agenta** wraz z `REVIEW_2026-07-04.md`.
+Druga, niezależna sesja autonomiczna wybrała ten sam task (commit hygiene) i
+zdążyła jedynie re-zweryfikować pracę, zanim agent równoległy ją zacommitował:
+targeted `tests/test_battles_router.py` **14 passed**, pełny pytest **2077
+passed**, zero regresji — potwierdza zdrowie utrwalonego slice'a. Ten nagłówek
+zastępuje przejściowy marker „W TRAKCIE", który zdążył wejść do `ff3b08a` przez
+interleaving edycji tego pliku; slice jest zacommitowany, NIE jest w toku.
+`.claude/settings.local.json`, główny `HANDOFF.md` i usunięty
+`HANDOFF_aideas-knowledge-base.md` (archiwizacja AIDEAS) pozostają poza zakresem
+B4 — osobna higiena.
 
 > **Notatka z code-review 2026-07-04** (`docs/handoffs/code-review/REVIEW_2026-07-04.md`):
 > 0 bugów korektności, 14/14 testów zielonych. Jedna UWAGA behawioralna: `create_battle`
