@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_utcnow-deprecation](docs/handoffs/HANDOFF_utcnow-deprecation.md) | Migracja 9 przedawnionych `datetime.utcnow()` na SSOT naive-UTC (`app/db.py::utcnow()`), zero zmian zachowania. | `app/db.py`, `app/models.py`, `app/routers/export.py` | Ready for archive |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -54,6 +53,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-07-04 — utcnow-deprecation (archived) — migracja `datetime.utcnow()` → SSOT naive-UTC
+- Sesja autonomiczna, poza gorącym frontendem B4/B5 (świadomie, by uniknąć kolizji z równoległymi agentami w `battles.py`/`http.py`). Domknięty latentny dług: `datetime.utcnow()` jest deprecated (Py 3.12+, slated for removal) i zaśmiecał sygnał testów ~3074 warningami. Dodano SSOT `app/db.py::utcnow()` (naive UTC, `datetime.now(UTC).replace(tzinfo=None)` — ta sama konwencja co `app/security.py`); zmigrowano 9 przedawnionych sitów w `db.py`/`models.py`/`export.py`. **Naive zachowane świadomie** — kolumny `DateTime` (bez `timezone=True`) porównują naive (`AgentToken.expires_at <= now`); aware zerwałby `TypeError`. Pliki auth nietknięte (już non-deprecated). Warningi pytest **~3074 → 14** (reszta third-party `openpyxl`). Zero zmian zachowania (wartości byte-identyczne).
+- Pliki: `app/db.py`, `app/models.py`, `app/routers/export.py`, `tests/test_db_utcnow.py` (NEW 2). Commit na `Faza_A`: `dbcd052`.
+- Weryfikacja: pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2081 passed** (2079 + 2 nowe pinujące naive-UTC). Call-site check: `grep datetime.utcnow app/` = 0. DoD: `/simplify` 0 zmian (jeden SSOT helper); `/review` inline 0 bugów (zero-arg callable jak wcześniej, naive pinowane testem, `datetime` import usunięty z export.py); `/security-review` N/A (timestamp-of-record, semantyka bez zmian). `git diff --check` czysto (tylko znane CRLF `.claude`).
+- Doc updates: brak/N/A (czysta higiena — helper w istniejącym `db.py`, brak nowego pakietu/ADR/ENV/checkboxa; naive-UTC już była konwencją w kodzie). **Follow-up (READY, NIE blokujące):** `security.py:182` inline i `agent_tokens._now()` mogłyby delegować do `db.utcnow()` (redukcja duplikacji) — osobny slice, bo pliki auth → `/security-review`.
 
 ### 2026-07-01 — aideas-knowledge-base (archived) — materiały AIDEAS wyłączone z pracy repo
 - Wątek pomocniczy AIDEAS zamknięty na polecenie usera. W repo zdjęto aktywną blokadę `AIdeas/Baza wiedzy/` i usunięto per-wątkowy handoff; `AIdeas/` pozostaje lokalnym materiałem szkoleniowym wyłączonym z trackingu. Materiały były poza aplikacją SZOP: prezentacje, baza wiedzy/upload pack oraz defensywny raport z logów Agent Arena; brak zmian kodu aplikacji i brak potrzeby pytest.
