@@ -30,14 +30,14 @@ STRATEGIC_TASKS: List[StrategicCard] = [
         'Natarcie: Wybierz cel kontrolowany przez przeciwnika; jeżeli takich nie ma,'
         ' to przeciwnik wybiera dowolny. Kontroluj go.',
     ),
-    # Obrona
+    # Mobilizacja
     StrategicCard(
         'obrona-brak-wrogow',
-        'Obrona: Nie ma nieprzyszpilonych wrogów w twojej strefie rozstawienia. Odrzuć kartę.',
+        'Mobilizacja: Nie ma nieprzyszpilonych wrogów w twojej strefie rozstawienia. Odrzuć kartę.',
     ),
     StrategicCard(
         'obrona-twoj-oddzial',
-        'Obrona: Twój oddział wybrany przez przeciwnika nie jest pokonany.',
+        'Mobilizacja: Twój oddział wybrany przez przeciwnika nie jest pokonany.',
     ),
     # Dywersja
     StrategicCard(
@@ -72,7 +72,7 @@ STRATEGIC_SUPPORTS: List[StrategicCard] = [
     ),
     StrategicCard(
         'ufortyfikuj',
-        'Przerwij i odrzuć kartę, aby wybrany oddział został Ufortyfikowany.',
+        'Przerwij i odrzuć kartę, aby wybrany oddział został Przygotowany.',
     ),
     StrategicCard(
         'odrzuc-zamiast-przegrupowania',

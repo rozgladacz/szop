@@ -18,4 +18,7 @@ app/routers/__pycache__/
 .tools/
 
 # Documentation
-app/static/docs/
+app/static/docs/**
+!app/static/docs/*.md
+!app/static/docs/*.docx
+!app/static/docs/*.pdf

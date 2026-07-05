@@ -331,7 +331,7 @@ def test_szpica_increases_weapon_hit_chance() -> None:
     assert cost_with - cost_without == pytest.approx(expected_delta, rel=1e-6)
 
 
-def test_przygotowanie_only_modifies_weapon_cost() -> None:
+def test_planowanie_only_modifies_weapon_cost() -> None:
     weapon = models.Weapon(
         id=1,
         name="Karabin",  # arbitrary label for clarity
@@ -356,7 +356,7 @@ def test_przygotowanie_only_modifies_weapon_cost() -> None:
     unit.default_weapon_id = weapon.id
 
     base_cost = costs.weapon_cost(weapon, unit_quality=unit.quality, unit_flags=[])
-    with_przygotowanie = costs.weapon_cost(
+    with_planowanie = costs.weapon_cost(
         weapon,
         unit_quality=unit.quality,
         unit_flags=["Przygotowanie"],
@@ -367,14 +367,14 @@ def test_przygotowanie_only_modifies_weapon_cost() -> None:
     ap_mod = costs.lookup_with_nearest(costs.AP_BASE, weapon.effective_ap)
     expected_delta = round(2.0 * range_mod * ap_mod * 0.65, 2)
 
-    assert with_przygotowanie - base_cost == pytest.approx(expected_delta, abs=0.02)
+    assert with_planowanie - base_cost == pytest.approx(expected_delta, abs=0.02)
 
     entries = rosters._passive_entries(unit)
-    przygotowanie_entry = next(
+    planowanie_entry = next(
         entry for entry in entries if costs.ability_identifier(entry.get("slug")) == "przygotowanie"
     )
 
-    assert przygotowanie_entry["cost"] == pytest.approx(expected_delta, rel=1e-2)
+    assert planowanie_entry["cost"] == pytest.approx(expected_delta, rel=1e-2)
 
     roster_unit = models.RosterUnit(unit=unit, count=1)
     loadout = rosters._default_loadout_payload(unit)
@@ -403,7 +403,7 @@ def test_zwrot_passive_cost() -> None:
     assert costs.passive_cost("zwrot", 3.0) == pytest.approx(-3.0)
 
 
-def test_przygotowanie_ignored_for_samolot() -> None:
+def test_planowanie_ignored_for_samolot() -> None:
     weapon = models.Weapon(range='24"', attacks=1.0, ap=0, armory_id=1)
     cost_normal = costs.weapon_cost(weapon, unit_quality=4, unit_flags=["Przygotowanie"])
     cost_samolot = costs.weapon_cost(weapon, unit_quality=4, unit_flags=["Przygotowanie", "Samolot"])

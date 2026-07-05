@@ -149,7 +149,6 @@ def _weapon_cost(
             has_namierzanie = True
             mult *= 1.1
         elif norm in {"impet", "impact"}:
-            chance += 0.65
             ap_mod += lookup_with_nearest(AP_LANCE, base_ap)
         elif norm in {"przebijajaca", "przebijajacy", "penetrating"}:
             mult *= lookup_with_nearest(PENETRATING_MULTIPLIER, base_ap)

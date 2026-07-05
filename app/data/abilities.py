@@ -200,6 +200,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Straceńcy",
         type="passive",
         description="Po nieudanym teście przegrupowania wykonaj test trudnego terenu zamiast normalnych konsekwencji.",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="furia",
@@ -209,9 +210,9 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
     ),
     AbilityDefinition(
         slug="przygotowanie",
-        name="Przygotowanie",
+        name="Planowanie",
         type="passive",
-        description="Jeżeli jest Ufortyfikowany, +1 do rzutów na trafienie.",
+        description="Jeżeli jest Przygotowany, +1 do rzutów na trafienie.",
     ),
     AbilityDefinition(
         slug="kontra",
@@ -273,6 +274,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
             "przyjaznego oddziału z tą zdolnością w zasięgu 12”, twoje ataki mają -1AP, a "
             "ataki w ciebie +1AP."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="ostrozny",
@@ -575,7 +577,11 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="ratownik",
         name="Ratownik",
         type="aura",
-        description="W aktywacji w której twój oddział otrzymał rany, leczy jedną ranę.",
+        description=(
+            "W aktywacji w której twój oddział otrzymał rany, leczy jedną ranę. "
+            "Jeżeli na końcu swojej aktywacji oddział ma dwóch ratowników i jest Przygotowany leczy jedną ranę. "
+            "Nie kumulatywne."
+        ),
     ),
     AbilityDefinition(
         slug="meczennik",
@@ -623,7 +629,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="impet",
         name="Impet",
         type="weapon",
-        description="+1 do trafienia i +1 do AP podczas szarży.",
+        description="+1 do AP podczas szarży.",
     ),
     AbilityDefinition(
         slug="namierzanie",
