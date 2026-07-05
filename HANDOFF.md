@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_fastapi-lifespan](docs/handoffs/HANDOFF_fastapi-lifespan.md) | Higiena: migracja przedawnionego `@app.on_event("startup")` → `lifespan` w `app/main.py`. | `app/main.py` | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)
@@ -54,6 +53,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-07-05 — fastapi-lifespan (archived) — migracja `on_event("startup")` → `lifespan`
+- Domknięty latentny dług higieny odnotowany w REVIEW_2026-07-05: przedawniony (Starlette/FastAPI) dekorator `@app.on_event("startup")` w `app/main.py` zastąpiony `@asynccontextmanager lifespan` przekazanym do `FastAPI(lifespan=...)`. Zachowanie 1:1 — `init_db()` + log nadal wykonują się przy starcie ASGI (potwierdzone smoke `async with lifespan(app)` → `init_db` wołane). Testy nie używają `TestClient`/ASGI lifecycle (httpx niezainstalowany; routery testowane wprost), więc zero wpływu na suitę.
+- Pliki: `app/main.py`. Commit na `Faza_A`: `66a8cad`.
+- Weryfikacja: pełny `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2084 passed**, warnings **14→12** (zniknął `on_event` DeprecationWarning). Call-site: brak innych referencji `startup_event`/`on_event`. DoD: `/simplify` 0 zmian (idiomatyczny wzorzec FastAPI); `/review`/`/security-review` pominięte warunkowo (diff ~10 linii, brak hot-path/SSOT/auth; `init_db` bez zmian). `git diff --check` czysto (tylko znane CRLF).
+- Doc updates: brak/N/A (czysta higiena; `on_event`/`lifespan` nie występuje w `architecture.md`/`roadmap.md`/`overview.md` — brak nowego pakietu/ADR/ENV/checkboxa).
 
 ### 2026-07-04 — utcnow-ssot-auth (archived) — konsolidacja auth do `db.utcnow()`
 - Follow-up wątku `utcnow-deprecation` (ten sam dzień): pozostałe 2 kopie wyrażenia naive-UTC w plikach auth delegują teraz do SSOT `db.utcnow()`. `security.py:182` inline → `utcnow()`; `agent_tokens._now()` usunięty, 2 call-site'y → `utcnow()`. Nieużywane importy `datetime`/`UTC` (security) i `UTC` (agent_tokens) usunięte. Netto −5 linii, 3 kopie wyrażenia → 1 SSOT. Mechanicznie **no-op** (wartość naive-UTC byte-identyczna).
