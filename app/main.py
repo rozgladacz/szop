@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Request
@@ -34,7 +36,15 @@ from .services import costs
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(debug=DEBUG)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    init_db()
+    logger.info("Application started")
+    yield
+
+
+app = FastAPI(debug=DEBUG, lifespan=lifespan)
 
 # Trusted-host guard — zapobiega atakom Host-header injection gdy za reverse proxy.
 # Domyślnie "*" (wszystkie hosty dozwolone) — zawężamy przez TRUSTED_HOSTS w .env.
@@ -51,12 +61,6 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-
-@app.on_event("startup")
-def startup_event() -> None:
-    init_db()
-    logger.info("Application started")
 
 
 @app.get("/", response_class=HTMLResponse)
