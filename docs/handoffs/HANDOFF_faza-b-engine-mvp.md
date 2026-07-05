@@ -3,7 +3,28 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-05T06:13:19+02:00 (DONE — B5 `HttpClient` create error label)
+> **Ostatnia aktualizacja:** 2026-07-05T09:20:00+02:00 (commit hygiene — dwa slice'y B4/B5 utrwalone)
+
+## DONE — 2026-07-05T09:20:00+02:00 — commit hygiene: adaptation_report + create error label
+
+Sesja autonomiczna domknęła higienę: dwa w pełni ukończone i zweryfikowane w
+poprzednich dzisiejszych sesjach slice'y (wpisy DONE 01:16 „B4 `POST /battles`
+adaptation report" + 06:13 „B5 `HttpClient` create error label") leżały
+**niezacommitowane** w drzewie roboczym. Re-weryfikacja bez zmian kodu: pełny
+`.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q` **2084 passed**,
+14 warnings (identyczny baseline jak wpis 06:13). Diff kodu (`battles.py`
+addytywne modele raportu + `http.py` `error_label` per call-site) potwierdzony
+spójny z wpisami DONE i oboma review (0 findingów). Zacommitowano jako dwa
+rozdzielone wg zakresu commity na `Faza_A` (bez push, workflow projektu):
+- `8220550` `feat(b4): return adaptation_report from POST /battles` (battles.py +
+  test_battles_router.py + roadmap + architecture).
+- `0f846b3` `fix(b5): distinguish HttpClient create vs GET metadata error label`
+  (http.py + test_clients_http.py + ten HANDOFF + REVIEW_2026-07-04/07-05).
+
+`.claude/settings.local.json` świadomie poza commitami (zastana lokalna
+allowlista). Brak śladów aktywnego równoległego agenta (ostatnia edycja plików
+06:13, brak markera „W TRAKCIE"). B4/B5 pozostałe write/state/simulate endpointy
+nadal `WAITING(prereq)`.
 
 ## DONE — 2026-07-05T06:13:19+02:00 — B5 `HttpClient` create error label
 
