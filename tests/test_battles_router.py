@@ -154,6 +154,22 @@ def _seed_roster(
     return roster
 
 
+def _attach_roster_unit(session: Session, roster: models.Roster) -> models.RosterUnit:
+    parent = roster.roster_units[0]
+    attached = models.RosterUnit(
+        roster_id=roster.id,
+        unit_id=parent.unit_id,
+        count=1,
+        position=parent.position + 1,
+        parent_roster_unit_id=parent.id,
+    )
+    session.add(attached)
+    session.commit()
+    session.refresh(attached)
+    session.expire(roster, ["roster_units"])
+    return attached
+
+
 def _fake_request(
     token: str | None = RAW_TOKEN,
     *,
@@ -220,6 +236,26 @@ def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
     assert events
     assert response.latest_sequence == len(events)
     assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+
+
+def test_create_battle_reports_roster_adapter_omissions() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    roster_a = _seed_roster(session, name="A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B", owner_id=owner.id)
+    attached = _attach_roster_unit(session, roster_a)
+
+    response = battles.create_battle(
+        battles.BattleCreate(p1_roster_id=roster_a.id, p2_roster_id=roster_b.id),
+        db=session,
+        creator=battles.BattleCreator(user_id=owner.id),
+    )
+
+    assert response.adaptation_report is not None
+    assert response.adaptation_report.p1.deferred_attached_heroes == [attached.id]
+    assert response.adaptation_report.p1.dropped_excluded == []
+    assert response.adaptation_report.p1.inert_incomplete == []
+    assert response.adaptation_report.p2.deferred_attached_heroes == []
 
 
 def test_create_battle_accepts_agent_scope_and_audits_request() -> None:

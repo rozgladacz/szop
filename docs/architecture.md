@@ -52,9 +52,12 @@ sesję gracza albo bearer token ze scope `battle:read`, mapując agenta na
 Bearer path używa standardowego audytu `AgentAuditLog`. Addytywny write-slice
 `POST /battles` tworzy sandboxową bitwę dla ownera dwóch własnych rosterów
 (`battle:create` dla agenta), zapisuje metadane `Battle` oraz startowy event-log
-rozstawienia przez `persistence.save_events`. Pierwszy klient read-only tego
-kontraktu to `szop_client.HttpClient`: `get_battle_metadata` odpytuje metadane
-bitwy, a `get_events` odpytuje polling endpoint i deserializuje payload przez
+rozstawienia przez `persistence.save_events`; create response zawiera addytywny
+`adaptation_report` p1/p2 z raportu `roster_to_engine_roster`
+(`dropped_excluded`, `inert_incomplete`, `deferred_attached_heroes`), a GET
+metadata nie rekonstruuje tego raportu. Pierwszy klient read-only tego kontraktu
+to `szop_client.HttpClient`: `get_battle_metadata` odpytuje metadane bitwy, a
+`get_events` odpytuje polling endpoint i deserializuje payload przez
 `json_to_event`.
 
 ## Dokumentacja reguł gry — read-only
@@ -269,9 +272,9 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 |---|---|
 | `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` z `deployment_zones` D5) + `SimulationSummary` (frozen, win_rate/draw_rate/avg_rounds) |
 | `local.py` | `LocalClient(session=None, user_id=None)` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); **ścieżka DB** `simulate_roster_ids`/`create_battle_from_roster_ids` (wczytuje `Roster` po id, adapter ORM→engine, ownership-scoped); `UnknownBattleError`/`RosterNotFoundError` |
-| `http.py` | `HttpClient(base_url, token)` slices — `get_battle_metadata(battle_id)` odpytuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events(battle_id, since)` odpytuje B4 `GET /battles/{id}/events?since=N`; `create_battle(p1_roster_id, p2_roster_id, rng_seed, initiative_player)` woła sandbox `POST /battles` (JSON body + `Content-Type`) i zwraca `BattleMetadata`; wszystkie dodają bearer token gdy podany, eventy dekodowane przez `json_to_event`; pełny `GameClient` HTTP czeka na pozostałe endpointy B4 |
+| `http.py` | `HttpClient(base_url, token)` slices — `get_battle_metadata(battle_id)` odpytuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events(battle_id, since)` odpytuje B4 `GET /battles/{id}/events?since=N`; `create_battle(p1_roster_id, p2_roster_id, rng_seed, initiative_player)` woła sandbox `POST /battles` (JSON body + `Content-Type`) i zwraca `BattleMetadata`, tolerując addytywny `adaptation_report` bez mapowania do metadata; wszystkie dodają bearer token gdy podany, eventy dekodowane przez `json_to_event`; pełny `GameClient` HTTP czeka na pozostałe endpointy B4 |
 
-**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient.get_battle_metadata`, `HttpClient.get_events` read-only + `HttpClient.create_battle` sandbox write) dla metadanych bitwy, zapisanego event-logu i tworzenia sandboxowej bitwy z dwóch własnych rosterów. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia (Ufortyfikowany pkt 13.c) — spójna z `persistence.save_events`. **Odłożone:** pełny `HttpClient` zgodny z całym `GameClient`, pakowanie `pip install -e`. 30 testów klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, wierność `take_action == apply_activation`, DB-path (seeded in-memory SQLite, ownership scoping), HTTP URL/header/error handling i dekodowanie payloadu metadanych oraz eventów.
+**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient.get_battle_metadata`, `HttpClient.get_events` read-only + `HttpClient.create_battle` sandbox write) dla metadanych bitwy, zapisanego event-logu i tworzenia sandboxowej bitwy z dwóch własnych rosterów. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia (Ufortyfikowany pkt 13.c) — spójna z `persistence.save_events`. **Odłożone:** pełny `HttpClient` zgodny z całym `GameClient`, pakowanie `pip install -e`. 31 testów klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, wierność `take_action == apply_activation`, DB-path (seeded in-memory SQLite, ownership scoping), HTTP URL/header/error handling i dekodowanie payloadu metadanych oraz eventów.
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
-from ..services.agents.roster_adapter import roster_to_engine_roster
+from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
 from ..services.engine.persistence import latest_event_sequence, load_events, save_events
@@ -51,6 +51,17 @@ class BattleEventsPublic(BaseModel):
     events: list[BattleEventPublic]
 
 
+class RosterAdaptationPublic(BaseModel):
+    dropped_excluded: list[str] = Field(default_factory=list)
+    inert_incomplete: list[str] = Field(default_factory=list)
+    deferred_attached_heroes: list[int] = Field(default_factory=list)
+
+
+class BattleAdaptationPublic(BaseModel):
+    p1: RosterAdaptationPublic
+    p2: RosterAdaptationPublic
+
+
 class BattlePublic(BaseModel):
     battle_id: int
     p1_user_id: int | None
@@ -62,6 +73,7 @@ class BattlePublic(BaseModel):
     rng_seed: int
     status: str
     latest_sequence: int = Field(..., ge=0)
+    adaptation_report: BattleAdaptationPublic | None = None
 
 
 def _authorization_header(request: Request) -> str | None:
@@ -162,7 +174,20 @@ def _public_event(event: EngineBattleEvent) -> BattleEventPublic:
     )
 
 
-def _public_battle(db: Session, battle: models.Battle) -> BattlePublic:
+def _public_adaptation(result: AdaptResult) -> RosterAdaptationPublic:
+    return RosterAdaptationPublic(
+        dropped_excluded=list(result.dropped_excluded),
+        inert_incomplete=list(result.inert_incomplete),
+        deferred_attached_heroes=list(result.deferred_attached_heroes),
+    )
+
+
+def _public_battle(
+    db: Session,
+    battle: models.Battle,
+    *,
+    adaptation_report: BattleAdaptationPublic | None = None,
+) -> BattlePublic:
     return BattlePublic(
         battle_id=battle.id,
         p1_user_id=battle.p1_user_id,
@@ -174,6 +199,7 @@ def _public_battle(db: Session, battle: models.Battle) -> BattlePublic:
         rng_seed=battle.rng_seed,
         status=battle.status,
         latest_sequence=latest_event_sequence(db, battle.id),
+        adaptation_report=adaptation_report,
     )
 
 
@@ -189,10 +215,9 @@ def create_battle(
     roster_p1 = _get_owned_roster(
         db, roster_id=payload.p2_roster_id, owner_user_id=creator.user_id
     )
-    rosters = [
-        roster_to_engine_roster(roster_p0, owner_player=0).units,
-        roster_to_engine_roster(roster_p1, owner_player=1).units,
-    ]
+    adapted_p0 = roster_to_engine_roster(roster_p0, owner_player=0)
+    adapted_p1 = roster_to_engine_roster(roster_p1, owner_player=1)
+    rosters = [adapted_p0.units, adapted_p1.units]
     state = setup_phase(
         rosters,
         terrain=(),
@@ -214,7 +239,14 @@ def create_battle(
     save_events(db, battle.id, deploy_events, expected_latest_sequence=0)
     db.commit()
     db.refresh(battle)
-    return _public_battle(db, battle)
+    return _public_battle(
+        db,
+        battle,
+        adaptation_report=BattleAdaptationPublic(
+            p1=_public_adaptation(adapted_p0),
+            p2=_public_adaptation(adapted_p1),
+        ),
+    )
 
 
 @router.get("/{battle_id}", response_model=BattlePublic)
