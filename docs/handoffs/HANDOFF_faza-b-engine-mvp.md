@@ -3,7 +3,163 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-04T22:30+02:00 (DONE — B5 `HttpClient.create_battle`)
+> **Ostatnia aktualizacja:** 2026-07-05T06:13:19+02:00 (DONE — B5 `HttpClient` create error label)
+
+## DONE — 2026-07-05T06:13:19+02:00 — B5 `HttpClient` create error label
+
+**Zakres pracy:** mały follow-up po B5 `HttpClient.create_battle`: parser metadanych
+jest współdzielony przez `POST /battles` i `GET /battles/{id}`, ale przy
+niepoprawnym payloadzie create nadal zgłasza komunikat `GET battle metadata
+returned malformed payload`. Slice rozdziela etykietę błędu bez zmiany kontraktu
+API, bez mapowania `adaptation_report` do klienta i bez ruszania endpointów akcji.
+
+**Wybór zadania:** kontynuacja aktywnego B4/B5 po sandbox create i adaptation
+report; usuwa konkretny błąd diagnostyczny w kliencie HTTP, mieści się w jednej
+sesji, nie dotyka `LOCKED` (Dywersant, raw rolls, `models_mode=per_copy`) i nie
+wymaga decyzji usera ani projektowania większego write endpointu.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A — brak zmian schemy.
+- Backend payload/API: N/A — kontrakt B4 bez zmian.
+- Klient HTTP: `szop_client/http.py` — label walidacji payloadu zależny od call-site.
+- JS render / CSS / template: N/A — brak UI.
+- Testy: `tests/test_clients_http.py` — regresja dla malformed create response.
+- Dokumentacja/HANDOFF: ten HANDOFF; roadmap/architecture tylko jeśli okaże się,
+  że licznik/opis klienta wymaga synchronizacji.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Zmiana dotyczy wyłącznie obsługi błędnego payloadu w kliencie HTTP; zero nowych
+DB queries, indeksów, fetchy lub ścieżek runtime serwera.
+
+**Plan:**
+- [x] 1. Bootstrap, wybór zakresu i encoding gate dla `szop_client/http.py` oraz
+  `tests/test_clients_http.py`.
+- [x] 2. Rozdzielić etykietę malformed metadata dla `POST /battles` vs GET.
+- [x] 3. Dodać regresję klienta HTTP.
+- [x] 4. Weryfikacja: targeted pytest, pełny pytest, call-site check, manual
+  `/simplify`, manual `/review` jeśli diff >50, manual `/security-review` jeśli
+  dotknie auth/user input, `git diff --check`, diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Pełny `HttpClient` zgodny z całym
+`GameClient` nadal `WAITING(prereq)` na endpointy B4 actions/simulate.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-05T06:03+02:00: Bootstrap wykonany zgodnie z `/load-context`: pamięć
+  automatyzacji, `AGENTS.md`, canonical `.agents/skills/load-context/SKILL.md`,
+  `HANDOFF.md`, aktywny `HANDOFF_faza-b-engine-mvp.md`, `docs/handoffs/README.md`,
+  `docs/roadmap.md`, `docs/planning.md`, `docs/testing.md`, bieżący diff i review
+  2026-07-04/2026-07-05. Zastany diff B4 adaptation report i `.claude/settings`
+  pozostają poza zakresem. Encoding gate dla `szop_client/http.py` i
+  `tests/test_clients_http.py` OK po uruchomieniu `.venv` poza sandboxem; sandbox
+  trafił w znany WindowsApps `Odmowa dostępu`.
+- 2026-07-05T06:07+02:00: `HttpClient.create_battle` przekazuje do wspólnego
+  parsera etykietę `POST create battle`, a `get_battle_metadata` etykietę
+  `GET battle metadata`. Dodano regresję malformed create response, która pilnuje
+  braku starego komunikatu GET w ścieżce POST.
+- 2026-07-05T06:09+02:00: Targeted
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_http.py`:
+  **12 passed**.
+- 2026-07-05T06:10+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2084 passed**, 14 warnings.
+- 2026-07-05T06:12+02:00: Manual `/simplify` znalazł jedną lokalną redukcję:
+  etykiety `POST create battle` / `GET battle metadata` są teraz zmiennymi
+  lokalnymi reuse'owanymi przez `_request_json` i `_metadata_from_payload`.
+  Wymaga re-run testów po zmianie.
+- 2026-07-05T06:13+02:00: Po `/simplify` targeted
+  `tests/test_clients_http.py`: **12 passed**; pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2084 passed**, 14 warnings. Call-site check: `_metadata_from_payload` ma tylko
+  dwa call-site'y w `HttpClient.create_battle` i `get_battle_metadata`; oba
+  przekazują właściwy `error_label`, a walidacja pól metadanych bez zmian.
+  Manual `/review`: 0 bugów korektności — zmiana dotyczy tylko komunikatu błędu,
+  keyword-only argument wymusza label dla przyszłych call-site'ów. Manual
+  `/security-review`: N/A — brak zmian auth, sekretów, DB, uprawnień lub danych
+  użytkownika. `git diff --check` bez błędów whitespace; tylko znane ostrzeżenia
+  CRLF. Smoke JS N/A.
+
+## DONE — 2026-07-05T01:16:08+02:00 — B4 `POST /battles` adaptation report
+
+**Zakres pracy:** domknąć mały follow-up z code-review 2026-07-04: `POST
+/battles` używa `roster_to_engine_roster`, ale dotąd zwracał tylko metadane bitwy
+i cicho ukrywał raport adaptera (`dropped_excluded`, `inert_incomplete`,
+`deferred_attached_heroes`). Slice ma dodać addytywne, opcjonalne pole payloadu z
+raportem adaptacji dla p1/p2 przy tworzeniu bitwy. GET metadata pozostaje bez
+rekonstrukcji raportu, żeby nie dokładać DB/adaptacji do read path.
+
+**Wybór zadania:** kontynuacja aktywnego B4/B5 po `POST /battles` i
+`HttpClient.create_battle`; naprawia konkretną uwagę review o cichej utracie
+jednostek/zdolności, przybliża HTTP API do bezpiecznego użycia przez klienta/MCP,
+nie dotyka `LOCKED` (Dywersant, raw rolls, `models_mode=per_copy`) i mieści się w
+jednej sesji.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A — brak zmian schemy; raport nie jest persystowany.
+- Backend payload/API: `app/routers/battles.py` — nowe opcjonalne modele raportu
+  i wypełnienie ich wyłącznie dla create response.
+- JS render / CSS / template: N/A — brak UI.
+- Testy: `tests/test_battles_router.py` (raport dla pominiętego attached hero) i
+  `tests/test_clients_http.py` (klient metadata toleruje addytywne pole).
+- Dokumentacja/HANDOFF: `docs/roadmap.md`, `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i `/rosters/{id}`
+render. Create już wykonuje adaptację obu rosterów; raport jest budowany z
+wyniku tej samej adaptacji bez dodatkowych SELECT-ów. GET metadata nie dostaje
+nowej adaptacji ani dodatkowych query.
+
+**Plan:**
+- [x] 1. Encoding gate i doczytanie modeli/testowych fixture pod attached hero.
+- [x] 2. Dodać publiczny raport adaptacji i wypełnić go z istniejących
+  `AdaptResult`.
+- [x] 3. Dodać testy routera i klienta HTTP.
+- [x] 4. Zsynchronizować roadmap/architecture.
+- [x] 5. Weryfikacja: targeted pytest, pełny pytest, call-site check, manual
+  `/simplify`, manual `/review` (payload/API + auth/write), manual
+  `/security-review`, `git diff --check`, diff review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice'a. Trwałe
+persystowanie raportu przy GET i decyzja czy odrzucać rostery z pominięciami
+zostają `READY`/future hardening; ten zakres tylko przestaje ukrywać informację
+w create response.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-05T01:04+02:00: Encoding gate dla `app/routers/battles.py`,
+  `tests/test_battles_router.py`, `szop_client/http.py`,
+  `tests/test_clients_http.py` OK przez `.venv` poza sandboxem; sandboxowy shim
+  WindowsApps jak wcześniej zwrócił `Odmowa dostępu`. `RosterUnit` ma
+  `parent_roster_unit_id`, a `roster_to_engine_roster` raportuje pominiętego
+  attached hero przez `AdaptResult.deferred_attached_heroes`, więc test routera
+  może użyć realnego modelu ORM bez nowych helperów w adapterze.
+- 2026-07-05T01:08+02:00: Router ma nowe modele `RosterAdaptationPublic` i
+  `BattleAdaptationPublic`; `BattlePublic.adaptation_report` jest opcjonalne i
+  wypełniane tylko przez `create_battle` z dwóch już policzonych `AdaptResult`.
+  `_public_battle` zachowuje domyślne `None`, więc GET metadata nie wykonuje
+  dodatkowej adaptacji ani query.
+- 2026-07-05T01:12+02:00: Dodano test routera dla `parent_roster_unit_id`:
+  `POST /battles` zwraca `adaptation_report.p1.deferred_attached_heroes` z id
+  pominiętego attached hero, a p2 ma puste listy. Dodano test HTTP klienta:
+  `create_battle` ignoruje addytywne `adaptation_report` i dalej zwraca
+  `BattleMetadata`. Targeted
+  `tests/test_battles_router.py tests/test_clients_http.py`: **26 passed**.
+- 2026-07-05T01:15+02:00: `docs/roadmap.md` i `docs/architecture.md`
+  zsynchronizowane: B4 `POST /battles` opisuje opcjonalny `adaptation_report`
+  p1/p2 z pól adaptera, a B5 `HttpClient` dokumentuje tolerowanie tego
+  addytywnego pola bez mapowania do `BattleMetadata`.
+- 2026-07-05T01:16+02:00: Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`: **2083
+  passed**, 14 warnings. Call-site check: `_public_battle` ma tylko create/get
+  w `battles.py`; GET używa domyślnego `adaptation_report=None`, create
+  przekazuje raport z dwóch `AdaptResult`. `BattlePublic` konsumowany przez
+  router i `HttpClient` metadata; klient ignoruje addytywne pole (test). Manual
+  `/simplify`: 0 zmian — helper `_public_adaptation` usuwa powtórzenia i kopiuje
+  listy raportu. Manual `/review`: 0 bugów korektności; raport nie zmienia
+  setup/deployment/persistence, tylko serializuje wynik już wykonanej adaptacji.
+  Manual `/security-review`: auth i owner scoping bez zmian; raport trafia tylko
+  do sesji ownera lub agenta z `battle:create`, brak dynamicznego SQL i sekretów;
+  dane raportu dotyczą wyłącznie dwóch własnych rosterów wskazanych w żądaniu.
+  `git diff --check` bez błędów whitespace (tylko znane ostrzeżenia CRLF).
+  Zastane `.claude/settings.local.json` i
+  `docs/handoffs/code-review/REVIEW_2026-07-04.md` pozostają poza zakresem.
 
 ## DONE — 2026-07-04T22:30+02:00 — B5 `HttpClient.create_battle` (klient sandbox `POST /battles`)
 

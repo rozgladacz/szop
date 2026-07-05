@@ -93,6 +93,48 @@ def test_create_battle_raises_for_http_error_status() -> None:
     assert exc_info.value.status_code == 404
 
 
+def test_create_battle_raises_create_label_for_malformed_payload() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response({"battle_id": 1, "latest_sequence": "bad"})
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).create_battle(
+            p1_roster_id=1, p2_roster_id=2
+        )
+
+    assert "POST create battle returned malformed payload" in str(exc_info.value)
+    assert "GET battle metadata" not in str(exc_info.value)
+
+
+def test_create_battle_ignores_additive_adaptation_report() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        payload = _battle_public_payload(77)
+        payload["adaptation_report"] = {
+            "p1": {
+                "dropped_excluded": [],
+                "inert_incomplete": [],
+                "deferred_attached_heroes": [123],
+            },
+            "p2": {
+                "dropped_excluded": [],
+                "inert_incomplete": [],
+                "deferred_attached_heroes": [],
+            },
+        }
+        return HttpResponse(
+            status_code=201,
+            body=json.dumps(payload).encode("utf-8"),
+        )
+
+    metadata = HttpClient("http://localhost", transport=transport).create_battle(
+        p1_roster_id=100,
+        p2_roster_id=200,
+    )
+
+    assert metadata.battle_id == 77
+    assert metadata.latest_sequence == 4
+
+
 def test_get_battle_metadata_fetches_b4_metadata_endpoint() -> None:
     seen: list[HttpRequest] = []
 

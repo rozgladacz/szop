@@ -96,6 +96,7 @@ class HttpClient:
         initiative_player: int = 0,
     ) -> BattleMetadata:
         """Create a sandbox battle via `POST /battles` and return its metadata."""
+        error_label = "POST create battle"
         payload = self._request_json(
             "POST",
             "/battles",
@@ -106,18 +107,19 @@ class HttpClient:
                 "rng_seed": rng_seed,
                 "initiative_player": initiative_player,
             },
-            error_label="POST create battle",
+            error_label=error_label,
         )
-        return _metadata_from_payload(payload)
+        return _metadata_from_payload(payload, error_label=error_label)
 
     def get_battle_metadata(self, battle_id: int) -> BattleMetadata:
         """Return participant-scoped battle metadata from the B4 API."""
+        error_label = "GET battle metadata"
         payload = self._get_json(
             f"/battles/{battle_id}",
             {},
-            error_label="GET battle metadata",
+            error_label=error_label,
         )
-        return _metadata_from_payload(payload)
+        return _metadata_from_payload(payload, error_label=error_label)
 
     def get_events(self, battle_id: int, since: int = 0) -> tuple[BattleEvent, ...]:
         """Return battle events with `sequence > since` from the B4 polling API."""
@@ -191,9 +193,10 @@ def _decode_json(body: bytes) -> Any:
         raise HttpClientError("HTTP response body is not valid JSON") from exc
 
 
-def _metadata_from_payload(payload: Any) -> BattleMetadata:
+def _metadata_from_payload(payload: Any, *, error_label: str) -> BattleMetadata:
+    error_message = f"{error_label} returned malformed payload"
     if not isinstance(payload, dict):
-        raise HttpClientError("GET battle metadata returned malformed payload")
+        raise HttpClientError(error_message)
     try:
         return BattleMetadata(
             battle_id=_required_int(payload, "battle_id"),
@@ -208,7 +211,7 @@ def _metadata_from_payload(payload: Any) -> BattleMetadata:
             latest_sequence=_required_int(payload, "latest_sequence"),
         )
     except (KeyError, TypeError) as exc:
-        raise HttpClientError("GET battle metadata returned malformed payload") from exc
+        raise HttpClientError(error_message) from exc
 
 
 def _required_int(payload: dict[str, Any], key: str) -> int:
