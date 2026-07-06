@@ -3,7 +3,126 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-05T09:20:00+02:00 (commit hygiene — dwa slice'y B4/B5 utrwalone)
+> **Ostatnia aktualizacja:** 2026-07-06T09:18:00+02:00 (W TRAKCIE — commit hygiene B5 battle_id guard)
+
+## W TRAKCIE — 2026-07-06T09:18:00+02:00 — commit hygiene B5 `HttpClient` battle_id guard
+
+**Zakres pracy:** re-zweryfikować i utrwalić niezacommitowany, już opisany slice
+B5 `HttpClient` battle_id payload guard. Working tree zawiera spójny diff:
+`szop_client/http.py`, `tests/test_clients_http.py`, `docs/architecture.md` i
+ten HANDOFF. `.claude/settings.local.json` jest lokalną zmianą poza zakresem.
+
+**Wybór zadania:** kontynuacja aktywnego B4/B5 i naprawa higieny po poprzednim
+runie. Zakres nie wymaga decyzji usera, nie dotyka `LOCKED` (Dywersant, raw
+combat rolls, `models_mode=per_copy`) i ogranicza ryzyko kolizji przed kolejnymi
+endpointami B4/B5.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A — brak zmian schemy.
+- Backend payload/API: N/A — endpointy B4 bez zmian.
+- Klient HTTP: `szop_client/http.py` — weryfikacja istniejącej walidacji echoed
+  `battle_id`.
+- JS render / CSS / template: N/A — brak UI.
+- Testy: `tests/test_clients_http.py`; pełny pytest po re-weryfikacji.
+- Dokumentacja/HANDOFF: `docs/architecture.md`, ten HANDOFF.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Brak nowych DB queries, indeksów, fetchy lub zmian runtime serwera; klient
+wykonuje jedno porównanie pola z już pobranego JSON.
+
+**Plan:**
+- [~] 1. Potwierdzić diff i wykonać encoding gate dla dotkniętych plików `.py`.
+- [ ] 2. Uruchomić targeted pytest dla `tests/test_clients_http.py` i pełny pytest.
+- [ ] 3. DoD: call-site check, manual `/simplify`, manual `/review`,
+  `/security-review` N/A, `git diff --check`, diff review.
+- [ ] 4. Zacommitować wyłącznie pliki slice'a, bez `.claude/settings.local.json`.
+
+**Otwarte kwestie:** brak `BLOCKED(user)`. Pełny `HttpClient` zgodny z całym
+`GameClient` nadal `WAITING(prereq)` na endpointy B4 actions/simulate/state.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-06T09:18+02:00: Bootstrap wykonany: pamięć automatyzacji była
+  nieobecna; przeczytane `AGENTS.md`, canonical `.agents/skills/load-context`,
+  `HANDOFF.md`, jedyny aktywny `HANDOFF_faza-b-engine-mvp.md`,
+  `docs/handoffs/README.md`, `docs/roadmap.md`, `docs/planning.md`,
+  `docs/testing.md`, `docs/architecture.md`, `docs/developing.md` i bieżący
+  diff. Wybrano commit hygiene, bo code diff już odpowiada wpisowi DONE
+  2026-07-05T21:24 i pozostaje niezacommitowany.
+
+## DONE — 2026-07-05T21:24:05+02:00 — B5 `HttpClient` battle_id payload guard
+
+**Zakres pracy:** maly hardening slice B5 po obecnych read/create endpointach B4:
+`HttpClient.get_battle_metadata(id)` i `HttpClient.get_events(id, since)` maja
+odrzucac poprawny skladniowo payload, jesli echoed `battle_id` nie pasuje do
+zadanej bitwy. Chroni to klienta/MCP przed pomylonym lub sklejanym responsem bez
+zmiany kontraktu serwera i bez nowych endpointow.
+
+**Wybor zadania:** kontynuacja aktywnego B4/B5 po dzisiejszej commit hygiene.
+Zakres jest samodzielny, testowalny w jednej sesji, nie dotyka `LOCKED`
+(Dywersant, raw combat rolls, `models_mode=per_copy`) i przybliza stabilny
+publiczny klient B5 dla drugiej fali C/MCP.
+
+**Warstwy (Layer Checklist):**
+- Data model / migracja: N/A — brak zmian schemy.
+- Backend payload/API: N/A — B4 juz zwraca `battle_id`; klient tylko weryfikuje
+  spojnosc odpowiedzi.
+- Klient HTTP: `szop_client/http.py` — walidacja echoed `battle_id` dla GET
+  metadata i events.
+- JS render / CSS / template: N/A — brak UI.
+- Testy: `tests/test_clients_http.py` — regresje dla mismatched battle_id.
+- Dokumentacja/HANDOFF: ten HANDOFF; `architecture.md`/`roadmap.md` tylko jesli
+  diff zmieni opis kontraktu publicznego.
+
+**Performance gate:** poza hot path `/quote`, `/rosters/{id}` i render list.
+Walidacja to pojedyncze sprawdzenie pola juz odczytanego z JSON po stronie
+klienta; zero DB queries, indeksow, fetchy lub zmian runtime serwera.
+
+**Plan:**
+- [x] 1. Encoding gate dla `szop_client/http.py` i `tests/test_clients_http.py`.
+- [x] 2. Dodac walidacje `battle_id` w GET metadata i events.
+- [x] 3. Dodac regresje klienta HTTP dla mismatched response i wykonac call-site check.
+- [x] 4. Weryfikacja: targeted pytest, pelny pytest, call-site check, manual
+  `/simplify`, manual `/review` jesli diff >50/hot path/SSOT, manual
+  `/security-review` jesli dotknie auth/user input, `git diff --check`, diff
+  review.
+
+**Otwarte kwestie:** brak `BLOCKED(user)` dla tego slice'a. Pelny `HttpClient`
+zgodny z calym `GameClient` nadal `WAITING(prereq)` na endpointy B4
+actions/simulate/state.
+
+**Wykonane kroki / odkrycia:**
+- 2026-07-05T21:02+02:00: Bootstrap wykonany zgodnie z `/load-context`: pamiec
+  automatyzacji, `AGENTS.md`, canonical `.agents/skills/load-context/SKILL.md`,
+  `HANDOFF.md`, jedyny aktywny `HANDOFF_faza-b-engine-mvp.md`,
+  `docs/handoffs/README.md`, `docs/roadmap.md`, `docs/architecture.md`, biezacy
+  diff i sekcje B4/B5. Zastany diff tylko w `.claude/settings.local.json`
+  pozostaje poza zakresem.
+- 2026-07-05T21:04+02:00: Encoding gate dla `szop_client/http.py` i
+  `tests/test_clients_http.py` OK przez `.venv` poza sandboxem; sandboxowy shim
+  WindowsApps zwrocil znane `Odmowa dostepu`.
+- 2026-07-05T21:10+02:00: `HttpClient.get_battle_metadata` przekazuje
+  `expected_battle_id` do parsera metadata, a `get_events` sprawdza echoed
+  `battle_id` przed dekodowaniem eventow. Dodano dwie regresje mismatch:
+  metadata 43 vs request 42 oraz events 99 vs request 42. `docs/architecture.md`
+  zsynchronizowane tylko w liczniku testow klienta 31 -> 33.
+- 2026-07-05T21:16+02:00: Targeted
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_http.py`:
+  **14 passed**. Pelny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2086 passed**, 12 warnings.
+- 2026-07-05T21:19+02:00: Manual `/simplify` znalazl jedna redukcje:
+  `_metadata_from_payload` uzywa tego samego `_ensure_expected_battle_id` co
+  `get_events`, zamiast utrzymywac drugi wariant mismatch check. Po zmianie
+  powtorzono targeted **14 passed** i pelny pytest **2086 passed**, 12 warnings.
+- 2026-07-05T21:24+02:00: Call-site check: `_metadata_from_payload` ma tylko dwa
+  call-site'y w `HttpClient.create_battle` (bez expected id, bo create zwraca nowa
+  bitwe) i `get_battle_metadata` (z expected id). `_ensure_expected_battle_id`
+  jest wywolywany przez `get_events` i parser metadata. Manual `/review`: 0
+  findingow — walidacja jest read-only i nie zmienia transportu ani dekodowania
+  eventow po poprawnym payloadzie. Manual `/security-review`: N/A — brak zmian
+  auth, tokenow, DB, uprawnien lub danych user input -> DB. `git diff --check`
+  bez bledow whitespace; tylko znane ostrzezenia CRLF dla `.claude`, docs.
+  Zastany diff `.claude/settings.local.json` pozostaje poza zakresem.
 
 ## DONE — 2026-07-05T09:20:00+02:00 — commit hygiene: adaptation_report + create error label
 

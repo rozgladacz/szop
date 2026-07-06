@@ -119,18 +119,30 @@ class HttpClient:
             {},
             error_label=error_label,
         )
-        return _metadata_from_payload(payload, error_label=error_label)
+        return _metadata_from_payload(
+            payload,
+            error_label=error_label,
+            expected_battle_id=battle_id,
+        )
 
     def get_events(self, battle_id: int, since: int = 0) -> tuple[BattleEvent, ...]:
         """Return battle events with `sequence > since` from the B4 polling API."""
         if since < 0:
             raise ValueError("since must be >= 0")
+        error_label = "GET battle events"
         payload = self._get_json(
             f"/battles/{battle_id}/events",
             {"since": since},
-            error_label="GET battle events",
+            error_label=error_label,
         )
-        events = payload.get("events") if isinstance(payload, dict) else None
+        if not isinstance(payload, dict):
+            raise HttpClientError(f"{error_label} returned malformed payload")
+        _ensure_expected_battle_id(
+            payload,
+            battle_id,
+            error_label=error_label,
+        )
+        events = payload.get("events")
         if not isinstance(events, list):
             raise HttpClientError("GET battle events returned malformed payload")
         return tuple(_event_from_public_payload(item) for item in events)
@@ -193,10 +205,21 @@ def _decode_json(body: bytes) -> Any:
         raise HttpClientError("HTTP response body is not valid JSON") from exc
 
 
-def _metadata_from_payload(payload: Any, *, error_label: str) -> BattleMetadata:
+def _metadata_from_payload(
+    payload: Any,
+    *,
+    error_label: str,
+    expected_battle_id: int | None = None,
+) -> BattleMetadata:
     error_message = f"{error_label} returned malformed payload"
     if not isinstance(payload, dict):
         raise HttpClientError(error_message)
+    if expected_battle_id is not None:
+        _ensure_expected_battle_id(
+            payload,
+            expected_battle_id,
+            error_label=error_label,
+        )
     try:
         return BattleMetadata(
             battle_id=_required_int(payload, "battle_id"),
@@ -212,6 +235,23 @@ def _metadata_from_payload(payload: Any, *, error_label: str) -> BattleMetadata:
         )
     except (KeyError, TypeError) as exc:
         raise HttpClientError(error_message) from exc
+
+
+def _ensure_expected_battle_id(
+    payload: dict[str, Any],
+    expected_battle_id: int,
+    *,
+    error_label: str,
+) -> None:
+    try:
+        battle_id = _required_int(payload, "battle_id")
+    except (KeyError, TypeError) as exc:
+        raise HttpClientError(f"{error_label} returned malformed payload") from exc
+    if battle_id != expected_battle_id:
+        raise HttpClientError(
+            f"{error_label} returned battle_id {battle_id}, "
+            f"expected {expected_battle_id}"
+        )
 
 
 def _required_int(payload: dict[str, Any], key: str) -> int:

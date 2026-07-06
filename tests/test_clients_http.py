@@ -196,6 +196,18 @@ def test_get_battle_metadata_raises_for_malformed_payload() -> None:
         HttpClient("http://localhost", transport=transport).get_battle_metadata(1)
 
 
+def test_get_battle_metadata_rejects_mismatched_battle_id() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(_battle_public_payload(43))
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).get_battle_metadata(42)
+
+    assert "GET battle metadata returned battle_id 43, expected 42" in str(
+        exc_info.value
+    )
+
+
 def test_get_events_polls_b4_endpoint_and_decodes_engine_events() -> None:
     seen: list[HttpRequest] = []
     events = (
@@ -264,3 +276,15 @@ def test_get_events_raises_for_malformed_payload() -> None:
 
     with pytest.raises(HttpClientError):
         HttpClient("http://localhost", transport=transport).get_events(1)
+
+
+def test_get_events_rejects_mismatched_battle_id() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response({"battle_id": 99, "events": []})
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).get_events(42)
+
+    assert "GET battle events returned battle_id 99, expected 42" in str(
+        exc_info.value
+    )
