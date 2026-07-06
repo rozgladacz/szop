@@ -11,6 +11,7 @@ from __future__ import annotations
 # ------------------------------------------------------------------
 
 from dataclasses import dataclass, replace
+from functools import lru_cache
 from typing import Iterable, List, Sequence
 import re
 import unicodedata
@@ -801,11 +802,15 @@ def definitions_by_type(ability_type: str) -> List[AbilityDefinition]:
     return [ability for ability in ABILITY_DEFINITIONS if ability.type == ability_type]
 
 
+# Statyczny indeks slug -> definicja (tabela definicji jest niezmienna po
+# imporcie) — zamiast liniowego skanu przy każdym wywołaniu (hot path eksportu).
+_DEFINITION_BY_SLUG: dict[str, "AbilityDefinition"] = {
+    ability.slug: ability for ability in ABILITY_DEFINITIONS
+}
+
+
 def find_definition(slug: str) -> AbilityDefinition | None:
-    for ability in ABILITY_DEFINITIONS:
-        if ability.slug == slug:
-            return ability
-    return None
+    return _DEFINITION_BY_SLUG.get(slug)
 
 
 def display_with_value(definition: AbilityDefinition, value: str | None) -> str:
@@ -1022,6 +1027,7 @@ def _ascii_letters(value: str) -> str:
     return "".join(result)
 
 
+@lru_cache(maxsize=4096)
 def _normalize(text: str | None) -> str:
     if not text:
         return ""
@@ -1037,6 +1043,18 @@ ABILITY_ALIASES = {
 }
 
 
+# Statyczny indeks: znormalizowany tekst (slug/nazwa/nazwa-z-wartoscia) -> slug.
+# Pierwsza pasujaca definicja wygrywa (setdefault) — zgodnie z dawnym skanem.
+# Zamienia O(definicje x 3 normalizacje) przy KAZDYM wywolaniu na jedno
+# znormalizowanie wejscia + O(1) lookup (hot path eksportu/kalkulacji kosztow).
+_SLUG_BY_TEXT: dict[str, str] = {}
+for _definition in ABILITY_DEFINITIONS:
+    for _text in (_definition.slug, _definition.name, _definition.display_name()):
+        _normalized_text = _normalize(_text)
+        if _normalized_text:
+            _SLUG_BY_TEXT.setdefault(_normalized_text, _definition.slug)
+
+
 def slug_for_name(text: str | None) -> str | None:
     if not text:
         return None
@@ -1046,11 +1064,4 @@ def slug_for_name(text: str | None) -> str | None:
     alias = ABILITY_ALIASES.get(normalized)
     if alias:
         return alias
-    for definition in ABILITY_DEFINITIONS:
-        if normalized in {
-            _normalize(definition.slug),
-            _normalize(definition.name),
-            _normalize(definition.display_name()),
-        }:
-            return definition.slug
-    return None
+    return _SLUG_BY_TEXT.get(normalized)
