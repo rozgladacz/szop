@@ -231,9 +231,9 @@ def roster_print(
     spell_entries = _army_spell_entries(roster, roster_items)
     army_rules = _army_rule_labels(getattr(roster, "army", None))
     return templates.TemplateResponse(
+        request,
         "roster_print.html",
         {
-            "request": request,
             "user": current_user,
             "roster": roster,
             "roster_items": roster_items,
@@ -373,9 +373,9 @@ def roster_battle_state(
                     mage_group_ids.append(int(gid))
 
     return templates.TemplateResponse(
+        request,
         "roster_battle_state.html",
         {
-            "request": request,
             "user": current_user,
             "roster": roster,
             "roster_items": roster_items,
@@ -412,9 +412,9 @@ def roster_export_list(
     army_rules = _army_rule_labels(getattr(roster, "army", None))
 
     return templates.TemplateResponse(
+        request,
         "export/lista.html",
         {
-            "request": request,
             "user": current_user,
             "roster": roster,
             "entries": entries,

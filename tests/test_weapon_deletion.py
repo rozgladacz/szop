@@ -21,7 +21,8 @@ def _session():
 def _fake_templates(monkeypatch):
     captured: dict[str, object] = {}
 
-    def template_response(name, context):
+    def template_response(request, name, context):
+        captured["request"] = request
         captured["name"] = name
         captured["context"] = context
         return SimpleNamespace(context=context)

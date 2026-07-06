@@ -23,7 +23,7 @@ def login_form(
 ):
     if current_user:
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("auth_login.html", {"request": request, "error": None})
+    return templates.TemplateResponse(request, "auth_login.html", {"error": None})
 
 
 @router.post("/login")
@@ -36,8 +36,9 @@ def login(
     user = db.execute(select(models.User).where(models.User.username == username)).scalar_one_or_none()
     if not user or not verify_password(password, user.password_hash):
         return templates.TemplateResponse(
+            request,
             "auth_login.html",
-            {"request": request, "error": "Nieprawidłowy login lub hasło"},
+            {"error": "Nieprawidłowy login lub hasło"},
             status_code=400,
         )
     request.session["user_id"] = user.id
@@ -53,8 +54,9 @@ def register_form(
         return RedirectResponse(url="/", status_code=303)
     registration_open = get_registration_open()
     return templates.TemplateResponse(
+        request,
         "auth_register.html",
-        {"request": request, "error": None, "registration_open": registration_open},
+        {"error": None, "registration_open": registration_open},
     )
 
 
@@ -67,16 +69,17 @@ def register(
 ):
     if not get_registration_open():
         return templates.TemplateResponse(
+            request,
             "auth_register.html",
-            {"request": request, "error": None, "registration_open": False},
+            {"error": None, "registration_open": False},
             status_code=403,
         )
     username = username.strip()
     if not is_valid_username(username):
         return templates.TemplateResponse(
+            request,
             "auth_register.html",
             {
-                "request": request,
                 "error": "Nazwa użytkownika może zawierać tylko litery, cyfry, spację oraz znaki . _ -",
                 "registration_open": True,
             },
@@ -85,8 +88,9 @@ def register(
     existing = db.execute(select(models.User).where(models.User.username == username)).scalar_one_or_none()
     if existing:
         return templates.TemplateResponse(
+            request,
             "auth_register.html",
-            {"request": request, "error": "Użytkownik o takiej nazwie już istnieje", "registration_open": True},
+            {"error": "Użytkownik o takiej nazwie już istnieje", "registration_open": True},
             status_code=400,
         )
     user = models.User(username=username, password_hash=hash_password(password))

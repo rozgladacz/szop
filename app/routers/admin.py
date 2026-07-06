@@ -69,9 +69,9 @@ def admin_dashboard(
     message, error = _status_messages(status_key, detail)
 
     return templates.TemplateResponse(
+        request,
         "admin_dashboard.html",
         {
-            "request": request,
             "user": current_user,
             "message": message,
             "error": error,

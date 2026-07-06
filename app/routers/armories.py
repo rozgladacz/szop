@@ -318,9 +318,9 @@ def _render_armory_detail(
     db.commit()
 
     return templates.TemplateResponse(
+        request,
         "armory_detail.html",
         {
-            "request": request,
             "user": current_user,
             "armory": armory,
             "weapons": weapon_rows,
@@ -916,9 +916,9 @@ def list_armories(
     armories = db.execute(query).scalars().all()
     mine, global_items, others = utils.split_owned(armories, current_user)
     return templates.TemplateResponse(
+        request,
         "armory_list.html",
         {
-            "request": request,
             "user": current_user,
             "mine": mine,
             "global_items": global_items,
@@ -950,8 +950,9 @@ def new_armory_form(
     current_user: models.User = Depends(get_current_user()),
 ):
     return templates.TemplateResponse(
+        request,
         "armory_new.html",
-        {"request": request, "user": current_user, "error": None},
+        {"user": current_user, "error": None},
     )
 
 
@@ -966,9 +967,9 @@ def create_armory(
     cleaned_name = name.strip()
     if not cleaned_name:
         return templates.TemplateResponse(
+            request,
             "armory_new.html",
             {
-                "request": request,
                 "user": current_user,
                 "error": "Nazwa zbrojowni jest wymagana.",
             },
@@ -1050,9 +1051,9 @@ def rename_armory(
         ]
         weapon_tree = _weapon_tree_payload(weapon_rows)
         return templates.TemplateResponse(
+            request,
             "armory_detail.html",
             {
-                "request": request,
                 "user": current_user,
                 "armory": armory,
                 "weapons": weapon_rows,
@@ -1304,9 +1305,9 @@ def new_weapon_form(
     _ensure_armory_edit_access(armory, current_user)
 
     return templates.TemplateResponse(
+        request,
         "armory_weapon_form.html",
         {
-            "request": request,
             "user": current_user,
             "armory": armory,
             "weapon": None,
@@ -1348,9 +1349,9 @@ def create_weapon(
 
     if not cleaned_name:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             {
-                "request": request,
                 "user": current_user,
                 "armory": armory,
                 "weapon": None,
@@ -1378,9 +1379,9 @@ def create_weapon(
         ap_value = _parse_optional_int(ap)
     except ValueError as exc:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             {
-                "request": request,
                 "user": current_user,
                 "armory": armory,
                 "weapon": None,
@@ -1460,9 +1461,9 @@ def import_weapon_form(
     _ensure_armory_edit_access(armory, current_user)
 
     return templates.TemplateResponse(
+        request,
         "armory_weapon_import.html",
         {
-            "request": request,
             "user": current_user,
             "armory": armory,
             "import_options": _build_import_options(db, armory),
@@ -1486,9 +1487,9 @@ def import_weapon(
 
     def _render_error(message: str) -> HTMLResponse:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_import.html",
             {
-                "request": request,
                 "user": current_user,
                 "armory": armory,
                 "import_options": _build_import_options(db, armory),
@@ -1585,9 +1586,9 @@ def edit_weapon_form(
     weapon = _get_weapon(db, armory, weapon_id)
 
     return templates.TemplateResponse(
+        request,
         "armory_weapon_form.html",
         {
-            "request": request,
             "user": current_user,
             "armory": armory,
             "weapon": weapon,
@@ -1634,9 +1635,9 @@ def update_weapon(
 
     if not cleaned_name:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             {
-                "request": request,
                 "user": current_user,
                 "armory": armory,
                 "weapon": weapon,
@@ -1666,9 +1667,9 @@ def update_weapon(
         ap_value = _parse_optional_int(ap)
     except ValueError as exc:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             {
-                "request": request,
                 "user": current_user,
                 "armory": armory,
                 "weapon": weapon,

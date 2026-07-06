@@ -42,9 +42,9 @@ def _render_user_list(
         .all()
     )
     return templates.TemplateResponse(
+        request,
         "users_list.html",
         {
-            "request": request,
             "user": current_user,
             "users": users,
             "message": message,

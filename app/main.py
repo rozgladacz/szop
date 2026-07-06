@@ -102,9 +102,9 @@ def index(
         costs.ensure_cached_costs(roster.roster_units)
 
     return templates.TemplateResponse(
+        request,
         "index.html",
         {
-            "request": request,
             "user": current_user,
             "armies": armies,
             "rosters": rosters_list,
