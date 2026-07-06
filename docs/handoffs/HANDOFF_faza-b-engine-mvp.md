@@ -3,14 +3,16 @@
 > **Wątek:** Strumień B — Game Engine MVP (parent). Bootstrap (B0 założenia + 4 ADR-y) + B3 (rule executor) + B3.9 (architecture hardening) → B2 (modele ORM) → B4 (API) → B5 (klient) → B6 (prezentacja) → B7 (test bed). Praca delegowana do sub-wątków (`faza-b-2-models`, `faza-b-3-executor`, `faza-b-3-hardening`, ...).
 > **Status:** In progress — B0 ✅ + B3 ✅ + **B3.9 ✅** (sub-wątek `faza-b-3-hardening` ready for archive 2026-06-02, 6 faz B3.9.a-f, pytest 1337/1337, 13 ADR-ów Accepted). Następne: B2 ORM (event types stabilne — zero migration churn) + Strumień D (agenci-boty) równolegle, potem B4 API + B5 klient.
 > **Utworzony:** 2026-05-30
-> **Ostatnia aktualizacja:** 2026-07-06T09:18:00+02:00 (W TRAKCIE — commit hygiene B5 battle_id guard)
+> **Ostatnia aktualizacja:** 2026-07-06T09:35:00+02:00 (DONE — re-weryfikacja B5 battle_id guard)
 
-## W TRAKCIE — 2026-07-06T09:18:00+02:00 — commit hygiene B5 `HttpClient` battle_id guard
+## DONE — 2026-07-06T09:35:00+02:00 — re-weryfikacja B5 `HttpClient` battle_id guard
 
 **Zakres pracy:** re-zweryfikować i utrwalić niezacommitowany, już opisany slice
 B5 `HttpClient` battle_id payload guard. Working tree zawiera spójny diff:
 `szop_client/http.py`, `tests/test_clients_http.py`, `docs/architecture.md` i
-ten HANDOFF. `.claude/settings.local.json` jest lokalną zmianą poza zakresem.
+ten HANDOFF. W trakcie sesji równoległy commit `07841f0` utrwalił kod slice'a,
+więc ta sesja nie robi duplikatu commita kodowego. `.claude/settings.local.json`
+i późniejsze zmiany `template-response-signature`/telemetry są poza zakresem.
 
 **Wybór zadania:** kontynuacja aktywnego B4/B5 i naprawa higieny po poprzednim
 runie. Zakres nie wymaga decyzji usera, nie dotyka `LOCKED` (Dywersant, raw
@@ -31,11 +33,11 @@ Brak nowych DB queries, indeksów, fetchy lub zmian runtime serwera; klient
 wykonuje jedno porównanie pola z już pobranego JSON.
 
 **Plan:**
-- [~] 1. Potwierdzić diff i wykonać encoding gate dla dotkniętych plików `.py`.
-- [ ] 2. Uruchomić targeted pytest dla `tests/test_clients_http.py` i pełny pytest.
-- [ ] 3. DoD: call-site check, manual `/simplify`, manual `/review`,
+- [x] 1. Potwierdzić diff i wykonać encoding gate dla dotkniętych plików `.py`.
+- [x] 2. Uruchomić targeted pytest dla `tests/test_clients_http.py` i pełny pytest.
+- [x] 3. DoD: call-site check, manual `/simplify`, manual `/review`,
   `/security-review` N/A, `git diff --check`, diff review.
-- [ ] 4. Zacommitować wyłącznie pliki slice'a, bez `.claude/settings.local.json`.
+- [x] 4. Potwierdzić równoległy commit `07841f0` i nie stage'ować cudzych zmian.
 
 **Otwarte kwestie:** brak `BLOCKED(user)`. Pełny `HttpClient` zgodny z całym
 `GameClient` nadal `WAITING(prereq)` na endpointy B4 actions/simulate/state.
@@ -48,6 +50,33 @@ wykonuje jedno porównanie pola z już pobranego JSON.
   `docs/testing.md`, `docs/architecture.md`, `docs/developing.md` i bieżący
   diff. Wybrano commit hygiene, bo code diff już odpowiada wpisowi DONE
   2026-07-05T21:24 i pozostaje niezacommitowany.
+- 2026-07-06T09:21+02:00: Encoding gate dla `szop_client/http.py` i
+  `tests/test_clients_http.py` OK przez `.venv` poza sandboxem; sandboxowy shim
+  WindowsApps zwrócił znane `Odmowa dostępu`.
+- 2026-07-06T09:26+02:00: Targeted
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_http.py`:
+  **14 passed**. Pełny
+  `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`:
+  **2086 passed**, 12 warnings (znane Starlette/openpyxl/reportlab).
+- 2026-07-06T09:31+02:00: Call-site check: `_metadata_from_payload` ma tylko
+  call-site'y w `HttpClient.create_battle` (bez expected id, bo serwer nadaje
+  nową bitwę) i `get_battle_metadata` (z expected id). `_ensure_expected_battle_id`
+  jest wywoływany przez `get_events` i parser metadata. Manual `/simplify`: 0
+  zmian — wspólny helper usuwa drugi wariant mismatch check, a podwójny odczyt
+  pola dict jest pomijalny. Manual `/review`: istniejący
+  `docs/handoffs/code-review/REVIEW_2026-07-06.md` ma 0 findings; dodatkowy
+  przegląd inline potwierdził zgodność z kontraktem B4. Manual
+  `/security-review`: N/A — brak zmian auth, tokenów, DB, uprawnień lub danych
+  user input -> DB. `git diff --check` bez błędów whitespace; tylko znane
+  ostrzeżenie CRLF dla HANDOFF.
+- 2026-07-06T09:35+02:00: Przed selektywnym `git add` pojawił się równoległy
+  commit `07841f0 feat(b5): validate echoed battle_id in HttpClient GET
+  metadata/events`, obejmujący `szop_client/http.py`, `tests/test_clients_http.py`,
+  `docs/architecture.md`, `docs/handoffs/HANDOFF_faza-b-engine-mvp.md` i
+  `docs/handoffs/code-review/REVIEW_2026-07-06.md`. Następny commit `6ddb079`
+  dotyczy ADR-0017 telemetry. Nie robię duplikatu commita; pozostawiam cudze
+  zmiany robocze (`app/main.py`, routery, `HANDOFF_template-response-signature`,
+  `HANDOFF_telemetry-adr-0017.md`, `.claude/settings.local.json`) poza zakresem.
 
 ## DONE — 2026-07-05T21:24:05+02:00 — B5 `HttpClient` battle_id payload guard
 
