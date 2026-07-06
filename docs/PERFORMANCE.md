@@ -17,34 +17,45 @@ Wymagania:
 
 ## Aktualny baseline
 
-**Data:** 2026-04-30
+**Data:** 2026-07-06
 **Commit:** *(uzupełnij po commit'cie)*
 **Roster:** 10 (10 oddziałów; mierzone `python scripts/profile_quote.py 10`)
 
 | ru | Nazwa | wpns | abil | full(ms) | badge(ms) |
 |---:|---|---:|---:|---:|---:|
-| 70 | Leman Russ | 10 | 0 | 58.3 | 4.4 |
-| 137 | Chmiera | 6 | 0 | 67.2 | 3.7 |
-| 116 | Sentinel | 8 | 1 | 40.8 | 3.1 |
-| 71 | Oficer | 4 | 2 | 21.5 | 1.5 |
-| 72 | Piechota | 11 | 3 | 18.6 | 1.4 |
-| 74 | Oficer szturmowy | 4 | 1 | 15.5 | 1.3 |
-| 75 | Szturmowcy | 4 | 1 | 11.8 | 1.0 |
-| 138 | Starszy Szczurak | 2 | 1 | 37.2 | 2.8 |
-| 117 | Szczurak | 2 | 3 | 43.8 | 2.9 |
-| 139 | Weterani | 9 | 1 | 19.8 | 1.1 |
-| **TOTAL** | | | | **~334** | **~23** |
+| 70 | Leman Russ | 10 | 0 | 30.3 | 1.8 |
+| 137 | Chmiera | 6 | 0 | 42.1 | 2.3 |
+| 116 | Sentinel | 8 | 1 | 18.6 | 1.5 |
+| 71 | Oficer | 4 | 2 | 11.8 | 0.9 |
+| 72 | Piechota | 11 | 3 | 9.7 | 0.9 |
+| 74 | Oficer szturmowy | 4 | 2 | 10.9 | 0.8 |
+| 75 | Szturmowcy | 4 | 1 | 6.1 | 0.5 |
+| 138 | Starszy Szczurak | 2 | 2 | 24.1 | 1.4 |
+| 117 | Szczuracy | 2 | 3 | 27.2 | 1.3 |
+| 139 | Weterani | 11 | 2 | 14.9 | 1.0 |
+| **TOTAL** | | | | **~196** | **~12** |
 
-Cały zapis rostera (`/update`) z odświeżeniem badge'y mieści się w **<400 ms**
-(backend) + opóźnienie sieci. Badge-only refresh per-oddział: ~1-4 ms.
+Cały zapis rostera (`/update`) z odświeżeniem badge'y mieści się w **<250 ms**
+(backend) + opóźnienie sieci. Badge-only refresh per-oddział: ~0.5-2.5 ms.
 
 > **Uwaga:** liczby są wrażliwe na konkretną zawartość rostera. Worst-case
-> (Chmiera) ~67 ms wynika z liczby pasywek dynamicznych (transport).
+> (Chmiera) ~42 ms wynika z liczby pasywek dynamicznych (transport).
 > Przy regresji > 20% — uruchom `make profile` i porównaj sekcję cProfile.
 
 ---
 
 ## Historia (najnowsze na górze)
+
+### 2026-07-06 — Cache `_inherited_value` + eliminacja podwójnych wywołań
+- `Weapon._inherited_value` buforuje wyniki w `self.__dict__["_iv_cache"]`
+  (klucz: `(attr, default)`). Eliminuje ponowne traversale łańcucha parent
+  dla tych samych par (weapon, attr) w obrębie jednego quote.
+- `weapon_cost_components` i `_mistrzostwo_weapon_cost`: `effective_attacks`
+  i `effective_ap` były każdorazowo wywołane 2× (idiom `if x is not None` +
+  odczyt wartości). Zastąpione jednym `_ea = getattr(...)`.
+- `_inherited_value` calls: 15 360 → 10 240 (−33% count, −95% czas: 0.130 s → 0.006 s).
+- `getattr` (builtins): 119 914 → 10 714 (−91%).
+- TOTAL full: 467 ms → **196 ms** (−58%); badge TOTAL: 35 ms → **12 ms** (−65%).
 
 ### 2026-05-01 — Ekstrakcja weapons.py + abilities.py
 - Sekcja 5 wyciągnięta do `abilities.py`, sekcja 6 do `weapons.py`.

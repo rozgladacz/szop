@@ -238,16 +238,10 @@ def weapon_cost_components(
     traits = split_traits(
         getattr(weapon, "effective_tags", None) or getattr(weapon, "tags", "")
     )
-    attacks_value = (
-        getattr(weapon, "effective_attacks", None)
-        if getattr(weapon, "effective_attacks", None) is not None
-        else getattr(weapon, "attacks", 1.0)
-    )
-    ap_value = (
-        getattr(weapon, "effective_ap", None)
-        if getattr(weapon, "effective_ap", None) is not None
-        else getattr(weapon, "ap", 0)
-    )
+    _ea = getattr(weapon, "effective_attacks", None)
+    attacks_value = _ea if _ea is not None else getattr(weapon, "attacks", 1.0)
+    _eap = getattr(weapon, "effective_ap", None)
+    ap_value = _eap if _eap is not None else getattr(weapon, "ap", 0)
 
     ranged_cost = 0.0
     melee_cost = 0.0

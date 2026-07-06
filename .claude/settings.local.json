@@ -134,7 +134,12 @@
       "Bash(Get-ChildItem -Path \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\" -Directory)",
       "Bash(Select-Object Name)",
       "Bash(python -m pytest tests/test_roster_unit_quote.py -q)",
-      "Bash(python -m pytest tests/test_roster_unit_quote.py -q -k \"distinguishes_aura_links\")"
+      "Bash(python -m pytest tests/test_roster_unit_quote.py -q -k \"distinguishes_aura_links\")",
+      "PowerShell(Get-ChildItem -Force -File | Select-Object Name, @{N='MB';E={[math]::Round\\($_.Length/1MB,2\\)}} | Sort-Object MB -Descending | Format-Table -AutoSize)",
+      "PowerShell(git count-objects -vH)",
+      "Bash(git rev-list *)",
+      "Bash(git cat-file *)",
+      "Bash(awk '$1==\"blob\" {print $2, $3}')"
     ]
   }
 }

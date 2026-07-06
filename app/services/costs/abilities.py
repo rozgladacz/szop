@@ -183,16 +183,10 @@ def _mistrzostwo_weapon_cost(
         existing = list(split_traits(
             getattr(wpn, "effective_tags", None) or getattr(wpn, "tags", "")
         ))
-        attacks = float(
-            getattr(wpn, "effective_attacks", None)
-            if getattr(wpn, "effective_attacks", None) is not None
-            else getattr(wpn, "attacks", 1.0)
-        )
-        ap = int(
-            getattr(wpn, "effective_ap", None)
-            if getattr(wpn, "effective_ap", None) is not None
-            else getattr(wpn, "ap", 0)
-        )
+        _ea = getattr(wpn, "effective_attacks", None)
+        attacks = float(_ea if _ea is not None else getattr(wpn, "attacks", 1.0))
+        _eap = getattr(wpn, "effective_ap", None)
+        ap = int(_eap if _eap is not None else getattr(wpn, "ap", 0))
         if weapon_slug in {normalize_name(t) for t in existing}:
             continue
         cost_without = _weapon_cost(quality, range_v, attacks, ap, existing, list(unit_traits))

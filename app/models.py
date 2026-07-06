@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 from datetime import datetime
+
+_MISSING = object()  # sentinel for _inherited_value per-instance cache
 from typing import List, Optional
 
 from sqlalchemy import (
@@ -133,6 +135,20 @@ class Weapon(TimestampMixin, Base):
     units: Mapped[List["Unit"]] = relationship(back_populates="default_weapon")
 
     def _inherited_value(self, attr: str, default=None):
+        # Per-instance cache keyed by (attr, default) to avoid repeated
+        # parent-chain traversals. Stored in __dict__ (not a mapped column)
+        # so SQLAlchemy instrumentation never touches it.
+        cache_key = (attr, default)
+        try:
+            _cache = self.__dict__["_iv_cache"]
+        except KeyError:
+            _cache = {}
+            self.__dict__["_iv_cache"] = _cache
+        cached = _cache.get(cache_key, _MISSING)
+        if cached is not _MISSING:
+            return cached
+
+        result = default
         current: Weapon | None = self
         visited: set[int] = set()
         while current is not None:
@@ -143,9 +159,12 @@ class Weapon(TimestampMixin, Base):
                 visited.add(identifier)
             value = getattr(current, attr)
             if value is not None:
-                return value
+                result = value
+                break
             current = current.parent
-        return default
+
+        _cache[cache_key] = result
+        return result
 
     def inherits_from_parent(self) -> bool:
         return self.parent_id is not None
