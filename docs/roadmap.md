@@ -438,7 +438,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0015 | Interrupt point `BEFORE_ACTION` (pkt 11.b.i; korekta 2026-06-09 z 4 punktów) | ✓ |
 | 0015a | Reactive window w akcji ataku (atomowe) | ✓ |
 | 0016 | szop_client jako wydzielony moduł (Protocol + LocalClient slice) | ✓ |
-| 0017 | Telemetria od dnia 1 | — |
+| 0017 | Telemetria od dnia 1: analiza offline z event-logu | ✓ |
 | 0020 | MCP runtime: Python SDK | — |
 | 0021 | MCP jako klient publicznego API | — |
 | 0022 | Vector store: sqlite-vec | — |

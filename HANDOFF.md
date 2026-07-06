@@ -12,6 +12,8 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
+| [HANDOFF_telemetry-adr-0017](docs/handoffs/HANDOFF_telemetry-adr-0017.md) | Spisać brakujący ADR-0017 (Telemetria) dokumentujący zaimplementowaną telemetrię offline z event-logu; sync indeksu ADR. | `docs/adr/0017-telemetry-day-one.md` (NEW), `docs/roadmap.md` (wiersz indeksu ADR) | In progress (doc-only, bez kolizji z B4/B5) |
+| [HANDOFF_template-response-signature](docs/handoffs/HANDOFF_template-response-signature.md) | Migracja przedawnionego podpisu `TemplateResponse` w plikach ZIMNYCH (main/admin/auth/armories/export/users); hot-path `rosters.py`/`armies.py` odroczone. | `app/main.py`, `app/routers/{admin,auth,armories,export,users}.py` | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)
