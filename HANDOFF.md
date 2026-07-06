@@ -12,7 +12,6 @@
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
 | [HANDOFF_faza-b-engine-mvp](docs/handoffs/HANDOFF_faza-b-engine-mvp.md) | Strumień B — Game Engine MVP (parent). B0 ✅ + B3 ✅ + **B3.9 ✅** + rules-resync ✅ + **B7 ✅** + **B5 LocalClient ✅** + **B6 CLI replay ✅** → B2 → B4. | (delegowane do sub-wątków; parent koordynuje) | In progress (resync zamknięty; B2 ORM lub D pierwsze; backlog: Dywersant LOCKED + H7) |
-| [HANDOFF_telemetry-adr-0017](docs/handoffs/HANDOFF_telemetry-adr-0017.md) | Spisać brakujący ADR-0017 (Telemetria) dokumentujący zaimplementowaną telemetrię offline z event-logu; sync indeksu ADR. | `docs/adr/0017-telemetry-day-one.md` (NEW), `docs/roadmap.md` (wiersz indeksu ADR) | In progress (doc-only, bez kolizji z B4/B5) |
 | [HANDOFF_template-response-signature](docs/handoffs/HANDOFF_template-response-signature.md) | Migracja przedawnionego podpisu `TemplateResponse` w plikach ZIMNYCH (main/admin/auth/armories/export/users); hot-path `rosters.py`/`armies.py` odroczone. | `app/main.py`, `app/routers/{admin,auth,armories,export,users}.py` | In progress |
 
 
@@ -56,6 +55,12 @@
 ---
 
 ## LOG SESJI
+
+### 2026-07-06 — telemetry-adr-0017 (archived) — spisany brakujący ADR-0017 (Telemetria)
+- Sesja autonomiczna, wątek doc-only wybrany świadomie poza obszarem B4/B5 (równoległy agent aktywny na `szop_client/http.py`/`battles.py`, a potem `template-response-signature`) → zero kolizji na kodzie. ADR-0017 („Telemetria od dnia 1") był referowany w roadmap/architecture/scripts/silniku, ale **plik nie istniał** (indeks status `—`). Spisany `docs/adr/0017-telemetry-day-one.md` (Accepted) dokumentujący zaimplementowaną rzeczywistość telemetrii: analiza offline z event-logu (`analyze_battle` per-bitwa+`--games`+`--json` / `analyze_agents` per-bot), schemy `szop.battle_metrics/v1`+`szop.agent_metrics/v1`, hooki additive `on_decision`/`on_action` (default None → B7 golden bez zmian), zakres pomiaru per-akcja (opcja A, pkt 11.b.iv). Odłożone jawnie: structlog live-emission (`READY`) + raw combat rolls (`LOCKED` 2026-06-26). Precedens: ADR-0025 (spisanie zaimplementowanej infrastruktury). Zero zmian kodu.
+- Pliki: `docs/adr/0017-telemetry-day-one.md` (NEW), `docs/roadmap.md` (indeks ADR 0017 `—`→`✓`), `HANDOFF.md`. Commit na `Faza_A`: `eb69cbf`.
+- Weryfikacja: doc-only → pytest/`/review`/`/security-review` N/A (brak `.py`, kodu, hot-path, auth). Reguła pkt 11.b.iv (aktywacja do 2 akcji) potwierdzona ze źródła `app/static/docs/SZOP_Rozjemca.md:78-80` w tej sesji (AGENTS [REQUIRED] #8). `git diff --check` czysto (tylko znane CRLF). `/simplify` na treści ADR (zwięzła). Brak linków do konkretnej nazwy pliku ADR-0017 do naprawy (referencje tekstowe „ADR-0017").
+- Doc updates: `docs/roadmap.md` ADR index `0017`→`✓` (w tym samym commicie). `architecture.md` już referuje ADR-0017 (bez zmian). **Higiena kolizji:** równoległy agent zdążył zacommitować identyczny slice B5 `battle_id` guard (`07841f0`) tuż przed moim commitem hygiene — mój `git add` trafił na już-utrwalone pliki, zero szkody (udokumentowany wzorzec kolizji).
 
 ### 2026-07-05 — fastapi-lifespan (archived) — migracja `on_event("startup")` → `lifespan`
 - Domknięty latentny dług higieny odnotowany w REVIEW_2026-07-05: przedawniony (Starlette/FastAPI) dekorator `@app.on_event("startup")` w `app/main.py` zastąpiony `@asynccontextmanager lifespan` przekazanym do `FastAPI(lifespan=...)`. Zachowanie 1:1 — `init_db()` + log nadal wykonują się przy starcie ASGI (potwierdzone smoke `async with lifespan(app)` → `init_db` wołane). Testy nie używają `TestClient`/ASGI lifecycle (httpx niezainstalowany; routery testowane wprost), więc zero wpływu na suitę.
