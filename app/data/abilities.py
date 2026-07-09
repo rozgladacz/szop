@@ -264,7 +264,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="maskowanie",
         name="Maskowanie",
         type="passive",
-        description="Ma osłonę, gdy jest dalej niż 3\" od wrogów.",
+        description="Ma osłonę, gdy jest dalej niż 2\" od wrogów.",
     ),
     AbilityDefinition(
         slug="waagh",
@@ -309,9 +309,9 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
             "Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. "
             "Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. "
             "Transportowany oddział jako swoją akcję może zostać rozstawiony: wszystkie jego modele muszą zostać "
-            "ustawione w odległości do 3” od dowolnych modeli transportującego oddziału. "
+            "ustawione w odległości do 2” od dowolnych modeli transportującego oddziału. "
             "Następnie przestaje być transportowany. "
-            "Oddział, którego wszystkie modele znajdują się do 3” od transportującego oddziału, "
+            "Oddział, którego wszystkie modele znajdują się do 2” od transportującego oddziału, "
             "może jako swoją akcję zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. "
             "Jeżeli część modeli transportującego oddziału zostanie zniszczona, transportowane oddziały mogą tymczasowo "
             "przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie zniszczony, "
@@ -477,7 +477,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="latanie",
         name="Łatanie",
         type="active",
-        description="Na końcu towjej aktywacji oddział w zasięgu 3” odzyskuje k3 rany.",
+        description="Na końcu towjej aktywacji oddział w zasięgu 2” odzyskuje k3 rany.",
     ),
     AbilityDefinition(
         slug="mobilizacja",

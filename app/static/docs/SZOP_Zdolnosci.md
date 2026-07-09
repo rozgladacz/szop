@@ -261,10 +261,10 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
 - klatwa_tak: false
 - oznaczenie_tak: false
 - zakres: pozytywna
-- opis: "Ma osłonę, gdy jest dalej niż 3" od wrogów."
+- opis: "Ma osłonę, gdy jest dalej niż 2" od wrogów."
 - efekty:
     - kiedy: stale (sprawdzane przy testach ataku, pkt 17.a)
-      warunek: każdy wrogi oddział jest dalej niż 3″ od tego oddziału
+      warunek: każdy wrogi oddział jest dalej niż 2″ od tego oddziału
       co: oddział ma osłonę (pkt 19)
 - koszt:
     bazowy: 2 / pkt wytrzymałości
@@ -641,6 +641,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       co: maksymalny dystans ruchu modyfikowany o +2″ (Szybki) lub −2″ (Wolny)
 - koszt:
     bazowy: 1 / pkt wytrzymałości (Szybki); −1 / pkt wytrzymałości (Wolny)
+    uwaga: Wolny ma ujemny koszt na modelu (jest debuffem — nosiciel zyskuje punkty za posiadanie). Wartość dodatnia 1,25 / pkt wytrzymałości jest używana WYŁĄCZNIE jako podstawa bazowy(X) przy wycenie form Aury / Klątwy z X=Wolny (przekazywanie Wolnego przeciwnikowi jest niekorzystne dla niego, więc pozytywne dla nosiciela zdolności Aura/Klątwa).
 
 ### 34. Tarcza
 
@@ -668,15 +669,15 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
 - oznaczenie_tak: false
 - zakres: model
 - parametr: X — maksymalna sumaryczna wytrzymałość transportowanych oddziałów
-- opis: "Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. Transportowany oddział jako swoją akcję może zostać rozstawiony: wszystkie jego modele muszą zostać ustawione w odległości do 3" od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany. Oddział, którego wszystkie modele znajdują się do 3" od transportującego oddziału, może jako swoją akcję zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. Jeżeli część modeli transportującego oddziału zostanie pokonana, transportowane oddziały mogą tymczasowo przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie pokonany, nadmiarowe rany przechodzą na najliczniejszy transportowany oddział, a następnie wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się Wyczerpane. Jeżeli transportujący oddział wykona podwójny ruch lub początkowy ruch zdolności Samolot, wszystkie transportowane oddziały zostają Przyszpilone. Transportowane oddziały są rozstawiane razem z transporterem, w jednej aktywacji i muszą mieć te same zdolności wpływające na Rozstawienie."
+- opis: "Przyjazne oddziały o łącznej wytrzymałości do X mogą zostać transportowane przez ten oddział. Jeżeli oddział składa się z kilku modeli z Transport(X), ich pojemność sumuje się. Transportowany oddział jako swoją akcję może zostać rozstawiony: wszystkie jego modele muszą zostać ustawione w odległości do 2" od dowolnych modeli transportującego oddziału. Następnie przestaje być transportowany. Oddział, którego wszystkie modele znajdują się do 2" od transportującego oddziału, może jako swoją akcję zostać zdjęty z planszy i stać się transportowany, jeżeli dostępna pojemność na to pozwala. Jeżeli część modeli transportującego oddziału zostanie pokonana, transportowane oddziały mogą tymczasowo przekraczać jego pojemność. Jeżeli ostatni model transportującego oddziału zostanie pokonany, nadmiarowe rany przechodzą na najliczniejszy transportowany oddział, a następnie wszystkie transportowane oddziały muszą zostać natychmiast rozstawione jak wyżej i stają się Wyczerpane. Jeżeli transportujący oddział wykona podwójny ruch lub początkowy ruch zdolności Samolot, wszystkie transportowane oddziały zostają Przyszpilone. Transportowane oddziały są rozstawiane razem z transporterem, w jednej aktywacji i muszą mieć te same zdolności wpływające na Rozstawienie."
 - efekty:
     - kiedy: stale
       warunek: —
       co: oddział może mieć w środku oddziały o sumarycznej wytrzymałości ≤ X (sumowane między modelami z Transport(X) w tym samym oddziale)
     - kiedy: akcja transportowanego oddziału
       warunek: —
-      co: rozstaw modele do 3″ od dowolnego modelu transportującego; oddział przestaje być transportowany
-    - kiedy: akcja oddziału w 3″ od transportującego
+      co: rozstaw modele do 2″ od dowolnego modelu transportującego; oddział przestaje być transportowany
+    - kiedy: akcja oddziału w 2″ od transportującego
       warunek: dostępna pojemność wystarczy
       co: oddział zostaje zdjęty z planszy i transportowany
     - kiedy: pokonanie modeli transportującego
@@ -684,7 +685,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       co: transportowane oddziały mogą tymczasowo przekraczać pojemność
     - kiedy: pokonanie ostatniego modelu transportującego
       warunek: —
-      co: nadmiarowe rany przechodzą na najliczniejszy transportowany oddział; wszystkie transportowane oddziały zostają natychmiast rozstawione (do 3″ od pozycji transportującego) i otrzymują stan Wyczerpany
+      co: nadmiarowe rany przechodzą na najliczniejszy transportowany oddział; wszystkie transportowane oddziały zostają natychmiast rozstawione (do 2″ od pozycji transportującego) i otrzymują stan Wyczerpany
     - kiedy: transportujący wykona dwa Manewry w aktywacji lub początkowy ruch Samolotu
       warunek: —
       co: wszystkie transportowane oddziały otrzymują stan Przyszpilony
@@ -870,10 +871,10 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
 ### 46. Łatanie
 
 - typ: aktywna
-- opis: "W twojej aktywacji oddział w zasięgu 3" leczy k3 rany."
+- opis: "W twojej aktywacji oddział w zasięgu 2" leczy k3 rany."
 - efekty:
     - kiedy: w aktywacji oddziału z Łataniem, w fazie Odzyskiwania ran (pkt 21)
-      warunek: cel jest sojuszniczym oddziałem w 3″
+      warunek: cel jest sojuszniczym oddziałem w 2″
       co: cel odzyskuje k3 rany (zgodnie z pkt 21.c)
 - koszt:
     bazowy: 20

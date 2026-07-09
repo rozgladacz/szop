@@ -50,7 +50,7 @@ def test_order_like_abilities_ignore_cost_hint_for_dynamic_cost() -> None:
     )
     link = models.UnitAbility(unit=unit, ability=ability, params_json='{"value":"wolny"}')
 
-    assert costs.ability_cost(link, [], toughness=1) == -6.0
+    assert costs.ability_cost(link, [], toughness=1) == -7.5
 
 
 def test_non_order_like_ability_still_uses_cost_hint() -> None:
@@ -97,5 +97,5 @@ def test_rozkaz_sign_depends_on_kierunek():
 
 
 def test_klatwa_and_oznaczenie_use_x_for_toughness_6():
-    assert costs.ability_cost_from_name("Klątwa", "wolny", toughness=1) == -6.0
+    assert costs.ability_cost_from_name("Klątwa", "wolny", toughness=1) == -7.5
     assert costs.ability_cost_from_name("Oznaczenie", "furia", toughness=6) == 18.0

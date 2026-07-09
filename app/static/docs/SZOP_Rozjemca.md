@@ -103,9 +103,13 @@
 		iv.	Ostrzału nie można wybrać, jeżeli jakikolwiek wrogi oddział znajduje się w zasięgu 2″ i linii wzroku (pkt 6) co najmniej jednego modelu oddziału.
 		v.	Ostrzał można wykonać tylko raz podczas aktywacji, chyba że oddział ma zdolność Niestrudzony.
 	d.	Szarża:
-		i.	Oddział wskazuje od jednego do dwóch celów.
+		i.	Oddział wskazuje dowolną liczbę celów. Cel jest legalny, jeżeli szarżujący oddział jest w stanie fizycznie wejść na miejsce zajmowane przez ten cel (tj. istnieje trasa Związania, którą modele mogą pokonać, nawet gdyby zajęły miejsce celu).
 		ii.	Oddział wykonuje Związanie (pkt 16) tak, by znaleźć się 1″ od wszystkich wskazanych celów.
-		iii.	Modele oddziału znajdujące się w odległości do 2″ od celów wykonują Atak (pkt 17) bronią wręcz; każdy w najbliższy cel.
+		iii.	Atak bronią wręcz mogą wykonać modele oddziału zorganizowane w dwa szeregi:
+			-	**Pierwszy szereg**: modele w odległości do 1″ od co najmniej jednego wrogiego modelu w celu.
+			-	**Drugi szereg**: modele w odległości do 1″ od co najmniej jednego modelu z pierwszego szeregu.
+			Atakują modele z pierwszego i drugiego szeregu. Jeżeli liczba modeli spełniających kryterium drugiego szeregu przekracza liczbę modeli w pierwszym szeregu, kontrolujący gracz wybiera, które modele z drugiego szeregu walczą, aż do limitu równego liczbie modeli w pierwszym szeregu.
+			Modele nie muszą atakować — kontrolujący gracz może wybrać, które modele z uprawnionych szeregów wykonują Atak (pkt 17) bronią wręcz na najbliższy cel, a które się powstrzymują. Przydatne np. gdy część oddziału ma zdolność Bastion — kontratak można wykonać tylko modelami z Bastionem, aby oddział nie otrzymał stanu Wyczerpany.
 		iv.	Każdy obrońca, który nie jest Wyczerpany (pkt 22.a), może przerwać, aby wykonać kontratak, czyli punkty ii i iii. Po kontrataku obrońca staje się Wyczerpany, jeżeli atakujący (oddział szarżujący) nie został pokonany w wyniku kontrataku.
 		v.	Jeżeli żaden oddział nie został pokonany, szarżujący wykonuje minimalny dodatkowy ruch tak, aby między nim a każdym z celów było co najmniej 1″.
 		vi.	Szarżę można wykonać tylko raz podczas aktywacji, chyba że oddział ma zdolność Niestrudzony.
