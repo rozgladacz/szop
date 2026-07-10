@@ -50,9 +50,11 @@ def _seed_army(session: Session) -> tuple[models.User, models.Army, models.Unit,
 def _fake_templates(monkeypatch):
     captured: dict[str, object] = {}
 
-    def template_response(name, context):
+    def template_response(request, name, context, **kwargs):
+        captured["request"] = request
         captured["name"] = name
         captured["context"] = context
+        captured["kwargs"] = kwargs
         return SimpleNamespace(context=context)
 
     monkeypatch.setattr(armies_router, "templates", SimpleNamespace(TemplateResponse=template_response))

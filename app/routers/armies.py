@@ -702,7 +702,6 @@ def _ability_spell_details(
 
 
 def _spell_page_context(
-    request: Request,
     army: models.Army,
     current_user: models.User,
     db: Session,
@@ -727,7 +726,6 @@ def _spell_page_context(
     ability_options.sort(key=lambda entry: (entry.get("display_name") or entry.get("name") or "").casefold())
     remaining_slots = max(0, MAX_ARMY_SPELLS - len(spells))
     return {
-        "request": request,
         "user": current_user,
         "army": army,
         "spells": spells,
@@ -1042,7 +1040,6 @@ def _spell_weapon_cost(
 
 
 def _spell_weapon_form_context(
-    request: Request,
     army: models.Army,
     user: models.User,
     *,
@@ -1051,7 +1048,6 @@ def _spell_weapon_form_context(
     error: str | None = None,
 ) -> dict:
     return {
-        "request": request,
         "user": user,
         "armory": army.armory,
         "army": army,
@@ -1432,9 +1428,9 @@ def list_armies(
         armies.append(army)
     mine, global_items, others = utils.split_owned(armies, current_user)
     return templates.TemplateResponse(
+        request,
         "armies_list.html",
         {
-            "request": request,
             "user": current_user,
             "mine": mine,
             "global_items": global_items,
@@ -1474,9 +1470,9 @@ def new_army_form(
     armories = _available_armories(db, current_user)
     selected_armory_id = armories[0].id if armories else None
     return templates.TemplateResponse(
+        request,
         "army_form.html",
         {
-            "request": request,
             "user": current_user,
             "default_ruleset": default_ruleset,
             "army": None,
@@ -1512,9 +1508,9 @@ def create_army(
         armories = _available_armories(db, current_user)
         selected_id = armories[0].id if armories else None
         return templates.TemplateResponse(
+            request,
             "army_form.html",
             {
-                "request": request,
                 "user": current_user,
                 "default_ruleset": ruleset,
                 "army": None,
@@ -1529,9 +1525,9 @@ def create_army(
         armories = _available_armories(db, current_user)
         selected_id = armories[0].id if armories else None
         return templates.TemplateResponse(
+            request,
             "army_form.html",
             {
-                "request": request,
                 "user": current_user,
                 "default_ruleset": ruleset,
                 "army": None,
@@ -1546,9 +1542,9 @@ def create_army(
         armories = _available_armories(db, current_user)
         selected_id = armory.id if armory else (armories[0].id if armories else None)
         return templates.TemplateResponse(
+            request,
             "army_form.html",
             {
-                "request": request,
                 "user": current_user,
                 "default_ruleset": ruleset,
                 "army": None,
@@ -1754,8 +1750,9 @@ def edit_army_spells(
         raise HTTPException(status_code=404)
     _ensure_army_edit_access(army, current_user)
     return templates.TemplateResponse(
+        request,
         "army_spells.html",
-        _spell_page_context(request, army, current_user, db),
+        _spell_page_context(army, current_user, db),
     )
 
 
@@ -1764,14 +1761,16 @@ def _validate_spell_capacity(
 ):
     if len(getattr(army, "spells", []) or []) >= MAX_ARMY_SPELLS:
         context = _spell_page_context(
-            request,
             army,
             current_user,
             db,
             error="Osiągnięto maksymalną liczbę mocy.",
         )
         return templates.TemplateResponse(
-            "army_spells.html", context, status_code=400
+            request,
+            "army_spells.html",
+            context,
+            status_code=400,
         )
     return None
 
@@ -1793,9 +1792,9 @@ def new_spell_weapon_form(
         return capacity_response
 
     return templates.TemplateResponse(
+        request,
         "armory_weapon_form.html",
         _spell_weapon_form_context(
-            request,
             army,
             current_user,
             weapon=None,
@@ -1840,9 +1839,9 @@ def create_spell_weapon(
     cleaned_name = name.strip()
     if not cleaned_name:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             _spell_weapon_form_context(
-                request,
                 army,
                 current_user,
                 weapon=None,
@@ -1857,9 +1856,9 @@ def create_spell_weapon(
         ap_value = _spell_parse_optional_int(ap)
     except ValueError as exc:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             _spell_weapon_form_context(
-                request,
                 army,
                 current_user,
                 weapon=None,
@@ -1939,9 +1938,9 @@ def edit_spell_weapon_form(
     weapon = _get_spell_weapon(db, army, weapon_id)
 
     return templates.TemplateResponse(
+        request,
         "armory_weapon_form.html",
         _spell_weapon_form_context(
-            request,
             army,
             current_user,
             weapon=weapon,
@@ -1985,9 +1984,9 @@ def update_spell_weapon(
     cleaned_name = name.strip()
     if not cleaned_name:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             _spell_weapon_form_context(
-                request,
                 army,
                 current_user,
                 weapon=weapon,
@@ -2002,9 +2001,9 @@ def update_spell_weapon(
         ap_value = _spell_parse_optional_int(ap)
     except ValueError as exc:
         return templates.TemplateResponse(
+            request,
             "armory_weapon_form.html",
             _spell_weapon_form_context(
-                request,
                 army,
                 current_user,
                 weapon=weapon,
@@ -2080,37 +2079,49 @@ def add_army_spell_ability(
     ability = db.get(models.Ability, ability_id)
     if not ability or ability.type != "active":
         context = _spell_page_context(
-            request,
             army,
             current_user,
             db,
             error="Nieprawidłowa zdolność.",
         )
-        return templates.TemplateResponse("army_spells.html", context, status_code=400)
+        return templates.TemplateResponse(
+            request,
+            "army_spells.html",
+            context,
+            status_code=400,
+        )
 
     slug = ability_registry.ability_slug(ability)
     if slug in FORBIDDEN_SPELL_SLUGS:
         context = _spell_page_context(
-            request,
             army,
             current_user,
             db,
             error="Zdolność nie może być użyta jako moc.",
         )
-        return templates.TemplateResponse("army_spells.html", context, status_code=400)
+        return templates.TemplateResponse(
+            request,
+            "army_spells.html",
+            context,
+            status_code=400,
+        )
 
     definition = ability_catalog.find_definition(slug) if slug else None
     requires_value = bool(definition and definition.value_label)
     raw_value = (ability_value or "").strip()
     if requires_value and not raw_value:
         context = _spell_page_context(
-            request,
             army,
             current_user,
             db,
             error="Zdolność wymaga podania wartości.",
         )
-        return templates.TemplateResponse("army_spells.html", context, status_code=400)
+        return templates.TemplateResponse(
+            request,
+            "army_spells.html",
+            context,
+            status_code=400,
+        )
 
     if definition and definition.value_choices:
         valid_values: set[str] = set()
@@ -2123,14 +2134,16 @@ def add_army_spell_ability(
                 valid_values.add(str(choice_value))
         if valid_values and raw_value and raw_value not in valid_values:
             context = _spell_page_context(
-                request,
                 army,
                 current_user,
                 db,
                 error="Wybrano nieprawidłową wartość zdolności.",
             )
             return templates.TemplateResponse(
-                "army_spells.html", context, status_code=400
+                request,
+                "army_spells.html",
+                context,
+                status_code=400,
             )
 
     value_text = raw_value[:120] if raw_value else None
@@ -2176,13 +2189,17 @@ def add_army_spell_weapon(
     weapon = db.get(models.Weapon, weapon_id)
     if not weapon or weapon.armory_id != army.armory_id:
         context = _spell_page_context(
-            request,
             army,
             current_user,
             db,
             error="Nieprawidłowa broń.",
         )
-        return templates.TemplateResponse("army_spells.html", context, status_code=400)
+        return templates.TemplateResponse(
+            request,
+            "army_spells.html",
+            context,
+            status_code=400,
+        )
 
     base_label, description, cost = _weapon_spell_details(weapon)
     custom_text = _normalized_custom_name(weapon.effective_name)
@@ -2753,9 +2770,9 @@ def edit_unit_form(
     aura_definitions = ability_registry.definition_payload(db, "aura")
 
     return templates.TemplateResponse(
+        request,
         "unit_form.html",
         {
-            "request": request,
             "user": current_user,
             "army": army,
             "unit": unit,
@@ -3201,9 +3218,9 @@ def _render_army_edit(
     army_rule_entries = army_rule_service.parse_rules(army.passive_rules)
 
     return templates.TemplateResponse(
+        request,
         "army_edit.html",
         {
-            "request": request,
             "user": current_user,
             "army": army,
             "units": units,
@@ -3225,13 +3242,11 @@ def _render_army_edit(
 
 
 def _army_rules_context(
-    request: Request,
     army: models.Army,
     current_user: models.User,
 ) -> dict[str, object]:
     rules = army_rule_service.parse_rules(army.passive_rules)
     return {
-        "request": request,
         "user": current_user,
         "army": army,
         "rules": rules,
@@ -3335,8 +3350,9 @@ def edit_army_rules(
         raise HTTPException(status_code=404)
     _ensure_army_edit_access(army, current_user)
     return templates.TemplateResponse(
+        request,
         "army_rules.html",
-        _army_rules_context(request, army, current_user),
+        _army_rules_context(army, current_user),
     )
 
 

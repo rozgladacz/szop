@@ -402,9 +402,9 @@ def list_rosters(
     rosters = db.execute(query).scalars().all()
     mine, global_items, others = utils.split_owned(rosters, current_user)
     return templates.TemplateResponse(
+        request,
         "rosters_list.html",
         {
-            "request": request,
             "user": current_user,
             "mine": mine,
             "global_items": global_items,
@@ -431,9 +431,9 @@ def new_roster_form(
         )
     armies = db.execute(query).scalars().all()
     return templates.TemplateResponse(
+        request,
         "roster_form.html",
         {
-            "request": request,
             "user": current_user,
             "armies": armies,
             "error": None,
@@ -706,9 +706,9 @@ def edit_roster(
     available_groups = group_available_units(available_unit_options, roster.army)
 
     return templates.TemplateResponse(
+        request,
         "roster_edit.html",
         {
-            "request": request,
             "user": current_user,
             "roster": roster,
             "available_units": available_unit_options,
@@ -1852,9 +1852,9 @@ def strategic_cards_edit(
     can_edit = current_user.is_admin or roster.owner_id == current_user.id
     selected = _parse_strategic_cards(roster.strategic_cards_json)
     return templates.TemplateResponse(
+        request,
         "roster_strategic_cards.html",
         {
-            "request": request,
             "user": current_user,
             "roster": roster,
             "tasks": STRATEGIC_TASKS,
@@ -1921,9 +1921,9 @@ def strategic_cards_print(
     selected = _parse_strategic_cards(roster.strategic_cards_json)
     matrix = _strategic_card_matrix(selected)
     return templates.TemplateResponse(
+        request,
         "roster_strategic_cards_print.html",
         {
-            "request": request,
             "user": current_user,
             "roster": roster,
             "matrix": matrix,
