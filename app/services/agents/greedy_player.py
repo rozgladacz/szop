@@ -48,7 +48,7 @@ from app.services.engine.state import BattleState, UnitBlob
 
 #: Wartość 1 oczekiwanej rany w punktach oceny (skaluje atak vs pozycję).
 WOUND_VALUE: float = 8.0
-#: Wartość akcji Obrony (Ufortyfikowany) — niska, defensywny fallback.
+#: Wartość akcji Obrony (Przygotowany) — niska, defensywny fallback.
 DEFEND_VALUE: float = 1.0
 #: Wartość zdjęcia stanu Wyczerpany (Odrzuć Wyczerpany, pkt 22.a).
 DISCARD_VALUE: float = 3.0

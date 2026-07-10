@@ -158,15 +158,15 @@ def test_replay_single_maneuver():
 
 
 def test_replay_single_defend_emits_status_added():
-    """`_apply_defend` po B3.9.d emituje StatusAdded(Ufortyfikowany) —
-    replayed state ma Ufortyfikowany dzięki temu eventowi."""
+    """`_apply_defend` po B3.9.d emituje StatusAdded(Przygotowany) —
+    replayed state ma Przygotowany dzięki temu eventowi."""
     initial = _setup_and_deploy()
     result = apply(initial, DefendAction(unit_id=1), DeterministicDice(7))
     assert any(type(e).__name__ == "StatusAdded" for e in result.events)
     replayed = apply_events(initial, list(result.events))
     assert_blobs_match(result.state, replayed)
     blob = next(b for b in replayed.blobs if b.id == 1)
-    assert "Ufortyfikowany" in blob.status_flags
+    assert "Przygotowany" in blob.status_flags
 
 
 def test_replay_single_shoot_with_kills():
@@ -457,37 +457,37 @@ def test_replay_initiative_passed_after_action():
 
 
 # ---------------------------------------------------------------------------
-# CR-fix G — Ufortyfikowany removed at start of own activation
+# CR-fix G — Przygotowany removed at start of own activation
 # ---------------------------------------------------------------------------
 
 
 def test_replay_ufortyfikowany_removed_at_activation_start():
-    """CR-fix G (pkt 22.c.iv): oddział z Ufortyfikowany traci status na
-    początku własnej aktywacji — emit `StatusRemoved(Ufortyfikowany)`."""
+    """CR-fix G (pkt 22.c.iv): oddział z Przygotowany traci status na
+    początku własnej aktywacji — emit `StatusRemoved(Przygotowany)`."""
     initial = _setup_and_deploy()
     initial = replace(
         initial,
         blobs=tuple(
-            replace(b, status_flags=("Ufortyfikowany",)) if b.id == 1 else b
+            replace(b, status_flags=("Przygotowany",)) if b.id == 1 else b
             for b in initial.blobs
         ),
     )
     action = ManeuverAction(unit_id=1, target_position=Position(12, 0))
     result = apply(initial, action, DeterministicDice(7))
-    # Powinien być StatusRemoved(Ufortyfikowany) dla bloba 1
+    # Powinien być StatusRemoved(Przygotowany) dla bloba 1
     sr_events = [
         e
         for e in result.events
-        if type(e).__name__ == "StatusRemoved" and e.target_id == 1 and e.status == "Ufortyfikowany"
+        if type(e).__name__ == "StatusRemoved" and e.target_id == 1 and e.status == "Przygotowany"
     ]
     assert len(sr_events) == 1
-    # Po aktywacji actor nie ma już Ufortyfikowany
+    # Po aktywacji actor nie ma już Przygotowany
     blob1_post = next(b for b in result.state.blobs if b.id == 1)
-    assert "Ufortyfikowany" not in blob1_post.status_flags
+    assert "Przygotowany" not in blob1_post.status_flags
     # Replay rekonstruuje stan
     replayed = apply_events(initial, list(result.events))
     blob1_rep = next(b for b in replayed.blobs if b.id == 1)
-    assert "Ufortyfikowany" not in blob1_rep.status_flags
+    assert "Przygotowany" not in blob1_rep.status_flags
 
 
 # ---------------------------------------------------------------------------

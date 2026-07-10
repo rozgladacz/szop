@@ -10,7 +10,7 @@ wykonany Ostrzał/Szarżę i bierzemy następną dostępną):
   1. Jeśli Wyczerpany — zdejmij (SpecialAction discard_exhausted, pkt 22.a).
   2. Jeśli możesz — Strzelaj do najbliższego widocznego wroga (pkt 14.c).
   3. Jeśli możesz — Szarżuj na najbliższego wroga (pkt 14.d).
-  4. Jeśli Przyszpilony — zdejmij (Obrona → Ufortyfikowany odrzuca Przyszpilony, pkt 22.b.v).
+  4. Jeśli Przyszpilony — zdejmij (Obrona → Przygotowany odrzuca Przyszpilony, pkt 22.b.v).
   5. Ruch do najbliższego celu **nie zajętego przez twoją stronę** (pkt 5.d),
      **dla którego jesteś najbliższym własnym oddziałem** (anty-klastrowanie —
      rozprasza oddziały po celach).
@@ -191,7 +191,7 @@ class PriorityPlayer(GridDeploymentMixin, Player):
             charge = _nearest_enemy_charge(unit, enemies, move)
             if charge is not None:
                 return charge
-        # 4. Zdejmij Przyszpilony (Obrona → Ufortyfikowany odrzuca Przyszpilony, pkt 22.b.v).
+        # 4. Zdejmij Przyszpilony (Obrona → Przygotowany odrzuca Przyszpilony, pkt 22.b.v).
         if STATUS_PRZYSZPILONY in unit.status_flags:
             return DefendAction(unit_id=unit.id)
 

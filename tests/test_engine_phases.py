@@ -30,7 +30,7 @@ from app.services.engine.phases import (
     OBJECTIVE_CONTROL_RANGE,
     STATUS_AKTYWOWANY,
     STATUS_PRZYSZPILONY,
-    STATUS_UFORTYFIKOWANY,
+    STATUS_PRZYGOTOWANY,
     ActivationContext,
     _regroup_test,
     activation_phase,
@@ -140,8 +140,8 @@ def test_deployment_round_resets_activated_status():
 
 
 def test_deployment_round_adds_ufortyfikowany_to_deployed_units():
-    """R5.f pkt 13.c (2026-06): każdy rozstawiony oddział dostaje Ufortyfikowany
-    na start rundy 1. StatusAdded(Ufortyfikowany) musi być w events."""
+    """R5.f pkt 13.c (2026-06): każdy rozstawiony oddział dostaje Przygotowany
+    na start rundy 1. StatusAdded(Przygotowany) musi być w events."""
     from app.services.engine.events import StatusAdded
 
     rosters = [make_roster(0, [make_unit(1)]), make_roster(1, [make_unit(2)])]
@@ -149,40 +149,40 @@ def test_deployment_round_adds_ufortyfikowany_to_deployed_units():
     actions = [DeploymentAction(unit_id=1, position=Position(5, 0))]
     new_state, events = deployment_round(state, actions)
 
-    # Deployed unit (1) ma Ufortyfikowany w final state
+    # Deployed unit (1) ma Przygotowany w final state
     blob1 = next(b for b in new_state.blobs if b.id == 1)
-    assert STATUS_UFORTYFIKOWANY in blob1.status_flags
+    assert STATUS_PRZYGOTOWANY in blob1.status_flags
 
-    # StatusAdded(Ufortyfikowany) jest w event stream
+    # StatusAdded(Przygotowany) jest w event stream
     ufort_events = [
         e for e in events
-        if isinstance(e, StatusAdded) and e.status == STATUS_UFORTYFIKOWANY
+        if isinstance(e, StatusAdded) and e.status == STATUS_PRZYGOTOWANY
     ]
     assert any(e.target_id == 1 for e in ufort_events)
 
 
 def test_deployment_round_ufortyfikowany_persists_after_round_start():
-    """R5.f: Ufortyfikowany z deployment nie jest resetowany na początku rundy 1.
+    """R5.f: Przygotowany z deployment nie jest resetowany na początku rundy 1.
     Zostaje usunięty dopiero gdy oddział się aktywuje (CR-fix G)."""
     rosters = [make_roster(0, [make_unit(1)]), make_roster(1, [make_unit(2, x=20)])]
     state = setup_phase(rosters)
     actions = [DeploymentAction(unit_id=1, position=Position(5, 0))]
     state, _ = deployment_round(state, actions)
     blob1_before = next(b for b in state.blobs if b.id == 1)
-    assert STATUS_UFORTYFIKOWANY in blob1_before.status_flags
+    assert STATUS_PRZYGOTOWANY in blob1_before.status_flags
 
-    # Aktywacja usuwa Ufortyfikowany (CR-fix G: pkt 22.c.iv)
+    # Aktywacja usuwa Przygotowany (CR-fix G: pkt 22.c.iv)
     from app.services.engine.actions import ManeuverAction
 
     action = ManeuverAction(unit_id=1, target_position=Position(8, 0))
     new_state, _ = activation_phase(state, action, DeterministicDice(42))
     blob1_after = next(b for b in new_state.blobs if b.id == 1)
-    assert STATUS_UFORTYFIKOWANY not in blob1_after.status_flags
+    assert STATUS_PRZYGOTOWANY not in blob1_after.status_flags
 
 
 def test_deployment_round_skips_ufortyfikowany_for_reserves():
     """Finding #3 (2026-06-06): rezerwy off-board (ZAPLECZE: Zasadzka/Rezerwa)
-    NIE dostają Ufortyfikowany w deployment_round. Pkt 13.c dotyczy tylko
+    NIE dostają Przygotowany w deployment_round. Pkt 13.c dotyczy tylko
     *rozstawionych* oddziałów; pkt 26 ZAPLECZE = poza planszą."""
     from app.services.engine.state import Lokalizacja
 
@@ -197,9 +197,9 @@ def test_deployment_round_skips_ufortyfikowany_for_reserves():
     front = next(b for b in state.blobs if b.id == 1)
     # Rezerwa jest w ZAPLECZE i NIE jest fortyfikowana
     assert reserve.location == Lokalizacja.ZAPLECZE
-    assert STATUS_UFORTYFIKOWANY not in reserve.status_flags
-    # Oddział na froncie nadal dostaje Ufortyfikowany
-    assert STATUS_UFORTYFIKOWANY in front.status_flags
+    assert STATUS_PRZYGOTOWANY not in reserve.status_flags
+    # Oddział na froncie nadal dostaje Przygotowany
+    assert STATUS_PRZYGOTOWANY in front.status_flags
 
 
 # ---------------------------------------------------------------------------
@@ -350,12 +350,12 @@ def test_activation_defend_adds_ufortyfikowany():
     action = DefendAction(unit_id=1)
     new_state, events = activation_phase(state, action, DeterministicDice(42))
     blob = next(b for b in new_state.blobs if b.id == 1)
-    assert STATUS_UFORTYFIKOWANY in blob.status_flags
+    assert STATUS_PRZYGOTOWANY in blob.status_flags
     assert STATUS_AKTYWOWANY in blob.status_flags
 
 
 def test_activation_defend_removes_pinned_status():
-    """Pkt 22.b.v — Przyszpilony zostaje odrzucony gdy oddział staje się Ufortyfikowany."""
+    """Pkt 22.b.v — Przyszpilony zostaje odrzucony gdy oddział staje się Przygotowany."""
     rosters = [
         make_roster(0, [make_unit(1)]),
         make_roster(1, [make_unit(2, x=20)]),
@@ -373,7 +373,7 @@ def test_activation_defend_removes_pinned_status():
     new_state, _ = activation_phase(state, DefendAction(unit_id=1), DeterministicDice(42))
     blob = next(b for b in new_state.blobs if b.id == 1)
     assert STATUS_PRZYSZPILONY not in blob.status_flags
-    assert STATUS_UFORTYFIKOWANY in blob.status_flags
+    assert STATUS_PRZYGOTOWANY in blob.status_flags
 
 
 def test_activation_shoot_emits_shot_resolved():
@@ -419,12 +419,12 @@ def test_activation_special_discard_exhausted():
 
 def test_charge_defender_mutex_drops_both_statuses():
     """R5.e (resync 2026-06) pkt 22.b/c: defender szarży rozstawiony z
-    Ufortyfikowany (R5.f) który po Przegrupowaniu zyskuje Przyszpilony (2
+    Przygotowany (R5.f) który po Przegrupowaniu zyskuje Przyszpilony (2
     porażki) traci OBA statusy — emit MutexCollision.
 
     Dwa twierdzenia:
     1. **Inwariant bezpieczeństwa** (niezależny od kości): dla każdego seeda
-       żaden blob nie kończy aktywacji z OBOMA Przyszpilony + Ufortyfikowany.
+       żaden blob nie kończy aktywacji z OBOMA Przyszpilony + Przygotowany.
     2. **Branch fires**: dla co najmniej jednego seeda kolizja faktycznie
        zachodzi (MutexCollision emitowany) — test nie jest pusty.
     """
@@ -435,7 +435,7 @@ def test_charge_defender_mutex_drops_both_statuses():
     # Tanky defender (toughness 40, 1 model) przeżywa szarżę małego (2 modele)
     # szarżującego i przyjmuje rany netto → testuje Przegrupowanie (pkt 20.a);
     # pre-wound 18 stawia go blisko ½ wytrzymałości (+1 test). Część seedów daje
-    # 2 porażki → Przyszpilony → kolizja z Ufortyfikowany (R5.f deployment).
+    # 2 porażki → Przyszpilony → kolizja z Przygotowany (R5.f deployment).
     weapon = WeaponProfile(slug="sw", name="Sw", range_inches=0, attacks=2)
     fired = False
     for seed in range(0, 60):
@@ -445,9 +445,9 @@ def test_charge_defender_mutex_drops_both_statuses():
         ]
         state = setup_phase(rosters)
         state, _ = deployment_round(state, [])
-        # Po deployment defender ma Ufortyfikowany (R5.f) — sprawdzamy że tak jest.
+        # Po deployment defender ma Przygotowany (R5.f) — sprawdzamy że tak jest.
         defender = next(b for b in state.blobs if b.id == 2)
-        assert STATUS_UFORTYFIKOWANY in defender.status_flags
+        assert STATUS_PRZYGOTOWANY in defender.status_flags
         defender = replace(defender, wounds_received=18)
         state = replace(
             state, blobs=tuple(defender if b.id == 2 else b for b in state.blobs)
@@ -460,7 +460,7 @@ def test_charge_defender_mutex_drops_both_statuses():
         for b in new_state.blobs:
             assert not (
                 STATUS_PRZYSZPILONY in b.status_flags
-                and STATUS_UFORTYFIKOWANY in b.status_flags
+                and STATUS_PRZYGOTOWANY in b.status_flags
             ), f"seed={seed} blob={b.id} ma oba statusy (mutex naruszony)"
 
         if any(isinstance(e, MutexCollision) for e in events):
@@ -468,7 +468,7 @@ def test_charge_defender_mutex_drops_both_statuses():
             # W tym seedzie kolizja zaszła — defender stracił oba statusy.
             d = next(b for b in new_state.blobs if b.id == 2)
             assert STATUS_PRZYSZPILONY not in d.status_flags
-            assert STATUS_UFORTYFIKOWANY not in d.status_flags
+            assert STATUS_PRZYGOTOWANY not in d.status_flags
 
     assert fired, "Żaden seed nie wywołał MutexCollision — scenariusz pusty"
 

@@ -16,7 +16,7 @@ from app.services.engine.dice import DeterministicDice
 from app.services.engine.phases import deployment_round, setup_phase
 from app.services.engine.resolver import IllegalActionError, apply_activation
 from app.services.engine.state import Objective, Position
-from app.services.engine.status import STATUS_UFORTYFIKOWANY
+from app.services.engine.status import STATUS_PRZYGOTOWANY
 from scripts.balance_simulate import (
     PLAYER_SEED_OFFSET,
     load_battle_fixture,
@@ -200,7 +200,7 @@ def test_take_action_matches_resolver():
 
     ref_state = setup_phase(_ROSTERS, objectives=_OBJECTIVES, initiative_player=0)
     ref_state, deploy_events = deployment_round(ref_state, ())
-    # Sekwencja kontynuuje monotonicznie od eventów rozstawienia (Ufortyfikowany
+    # Sekwencja kontynuuje monotonicznie od eventów rozstawienia (Przygotowany
     # pkt 13.c) — tak jak `LocalClient.create_battle` (event-sourcing, B2 persist).
     ref = apply_activation(
         ref_state,
@@ -210,9 +210,9 @@ def test_take_action_matches_resolver():
     )
     assert new_state == ref.state
     assert events == ref.events
-    # Obrona → Ufortyfikowany (pkt 22.c).
+    # Obrona → Przygotowany (pkt 22.c).
     blob1 = next(b for b in new_state.blobs if b.id == 1)
-    assert STATUS_UFORTYFIKOWANY in blob1.status_flags
+    assert STATUS_PRZYGOTOWANY in blob1.status_flags
 
 
 def test_get_events_since():
@@ -220,7 +220,7 @@ def test_get_events_since():
     bid = client.create_battle(_ROSTERS, seed=7, objectives=_OBJECTIVES)
     _, events = client.take_action(bid, DefendAction(unit_id=1))
     all_events = client.get_events(bid)
-    # all_events = eventy rozstawienia (Ufortyfikowany pkt 13.c — oddziały, które
+    # all_events = eventy rozstawienia (Przygotowany pkt 13.c — oddziały, które
     # nie ruszyły się w rozstawieniu) + eventy aktywacji. `take_action` zwraca
     # samą deltę aktywacji, więc jest sufiksem pełnego logu.
     assert len(all_events) > len(events)

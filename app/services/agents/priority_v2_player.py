@@ -15,7 +15,7 @@ pokonania / oczekiwane obrażenia).
   1. zdejmij Wyczerpany (pkt 22.a),
   2. Strzelaj (najlepszy cel, pkt 14.c),
   3. Szarżuj (najlepszy cel, pkt 14.d),
-  4. zdejmij Przyszpilony (Obrona → Ufortyfikowany, pkt 22.b.v),
+  4. zdejmij Przyszpilony (Obrona → Przygotowany, pkt 22.b.v),
   5. ruch do niezajętego celu (pkt 5.d), dla którego jesteś najbliższym oddziałem,
   6. ruch przechwytujący: do najbliższego wroga, który jest bliżej niż ty celu
      ZAJĘTEGO przez nas (dla którego jesteś najbliższym obrońcą) — broń celu,
@@ -192,7 +192,7 @@ class PriorityV2Player(GridDeploymentMixin, Player):
             target = _best_target(unit, reachable, weapon, ())
             if target is not None:
                 return ChargeAction(unit_id=unit.id, target_id=target.id, weapon=weapon)
-        # 4. Zdejmij Przyszpilony (Obrona → Ufortyfikowany odrzuca Przyszpilony, pkt 22.b.v).
+        # 4. Zdejmij Przyszpilony (Obrona → Przygotowany odrzuca Przyszpilony, pkt 22.b.v).
         if STATUS_PRZYSZPILONY in unit.status_flags:
             return DefendAction(unit_id=unit.id)
 

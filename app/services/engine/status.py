@@ -4,7 +4,7 @@ Single source of truth dla 4 statusów MVP:
 - `Aktywowany` (pkt 22.d) — oddział wykonał aktywację w tej rundzie; reset na końcu rundy (pkt 8.c.i)
 - `Wyczerpany` (pkt 22.a) — oddział wyczerpał aktywne zdolności/akcje
 - `Przyszpilony` (pkt 22.b) — oddział nie kontroluje celów, otrzymuje -1 do obrony
-- `Ufortyfikowany` (pkt 22.c) — oddział po Obronie; +1 do obrony, odrzucany na początku własnej aktywacji
+- `Przygotowany` (pkt 22.c) — oddział po Obronie; +1 do obrony, odrzucany na początku własnej aktywacji
 
 Przed B3.9 te same stringi były duplikowane w `effects.py`, `phases.py` i `combat.py` (dziura D
 z post-B3 code review). Refactor wprowadza `StatusFlag(str, Enum)` żeby:
@@ -45,7 +45,7 @@ class StatusFlag(str, Enum):
     AKTYWOWANY = "Aktywowany"
     WYCZERPANY = "Wyczerpany"
     PRZYSZPILONY = "Przyszpilony"
-    UFORTYFIKOWANY = "Ufortyfikowany"
+    PRZYGOTOWANY = "Przygotowany"
 
 
 # Module-level aliasy dla zwięzłości w call sites (`STATUS_AKTYWOWANY` zamiast
@@ -53,7 +53,7 @@ class StatusFlag(str, Enum):
 STATUS_AKTYWOWANY: StatusFlag = StatusFlag.AKTYWOWANY
 STATUS_WYCZERPANY: StatusFlag = StatusFlag.WYCZERPANY
 STATUS_PRZYSZPILONY: StatusFlag = StatusFlag.PRZYSZPILONY
-STATUS_UFORTYFIKOWANY: StatusFlag = StatusFlag.UFORTYFIKOWANY
+STATUS_PRZYGOTOWANY: StatusFlag = StatusFlag.PRZYGOTOWANY
 
 
 def add_status(blob: "UnitBlob", status: str | StatusFlag) -> "UnitBlob":
@@ -88,7 +88,7 @@ __all__ = [
     "STATUS_AKTYWOWANY",
     "STATUS_WYCZERPANY",
     "STATUS_PRZYSZPILONY",
-    "STATUS_UFORTYFIKOWANY",
+    "STATUS_PRZYGOTOWANY",
     "add_status",
     "remove_status",
 ]

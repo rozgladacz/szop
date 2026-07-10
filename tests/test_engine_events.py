@@ -196,7 +196,7 @@ def test_mutex_collision_round_trip():
     e = MutexCollision(
         sequence=9,
         target_id=3,
-        dropped_statuses=("Przyszpilony", "Ufortyfikowany"),
+        dropped_statuses=("Przyszpilony", "Przygotowany"),
     )
     payload = event_to_json(e)
     assert payload["event_type"] == "MutexCollision"
@@ -204,7 +204,7 @@ def test_mutex_collision_round_trip():
     restored = json_to_event(json.loads(json_str))
     assert restored == e
     assert isinstance(restored.dropped_statuses, tuple)
-    assert restored.dropped_statuses == ("Przyszpilony", "Ufortyfikowany")
+    assert restored.dropped_statuses == ("Przyszpilony", "Przygotowany")
 
 
 def test_event_default_version_is_schema_version():

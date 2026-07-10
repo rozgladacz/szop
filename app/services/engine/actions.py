@@ -8,7 +8,7 @@ Wszystkie akcje są frozen+slots dataclass — immutable, deterministyczne, repl
 
 Akcje runtime (pkt 14):
 - `ManeuverAction` (14.a) — Ruch oddziału do target_position
-- `DefendAction` (14.b) — Status `Ufortyfikowany`
+- `DefendAction` (14.b) — Status `Przygotowany`
 - `ShootAction` (14.c) — Ostrzał (pojedynczy target w MVP; multi-target → przyszła iteracja)
 - `ChargeAction` (14.d) — Szarża + ewentualny kontratak
 - `SpecialAction` (14.e) — Akcja specjalna (Odrzuć Wyczerpany / aktywna zdolność per slug)
@@ -48,7 +48,7 @@ class ManeuverAction:
 
 @dataclass(frozen=True, slots=True)
 class DefendAction:
-    """Pkt 14.b Obrona — oddział zyskuje stan Ufortyfikowany (pkt 22.c)."""
+    """Pkt 14.b Obrona — oddział zyskuje stan Przygotowany (pkt 22.c)."""
 
     unit_id: int
 

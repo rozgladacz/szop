@@ -144,7 +144,7 @@ class UnitBlob:
     wipe (`models_alive == 0`) zeruje oba.
 
     `passives` zawiera sluggi z `app/rulesets/v1/abilities.yaml`. `status_flags`
-    z pkt 22 (Aktywowany, Wyczerpany, Przyszpilony, Ufortyfikowany).
+    z pkt 22 (Aktywowany, Wyczerpany, Przyszpilony, Przygotowany).
 
     `melee_weapons` / `ranged_weapons` (B3.9.e / ADR-0047) — inventory broni
     oddziału. Partycja po `range_inches`: > 0 ranged, == 0 melee. Pre-B3.9.e

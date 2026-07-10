@@ -49,8 +49,8 @@ from app.services.engine.state import (
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
+    STATUS_PRZYGOTOWANY,
     STATUS_PRZYSZPILONY,
-    STATUS_UFORTYFIKOWANY,
     STATUS_WYCZERPANY,
     add_status,
     remove_status,
@@ -237,7 +237,7 @@ def _reduce_mutex_collision(
     """R5.e (resync 2026-06): odrzuca wszystkie `dropped_statuses` z oddziału.
 
     Mirror producer-a `phases._apply_mutex_collisions` — Przyszpilony i
-    Ufortyfikowany (pkt 22.b/c) odrzucone gdy współistnieją. Idempotentny:
+    Przygotowany (pkt 22.b/c) odrzucone gdy współistnieją. Idempotentny:
     `remove_status` to no-op gdy flag nieobecny, więc powtórna aplikacja
     eventu daje ten sam state.
     """

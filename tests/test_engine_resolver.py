@@ -97,8 +97,8 @@ def test_apply_defend_emits_effect():
     state = _basic_state()
     result = apply(state, DefendAction(unit_id=1), DeterministicDice(42))
     blob = next(b for b in result.state.blobs if b.id == 1)
-    from app.services.engine.phases import STATUS_UFORTYFIKOWANY
-    assert STATUS_UFORTYFIKOWANY in blob.status_flags
+    from app.services.engine.phases import STATUS_PRZYGOTOWANY
+    assert STATUS_PRZYGOTOWANY in blob.status_flags
 
 
 def test_apply_shoot_emits_shot_resolved():

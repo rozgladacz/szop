@@ -68,12 +68,12 @@ def _all_events():
         EffectApplied(sequence=6, slug="latanie", target_unit_id=1, source_unit_id=2, payload={"x": 1}),
         InterruptTriggered(sequence=7, interrupt_point="before_action", slug="rozkaz", source_unit_id=2, target_unit_id=1, consumes_round_limit=True),
         RoundEnded(sequence=8, round_number=1, objectives_held=(2, 1)),
-        StatusAdded(sequence=9, target_id=1, status="Ufortyfikowany"),
+        StatusAdded(sequence=9, target_id=1, status="Przygotowany"),
         StatusRemoved(sequence=10, target_id=1, status="Aktywowany"),
         ObjectiveControlChanged(sequence=11, objective_id=5, previous_controller=None, new_controller=0),
         InitiativePassed(sequence=12, previous_active_player=0, new_active_player=1),
         MeleeBalanceReset(sequence=13, target_id=2),
-        MutexCollision(sequence=14, target_id=1, dropped_statuses=("Przyszpilony", "Ufortyfikowany")),
+        MutexCollision(sequence=14, target_id=1, dropped_statuses=("Przyszpilony", "Przygotowany")),
         AbilityOverrideApplied(sequence=15, target_id=1, ability="cierpliwy", granted=True, source_id=2),
         AbilityOverridesCleared(sequence=16, target_id=2),
     ]
@@ -116,9 +116,9 @@ def test_status_flag_enum_renders_value_not_repr(mod):
     """StatusAdded.status jako `StatusFlag` (str-Enum) → czytelna wartość, nie repr."""
     from app.services.engine.status import StatusFlag
 
-    e = StatusAdded(sequence=1, target_id=1, status=StatusFlag.UFORTYFIKOWANY)
+    e = StatusAdded(sequence=1, target_id=1, status=StatusFlag.PRZYGOTOWANY)
     line = mod.format_event(e)
-    assert "Ufortyfikowany" in line
+    assert "Przygotowany" in line
     assert "StatusFlag" not in line
 
 

@@ -93,42 +93,44 @@ def _run(fixture_file: str, kinds: tuple[str, str], seed: int, initiative: int):
 # Pola: id, fixtura, (P0_kind, P1_kind), seed, initiative,
 #       winner, rounds, score (P0, P1), n_events, digest sha256.
 # Wartości zapieczętowane 2026-06-25 po ADR-0052 (final-position Maneuver clearance).
+# Digesty odświeżone 2026-07-08 po ADR-0053 (rename statusu Ufortyfikowany→Przygotowany,
+# rules-resync 2026-07) — winner/rounds/score/n_events niezmienione, tylko payload string.
 GOLDEN_CASES = [
     (
         "demo_priority_mirror",
         "demo_skirmish.yaml", ("priority", "priority"), 0, 0,
         1, 4, (2, 3), 272,
-        "0f5be2dcb7374558995ce61420ef1e6919618374d05d4533581b23fbfa0c91dc",
+        "c74f091602899b5e9d2342a5adbe2bb86f9be0202c4a1e228e675a2e1487d26b",
     ),
     (
         "demo_greedy_vs_random",
         "demo_skirmish.yaml", ("greedy", "random"), 7, 1,
         1, 4, (2, 3), 208,
-        "f66d5dd584a017b7dfddf98d24ba6e13afbcb3ff0d1378e89b76095d81e49f33",
+        "4d7017f46643141626b94ed4d10ffa97c49d8086149d223182191fba63e5a0f8",
     ),
     (
         "clash_priority_vs_greedy",
         "objective_clash.yaml", ("priority", "greedy"), 0, 0,
         0, 4, (3, 0), 213,
-        "b4c003e3ceb9c2bd50a59e953910a76fde29dc3275f1d900629b6575c19e9844",
+        "ed3e7d03c0c674c0f2689bbc566b435c9db83c7dc80e94bc83bab184a010cd7e",
     ),
     (
         "clash_random_mirror",
         "objective_clash.yaml", ("random", "random"), 42, 0,
         0, 4, (1, 0), 201,
-        "ae88f17535f754fb1b737def9d8db105bd7fbe95e6542dccfe1f21b173117b19",
+        "fb663d9e0ad73e5bb11482afede41cfa85a7c1506bf7d282d39d34e509c32a2c",
     ),
     (
         "profiles_v3_vs_v2",
         "unit_profiles.yaml", ("priority3", "priority2"), 0, 0,
         0, 4, (3, 2), 253,
-        "ae1ad8fea8c6dc42e1c5ab1870dc072c8ca634671f907b4e5b840b2d389a03bc",
+        "6a4a69783ff75babfbdd0f93adfd98302e3937acba0205588854988142b1ea4f",
     ),
     (
         "profiles_v2_vs_priority",
         "unit_profiles.yaml", ("priority2", "priority"), 3, 1,
         None, 4, (2, 2), 245,
-        "5d7d01396453610e7b607bc51db74ea75d2fe8200db86c1c5e9ee25292ee52ed",
+        "2c59ea9d01888b9fcd0bceee6ab629425db7edb9bf155e38de62001b92881a34",
     ),
 ]
 

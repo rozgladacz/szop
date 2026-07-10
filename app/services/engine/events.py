@@ -21,7 +21,7 @@ Wszystkie 10 typów:
 - `StatusAdded` (B3.9.d / ADR-0046) — status flag dodany do oddziału (pkt 22)
 - `StatusRemoved` (B3.9.d / ADR-0046) — status flag usunięty z oddziału
 - `MeleeBalanceReset` (B3.9.d / ADR-0046) — reset bilansu wręcz po Przegrupowaniu
-- `MutexCollision` (R5.e / resync 2026-06) — Przyszpilony↔Ufortyfikowany mutex, oba odrzucone (pkt 22.b/c)
+- `MutexCollision` (R5.e / resync 2026-06) — Przyszpilony↔Przygotowany mutex, oba odrzucone (pkt 22.b/c)
 - `AbilityOverrideApplied` (faza-b-order-interrupts 2026-06) — nadanie/odebranie pasywki X (Rozkaz/Klątwa/Oznaczenie, pkt 12)
 - `AbilityOverridesCleared` (faza-b-order-interrupts 2026-06) — wygaśnięcie override'ów na końcu aktywacji (pkt 11.b.vi)
 
@@ -193,7 +193,7 @@ class StatusAdded:
     Reducer jest idempotentny — dodanie istniejącego flagu = no-op, zgodny z
     `status.add_status` helper.
 
-    `status` ∈ {"Aktywowany", "Wyczerpany", "Przyszpilony", "Ufortyfikowany"}
+    `status` ∈ {"Aktywowany", "Wyczerpany", "Przyszpilony", "Przygotowany"}
     (`StatusFlag` enum z `status.py`).
     """
 
@@ -209,7 +209,7 @@ class StatusRemoved:
 
     B3.9.d (ADR-0046). Idempotentny — usunięcie nieistniejącego flagu = no-op.
     Używany przez `round_end_phase` (reset Aktywowany pkt 8.c.i),
-    `_apply_defend` (Przyszpilony→Ufortyfikowany pkt 22.b.v),
+    `_apply_defend` (Przyszpilony→Przygotowany pkt 22.b.v),
     `_apply_special.discard_exhausted` (Wyczerpany pkt 22.a.ii).
     """
 
@@ -288,7 +288,7 @@ class MutexCollision:
     """Wzajemne wykluczenie statusów odrzuca oba (`SZOP_Rozjemca.md pkt 22.b/c`).
 
     R5.e (faza-b-rules-resync 2026-06 / decyzja H2 opcja (c)): Przyszpilony
-    (pkt 22.b) i Ufortyfikowany (pkt 22.c) nie mogą współistnieć na jednym
+    (pkt 22.b) i Przygotowany (pkt 22.c) nie mogą współistnieć na jednym
     oddziale. Gdy producer (`phases.activation_phase` po fazie Przegrupowania)
     wykryje że oddział ma OBA statusy — emituje `MutexCollision`, a reducer
     odrzuca oba.
@@ -296,7 +296,7 @@ class MutexCollision:
     Pipeline event-sourced (zamiast producer-only silent removal): explicit
     collision marker w replay log daje debug/analytics widoczność "tu doszło
     do mutex collision". `dropped_statuses` to lista statusów odrzuconych
-    (zawsze `("Przyszpilony", "Ufortyfikowany")` w MVP — pole generyczne na
+    (zawsze `("Przyszpilony", "Przygotowany")` w MVP — pole generyczne na
     wypadek przyszłych par mutex).
 
     Idempotentny — reducer usuwa statusy z `remove_status` (no-op gdy brak).

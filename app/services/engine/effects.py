@@ -43,8 +43,8 @@ from app.services.engine.state import (
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
+    STATUS_PRZYGOTOWANY,
     STATUS_PRZYSZPILONY,
-    STATUS_UFORTYFIKOWANY,
     STATUS_WYCZERPANY,
     remove_status,
 )
@@ -83,7 +83,7 @@ WeaponModifierFn = Callable[[WeaponProfile, UnitBlob], WeaponProfile]
 # Brak rejestru morale modifiers: po drift 2026-06 (R5.c + pkt 20.e) pkt 20 nie
 # ma już ADDYTYWNYCH modyfikatorów liczby testów Przegrupowania — Nieustraszony
 # jest binarny (powyżej połowy → skip wszystkich, obsługiwane w `phases._regroup_test`),
-# a modyfikatory statusów (Przyszpilony/Ufortyfikowany) usunięte z reguł.
+# a modyfikatory statusów (Przyszpilony/Przygotowany) usunięte z reguł.
 _DEFENSE_MODIFIERS: dict[str, DefenseModifierFn] = {}
 _ATTACK_MODIFIERS: dict[str, AttackModifierFn] = {}
 _WEAPON_MODIFIERS: dict[str, WeaponModifierFn] = {}

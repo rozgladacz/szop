@@ -71,8 +71,8 @@ from app.services.engine.state import (
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
+    STATUS_PRZYGOTOWANY,
     STATUS_PRZYSZPILONY,
-    STATUS_UFORTYFIKOWANY,
     STATUS_WYCZERPANY,
     add_status as _add_status,
     remove_status as _remove_status,
@@ -281,7 +281,7 @@ def deployment_round(
         current = _replace_blob(current, moved)
 
     # R5.f pkt 13.c (faza-b-rules-resync 2026-06): KAŻDY rozstawiony oddział
-    # (niezależnie czy explicit DeploymentAction wykonana) zyskuje Ufortyfikowany
+    # (niezależnie czy explicit DeploymentAction wykonana) zyskuje Przygotowany
     # na początek rundy 1. Persists do startu własnej aktywacji (CR-fix G:
     # pkt 22.c.iv usuwa na początku aktywacji actor-a).
     # Finding #3 (2026-06-06): tylko oddziały ROZSTAWIONE na planszy (pkt 13.c
@@ -292,15 +292,15 @@ def deployment_round(
         if (
             b.models_alive > 0
             and b.location != Lokalizacja.ZAPLECZE
-            and STATUS_UFORTYFIKOWANY not in b.status_flags
+            and STATUS_PRZYGOTOWANY not in b.status_flags
         ):
-            new_b = _add_status(b, STATUS_UFORTYFIKOWANY)
+            new_b = _add_status(b, STATUS_PRZYGOTOWANY)
             current = _replace_blob(current, new_b)
             events.append(
                 StatusAdded(
                     sequence=seq,
                     target_id=b.id,
-                    status=STATUS_UFORTYFIKOWANY,
+                    status=STATUS_PRZYGOTOWANY,
                 )
             )
             seq += 1
@@ -410,11 +410,11 @@ def _blob_inside_terrain_circle(blob: UnitBlob, terrain: TerrainCircle) -> bool:
 def _apply_defend(
     state: BattleState, action: DefendAction, sequence: int
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
-    """Pkt 14.b Obrona — oddział zyskuje Ufortyfikowany (pkt 22.c). Przyszpilony
+    """Pkt 14.b Obrona — oddział zyskuje Przygotowany (pkt 22.c). Przyszpilony
     odrzucany (pkt 22.b.v: Przyszpilony zostaje odrzucony gdy oddział staje się
-    Ufortyfikowany).
+    Przygotowany).
 
-    B3.9.d (ADR-0046) — emit `StatusAdded(Ufortyfikowany)` + opcjonalny
+    B3.9.d (ADR-0046) — emit `StatusAdded(Przygotowany)` + opcjonalny
     `StatusRemoved(Przyszpilony)` zamiast silent `replace(status_flags=...)`.
     `EffectApplied(slug="defend")` zachowany jako annotation/audit log (nie
     redukuje state — to dwa równolegle eventy: Status* niesie deltę state,
@@ -422,7 +422,7 @@ def _apply_defend(
     """
     blob = _find_blob(state, action.unit_id)
     had_przyszpilony = STATUS_PRZYSZPILONY in blob.status_flags
-    blob = _add_status(blob, STATUS_UFORTYFIKOWANY)
+    blob = _add_status(blob, STATUS_PRZYGOTOWANY)
     blob = _remove_status(blob, STATUS_PRZYSZPILONY)
 
     events: list[BattleEvent] = [
@@ -431,12 +431,12 @@ def _apply_defend(
             slug="defend",
             target_unit_id=blob.id,
             source_unit_id=blob.id,
-            payload={"status_added": STATUS_UFORTYFIKOWANY},
+            payload={"status_added": STATUS_PRZYGOTOWANY},
         ),
         StatusAdded(
             sequence=sequence + 1,
             target_id=blob.id,
-            status=STATUS_UFORTYFIKOWANY,
+            status=STATUS_PRZYGOTOWANY,
         ),
     ]
     next_seq = sequence + 2
@@ -591,7 +591,7 @@ def _regroup_test(
     if blob_id in context.melee_combatants:
         n_tests += 1
     # R5.c (faza-b-rules-resync 2026-06): pkt 20.d **status modifiers usunięte**
-    # per drift — pkt 22.b.iv (Przyszpilony +1 test) i pkt 22.c.ii (Ufortyfikowany
+    # per drift — pkt 22.b.iv (Przyszpilony +1 test) i pkt 22.c.ii (Przygotowany
     # -1 test) **usunięte** z zasad. Status flags pozostają (informacja o stanie),
     # ale nie wpływają na liczbę testów. Brak też addytywnych morale modifiers
     # (Nieustraszony jest binarny — patrz pkt 20.e wyżej). n_tests >= 1 tutaj.
@@ -638,7 +638,7 @@ def _regroup_test(
 
 
 # ---------------------------------------------------------------------------
-# Mutex Przyszpilony↔Ufortyfikowany (pkt 22.b/c) — R5.e (resync 2026-06)
+# Mutex Przyszpilony↔Przygotowany (pkt 22.b/c) — R5.e (resync 2026-06)
 # ---------------------------------------------------------------------------
 
 
@@ -647,13 +647,13 @@ def _apply_mutex_collisions(
     candidate_ids: Iterable[int],
     sequence: int,
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
-    """Pkt 22.b/c — Przyszpilony i Ufortyfikowany wzajemnie się wykluczają.
+    """Pkt 22.b/c — Przyszpilony i Przygotowany wzajemnie się wykluczają.
 
     R5.e (faza-b-rules-resync 2026-06 / decyzja H2 opcja (c)): gdy oddział po
     fazie akcji+Przegrupowania ma OBA statusy, oba zostają odrzucone. Jedyne
     miejsce powstania kolizji w MVP: `_regroup_test` dodaje Przyszpilony (2
-    porażki) do oddziału który był Ufortyfikowany (np. defender szarży
-    rozstawiony z Ufortyfikowany w rundzie 1, testujący Przegrupowanie w
+    porażki) do oddziału który był Przygotowany (np. defender szarży
+    rozstawiony z Przygotowany w rundzie 1, testujący Przegrupowanie w
     aktywacji chargera). Deployment (pkt 13.c) i Obrona (pkt 14.b) same w
     sobie nie kolidują — deployment startuje bez statusów, `_apply_defend`
     explicite usuwa Przyszpilony.
@@ -672,16 +672,16 @@ def _apply_mutex_collisions(
             continue
         if (
             STATUS_PRZYSZPILONY in blob.status_flags
-            and STATUS_UFORTYFIKOWANY in blob.status_flags
+            and STATUS_PRZYGOTOWANY in blob.status_flags
         ):
             new_blob = _remove_status(blob, STATUS_PRZYSZPILONY)
-            new_blob = _remove_status(new_blob, STATUS_UFORTYFIKOWANY)
+            new_blob = _remove_status(new_blob, STATUS_PRZYGOTOWANY)
             state = _replace_blob(state, new_blob)
             events.append(
                 MutexCollision(
                     sequence=seq,
                     target_id=uid,
-                    dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY),
+                    dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_PRZYGOTOWANY),
                 )
             )
             seq += 1
@@ -745,21 +745,21 @@ def _begin_activation(
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Początek aktywacji (pkt 11.b) — RAZ, przed pierwszą akcją.
 
-    CR-fix G (pkt 22.c.iv): Ufortyfikowany odrzucany na POCZĄTKU aktywacji
+    CR-fix G (pkt 22.c.iv): Przygotowany odrzucany na POCZĄTKU aktywacji
     własnego oddziału. Musi być raz (nie per-akcja) — inaczej Obrona jako akcja
-    #1 nadałaby Ufortyfikowany, a początek akcji #2 by go zdjął.
+    #1 nadałaby Przygotowany, a początek akcji #2 by go zdjął.
     """
     events: list[BattleEvent] = []
     seq = sequence
     actor_pre = next((b for b in state.blobs if b.id == actor_id), None)
-    if actor_pre is not None and STATUS_UFORTYFIKOWANY in actor_pre.status_flags:
-        new_actor = _remove_status(actor_pre, STATUS_UFORTYFIKOWANY)
+    if actor_pre is not None and STATUS_PRZYGOTOWANY in actor_pre.status_flags:
+        new_actor = _remove_status(actor_pre, STATUS_PRZYGOTOWANY)
         state = _replace_blob(state, new_actor)
         events.append(
             StatusRemoved(
                 sequence=seq,
                 target_id=actor_id,
-                status=STATUS_UFORTYFIKOWANY,
+                status=STATUS_PRZYGOTOWANY,
             )
         )
         seq += 1
@@ -828,9 +828,9 @@ def _apply_single_action(
         )
         events.extend(regroup_events)
 
-    # R5.e (resync 2026-06) pkt 22.b/c: mutex Przyszpilony↔Ufortyfikowany —
+    # R5.e (resync 2026-06) pkt 22.b/c: mutex Przyszpilony↔Przygotowany —
     # po Przegrupowaniu oddział który zyskał Przyszpilony (2 porażki) mając już
-    # Ufortyfikowany traci oba. Kandydaci = subjects Przegrupowania (jedyne
+    # Przygotowany traci oba. Kandydaci = subjects Przegrupowania (jedyne
     # miejsce dodania Przyszpilony w tej aktywacji).
     state, mutex_events, seq = _apply_mutex_collisions(
         state, regroup_subjects, seq
@@ -997,7 +997,7 @@ def round_end_phase(
             )
             seq += 1
     new_blobs = tuple(_remove_status(b, STATUS_AKTYWOWANY) for b in state.blobs)
-    # CR-fix G: Ufortyfikowany NIE jest resetowany tutaj — od post-CR-fix-G
+    # CR-fix G: Przygotowany NIE jest resetowany tutaj — od post-CR-fix-G
     # reset wykonuje się w `activation_phase` na actorze, per pkt 22.c.iv
     # "na początku aktywacji oddziału" (semantycznie poprawnie).
     state = replace(state, blobs=new_blobs)

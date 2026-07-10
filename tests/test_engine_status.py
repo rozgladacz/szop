@@ -18,7 +18,7 @@ from app.services.engine.state import Position, UnitBlob
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYSZPILONY,
-    STATUS_UFORTYFIKOWANY,
+    STATUS_PRZYGOTOWANY,
     STATUS_WYCZERPANY,
     StatusFlag,
     add_status,
@@ -45,12 +45,12 @@ def _make_blob(status_flags: tuple[str, ...] = ()) -> UnitBlob:
 
 def test_status_flag_has_exactly_four_members_for_mvp():
     """B3.9 MVP scope per ADR-0008: 4 statusy z pkt 22 (Aktywowany/Wyczerpany/
-    Przyszpilony/Ufortyfikowany). Nowy status = zmiana scope MVP."""
+    Przyszpilony/Przygotowany). Nowy status = zmiana scope MVP."""
     assert set(StatusFlag) == {
         StatusFlag.AKTYWOWANY,
         StatusFlag.WYCZERPANY,
         StatusFlag.PRZYSZPILONY,
-        StatusFlag.UFORTYFIKOWANY,
+        StatusFlag.PRZYGOTOWANY,
     }
 
 
@@ -60,7 +60,7 @@ def test_status_flag_has_exactly_four_members_for_mvp():
         (StatusFlag.AKTYWOWANY, "Aktywowany"),
         (StatusFlag.WYCZERPANY, "Wyczerpany"),
         (StatusFlag.PRZYSZPILONY, "Przyszpilony"),
-        (StatusFlag.UFORTYFIKOWANY, "Ufortyfikowany"),
+        (StatusFlag.PRZYGOTOWANY, "Przygotowany"),
     ],
 )
 def test_status_flag_equals_polish_literal(flag: StatusFlag, literal: str):
@@ -76,7 +76,7 @@ def test_status_flag_module_aliases_point_to_enum_members():
     assert STATUS_AKTYWOWANY is StatusFlag.AKTYWOWANY
     assert STATUS_WYCZERPANY is StatusFlag.WYCZERPANY
     assert STATUS_PRZYSZPILONY is StatusFlag.PRZYSZPILONY
-    assert STATUS_UFORTYFIKOWANY is StatusFlag.UFORTYFIKOWANY
+    assert STATUS_PRZYGOTOWANY is StatusFlag.PRZYGOTOWANY
 
 
 def test_status_flag_membership_in_str_tuple():
@@ -196,7 +196,7 @@ def test_effects_module_reexports_status_constants():
     assert effects.STATUS_AKTYWOWANY is STATUS_AKTYWOWANY
     assert effects.STATUS_WYCZERPANY is STATUS_WYCZERPANY
     assert effects.STATUS_PRZYSZPILONY is STATUS_PRZYSZPILONY
-    assert effects.STATUS_UFORTYFIKOWANY is STATUS_UFORTYFIKOWANY
+    assert effects.STATUS_PRZYGOTOWANY is STATUS_PRZYGOTOWANY
 
 
 def test_phases_module_reexports_status_constants():
@@ -205,7 +205,7 @@ def test_phases_module_reexports_status_constants():
     assert phases.STATUS_AKTYWOWANY is STATUS_AKTYWOWANY
     assert phases.STATUS_WYCZERPANY is STATUS_WYCZERPANY
     assert phases.STATUS_PRZYSZPILONY is STATUS_PRZYSZPILONY
-    assert phases.STATUS_UFORTYFIKOWANY is STATUS_UFORTYFIKOWANY
+    assert phases.STATUS_PRZYGOTOWANY is STATUS_PRZYGOTOWANY
 
 
 def test_combat_module_reexports_status_wyczerpany():
@@ -216,7 +216,7 @@ def test_combat_module_reexports_status_wyczerpany():
 
 
 # ---------------------------------------------------------------------------
-# R5.e (resync 2026-06) — mutex Przyszpilony↔Ufortyfikowany (pkt 22.b/c)
+# R5.e (resync 2026-06) — mutex Przyszpilony↔Przygotowany (pkt 22.b/c)
 # ---------------------------------------------------------------------------
 
 
@@ -233,40 +233,40 @@ def _state_with(blob: UnitBlob) -> "BattleState":
 
 
 def test_mutex_drops_both_when_blob_has_both_flags():
-    """Oddział z Przyszpilony + Ufortyfikowany → oba odrzucone + MutexCollision."""
+    """Oddział z Przyszpilony + Przygotowany → oba odrzucone + MutexCollision."""
     from app.services.engine.events import MutexCollision
     from app.services.engine.phases import _apply_mutex_collisions
 
-    blob = _make_blob(status_flags=("Przyszpilony", "Ufortyfikowany"))
+    blob = _make_blob(status_flags=("Przyszpilony", "Przygotowany"))
     state = _state_with(blob)
     new_state, events, next_seq = _apply_mutex_collisions(state, [1], sequence=5)
 
     new_blob = next(b for b in new_state.blobs if b.id == 1)
     assert STATUS_PRZYSZPILONY not in new_blob.status_flags
-    assert STATUS_UFORTYFIKOWANY not in new_blob.status_flags
+    assert STATUS_PRZYGOTOWANY not in new_blob.status_flags
     assert len(events) == 1
     assert isinstance(events[0], MutexCollision)
     assert events[0].target_id == 1
     assert events[0].sequence == 5
     assert set(events[0].dropped_statuses) == {
         STATUS_PRZYSZPILONY,
-        STATUS_UFORTYFIKOWANY,
+        STATUS_PRZYGOTOWANY,
     }
     assert next_seq == 6
 
 
 def test_mutex_preserves_other_flags():
-    """Mutex odrzuca tylko parę Przyszpilony/Ufortyfikowany — Aktywowany zostaje."""
+    """Mutex odrzuca tylko parę Przyszpilony/Przygotowany — Aktywowany zostaje."""
     from app.services.engine.phases import _apply_mutex_collisions
 
     blob = _make_blob(
-        status_flags=("Aktywowany", "Przyszpilony", "Ufortyfikowany")
+        status_flags=("Aktywowany", "Przyszpilony", "Przygotowany")
     )
     new_state, _events, _seq = _apply_mutex_collisions(_state_with(blob), [1], 1)
     new_blob = next(b for b in new_state.blobs if b.id == 1)
     assert STATUS_AKTYWOWANY in new_blob.status_flags
     assert STATUS_PRZYSZPILONY not in new_blob.status_flags
-    assert STATUS_UFORTYFIKOWANY not in new_blob.status_flags
+    assert STATUS_PRZYGOTOWANY not in new_blob.status_flags
 
 
 @pytest.mark.parametrize(
@@ -274,7 +274,7 @@ def test_mutex_preserves_other_flags():
     [
         (),
         ("Przyszpilony",),
-        ("Ufortyfikowany",),
+        ("Przygotowany",),
         ("Aktywowany", "Wyczerpany"),
     ],
 )
@@ -295,17 +295,17 @@ def test_mutex_reducer_removes_both_via_apply_events():
     from app.services.engine.events import MutexCollision
     from app.services.engine.state import apply_events
 
-    blob = _make_blob(status_flags=("Przyszpilony", "Ufortyfikowany"))
+    blob = _make_blob(status_flags=("Przyszpilony", "Przygotowany"))
     initial = _state_with(blob)
     event = MutexCollision(
         sequence=1,
         target_id=1,
-        dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY),
+        dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_PRZYGOTOWANY),
     )
     replayed = apply_events(initial, [event])
     new_blob = next(b for b in replayed.blobs if b.id == 1)
     assert STATUS_PRZYSZPILONY not in new_blob.status_flags
-    assert STATUS_UFORTYFIKOWANY not in new_blob.status_flags
+    assert STATUS_PRZYGOTOWANY not in new_blob.status_flags
 
 
 def test_mutex_reducer_idempotent():
@@ -313,12 +313,12 @@ def test_mutex_reducer_idempotent():
     from app.services.engine.events import MutexCollision
     from app.services.engine.state import apply_events
 
-    blob = _make_blob(status_flags=("Aktywowany", "Przyszpilony", "Ufortyfikowany"))
+    blob = _make_blob(status_flags=("Aktywowany", "Przyszpilony", "Przygotowany"))
     initial = _state_with(blob)
     event = MutexCollision(
         sequence=1,
         target_id=1,
-        dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_UFORTYFIKOWANY),
+        dropped_statuses=(STATUS_PRZYSZPILONY, STATUS_PRZYGOTOWANY),
     )
     once = apply_events(initial, [event])
     twice = apply_events(initial, [event, event])
@@ -331,7 +331,7 @@ def test_mutex_producer_reducer_parity():
     from app.services.engine.phases import _apply_mutex_collisions
     from app.services.engine.state import apply_events
 
-    blob = _make_blob(status_flags=("Przyszpilony", "Ufortyfikowany"))
+    blob = _make_blob(status_flags=("Przyszpilony", "Przygotowany"))
     initial = _state_with(blob)
     live_state, events, _seq = _apply_mutex_collisions(initial, [1], 1)
     replayed = apply_events(initial, list(events))

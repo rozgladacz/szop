@@ -14,7 +14,7 @@ Strzelec; węzły to warunki (→true/→false) lub akcje-liście.
 
 **Wybór celu ataku** — MAX wagi `_target_weight`:
   `-1 jeśli Aktywowany; -0.25 za każdy z {Przyszpilony, Wyczerpany,
-  Ufortyfikowany}; +x*(4-x)` gdzie `x = oczekiwane_obrażenia / pozostała_HP`.
+  Przygotowany}; +x*(4-x)` gdzie `x = oczekiwane_obrażenia / pozostała_HP`.
 
 ZAŁOŻENIA: Wojownik = `melee_attacks > ranged_attacks` (silnik bez klasyfikacji
 kosztów); „Masz Przygotowanie" = pasywka slug `przygotowanie`. Konsekwencja
@@ -66,8 +66,8 @@ from app.services.engine.state import (
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
+    STATUS_PRZYGOTOWANY,
     STATUS_PRZYSZPILONY,
-    STATUS_UFORTYFIKOWANY,
     STATUS_WYCZERPANY,
 )
 
@@ -86,7 +86,7 @@ def _target_weight(attacker: UnitBlob, target: UnitBlob, weapon, terrain: tuple)
     w = 0.0
     if STATUS_AKTYWOWANY in target.status_flags:
         w -= 1.0
-    for s in (STATUS_PRZYSZPILONY, STATUS_WYCZERPANY, STATUS_UFORTYFIKOWANY):
+    for s in (STATUS_PRZYSZPILONY, STATUS_WYCZERPANY, STATUS_PRZYGOTOWANY):
         if s in target.status_flags:
             w -= 0.25
     hp = target.models_alive * target.toughness_per_model
@@ -177,7 +177,7 @@ def _c_przygotowanie_first_not_fortified(c: _Ctx) -> bool:
     return (
         "przygotowanie" in c.unit.passives
         and c.first_action
-        and STATUS_UFORTYFIKOWANY not in c.unit.status_flags
+        and STATUS_PRZYGOTOWANY not in c.unit.status_flags
     )
 
 
