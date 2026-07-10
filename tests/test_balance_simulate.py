@@ -173,6 +173,14 @@ def test_make_player_kinds():
         bs.make_player("nieistniejacy_bot", 1)
 
 
+def test_player_factory_symbols_are_app_level_reexports():
+    from app.services.agents import factory as agent_factory
+
+    assert bs.make_player is agent_factory.make_player
+    assert bs.PLAYER_KINDS is agent_factory.PLAYER_KINDS
+    assert bs.PLAYER_SEED_OFFSET == agent_factory.PLAYER_SEED_OFFSET
+
+
 # --- inicjatywa --------------------------------------------------------------
 
 

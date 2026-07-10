@@ -1,29 +1,13 @@
 """Testy rejestru botów (`agents.registry`) — SSOT klasyfikacji useful/reference + tiery.
 
 Pilnuje: aktualnego oznaczenia (useful = priority/priority3/claude_v3), spójności tagów
-status/koszt, działania zapytań po tagach (rozszerzalność) ORAZ **drift-guard**: każdy
-kanoniczny bot rejestru jest konstruowalny przez `balance_simulate.make_player` i odwrotnie.
+status/koszt i działania zapytań po tagach (rozszerzalność). Drift-guard
+rejestr↔fabryka żyje w `tests/test_agents_factory.py`.
 """
 
 from __future__ import annotations
 
-import importlib.util
-import pathlib
-import sys
-
 from app.services.agents import registry as reg
-
-_ROOT = pathlib.Path(__file__).resolve().parents[1]
-if str(_ROOT) not in sys.path:
-    sys.path.insert(0, str(_ROOT))
-
-
-def _load_bsim():
-    spec = importlib.util.spec_from_file_location("bsim_reg", _ROOT / "scripts" / "balance_simulate.py")
-    mod = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = mod
-    spec.loader.exec_module(mod)
-    return mod
 
 
 def test_useful_marking_current():
@@ -62,19 +46,3 @@ def test_spec_unknown_raises():
 
     with pytest.raises(KeyError):
         reg.spec("nie_ma_takiego")
-
-
-def test_registry_matches_make_player():
-    # Drift-guard: kanoniczne kindy rejestru = konstruowalne; każdy ma odpowiednik w
-    # PLAYER_KINDS (poza aliasami konstrukcyjnymi jak 'claude').
-    bsim = _load_bsim()
-    for kind in reg.ALL_KINDS:
-        player = bsim.make_player(kind, 0)
-        assert player is not None
-        assert kind in bsim.PLAYER_KINDS
-    # Każdy kanoniczny kind z make_player (bez aliasów) jest w rejestrze.
-    aliases = {"claude"}
-    for kind in bsim.PLAYER_KINDS:
-        if kind in aliases:
-            continue
-        assert kind in reg.ALL_KINDS, f"{kind} brak w registry.BOT_SPECS"

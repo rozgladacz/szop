@@ -10,8 +10,8 @@ zmian API), a nie sztywne flagi. Zdefiniowane wymiary (każdy = jeden tag):
 
 Nowy poziom = po prostu nowy tag (np. bot „useful"+"expensive"); zapytania `kinds(...)`
 działają bez zmian. `cost_ratio` (≈× `priority`) jest informacyjny (pomiar self-play,
-patrz roadmap D4). Ten moduł to czyste dane — `make_player` (konstrukcja z seedem) żyje
-w `scripts/balance_simulate.py`; spójność pilnuje `tests/test_agents_registry.py`.
+patrz roadmap D4). Ten moduł to czyste dane; `agents.factory.make_player` jest SSOT
+konstrukcji z seedem, a spójność pilnuje `tests/test_agents_factory.py`.
 """
 
 from __future__ import annotations

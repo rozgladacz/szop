@@ -24,6 +24,8 @@ Public API:
   pętla bitwy (orkiestrator pełnej gry) → `MatchResult`.
 - `DeploymentZone` + `grid_positions` / `random_position_in_zone` — D5: strefa
   rozstawienia (pkt 24) + proste strategie pozycjonowania botów (`Player.choose_deployment`).
+- `make_player(kind, seed)` + `PLAYER_KINDS` / `PLAYER_SEED_OFFSET` — SSOT
+  konstrukcji botów z nazwy dla skryptów, przyszłych routerów B4 i UI.
 
 Konsumenci (roadmap): D2 balance_simulate, D3 exploit_hunt, D4 adversarial UI.
 `run_match` to zalążek B5 LocalClient.simulate (pełen B5 z HttpClient poza zakresem).
@@ -39,6 +41,11 @@ from app.services.agents.deployment import (
     grid_deployment_position,
     grid_positions,
     random_position_in_zone,
+)
+from app.services.agents.factory import (
+    PLAYER_KINDS,
+    PLAYER_SEED_OFFSET,
+    make_player,
 )
 from app.services.agents.greedy_player import GreedyPlayer
 from app.services.agents.match import (
@@ -90,6 +97,9 @@ __all__ = [
     "AdaptResult",
     "roster_to_engine_roster",
     "roster_points",
+    "make_player",
+    "PLAYER_KINDS",
+    "PLAYER_SEED_OFFSET",
     "BotSpec",
     "BOT_SPECS",
     "USEFUL_KINDS",
