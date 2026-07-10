@@ -89,6 +89,15 @@ allowed_yaml_only:
   - slug: usprawnienie
     reason: "YAML-only active ability dodana w main przez 313fb1d (Klaryfikacja zasad) — brak w DOCX/MD 2026-06. TODO faza-b-rules-resync R4: decyzja czy zachować jako blocked vs usunąć z YAML."
     until_date: 2026-09-30
+  - slug: latajacy
+    reason: "Legacy slug — DOCX resync 2026-07 zmienił nazwę na 'Skok'. Zaszyte jako magic string w cost engine (abilities.py/role_totals.py/_engine.py) + klasyfikacji geometrii; rename kodu odłożony, patrz allowed_docx_only:skok."
+    until_date: 2026-12-31
+  - slug: regeneracja
+    reason: "blocked=True (backward compat) w app/data/abilities.py. Passive ability usunięta z DOCX w resyncu 2026-07 (rozszerzenie istniejącego wzorca active-only na passive, decyzja usera board-triage 2026-07-08)."
+    until_date: 2026-12-31
+  - slug: stracency
+    reason: "blocked=True (backward compat) w app/data/abilities.py. Passive ability usunięta z DOCX w resyncu 2026-07 (rozszerzenie istniejącego wzorca active-only na passive, decyzja usera board-triage 2026-07-08)."
+    until_date: 2026-12-31
 
 # Symetria R1: DOCX-only slugi które YAML wyraża pod innym slug (split/rename
 # pairs). Bez tego R1 ERROR by blokował PR za każdą redakcją DOCX wording.
@@ -116,4 +125,10 @@ allowed_docx_only:
   # (ap_base/ap_lance/etc. w tables.yaml), nie jako osobna ability definition.
   - slug: ap
     reason: "DOCX traktuje AP(X) jako ability, YAML traktuje jako tabelę kosztu w tables.yaml (ap_base, ap_lance, penetrating_multiplier, brutalny_ap_cost)."
+    until_date: ~
+  - slug: skok
+    reason: "DOCX-side rename 2026-07 resync (dawniej 'Latający', opis identyczny). YAML zachowuje legacy slug 'latajacy' w cost engine — patrz allowed_yaml_only:latajacy."
+    until_date: 2026-12-31
+  - slug: aura_12
+    reason: "DOCX 2026-07 resync — parametryzowany wariant szablonu Aura(X) z jawnym zasięgiem 12”, sąsiaduje z bazowym 'aura' w extracted DOCX. Ten sam abstrakcyjny koncept co 'aura' (cost DSL handler aura_range_bonus/T_eff już generyczny na dowolny zasięg), nie nowa zdolność do wyceny."
     until_date: ~

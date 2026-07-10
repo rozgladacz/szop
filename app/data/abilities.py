@@ -191,6 +191,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Straceńcy",
         type="passive",
         description="Po nieudanym teście przegrupowania wykonaj test trudnego terenu zamiast normalnych konsekwencji.",
+        blocked=True,
     ),
     AbilityDefinition(
         slug="furia",
@@ -218,6 +219,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
             "Przed przegrupowaniem odzyskujesz K3 rany, "
             "ale nie więcej, niż liczba straconych w tej aktywacji."
         ),
+        blocked=True,
     ),
     AbilityDefinition(
         slug="dywersant",
