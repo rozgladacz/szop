@@ -174,10 +174,12 @@ def _ensure_army_view_access(army: models.Army, user: models.User) -> None:
         raise HTTPException(status_code=403, detail="Brak dostępu do armii")
 
 
+def _army_can_edit(army: models.Army, user: models.User) -> bool:
+    return user.is_admin or army.owner_id == user.id
+
+
 def _ensure_army_edit_access(army: models.Army, user: models.User) -> None:
-    if user.is_admin:
-        return
-    if army.owner_id != user.id:
+    if not _army_can_edit(army, user):
         raise HTTPException(status_code=403, detail="Brak dostępu do armii")
 
 
@@ -734,22 +736,30 @@ def _spell_page_context(
         spell.base_label = base_label
         spell.description = description
         spell.cost = cost
-    ability_options = [
-        entry
-        for entry in ability_registry.definition_payload(db, "active")
-        if entry.get("ability_id") and entry.get("slug") not in FORBIDDEN_SPELL_SLUGS
-    ]
-    ability_options.sort(key=lambda entry: (entry.get("display_name") or entry.get("name") or "").casefold())
+    can_edit = _army_can_edit(army, current_user)
+    ability_options: list[dict] = []
+    passive_definitions: list = []
+    if can_edit:
+        # Only the "Dodaj/Edytuj moc" form (edit-only) reads these; skip the
+        # ability-catalog sync + scan entirely for view-only requests.
+        ability_options = [
+            entry
+            for entry in ability_registry.definition_payload(db, "active")
+            if entry.get("ability_id") and entry.get("slug") not in FORBIDDEN_SPELL_SLUGS
+        ]
+        ability_options.sort(key=lambda entry: (entry.get("display_name") or entry.get("name") or "").casefold())
+        passive_definitions = passive_definitions_for_army(army)
     remaining_slots = max(0, MAX_ARMY_SPELLS - len(spells))
     return {
         "request": request,
         "user": current_user,
         "army": army,
+        "can_edit": can_edit,
         "spells": spells,
         "ability_options": ability_options,
         "remaining_slots": remaining_slots,
         "name_max_length": models.ARMY_SPELL_NAME_MAX_LENGTH,
-        "passive_definitions": passive_definitions_for_army(army),
+        "passive_definitions": passive_definitions,
         "spell_difficulties": list(range(costs.SPELL_DIFFICULTY_MIN, costs.SPELL_DIFFICULTY_MAX + 1)),
         "spell_difficulty_default": costs.SPELL_DIFFICULTY_DEFAULT,
         "editing_spell": editing_spell,
@@ -1908,7 +1918,9 @@ def edit_army_spells(
     army = db.get(models.Army, army_id)
     if not army:
         raise HTTPException(status_code=404)
-    _ensure_army_edit_access(army, current_user)
+    # View-only armies (e.g. global armies for non-admins) may still inspect
+    # the spell list; mutating routes below stay gated on edit access.
+    _ensure_army_view_access(army, current_user)
     return templates.TemplateResponse(
         "army_spells.html",
         _spell_page_context(request, army, current_user, db),
@@ -3354,7 +3366,7 @@ def _render_army_edit(
     error: str | None = None,
     selected_armory_id: int | None = None,
 ) -> HTMLResponse:
-    can_edit = current_user.is_admin or army.owner_id == current_user.id
+    can_edit = _army_can_edit(army, current_user)
     can_delete = False
     if can_edit:
         has_rosters = db.execute(

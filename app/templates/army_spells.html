@@ -4,10 +4,16 @@
 <div class="d-flex flex-wrap gap-2 gap-md-3 justify-content-between align-items-center mb-3">
   <div>
     <h2 class="mb-1">Lista zaklęć armii: {{ army.name }}</h2>
+    {% if can_edit %}
     <p class="text-muted mb-0">Możesz zdefiniować maksymalnie 6 mocy dla magów tej armii.</p>
+    {% else %}
+    <p class="text-muted mb-0">Podgląd mocy zdefiniowanych dla magów tej armii.</p>
+    {% endif %}
   </div>
   <div class="btn-group">
+    {% if can_edit %}
     <a class="btn btn-outline-primary" href="/armies/{{ army.id }}/rules">Zasady armii</a>
+    {% endif %}
     <a class="btn btn-outline-secondary" href="/armies/{{ army.id }}">Wróć do armii</a>
   </div>
 </div>
@@ -41,8 +47,11 @@
           <tr data-spell-id="{{ spell.id }}">
             <td>
               <div class="d-flex align-items-center gap-1">
+                {% if can_edit %}
                 <span class="spell-drag-handle drag-handle" aria-hidden="true">⋮⋮</span>
+                {% endif %}
                 <span class="spell-index">{{ loop.index }}</span>
+                {% if can_edit %}
                 <div class="btn-group btn-group-sm spell-move-buttons" role="group" aria-label="Zmiana kolejności mocy">
                   <form
                     method="post"
@@ -75,6 +84,7 @@
                     </button>
                   </form>
                 </div>
+                {% endif %}
               </div>
             </td>
             <td>
@@ -98,9 +108,7 @@
             <td>{{ spell.cast_difficulty }}+</td>
             <td>{{ spell.cost }}</td>
             <td>
-              {% if spell.kind == 'weapon' %}
-              <div class="form-control form-control-sm bg-light">{{ spell.display_label or spell.base_display_label }}</div>
-              {% else %}
+              {% if can_edit and spell.kind != 'weapon' %}
               <form class="d-flex gap-2" method="post" action="/armies/{{ army.id }}/spells/{{ spell.id }}/update">
                 <input
                   class="form-control form-control-sm"
@@ -112,9 +120,12 @@
                 />
                 <button class="btn btn-outline-primary btn-sm" type="submit">Zapisz</button>
               </form>
+              {% else %}
+              <div class="form-control form-control-sm bg-light">{{ (spell.display_label or spell.base_display_label) if spell.kind == 'weapon' else (spell.normalized_custom_name or '—') }}</div>
               {% endif %}
             </td>
             <td>
+              {% if can_edit %}
               <div class="d-flex justify-content-end gap-2">
                 {% if spell.kind == 'ability' %}
                 <a
@@ -140,6 +151,7 @@
                   <button class="btn btn-outline-danger btn-sm" type="submit">Usuń</button>
                 </form>
               </div>
+              {% endif %}
             </td>
           </tr>
           {% endfor %}
@@ -152,7 +164,8 @@
   </div>
 </div>
 
-{% if remaining_slots > 0 or editing_spell %}
+{% if not can_edit %}
+{% elif remaining_slots > 0 or editing_spell %}
 <div class="card">
   <div class="card-body">
     <h5 class="card-title">{% if editing_spell %}Edytuj moc{% else %}Dodaj nową moc{% endif %}</h5>
@@ -260,7 +273,7 @@
 {% else %}
 <div class="alert alert-info">Wykorzystano maksymalną liczbę mocy. Usuń istniejącą moc, aby dodać kolejną.</div>
 {% endif %}
-{% if spells %}
+{% if can_edit and spells %}
 <script src="/static/vendor/sortable.min.js"></script>
 <script>
 (function () {
