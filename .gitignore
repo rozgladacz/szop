@@ -25,7 +25,15 @@ build/
 reports/
 
 # Documentation
-app/static/docs/
+# `dir/*` (not `dir/`) so per-file negations below still work — a blanket
+# `dir/` pattern prunes the directory from traversal entirely, silently
+# breaking `!file` exceptions (classic gitignore gotcha).
+app/static/docs/*
+# Hand-curated MD mirrors are engine SSOT (B0, faza-b) — must survive fresh
+# checkouts for source_hashes.yaml / rules_sources_check.py to pass (decision
+# 2026-07-08, rozwoj-faza-a-merge).
+!app/static/docs/SZOP_Zdolnosci.md
+!app/static/docs/SZOP_Rozjemca.md
 
 # Scratch diff/audit dumps w root projektu (np. _b39_diff.txt, _drift_*.diff)
 # — jednorazowe zrzuty z sesji, odtwarzalne z historii git. NIE dotyczy scripts/_*.py.
