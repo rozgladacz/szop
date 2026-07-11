@@ -39,6 +39,7 @@
 
 - **2026-05-20:** Lokalny runtime na Windows — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
 - **2026-05-12:** Merge conflicts gałęzi Klasyfikacja nadal nierozwiązane — blokują SSOT Phase 5. Patrz [docs/roadmap.md](docs/roadmap.md).
+- **2026-07-10:** `/security-review` (uruchomiony w wątku demoralizacja-mag) znalazł i naprawił IDOR w `app/routers/collections.py` (plik zablokowany przez wątek `kolekcja`) — brak sprawdzenia własności jednostki w `POST /collections/units/{unit_id}/models/add`. Fix + regresja `tests/test_collections_authz.py`. Szczegóły w [HANDOFF_kolekcja.md](docs/handoffs/HANDOFF_kolekcja.md) sekcja „Notatki".
 
 ---
 

@@ -194,6 +194,14 @@ def _require_owner(model: models.CollectionModel, current_user: models.User) -> 
         raise HTTPException(status_code=403, detail="Brak uprawnień")
 
 
+def _require_unit_access(unit: models.Unit, current_user: models.User) -> None:
+    if current_user.is_admin:
+        return
+    army = unit.army
+    if army and army.owner_id is not None and army.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Brak uprawnień")
+
+
 def _build_collection_card(cm: models.CollectionModel, weapon_map: dict, ability_map: dict) -> dict:
     try:
         loadout = json.loads(cm.loadout_json) if cm.loadout_json else {}
@@ -295,10 +303,7 @@ def unit_collection(
     ).scalars().unique().one_or_none()
     if not unit:
         raise HTTPException(status_code=404)
-    if not current_user.is_admin:
-        army = unit.army
-        if army and army.owner_id is not None and army.owner_id != current_user.id:
-            raise HTTPException(status_code=403)
+    _require_unit_access(unit, current_user)
 
     weapon_opts = _weapon_options(unit)
     ability_opts = _ability_options(unit)
@@ -345,6 +350,7 @@ async def add_collection_model(
     ).scalars().unique().one_or_none()
     if not unit:
         raise HTTPException(status_code=404)
+    _require_unit_access(unit, current_user)
 
     form = await request.form()
     form_multi = _parse_form_multi(form)
