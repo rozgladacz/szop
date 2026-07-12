@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from ..data import abilities as ability_catalog
-from .costs import ability_link_loadout_key
+from .costs import ability_link_loadout_key, normalize_range_value
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -499,6 +499,38 @@ def used_in_other_units(
     return used
 
 
+def _best_mount_effective(
+    cm: models.CollectionModel, target: dict[int, int]
+) -> tuple[dict[int, int], dict[str, int | None] | None]:
+    """Dla derywacji: dobierz zamontowaną broń modelu magnetyzowanego tak, by
+    pasowała do `target` (loadout), zamiast zapisanej domyślnej. Zwraca
+    ``(efektywna_broń, mounted|None)``. ``mounted=None`` dla modeli bez slotów.
+
+    Dla każdego slotu wybiera opcję POTRZEBNĄ w loadoutcie (a nie np. zapisane
+    „Działo Plazmowe", gdy oddział ma „Miotacz ognia"); jeśli żadna opcja nie jest
+    potrzebna — zostawia zapisaną (o ile mieści się w loadoutcie), inaczej pusty.
+    """
+    slots = list(getattr(cm, "slots", []) or [])
+    if not slots:
+        return _model_base_weapons(cm), None
+    eff = _model_base_weapons(cm)
+    mounted: dict[str, int | None] = {}
+    for slot in slots:
+        chosen: int | None = None
+        for oid in sorted(_slot_option_ids(slot)):
+            if target.get(oid, 0) - eff.get(oid, 0) > 0:
+                chosen = oid
+                break
+        if chosen is None and slot.selected_weapon_id is not None:
+            sid = int(slot.selected_weapon_id)
+            if target.get(sid, 0) - eff.get(sid, 0) > 0:
+                chosen = sid
+        if chosen is not None:
+            eff[chosen] = eff.get(chosen, 0) + 1
+        mounted[str(slot.id)] = chosen
+    return eff, mounted
+
+
 def derive_composition(
     unit: models.Unit,
     current_loadout: dict[str, Any] | None,
@@ -507,17 +539,15 @@ def derive_composition(
     available: dict[int, int],
 ) -> list[dict[str, Any]]:
     """Best-effort suma→modele: odtwórz oddział (broń + zdolności) jako selekcję
-    modeli, preferując posiadane; braki uzupełnij proxy budowanymi z „domyślnego
-    modelu" + brakująca zdolność/broń. Proxy = pełny model w ramach `count` (bez
-    zawyżania liczności). Punkt startowy — user koryguje miękkimi limitami.
+    modeli, preferując posiadane; braki uzupełnij proxy. Punkt startowy — user
+    koryguje miękkimi limitami.
 
-    Kolejność (wg ustaleń): 1) zdolności (model z pasującą zdolnością i bronią
-    obecną w oddziale), 2) broń nie-podstawowa, 3) broń podstawowa, 4) dopełnienie.
-
-    Heurystyka proxy (best-effort): broń poszukiwaną wstawiamy do „domyślnego
-    modelu" PODMIENIAJĄC główną broń domyślną, ale tylko gdy model ma >1 broni —
-    przy jednej domyślnej broni DODAJEMY (by nie zgubić ostatniej, np. lekkiej
-    broni ręcznej). Zdolności jak w ``compose_loadout`` (bare id).
+    FAZA A: przypisz posiadane modele pokrywające zapotrzebowanie (najpierw
+    pokrycie zdolności, potem nakład broni). FAZA B: RESZTĘ (residual weapon/
+    ability target) rozłóż DOKŁADNIE na pozostałe sloty proxy — broń
+    specjalistyczna po jednej na model (round-robin), broń podstawowa dopełnia.
+    Dzięki temu proxy odtwarzają dokładny agregat broni oddziału (nie zawyżają
+    broni podstawowej klonowaniem „domyślnego modelu"). Zdolności bare id.
     """
     cl = current_loadout or {}
     raw = _weapon_multiset(cl.get("weapons"))
@@ -543,23 +573,37 @@ def derive_composition(
         if wid is not None and int(c) > 0:
             default_weapons[int(wid)] = default_weapons.get(int(wid), 0) + int(c)
     default_wids = set(default_weapons)
-    default_weapon_id = getattr(unit, "default_weapon_id", None)
-    primary_default = (
-        int(default_weapon_id)
-        if default_weapon_id in default_weapons
-        else (max(default_weapons, key=default_weapons.get) if default_weapons else None)
-    )
+
+    # Kategoria broni: wręcz (zasięg 0) vs dystans — do parowania w proxy tak, by
+    # każdy model miał broń do walki wręcz (i pary specjalistów melee+dystans).
+    weapon_is_melee: dict[int, bool] = {}
+    for link in getattr(unit, "weapon_links", []) or []:
+        wid = getattr(link, "weapon_id", None)
+        if wid is None:
+            continue
+        w = getattr(link, "weapon", None)
+        rng = getattr(w, "effective_range", None) if w is not None else None
+        weapon_is_melee[int(wid)] = normalize_range_value(rng) == 0
+    dwid = getattr(unit, "default_weapon_id", None)
+    if dwid is not None:
+        dw = getattr(unit, "default_weapon", None)
+        rng = getattr(dw, "effective_range", None) if dw is not None else None
+        weapon_is_melee.setdefault(int(dwid), normalize_range_value(rng) == 0)
 
     avail = {cm.id: int(available.get(cm.id, 0)) for cm in owned_models}
-    weapons_of = {cm.id: collection_model_effective_weapons(cm) for cm in owned_models}
+    # Efektywna broń + dobrany mount (magnetyzacja pasująca do loadoutu, nie
+    # zapisana domyślna) — kluczowe dla modeli z magnesami (np. Sentinel).
+    weapons_of: dict[int, dict[int, int]] = {}
+    mount_of: dict[int, dict[str, int | None] | None] = {}
+    for cm in owned_models:
+        eff, mounted = _best_mount_effective(cm, weapon_target)
+        weapons_of[cm.id] = eff
+        mount_of[cm.id] = mounted
     abilities_of = {cm.id: set(_model_ability_base_ids(cm)) for cm in owned_models}
 
     sel: dict[int, int] = {}
     proxy_entries: list[dict[str, Any]] = []
     assigned = 0
-
-    def _overlap(cm_id: int) -> int:
-        return sum(min(c, weapon_target.get(w, 0)) for w, c in weapons_of[cm_id].items())
 
     def _consume_weapons(ew: dict[int, int]) -> None:
         for wid, c in ew.items():
@@ -583,79 +627,101 @@ def derive_composition(
         _consume_weapons(weapons_of[cm_id])
         _consume_abilities(abilities_of[cm_id])
 
-    def _sought_nondefault_weapon() -> int | None:
-        for wid in sorted(weapon_target):
-            if wid not in default_wids and weapon_target[wid] > 0:
-                return wid
-        return None
+    # FAZA A: przypisz posiadane modele, których PEŁNE uzbrojenie (i zdolności)
+    # mieści się w RESZCIE zapotrzebowania. Agregat = DOKŁADNIE loadout — nie
+    # dodajemy broni spoza rozpiski (np. modelu „Plazma gunner" z bronią, której
+    # oddział nie ma). Preferuj fizycznie dostępne (avail>0), potem większe
+    # pokrycie; nadwyżka ponad available dozwolona (miękki limit → proxy wariantu).
+    def _fits_residual(cm_id: int) -> bool:
+        ew = weapons_of[cm_id]
+        if not ew or not all(weapon_target.get(w, 0) >= c for w, c in ew.items()):
+            return False
+        return all(ability_target.get(aid, 0) > 0 for aid in abilities_of[cm_id])
 
-    def add_proxy(ability: int | None, weapon: int | None) -> None:
-        nonlocal assigned
-        pw = dict(default_weapons)
-        if weapon is not None and weapon not in default_wids:
-            # Podmień główną broń domyślną na poszukiwaną, zachowując pozostałe
-            # (np. lekką broń ręczną). Gdy domyślny model ma tylko jedną broń —
-            # DODAJ (nie gub ostatniej).
-            if primary_default is not None and pw.get(primary_default) and len(pw) > 1:
-                pw[primary_default] -= 1
-                if pw[primary_default] <= 0:
-                    pw.pop(primary_default, None)
-            pw[weapon] = pw.get(weapon, 0) + 1
-        abilities = [ability] if ability is not None else []
-        proxy_entries.append({
-            "id": None,
-            "weapons": {str(w): c for w, c in pw.items()},
-            "abilities": abilities,
-            "qty": 1,
-        })
-        assigned += 1
-        _consume_weapons(pw)
-        _consume_abilities(abilities)
-
-    # FAZA A: NAJPIERW przypisz posiadane modele pokrywające zapotrzebowanie —
-    # w każdej iteracji bierz najlepszy (najpierw pokrycie zdolności, potem nakład
-    # broni). Dopiero potem proxy. Inaczej „pełne" proxy budowane z domyślnego
-    # modelu zjadałyby broń, której szukają modele mające tylko JEJ CZĘŚĆ (np.
-    # target {A,B}, posiadany ma tylko B → proxy z domyślnego {A,B} zżera B i
-    # posiadany nigdy nie zostaje użyty).
-    def _ability_cover(cm_id: int) -> int:
-        return sum(1 for aid in abilities_of[cm_id] if ability_target.get(aid, 0) > 0)
+    def _coverage(cm_id: int) -> int:
+        return sum(weapons_of[cm_id].values()) + len(abilities_of[cm_id])
 
     while assigned < count:
-        best_id = None
-        best_score = (0, 0)
-        for cm in owned_models:
-            if avail[cm.id] <= 0:
-                continue
-            score = (_ability_cover(cm.id), _overlap(cm.id))
-            if score > best_score:
-                best_score = score
-                best_id = cm.id
-        if best_id is None or best_score == (0, 0):
-            break  # żaden posiadany nie pokrywa już RESZTY zapotrzebowania
-        assign_owned(best_id)
+        cands = [cm.id for cm in owned_models if _fits_residual(cm.id)]
+        if not cands:
+            break
+        assign_owned(max(cands, key=lambda cid: (avail[cid] > 0, _coverage(cid))))
 
-    # FAZA B: proxy dla RESZTY (zdolności → broń nie-podstawowa → podstawowa);
-    # posiadane są już wyczerpane dla pokrycia (Faza A).
-    for aid in list(ability_target):
-        while ability_target.get(aid, 0) > 0 and assigned < count:
-            add_proxy(ability=aid, weapon=_sought_nondefault_weapon())
-    ordered_weapons = sorted(w for w in weapon_target if w not in default_wids)
-    ordered_weapons += sorted(w for w in weapon_target if w in default_wids)
-    for wid in ordered_weapons:
-        while weapon_target.get(wid, 0) > 0 and assigned < count:
-            add_proxy(ability=None, weapon=wid)
+    # FAZA B: RESZTĘ zapotrzebowania (residual po Fazie A) rozłóż na sloty proxy,
+    # PARTYCJONUJĄC dokładnie broń i zdolności. Per KATEGORIA (wręcz/dystans):
+    # broń specjalistyczna pakowana na najmniej modeli (o `slots` domyślnych na
+    # model), broń podstawowa tworzy PEŁNE modele domyślne na pozostałych. Dzięki
+    # temu: {Grobowe:2, Podwójne:1} → {Podwójne} + {Grobowe ×2}; a układ
+    # melee+dystans → pary specjalistów i każdy model z bronią do walki wręcz
+    # (np. {Piłomiecz, Hellpistol} + {Lekka, Hellgun}×9).
+    remaining = max(count - assigned, 0)
+    if remaining > 0:
+        bucket_w: list[dict[str, int]] = [{} for _ in range(remaining)]
+        bucket_a: list[list[int]] = [[] for _ in range(remaining)]
+        slot = 0
+        for aid in sorted(ability_target):
+            for _ in range(ability_target[aid]):
+                bucket_a[slot % remaining].append(aid)
+                slot += 1
 
-    # FAZA C: dopełnij liczność pozostałymi posiadanymi (overlap 0) albo proxy.
-    while assigned < count:
-        cands = [cm.id for cm in owned_models if avail[cm.id] > 0]
-        if cands:
-            assign_owned(max(cands, key=_overlap))
+        def _cat(wid: int) -> int:
+            return 0 if weapon_is_melee.get(wid, False) else 1  # 0=wręcz, 1=dystans
+
+        def _flat(predicate) -> list[int]:
+            out: list[int] = []
+            for wid in sorted(w for w in weapon_target if predicate(w)):
+                out.extend([wid] * weapon_target[wid])
+            return out
+
+        # Sloty domyślne per kategoria (ile broni danej kategorii ma model domyślny).
+        default_slots = {0: 0, 1: 0}
+        for wid, c in default_weapons.items():
+            default_slots[_cat(wid)] += c
+
+        # Per kategoria: broń specjalistyczną upchnij na PIERWSZE `cn` modeli
+        # (cn = ceil(specjalistów / slotów) — najmniej modeli), broń podstawową
+        # rozłóż na POZOSTAŁE. Wszystkie kategorie startują od modelu 0, więc
+        # specjaliści melee+dystans parują się na tych samych (najniższych) modelach,
+        # a bazowa broń wypełnia luki kategorii (np. {Piłomiecz,Bolt}+{Lekka,Granatnik}).
+        for cat in (0, 1):
+            slots = default_slots[cat] or 1
+            spec = _flat(lambda w: w not in default_wids and _cat(w) == cat)
+            cn = min(-(-len(spec) // slots), remaining) if spec else 0
+            for i, wid in enumerate(spec):
+                b = bucket_w[i % max(cn, 1)]
+                b[str(wid)] = b.get(str(wid), 0) + 1
+            base_models = list(range(cn, remaining)) or list(range(remaining))
+            base = _flat(lambda w: w in default_wids and _cat(w) == cat)
+            for j, wid in enumerate(base):
+                b = bucket_w[base_models[j % len(base_models)]]
+                b[str(wid)] = b.get(str(wid), 0) + 1
+
+        for wdict, alist in zip(bucket_w, bucket_a):
+            proxy_entries.append({
+                "id": None,
+                "weapons": wdict,
+                "abilities": sorted(set(alist)),
+                "qty": 1,
+            })
+
+    selection: list[dict[str, Any]] = []
+    for cid, q in sel.items():
+        if q <= 0:
+            continue
+        entry: dict[str, Any] = {"id": cid, "qty": q}
+        mounted = mount_of.get(cid)
+        if mounted:  # magnetyzacja dobrana do loadoutu (per-oddział)
+            entry["mounted"] = dict(mounted)
+        selection.append(entry)
+    # Scal identyczne proxy (ten sam wariant) w jeden wpis z qty.
+    merged: dict[tuple, dict[str, Any]] = {}
+    for p in proxy_entries:
+        key = (tuple(sorted(p["weapons"].items())), tuple(p["abilities"]))
+        if key in merged:
+            merged[key]["qty"] += p["qty"]
         else:
-            add_proxy(ability=None, weapon=None)
-
-    selection: list[dict[str, Any]] = [{"id": cid, "qty": q} for cid, q in sel.items() if q > 0]
-    selection.extend(proxy_entries)
+            merged[key] = dict(p)
+    selection.extend(merged.values())
     return selection
 
 
@@ -668,6 +734,7 @@ def composition_groups(
     ability_names: dict[str, str],
     weapon_cost_map: dict[int, float],
     ability_cost_map: dict[int, float],
+    unit_name: str = "",
 ) -> list[dict[str, Any]]:
     """Grupuje kompozycję (`parse_selection`) po WARIANCIE (broń + zdolności) do
     widoku „Modele" w Stanie Bitewnym; sortuje **rosnąco po koszcie wariantu**.
@@ -686,11 +753,13 @@ def composition_groups(
         if qty <= 0:
             continue
         cm_id = _coerce_int(entry.get("id")) if entry.get("id") is not None else None
+        entry_label = ""
         if cm_id is not None:
             cm = owned_by_id.get(cm_id)
             if cm is None:
                 continue  # obcy/nieznany model — pomijamy (izolacja właściciela)
             weapons = collection_model_effective_weapons(cm, entry.get("mounted"))
+            entry_label = (getattr(cm, "label", "") or "").strip()
             # Pełne klucze (z wartością) rozróżniają warianty parametryzowane aur;
             # `abilities` (gołe id) służą kosztowi i mapowaniu przekreśleń (#4).
             display_keys = sorted(set(_model_ability_keys(cm)))
@@ -720,6 +789,7 @@ def composition_groups(
             cost += sum(ability_cost_map.get(a, 0.0) for a in bare_ids)
             grp = {
                 "key": key,
+                "name": entry_label,  # etykieta modelu z Kolekcji (fallback niżej)
                 "weapons": {str(w): c for w, c in weapons.items()},
                 "abilities": bare_ids,
                 "summary": summary,
@@ -727,5 +797,11 @@ def composition_groups(
                 "cost": round(float(cost), 2),
             }
             groups[key] = grp
+        elif entry_label and not grp["name"]:
+            grp["name"] = entry_label  # pierwsza niepusta etykieta wariantu
         grp["count"] += qty
-    return sorted(groups.values(), key=lambda g: (g["cost"], g["summary"]))
+    result = sorted(groups.values(), key=lambda g: (g["cost"], g["summary"]))
+    for g in result:
+        if not g["name"]:
+            g["name"] = unit_name  # fallback: nazwa oddziału (np. proxy/bez etykiety)
+    return result

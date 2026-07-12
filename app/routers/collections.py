@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
@@ -508,3 +508,48 @@ async def delete_collection_model(
     if want_json:
         return JSONResponse({"ok": True})
     return RedirectResponse(url=f"/collections/units/{unit_id}", status_code=303)
+
+
+@router.post("/units/{unit_id}/models/reorder")
+async def reorder_collection_models(
+    unit_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user()),
+):
+    order = payload.get("order") if isinstance(payload, dict) else None
+    if not isinstance(order, list):
+        raise HTTPException(status_code=400, detail="Nieprawidłowa kolejność")
+
+    # Modele bieżącego usera dla tego oddziału (izolacja właściciela).
+    rows = (
+        db.execute(
+            select(models.CollectionModel).where(
+                models.CollectionModel.owner_id == current_user.id,
+                models.CollectionModel.unit_id == unit_id,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    by_id = {m.id: m for m in rows}
+    pos = 0
+    seen: set[int] = set()
+    for raw in order:
+        try:
+            mid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        m = by_id.get(mid)
+        if m is None or mid in seen:
+            continue
+        m.position = pos
+        seen.add(mid)
+        pos += 1
+    # Modele spoza listy (spójność) — na koniec, zachowując dotychczasową kolejność.
+    for m in sorted(rows, key=lambda x: (x.position, x.id)):
+        if m.id not in seen:
+            m.position = pos
+            pos += 1
+    db.commit()
+    return JSONResponse({"ok": True})

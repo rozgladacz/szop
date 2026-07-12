@@ -329,6 +329,7 @@ def roster_battle_state(
                 collection_match.parse_selection(ru.composed_models_json),
                 owned_by_unit.get(unit.id, {}),
                 weapon_names, ability_names, weapon_cost_map, ability_cost_map,
+                unit_name=unit.name,
             )
 
     roster_groups = group_roster_items(roster_items, roster.army)

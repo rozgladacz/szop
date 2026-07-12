@@ -377,31 +377,31 @@ def test_used_in_other_units_sums_owned_excluding_self_and_proxies() -> None:
     assert used == {5: 2, 6: 1}
 
 
-def test_derive_composition_per_model_owned_plus_proxy() -> None:
+def test_derive_composition_owned_overflow_not_proxy() -> None:
     unit = _compose_unit()
     owned = [_owned_model(1, {"5": 1})]
-    # per_model {5:1} × count 5 = total {5:5}; posiadane available 3 → 3 owned + 2 proxy
+    # per_model {5:1} × count 5 = total {5:5}; posiadany wariant PASUJE — miękki
+    # limit: nadwyżka ponad available 3 to nadal ten model (qty 5), NIE proxy.
     selection = cm.derive_composition(
         unit, {"weapons": {"5": 1}, "mode": "per_model"}, 5, owned, {1: 3}
     )
-    assert sum(int(e["qty"]) for e in selection) == 5
-    owned_entries = [e for e in selection if e.get("id") == 1]
-    proxy_entries = [e for e in selection if e.get("id") is None]
-    assert owned_entries == [{"id": 1, "qty": 3}]
-    assert sum(int(e["qty"]) for e in proxy_entries) == 2
-    assert all(e["weapons"] == {"5": 1} for e in proxy_entries)
+    assert selection == [{"id": 1, "qty": 5}]
 
 
-def test_derive_composition_uses_owned_not_proxy_clones() -> None:
-    # Posiadany model {5,7} nie jest podzbiorem targetu {5} (ma dodatkową broń 7),
-    # ale jest dostępny — derywacja MA go użyć, a nie tworzyć proxy-klona z bronią 5.
+def test_derive_composition_owned_with_extra_weapon_not_used() -> None:
+    # Filozofia: agregat = DOKŁADNIE loadout. Posiadany {5,7} ma broń 7 spoza
+    # rozpiski {5} → NIE używany (nie dodajemy 7 do sumy), tylko proxy odtwarza {5}.
     unit = _compose_unit()
     owned = [_owned_model(1, {"5": 1, "7": 1})]
     selection = cm.derive_composition(
         unit, {"weapons": {"5": 1}, "mode": "per_model"}, 3, owned, {1: 5}
     )
-    assert all(e.get("id") is not None for e in selection), "nie powinno być proxy gdy są dostępne modele"
-    assert sum(int(e["qty"]) for e in selection if e.get("id") == 1) == 3
+    assert all(e.get("id") is None for e in selection)
+    total: dict[str, int] = {}
+    for e in selection:
+        for w, c in e["weapons"].items():
+            total[w] = total.get(w, 0) + c * int(e["qty"])
+    assert total == {"5": 3}  # dokładnie loadout ×3, bez 7
 
 
 def test_derive_composition_owns_enough_no_proxies() -> None:
@@ -436,11 +436,9 @@ def test_compose_loadout_proxy_carries_abilities() -> None:
     assert loadout["active"] == {"50": 2}  # 50 to active w _compose_unit
 
 
-def test_derive_composition_owned_not_starved_by_proxy() -> None:
-    # Bug 2d: target broni domyślnej {182:1, 275:2}; posiadany model ma tylko 275
-    # (+ inną broń 209). „Pełne" proxy budowane z domyślnego modelu {182,275} NIE
-    # mogą zjeść 275 tak, by posiadany nigdy nie został użyty — Faza A (posiadane
-    # najpierw) musi go przypisać.
+def test_derive_composition_owned_partial_variant_not_used() -> None:
+    # Posiadany {275,209} ma broń 209 SPOZA rozpiski {182,275} → NIE używany
+    # (agregat = dokładnie loadout, bez 209); proxy odtwarza {182,275}×count.
     unit = SimpleNamespace(
         default_weapon_id=182,
         default_weapon_loadout=[(SimpleNamespace(id=182), 1), (SimpleNamespace(id=275), 2)],
@@ -449,8 +447,87 @@ def test_derive_composition_owned_not_starved_by_proxy() -> None:
     selection = cm.derive_composition(
         unit, {"weapons": {"182": 1, "275": 2}, "mode": "per_model"}, 3, owned, {3: 1}
     )
-    assert any(e.get("id") == 3 for e in selection), selection
-    assert sum(int(e["qty"]) for e in selection) == 3
+    assert all(e.get("id") is None for e in selection)  # model nie użyty (209 spoza)
+    total: dict[str, int] = {}
+    for e in selection:
+        for w, c in e["weapons"].items():
+            total[w] = total.get(w, 0) + c * int(e["qty"])
+    assert total == {"182": 3, "275": 6}  # dokładnie {182:1,275:2}×3, bez 209
+
+
+def test_derive_composition_proxy_partitions_no_base_inflation() -> None:
+    # Bug (roster 21/unit 270): dodanie broni specjalistycznej klonowało pełny
+    # domyślny model → inflacja broni podstawowej (2 Grobowe + 1 Podwójne na 2
+    # modele dawało 4 Grobowe). Fix: partycjonuj residual dokładnie.
+    # obie bronie to WRĘCZ (ostrza) — metadane zasięgu, by kategoryzacja była poprawna
+    unit = SimpleNamespace(
+        weapon_links=[
+            SimpleNamespace(weapon_id=1, weapon=SimpleNamespace(effective_range="melee")),
+            SimpleNamespace(weapon_id=2, weapon=SimpleNamespace(effective_range="melee")),
+        ],
+        default_weapon_id=1,
+        default_weapon_loadout=[(SimpleNamespace(id=1), 2)],  # domyślnie 2× Grobowe
+    )
+    selection = cm.derive_composition(
+        unit, {"weapons": {"1": 2, "2": 1}, "mode": "total"}, 2, [], {}
+    )
+    assert all(e.get("id") is None for e in selection)
+    total: dict[str, int] = {}
+    for e in selection:
+        for w, c in e["weapons"].items():
+            total[w] = total.get(w, 0) + c * int(e["qty"])
+    assert total == {"1": 2, "2": 1}, total  # dokładny agregat, NIE 4× Grobowe
+    assert sum(int(e["qty"]) for e in selection) == 2
+    # ideał: model specjalistyczny (2=Podwójne) osobno, model podstawowy 2× Grobowe (1)
+    special = [e for e in selection if "2" in e["weapons"]]
+    base = [e for e in selection if "2" not in e["weapons"]]
+    assert len(special) == 1 and special[0]["weapons"] == {"2": 1}
+    assert len(base) == 1 and base[0]["weapons"] == {"1": 2}
+
+
+def test_derive_composition_proxy_pairs_melee_ranged() -> None:
+    # roster 16: wręcz {Lekka(1):9, Piłomiecz(2):1} + dystans {Hellgun(3):9,
+    # Hellpistol(4):1}, 10 modeli. Ideał: 9× {Lekka, Hellgun} + 1× {Piłomiecz,
+    # Hellpistol} — każdy model z bronią wręcz, specjaliści sparowani.
+    def _w(wid: int, rng: str) -> SimpleNamespace:
+        return SimpleNamespace(weapon_id=wid, weapon=SimpleNamespace(effective_range=rng))
+    unit = SimpleNamespace(
+        weapon_links=[_w(1, "melee"), _w(2, "melee"), _w(3, "24"), _w(4, "12")],
+        default_weapon_id=1,
+        default_weapon_loadout=[(SimpleNamespace(id=1), 1), (SimpleNamespace(id=3), 1)],
+    )
+    selection = cm.derive_composition(
+        unit, {"weapons": {"1": 9, "2": 1, "3": 9, "4": 1}, "mode": "total"}, 10, [], {}
+    )
+    total: dict[str, int] = {}
+    for e in selection:
+        for w, c in e["weapons"].items():
+            total[w] = total.get(w, 0) + c * int(e["qty"])
+    assert total == {"1": 9, "2": 1, "3": 9, "4": 1}, total
+    assert sum(int(e["qty"]) for e in selection) == 10
+    special = [e for e in selection if "2" in e["weapons"]]
+    assert len(special) == 1 and special[0]["weapons"] == {"2": 1, "4": 1} and int(special[0]["qty"]) == 1
+    base = [e for e in selection if "1" in e["weapons"]]
+    assert len(base) == 1 and base[0]["weapons"] == {"1": 1, "3": 1} and int(base[0]["qty"]) == 9
+
+
+def test_derive_composition_picks_matching_mount() -> None:
+    # Model magnetyzowany (Sentinel): slot z opcjami {Miotacz(7), Działo Plazmowe(8)},
+    # ZAPISANY=8. Loadout ma 7 → derywacja przypisuje model z mounted slot=7 (nie 8).
+    slot = SimpleNamespace(
+        id=10, name="Wieżyczka",
+        option_weapon_ids_json=json.dumps([7, 8]), selected_weapon_id=8,
+    )
+    model = SimpleNamespace(
+        id=1, label="Sentinel", loadout_json=json.dumps({"weapons": {"5": 1}}), slots=[slot],
+    )
+    unit = SimpleNamespace(
+        default_weapon_id=5, default_weapon_loadout=[(SimpleNamespace(id=5), 1)],
+    )
+    selection = cm.derive_composition(
+        unit, {"weapons": {"5": 1, "7": 1}, "mode": "total"}, 1, [model], {1: 1}
+    )
+    assert selection == [{"id": 1, "qty": 1, "mounted": {"10": 7}}]
 
 
 def test_derive_composition_matches_model_with_ability() -> None:

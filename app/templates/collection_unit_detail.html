@@ -14,7 +14,7 @@
     <div class="card">
       <div class="card-body">
         <h5 class="card-title">Posiadane modele</h5>
-        <div id="collection-cards-list">
+        <div id="collection-cards-list" data-collection-list data-unit-id="{{ unit.id }}">
           {% if cards %}
             {% for card in cards %}
             <div class="card mb-2 collection-card" id="collection-card-{{ card.id }}"
@@ -35,6 +35,7 @@
                     {% endif %}
                   </div>
                   <div class="d-flex gap-1 ms-2 flex-shrink-0">
+                    <span class="btn btn-outline-secondary btn-sm collection-drag-handle" title="Przeciągnij, aby zmienić kolejność" style="cursor: grab;">⠿</span>
                     <button class="btn btn-outline-secondary btn-sm" type="button"
                             data-edit-card="{{ card.id }}" title="Edytuj">✏️</button>
                     <form method="post" action="/collections/models/{{ card.id }}/delete"
@@ -415,6 +416,33 @@
       ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
   }
   function escAttr(s) { return escHtml(s); }
+}());
+</script>
+<script src="/static/vendor/sortable.min.js"></script>
+<script>
+(function () {
+  const list = document.querySelector('[data-collection-list]');
+  if (!list || typeof Sortable === 'undefined') return;
+  const unitId = list.dataset.unitId;
+  Sortable.create(list, {
+    handle: '.collection-drag-handle',
+    animation: 150,
+    draggable: '.collection-card',
+    ghostClass: 'collection-card-ghost',
+    onEnd(evt) {
+      if (evt.oldIndex === evt.newIndex) return;
+      const order = Array.from(list.querySelectorAll('.collection-card'))
+        .map((el) => parseInt(el.dataset.cardId, 10))
+        .filter((id) => id);
+      if (!order.length) return;
+      fetch(`/collections/units/${unitId}/models/reorder`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ order }),
+      }).catch(() => { location.reload(); });
+    },
+  });
 }());
 </script>
 {% endblock %}

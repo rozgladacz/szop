@@ -127,6 +127,8 @@
       primaryOverrides: {},
       struckAbilities: [],
       eliminated: {},
+      withdrawn: {},
+      eliminationMode: false,
     };
   }
 
@@ -173,31 +175,93 @@
     return auto;
   }
 
-  // Przelicz activeModels + us.weapons DOKŁADNIE z przeżywających grup (broń
-  // usuwana wg konkretnego wariantu, nie proporcjonalnie). Zwraca true dla kart
-  // komponowanych.
+  // Znormalizowany licznik z mapy stanu (0..cap) — wspólny dla eliminated/withdrawn.
+  function clampCount(store, key, cap) {
+    return Math.max(0, Math.min(parseInt((store || {})[key], 10) || 0, cap));
+  }
+
+  // Wspólna mutacja licznika wariantu (grp) — tryb eliminacji vs wycofanie.
+  // [−]: eliminuj (do count) lub wycofaj (do available); [+]: cofnij o 1. Zakłada
+  // zainicjowane us.eliminated/us.withdrawn. Używane przez licznik globalny i per-wariant.
+  function applyModelMinus(us, grp) {
+    const count = parseInt(grp.count, 10) || 0;
+    if (us.eliminationMode) {
+      us.eliminated[grp.key] = Math.min((us.eliminated[grp.key] || 0) + 1, count);
+    } else {
+      const available = Math.max(count - (us.eliminated[grp.key] || 0), 0);
+      us.withdrawn[grp.key] = Math.min((us.withdrawn[grp.key] || 0) + 1, available);
+    }
+  }
+  function applyModelPlus(us, grp) {
+    const store = us.eliminationMode ? us.eliminated : us.withdrawn;
+    const cur = store[grp.key] || 0;
+    if (cur > 0) store[grp.key] = cur - 1;
+  }
+
+  // Model liczebności (karty komponowane): dla każdej grupy wariantu
+  //   dostępna (available) = count − eliminated  (eliminacja [x] — trwała),
+  //   aktualna (current)    = available − withdrawn  (wycofanie [−] — odwracalne).
+  // Broń liczona z AKTUALNYCH (na polu) modeli. Zwraca true dla kart komponowanych.
   function recomputeComposed(card, us) {
     const groups = parseGroupsCached(card);
     if (!groups.length) return false;
     if (!us.eliminated || typeof us.eliminated !== "object") us.eliminated = {};
-    const initialModels = parseInt(card.dataset.initialModels || "0", 10) || 0;
-    let totalElim = 0;
+    if (!us.withdrawn || typeof us.withdrawn !== "object") us.withdrawn = {};
+    let totalCurrent = 0;
     const weapons = {};
     groups.forEach((g) => {
       const count = parseInt(g.count, 10) || 0;
-      let elim = parseInt(us.eliminated[g.key], 10) || 0;
-      elim = Math.max(0, Math.min(elim, count));
+      const elim = clampCount(us.eliminated, g.key, count);
       us.eliminated[g.key] = elim;
-      const alive = count - elim;
-      totalElim += elim;
+      const available = count - elim;
+      const withdrawn = clampCount(us.withdrawn, g.key, available);
+      us.withdrawn[g.key] = withdrawn;
+      const current = available - withdrawn;
+      totalCurrent += current;
       Object.keys(g.weapons || {}).forEach((wid) => {
         const key = "w" + wid;
-        weapons[key] = (weapons[key] || 0) + alive * (parseInt(g.weapons[wid], 10) || 0);
+        weapons[key] = (weapons[key] || 0) + current * (parseInt(g.weapons[wid], 10) || 0);
       });
     });
-    us.activeModels = Math.max(0, Math.min(initialModels - totalElim, initialModels));
+    us.activeModels = totalCurrent;
     us.weapons = weapons;
     return true;
+  }
+
+  // Σ dostępnych (żywych = count − eliminated) dla karty komponowanej; null dla klasycznej.
+  function composedAvailable(card, us) {
+    const groups = parseGroupsCached(card);
+    if (!groups.length) return null;
+    const elim = (us && us.eliminated) || {};
+    let total = 0;
+    groups.forEach((g) => {
+      const count = parseInt(g.count, 10) || 0;
+      total += count - clampCount(elim, g.key, count);
+    });
+    return total;
+  }
+
+  // Żywe modele (do progu zdrowia): dostępne dla komponowanych, activeModels dla klasycznych.
+  function unitAliveModels(card, us) {
+    const avail = composedAvailable(card, us);
+    return avail != null ? avail : (us.activeModels || 0);
+  }
+
+  // Próg krytyczny grupy (parent + bohaterowie): (Σ żywe×wytrz − rany)*2 ≤ Σ początkowe×wytrz.
+  function groupIsCritical(state, groupCard) {
+    let initialHealth = 0;
+    let aliveHealth = 0;
+    groupCard.querySelectorAll("[data-battle-unit]").forEach((card) => {
+      const us = state.units[card.dataset.rosterUnitId];
+      if (!us) return;
+      const t = parseInt(card.dataset.toughness || "1", 10) || 1;
+      const initial = parseInt(card.dataset.initialModels || "0", 10) || 0;
+      initialHealth += initial * t;
+      aliveHealth += unitAliveModels(card, us) * t;
+    });
+    const gs = state.groups[groupCard.dataset.groupId];
+    const wounds = (gs && parseInt(gs.woundsRemaining, 10)) || 0;
+    return initialHealth > 0 && (aliveHealth - wounds) * 2 <= initialHealth;
   }
 
   function groupInitialState() {
@@ -298,8 +362,17 @@
     const weapons = parseWeaponsCached(card);
 
     // Model counter (per-unit). Heroes always show counter even at count=1.
+    // Karty komponowane: aktualna / dostępna / początkowa; klasyczne: aktualna / początkowa.
     const modelsValue = card.querySelector("[data-models-value]");
     if (modelsValue) modelsValue.textContent = unitState.activeModels;
+    const availWrap = card.querySelector("[data-models-available-wrap]");
+    const availVal = card.querySelector("[data-models-available]");
+    const available = composedAvailable(card, unitState);
+    const initialModels = parseInt(card.dataset.initialModels || "0", 10) || 0;
+    // Środkowa wartość (dostępna) tylko gdy są modele wyeliminowane (available < initial).
+    const showAvail = available != null && available < initialModels;
+    if (availWrap) availWrap.classList.toggle("d-none", !showAvail);
+    if (availVal && showAvail) availVal.textContent = available;
 
     // Mode toolbar active state (shared mode across the group)
     const toolbar = card.querySelector("[data-mode-toolbar]");
@@ -318,51 +391,86 @@
     list.innerHTML = "";
     summary.innerHTML = "";
 
-    // 2c: tryb „Modele" — grupy wariantów z eliminacją (dla kart komponowanych).
+    // Tryb „Modele" — grupy wariantów (karty komponowane). Wiersz: [−] licznik [+]
+    // + nazwa (pogrubiona) i wyposażenie. Checkbox „Eliminacja" (na dole) przełącza
+    // [−]/[+] między wycofaniem a TRWAŁĄ eliminacją (chroni przed misclick).
+    // Licznik: aktualna/dostępna/początkowa gdy są eliminowane, inaczej aktualna/początkowa.
     const modelGroups = parseGroupsCached(card);
     if (groupState.mode === "models" && modelGroups.length) {
       summary.classList.add("d-none");
       if (!unitState.eliminated || typeof unitState.eliminated !== "object") unitState.eliminated = {};
+      if (!unitState.withdrawn || typeof unitState.withdrawn !== "object") unitState.withdrawn = {};
+      const elimMode = !!unitState.eliminationMode;
       modelGroups.forEach((g) => {
         const count = parseInt(g.count, 10) || 0;
-        const elim = Math.max(0, Math.min(parseInt(unitState.eliminated[g.key], 10) || 0, count));
-        const alive = count - elim;
+        const elim = clampCount(unitState.eliminated, g.key, count);
+        const available = count - elim;
+        const withdrawn = clampCount(unitState.withdrawn, g.key, available);
+        const current = available - withdrawn;
         const row = document.createElement("div");
         row.className = "weapon-line" + (elim > 0 ? " model-group-depleted" : "");
 
         const wrap = document.createElement("div");
         wrap.className = "weapon-label-wrap d-flex align-items-center gap-1";
 
-        const dec = document.createElement("button");
-        dec.type = "button";
-        dec.className = "btn btn-outline-secondary btn-sm counter-btn";
-        dec.textContent = "−";
-        dec.dataset.modelEliminate = g.key;
+        const mkBtn = (cls, txt, title, dataKey) => {
+          const b = document.createElement("button");
+          b.type = "button";
+          b.className = "btn " + cls + " btn-sm counter-btn";
+          b.textContent = txt;
+          b.title = title;
+          b.dataset[dataKey] = g.key;
+          return b;
+        };
+        const dec = mkBtn(elimMode ? "btn-outline-danger" : "btn-outline-secondary",
+          elimMode ? "✕" : "−", elimMode ? "Wyeliminuj (trwale)" : "Wycofaj", "modelMinus");
+        const inc = mkBtn("btn-outline-secondary",
+          elimMode ? "↺" : "+", elimMode ? "Cofnij eliminację" : "Przywróć", "modelPlus");
 
         const valueSpan = document.createElement("span");
         valueSpan.className = "counter-value";
-        valueSpan.textContent = alive;
+        valueSpan.textContent = current;
 
         const totalSpan = document.createElement("span");
         totalSpan.className = "text-muted small";
-        totalSpan.textContent = "/ " + count;
+        totalSpan.textContent = elim > 0 ? ("/ " + available + " / " + count) : ("/ " + count);
 
-        const inc = document.createElement("button");
-        inc.type = "button";
-        inc.className = "btn btn-outline-secondary btn-sm counter-btn";
-        inc.textContent = "+";
-        inc.dataset.modelRestore = g.key;
+        const counter = counterGroup(dec, valueSpan, totalSpan, inc);
 
-        const labelText = document.createElement("span");
-        labelText.className = "weapon-label ms-2";
-        labelText.textContent = g.summary || "—";
+        const label = document.createElement("span");
+        label.className = "weapon-label ms-2";
+        const nameEl = document.createElement("div");
+        const strong = document.createElement("strong");
+        strong.textContent = g.name || "—";
+        nameEl.appendChild(strong);
+        const eq = document.createElement("div");
+        eq.className = "small fw-normal";
+        eq.textContent = g.summary || "—";
+        label.appendChild(nameEl);
+        label.appendChild(eq);
 
-        // Licznik trzymamy razem (nowrap) — nie rozbija się, gdy etykieta wieloliniowa.
-        wrap.appendChild(counterGroup(dec, valueSpan, totalSpan, inc));
-        wrap.appendChild(labelText);
+        wrap.appendChild(counter);
+        wrap.appendChild(label);
         row.appendChild(wrap);
         list.appendChild(row);
       });
+
+      // Tryb eliminacji (checkbox): gdy zaznaczony [−] eliminuje trwale, [+] cofa.
+      const modeRow = document.createElement("div");
+      modeRow.className = "form-check form-switch small mt-1";
+      const cb = document.createElement("input");
+      cb.className = "form-check-input";
+      cb.type = "checkbox";
+      cb.checked = elimMode;
+      cb.id = "elim-mode-" + card.dataset.rosterUnitId;
+      cb.dataset.elimModeToggle = "1";
+      const cbLabel = document.createElement("label");
+      cbLabel.className = "form-check-label";
+      cbLabel.setAttribute("for", cb.id);
+      cbLabel.textContent = "Eliminacja";
+      modeRow.appendChild(cb);
+      modeRow.appendChild(cbLabel);
+      list.appendChild(modeRow);
       return;
     }
 
@@ -631,6 +739,8 @@
           primaryOverrides: (stored.primaryOverrides && typeof stored.primaryOverrides === "object") ? stored.primaryOverrides : {},
           struckAbilities: Array.isArray(stored.struckAbilities) ? stored.struckAbilities : [],
           eliminated: (stored.eliminated && typeof stored.eliminated === "object") ? stored.eliminated : {},
+          withdrawn: (stored.withdrawn && typeof stored.withdrawn === "object") ? stored.withdrawn : {},
+          eliminationMode: !!stored.eliminationMode,
         };
         Object.keys(init.weapons).forEach((k) => {
           migrated.units[uid].weapons[k] = typeof stored.weapons?.[k] === "number" ? stored.weapons[k] : init.weapons[k];
@@ -708,7 +818,20 @@
         renderUnit(card, us, gs);
         applyAbilityStates(card, us);
       });
-      groupCards.forEach((g) => renderGroup(state, g));
+      // Próg krytyczny (≤50% zdrowia grupy): etykiety Rany:/Modele: na czerwono.
+      // Licz raz per grupa (Rany: od razu), potem etykiety Modele: per oddział.
+      const criticalByGid = {};
+      groupCards.forEach((g) => {
+        const crit = groupIsCritical(state, g);
+        criticalByGid[g.dataset.groupId] = crit;
+        renderGroup(state, g);
+        const woundsLabel = g.querySelector("[data-wounds-label]");
+        if (woundsLabel) woundsLabel.classList.toggle("label-critical", crit);
+      });
+      cards.forEach((card) => {
+        const label = card.querySelector("[data-models-label]");
+        if (label) label.classList.toggle("label-critical", !!criticalByGid[card.dataset.groupId || card.dataset.rosterUnitId]);
+      });
       reorderDefeated(state);
       updateSummaryBadge(state, groupCards);
       updateRoundDisplay(state);
@@ -781,22 +904,34 @@
           return;
         }
 
+        // Przełącznik trybu eliminacji (checkbox, nie button) — przed guardem button.
+        const elimToggle = ev.target.closest("[data-elim-mode-toggle]");
+        if (elimToggle) {
+          us.eliminationMode = !!elimToggle.checked;
+          commit();
+          return;
+        }
+
         const target = ev.target.closest("button");
         if (!target) return;
 
+        // Komponowany licznik ±: w trybie eliminacji [−] eliminuje / [+] cofa
+        // eliminację; inaczej [−] wycofuje / [+] przywraca. Najtańsza grupa.
+        const ensureModelState = () => {
+          if (!us.eliminated || typeof us.eliminated !== "object") us.eliminated = {};
+          if (!us.withdrawn || typeof us.withdrawn !== "object") us.withdrawn = {};
+        };
         if (target.matches("[data-models-decrement]")) {
           const composedGroups = parseGroupsCached(card);
           if (composedGroups.length) {
-            // Komponowany: zdejmij NAJTAŃSZY żywy model (grupy posortowane po koszcie).
-            if (!us.eliminated || typeof us.eliminated !== "object") us.eliminated = {};
-            const grp = composedGroups.find(
-              (x) => ((parseInt(x.count, 10) || 0) - (us.eliminated[x.key] || 0)) > 0
-            );
-            if (grp) {
-              us.eliminated[grp.key] = (us.eliminated[grp.key] || 0) + 1;
-              recomputeComposed(card, us);
-              commit();
-            }
+            ensureModelState();
+            // Najtańsza grupa z „miejscem" na operację (available>0 dla eliminacji,
+            // current>0 dla wycofania); mutacja przez wspólny applyModelMinus.
+            const grp = composedGroups.find((x) => {
+              const avail = (parseInt(x.count, 10) || 0) - (us.eliminated[x.key] || 0);
+              return us.eliminationMode ? avail > 0 : avail - (us.withdrawn[x.key] || 0) > 0;
+            });
+            if (grp) { applyModelMinus(us, grp); recomputeComposed(card, us); commit(); }
             return;
           }
           const newCount = clamp(us.activeModels - 1, 0, initialModels);
@@ -813,14 +948,10 @@
         if (target.matches("[data-models-increment]")) {
           const composedGroups = parseGroupsCached(card);
           if (composedGroups.length) {
-            // Komponowany: przywróć NAJTAŃSZY wyeliminowany model.
-            if (!us.eliminated || typeof us.eliminated !== "object") us.eliminated = {};
-            const grp = composedGroups.find((x) => (us.eliminated[x.key] || 0) > 0);
-            if (grp) {
-              us.eliminated[grp.key] -= 1;
-              recomputeComposed(card, us);
-              commit();
-            }
+            ensureModelState();
+            const store = us.eliminationMode ? us.eliminated : us.withdrawn;
+            const grp = composedGroups.find((x) => (store[x.key] || 0) > 0);
+            if (grp) { applyModelPlus(us, grp); recomputeComposed(card, us); commit(); }
             return;
           }
           const newCount = clamp(us.activeModels + 1, 0, initialModels);
@@ -834,28 +965,20 @@
           return;
         }
 
-        // 2c: eliminacja/przywrócenie konkretnego wariantu (tryb Modele).
-        const elimKey = target.dataset.modelEliminate;
-        if (elimKey) {
-          if (!us.eliminated || typeof us.eliminated !== "object") us.eliminated = {};
-          const grp = parseGroupsCached(card).find((x) => x.key === elimKey);
-          if (grp) {
-            const cur = us.eliminated[elimKey] || 0;
-            us.eliminated[elimKey] = Math.min(cur + 1, parseInt(grp.count, 10) || 0);
-            recomputeComposed(card, us);
-            commit();
-          }
+        // Tryb Modele — per wariant: [−] (eliminuj/wycofaj), [+] (cofnij/przywróć),
+        // zależnie od trybu eliminacji (us.eliminationMode).
+        const minusKey = target.dataset.modelMinus;
+        if (minusKey) {
+          ensureModelState();
+          const grp = parseGroupsCached(card).find((x) => x.key === minusKey);
+          if (grp) { applyModelMinus(us, grp); recomputeComposed(card, us); commit(); }
           return;
         }
-        const restKey = target.dataset.modelRestore;
-        if (restKey) {
-          if (!us.eliminated || typeof us.eliminated !== "object") us.eliminated = {};
-          const cur = us.eliminated[restKey] || 0;
-          if (cur > 0) {
-            us.eliminated[restKey] = cur - 1;
-            recomputeComposed(card, us);
-            commit();
-          }
+        const plusKey = target.dataset.modelPlus;
+        if (plusKey) {
+          ensureModelState();
+          const grp = parseGroupsCached(card).find((x) => x.key === plusKey);
+          if (grp) { applyModelPlus(us, grp); recomputeComposed(card, us); commit(); }
           return;
         }
 
