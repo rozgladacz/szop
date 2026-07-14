@@ -135,7 +135,21 @@ def _parse_form_multi(form) -> dict[str, Any]:
     return result
 
 
-def _parse_slots(form_data: dict[str, Any], valid_weapon_ids: set[int]) -> list[dict]:
+def _parse_slots(
+    form_data: dict[str, Any],
+    valid_weapon_ids: set[int],
+    valid_ability_keys: set[str] | None = None,
+) -> list[dict]:
+    """Parsuje sloty magnetyzacji. Slot może oferować broń i/lub zdolności; pole
+    „zamontowana" (``slot_selected_{idx}``) używa prefiksu ``w:<id>`` (broń) lub
+    ``a:<klucz>`` (zdolność). Slot montuje broń XOR zdolność."""
+    valid_ability_keys = valid_ability_keys or set()
+
+    def _as_list(raw: Any) -> list:
+        if isinstance(raw, list):
+            return raw
+        return [raw] if raw else []
+
     slots = []
     idx = 0
     while True:
@@ -145,15 +159,8 @@ def _parse_slots(form_data: dict[str, Any], valid_weapon_ids: set[int]) -> list[
         if not name:
             idx += 1
             continue
-        raw_options = form_data.get(f"slot_options_{idx}", "")
-        if isinstance(raw_options, list):
-            option_ids = raw_options
-        elif raw_options:
-            option_ids = [raw_options]
-        else:
-            option_ids = []
         valid_opts = []
-        for o in option_ids:
+        for o in _as_list(form_data.get(f"slot_options_{idx}", "")):
             try:
                 oi = int(o)
             except (ValueError, TypeError):
@@ -161,21 +168,59 @@ def _parse_slots(form_data: dict[str, Any], valid_weapon_ids: set[int]) -> list[
             if oi in valid_weapon_ids:
                 valid_opts.append(oi)
 
-        raw_selected = form_data.get(f"slot_selected_{idx}", "")
-        try:
-            selected_id = int(raw_selected) if raw_selected else None
-        except (ValueError, TypeError):
-            selected_id = None
-        if selected_id is not None and selected_id not in valid_opts:
-            selected_id = None
+        valid_ability_opts = [
+            str(k) for k in _as_list(form_data.get(f"slot_ability_options_{idx}", ""))
+            if str(k) in valid_ability_keys
+        ]
+
+        raw_selected = str(form_data.get(f"slot_selected_{idx}", "") or "")
+        selected_id: int | None = None
+        selected_ability: str | None = None
+        if raw_selected.startswith("a:"):
+            key = raw_selected[2:]
+            if key in valid_ability_opts:
+                selected_ability = key
+        else:
+            token = raw_selected[2:] if raw_selected.startswith("w:") else raw_selected
+            try:
+                sid = int(token) if token else None
+            except (ValueError, TypeError):
+                sid = None
+            if sid is not None and sid in valid_opts:
+                selected_id = sid
 
         slots.append({
             "name": name,
             "option_weapon_ids": valid_opts,
             "selected_weapon_id": selected_id,
+            "option_ability_keys": valid_ability_opts,
+            "selected_ability_key": selected_ability,
         })
         idx += 1
     return slots
+
+
+def _persist_slots(
+    db: Session,
+    collection_model_id: int,
+    form_multi: dict[str, Any],
+    valid_weapon_ids: set[int],
+    valid_ability_keys: set[str],
+) -> None:
+    """Zapisuje sloty magnetyzacji z formularza (wspólny tor add/update). Nowe
+    kolumny slotu dokłada się TU raz — nie w dwóch endpointach osobno."""
+    if not form_multi.get("magnetyzacja"):
+        return
+    for i, slot in enumerate(_parse_slots(form_multi, valid_weapon_ids, valid_ability_keys)):
+        db.add(models.CollectionModelSlot(
+            collection_model_id=collection_model_id,
+            name=slot["name"],
+            option_weapon_ids_json=json.dumps(slot["option_weapon_ids"]),
+            selected_weapon_id=slot["selected_weapon_id"],
+            option_ability_keys_json=json.dumps(slot["option_ability_keys"], ensure_ascii=False),
+            selected_ability_key=slot["selected_ability_key"],
+            position=i,
+        ))
 
 
 def _collection_model_eager():
@@ -202,7 +247,9 @@ def _require_unit_access(unit: models.Unit, current_user: models.User) -> None:
         raise HTTPException(status_code=403, detail="Brak uprawnień")
 
 
-def _build_collection_card(cm: models.CollectionModel, weapon_map: dict, ability_map: dict) -> dict:
+def _build_collection_card(
+    cm: models.CollectionModel, weapon_map: dict, ability_map: dict, unit: models.Unit
+) -> dict:
     try:
         loadout = json.loads(cm.loadout_json) if cm.loadout_json else {}
     except (json.JSONDecodeError, TypeError):
@@ -211,6 +258,8 @@ def _build_collection_card(cm: models.CollectionModel, weapon_map: dict, ability
         "id": cm.id,
         "label": cm.label or "",
         "count": cm.count,
+        # Koszt oddziału złożonego z JEDNEGO tego modelu (silnik, SSOT).
+        "cost": collection_match.model_unit_cost(unit, cm),
         "summary": _loadout_summary(loadout, weapon_map, ability_map),
         "loadout": loadout,
         "slots": [
@@ -220,6 +269,14 @@ def _build_collection_card(cm: models.CollectionModel, weapon_map: dict, ability
                 "option_weapon_ids": json.loads(s.option_weapon_ids_json or "[]"),
                 "selected_weapon_id": s.selected_weapon_id,
                 "selected_weapon_name": s.selected_weapon.effective_name if s.selected_weapon else "nic",
+                "option_ability_keys": collection_match._slot_option_ability_keys(s),
+                "selected_ability_key": s.selected_ability_key,
+                # Etykieta zamontowanego elementu (broń albo zdolność) do plakietki.
+                "mounted_name": (
+                    ability_map.get(s.selected_ability_key, s.selected_ability_key)
+                    if s.selected_ability_key
+                    else (s.selected_weapon.effective_name if s.selected_weapon else "nic")
+                ),
             }
             for s in cm.slots
         ],
@@ -322,7 +379,7 @@ def unit_collection(
     )
     collection_models = db.execute(cm_stmt).scalars().unique().all()
 
-    cards = [_build_collection_card(cm, weapon_map, ability_map) for cm in collection_models]
+    cards = [_build_collection_card(cm, weapon_map, ability_map, unit) for cm in collection_models]
 
     return templates.TemplateResponse("collection_unit_detail.html", {
         "request": request,
@@ -387,16 +444,7 @@ async def add_collection_model(
     db.add(cm)
     db.flush()
 
-    if form_multi.get("magnetyzacja"):
-        slots = _parse_slots(form_multi, valid_weapon_ids)
-        for i, slot in enumerate(slots):
-            db.add(models.CollectionModelSlot(
-                collection_model_id=cm.id,
-                name=slot["name"],
-                option_weapon_ids_json=json.dumps(slot["option_weapon_ids"]),
-                selected_weapon_id=slot["selected_weapon_id"],
-                position=i,
-            ))
+    _persist_slots(db, cm.id, form_multi, valid_weapon_ids, valid_ability_keys)
 
     db.commit()
     db.refresh(cm)
@@ -404,7 +452,7 @@ async def add_collection_model(
     weapon_map = {o["id"]: o["name"] for o in weapon_opts}
     ability_map = {o["key"]: o["name"] for o in ability_opts}
 
-    card = _build_collection_card(cm, weapon_map, ability_map)
+    card = _build_collection_card(cm, weapon_map, ability_map, unit)
 
     want_json = "application/json" in request.headers.get("accept", "")
     if want_json:
@@ -462,16 +510,7 @@ async def update_collection_model(
         db.delete(slot)
     db.flush()
 
-    if form_multi.get("magnetyzacja"):
-        slots = _parse_slots(form_multi, valid_weapon_ids)
-        for i, slot in enumerate(slots):
-            db.add(models.CollectionModelSlot(
-                collection_model_id=cm.id,
-                name=slot["name"],
-                option_weapon_ids_json=json.dumps(slot["option_weapon_ids"]),
-                selected_weapon_id=slot["selected_weapon_id"],
-                position=i,
-            ))
+    _persist_slots(db, cm.id, form_multi, valid_weapon_ids, valid_ability_keys)
 
     db.commit()
 
@@ -480,7 +519,7 @@ async def update_collection_model(
         weapon_map = {o["id"]: o["name"] for o in weapon_opts}
         ability_map = {o["key"]: o["name"] for o in ability_opts}
         db.refresh(cm)
-        card = _build_collection_card(cm, weapon_map, ability_map)
+        card = _build_collection_card(cm, weapon_map, ability_map, unit)
         return JSONResponse({"ok": True, "card": card})
     return RedirectResponse(url=f"/collections/units/{cm.unit_id}", status_code=303)
 

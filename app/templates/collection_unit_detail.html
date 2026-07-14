@@ -25,11 +25,12 @@
                   <div>
                     <span class="badge bg-secondary me-2">{{ card.count }} szt.</span>
                     {% if card.label %}<strong>{{ card.label }}</strong>{% else %}<span class="text-muted fst-italic">bez nazwy</span>{% endif %}
+                    {% if card.cost is not none %}<span class="badge bg-light text-body-secondary border ms-1" title="Koszt oddziału z jednego takiego modelu">{{ card.cost }} pkt</span>{% endif %}
                     {% if card.summary %}<div class="text-muted small mt-1">{{ card.summary }}</div>{% endif %}
                     {% if card.slots %}
                     <div class="mt-1">
                       {% for slot in card.slots %}
-                      <span class="badge bg-info text-dark me-1">{{ slot.name }}: {{ slot.selected_weapon_name }}</span>
+                      <span class="badge bg-info text-dark me-1">{{ slot.name }}: {{ slot.mounted_name }}</span>
                       {% endfor %}
                     </div>
                     {% endif %}
@@ -138,6 +139,8 @@
 
           <div class="d-flex gap-2">
             <button class="btn btn-primary btn-sm" type="submit" id="form-submit-btn">Dodaj</button>
+            <button class="btn btn-outline-primary btn-sm d-none" type="button" id="form-copy-btn"
+                    title="Utwórz nowy wpis-kopię z bieżących ustawień (oryginał bez zmian)">Kopiuj</button>
             <button class="btn btn-outline-secondary btn-sm d-none" type="button" id="form-cancel-btn">Anuluj</button>
           </div>
         </form>
@@ -149,10 +152,12 @@
 <script>
 (function () {
   const weaponOpts = {{ weapon_opts | tojson }};
+  const abilityOpts = {{ ability_opts | tojson }};
   const addForm   = document.getElementById('collection-add-form');
   const cardsList = document.getElementById('collection-cards-list');
   const formTitle = document.getElementById('collection-form-title');
   const submitBtn = document.getElementById('form-submit-btn');
+  const copyBtn   = document.getElementById('form-copy-btn');
   const cancelBtn = document.getElementById('form-cancel-btn');
   const magToggle = document.getElementById('magnetyzacja-toggle');
   const magSection = document.getElementById('magnetyzacja-section');
@@ -171,6 +176,8 @@
   function buildSlotEl(idx, slotData) {
     const optionsIds   = slotData ? (slotData.option_weapon_ids || []) : [];
     const selectedId   = slotData ? (slotData.selected_weapon_id || '') : '';
+    const abilityKeys  = slotData ? (slotData.option_ability_keys || []) : [];
+    const selectedAbil = slotData ? (slotData.selected_ability_key || '') : '';
     const slotName     = slotData ? (slotData.name || '') : '';
 
     const cbs = weaponOpts.map(w => {
@@ -181,10 +188,28 @@
       </div>`;
     }).join('');
 
-    const selOpts = weaponOpts.map(w => {
-      const s = String(selectedId) === String(w.id) ? 'selected' : '';
-      return `<option value="${w.id}" ${s}>${escHtml(w.name)}</option>`;
+    const abilCbs = abilityOpts.map(a => {
+      const chk = abilityKeys.includes(a.key) ? 'checked' : '';
+      const safe = String(a.key).replace(/[^a-zA-Z0-9]/g, '_');
+      return `<div class="form-check form-check-inline">
+        <input class="form-check-input" type="checkbox" name="slot_ability_options_${idx}" value="${escAttr(a.key)}" id="sa_${idx}_${safe}" ${chk}/>
+        <label class="form-check-label" for="sa_${idx}_${safe}">${escHtml(a.name)}</label>
+      </div>`;
     }).join('');
+
+    // Zamontowana = broń (w:<id>) LUB zdolność (a:<klucz>) — jedno naraz.
+    const wSelOpts = weaponOpts.map(w => {
+      const s = String(selectedId) === String(w.id) ? 'selected' : '';
+      return `<option value="w:${w.id}" ${s}>${escHtml(w.name)}</option>`;
+    }).join('');
+    const aSelOpts = abilityOpts.map(a => {
+      const s = String(selectedAbil) === String(a.key) ? 'selected' : '';
+      return `<option value="a:${escAttr(a.key)}" ${s}>${escHtml(a.name)}</option>`;
+    }).join('');
+    const nothingSel = (!selectedId && !selectedAbil) ? ' selected' : '';
+    const abilOptsBlock = abilityOpts.length
+      ? `<div class="small text-muted mb-1 mt-2">Możliwe zdolności:</div>${abilCbs}`
+      : '';
 
     const el = document.createElement('div');
     el.className = 'card mb-2 slot-entry';
@@ -197,13 +222,15 @@
         </div>
         <input type="text" class="form-control form-control-sm mb-2" name="slot_name_${idx}"
                placeholder="Nazwa slotu (np. Broń pokładowa)" value="${escAttr(slotName)}" required />
-        <div class="small text-muted mb-1">Możliwe opcje:</div>
+        <div class="small text-muted mb-1">Możliwe opcje broni:</div>
         ${cbs || '<span class="text-muted small">Brak broni dla tego oddziału</span>'}
+        ${abilOptsBlock}
         <div class="mt-2">
           <label class="form-label small mb-1">Aktualnie zamontowana:</label>
           <select class="form-select form-select-sm" name="slot_selected_${idx}">
-            <option value=""${!selectedId ? ' selected' : ''}>— nic —</option>
-            ${selOpts}
+            <option value=""${nothingSel}>— nic —</option>
+            ${wSelOpts ? `<optgroup label="Broń">${wSelOpts}</optgroup>` : ''}
+            ${aSelOpts ? `<optgroup label="Zdolności">${aSelOpts}</optgroup>` : ''}
           </select>
         </div>
       </div>`;
@@ -273,12 +300,38 @@
 
   cancelBtn.addEventListener('click', exitEditMode);
 
+  // ── Kopiuj (podczas edycji): utwórz NOWY wpis z bieżących ustawień formularza;
+  // oryginał zostaje bez zmian (nie zapisujemy edycji do niego). ──────────────
+  copyBtn.addEventListener('click', async () => {
+    copyBtn.disabled = true;
+    const formData = new FormData(addForm);
+    try {
+      const resp = await fetch(addForm.dataset.addUrl, {
+        method: 'POST', body: formData,
+        headers: { Accept: 'application/json' },
+        credentials: 'same-origin',
+      });
+      if (!resp.ok) { location.reload(); return; }
+      const data = await resp.json();
+      if (!data.ok) { location.reload(); return; }
+      document.getElementById('empty-collection-msg')?.remove();
+      cardsList.appendChild(buildCardEl(data.card));
+      exitEditMode();
+    } catch (err) {
+      console.error(err);
+      location.reload();
+    } finally {
+      copyBtn.disabled = false;
+    }
+  });
+
   function exitEditMode() {
     editMode = false;
     editId   = null;
     addForm.action = addForm.dataset.addUrl;
     formTitle.textContent = 'Dodaj modele';
     submitBtn.textContent = 'Dodaj';
+    copyBtn.classList.add('d-none');
     cancelBtn.classList.add('d-none');
     resetForm();
   }
@@ -337,6 +390,7 @@
     addForm.action = `/collections/models/${cardId}/update`;
     formTitle.textContent = 'Edytuj model';
     submitBtn.textContent = 'Zapisz';
+    copyBtn.classList.remove('d-none');
     cancelBtn.classList.remove('d-none');
 
     // pre-fill fields
@@ -384,11 +438,13 @@
     const labelHtml = card.label
       ? `<strong>${escHtml(card.label)}</strong>`
       : `<span class="text-muted fst-italic">bez nazwy</span>`;
+    const costHtml = (card.cost != null)
+      ? ` <span class="badge bg-light text-body-secondary border ms-1" title="Koszt oddziału z jednego takiego modelu">${card.cost} pkt</span>` : '';
     const summaryHtml = card.summary
       ? `<div class="text-muted small mt-1">${escHtml(card.summary)}</div>` : '';
     const slotsHtml = (card.slots && card.slots.length)
       ? `<div class="mt-1">${card.slots.map(s =>
-          `<span class="badge bg-info text-dark me-1">${escHtml(s.name)}: ${escHtml(s.selected_weapon_name)}</span>`
+          `<span class="badge bg-info text-dark me-1">${escHtml(s.name)}: ${escHtml(s.mounted_name)}</span>`
         ).join('')}</div>` : '';
 
     el.innerHTML = `
@@ -396,7 +452,7 @@
         <div class="d-flex justify-content-between align-items-start">
           <div>
             <span class="badge bg-secondary me-2">${card.count} szt.</span>
-            ${labelHtml}${summaryHtml}${slotsHtml}
+            ${labelHtml}${costHtml}${summaryHtml}${slotsHtml}
           </div>
           <div class="d-flex gap-1 ms-2 flex-shrink-0">
             <button class="btn btn-outline-secondary btn-sm" type="button"

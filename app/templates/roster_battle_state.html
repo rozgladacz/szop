@@ -285,9 +285,8 @@
       </div>
       {% endif %}
       <div class="mt-2">
-        <div class="d-flex justify-content-between align-items-center mb-1">
-          <div class="section-title mb-0">Uzbrojenie</div>
-          <div class="btn-group btn-group-sm mode-toolbar" role="group" data-mode-toolbar data-group-id="{{ group_id }}">
+        <div class="mb-1">
+          <div class="d-flex flex-wrap gap-1 mode-toolbar" role="group" data-mode-toolbar data-group-id="{{ group_id }}">
             {% for mode in group_modes %}
               {% if mode == 'equipment' %}
                 <button class="btn btn-outline-secondary{% if loop.first %} active{% endif %}" type="button" data-mode="equipment">Wyposażenie</button>
@@ -381,5 +380,5 @@
 </div>
 
 <script>window._abilityDescriptions = {{ ability_descriptions | tojson }};</script>
-<script src="{{ url_for('static', path='js/battle_state.js') }}?v=2e3"></script>
+<script src="{{ url_for('static', path='js/battle_state.js') }}?v=2f1"></script>
 {% endblock %}

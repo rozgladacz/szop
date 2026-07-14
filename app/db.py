@@ -430,6 +430,20 @@ def _migrate_schema() -> None:
                 )
                 _initialize_unit_ability_positions(connection)
 
+        if "collection_model_slots" in table_names:
+            columns = inspector.get_columns("collection_model_slots")
+            column_names = {column["name"] for column in columns}
+            if "option_ability_keys_json" not in column_names:
+                logger.info("Adding option_ability_keys_json column to collection_model_slots table")
+                connection.execute(
+                    text("ALTER TABLE collection_model_slots ADD COLUMN option_ability_keys_json TEXT")
+                )
+            if "selected_ability_key" not in column_names:
+                logger.info("Adding selected_ability_key column to collection_model_slots table")
+                connection.execute(
+                    text("ALTER TABLE collection_model_slots ADD COLUMN selected_ability_key VARCHAR(120)")
+                )
+
         if "army_spells" in table_names:
             columns = inspector.get_columns("army_spells")
             column_names = {column["name"] for column in columns}

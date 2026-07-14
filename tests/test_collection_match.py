@@ -228,6 +228,7 @@ def test_describe_owned_models_formats_weapons_and_summary() -> None:
             "options": [{"id": 7, "name": "Miotacz"}],
         }],
         "abilities": [],
+        "ability_cost": 0.0,
         "summary": "Bolter ×2, Miotacz",
     }
     # brak broni → podsumowanie „—", brakująca nazwa broni → fallback
@@ -248,6 +249,19 @@ def test_describe_owned_models_includes_ability_names() -> None:
     out = cm.describe_owned_models(doubles, {5: "Bolter"}, {"50": "Medyk", "60:furia|6": "Aura: Furia"})
     assert out[0]["abilities"] == ["Medyk", "Aura: Furia"]
     assert out[0]["summary"] == "Bolter • Medyk, Aura: Furia"
+
+
+def test_describe_owned_models_ability_cost_sums_bare_ids() -> None:
+    doubles = [
+        SimpleNamespace(
+            id=1, label="Sierżant", count=1,
+            loadout_json=json.dumps({"weapons": {"5": 1}, "abilities": {"50": 1, "60:furia|6": 1}}),
+            slots=[],
+        ),
+    ]
+    # koszt zdolności z mapy bare-id (front dolicza go do bazy + broni)
+    out = cm.describe_owned_models(doubles, {5: "Bolter"}, None, {50: 3.0, 60: 4.5})
+    assert out[0]["ability_cost"] == 7.5
 
 
 def test_unit_ability_display_uses_value_with_bare_fallback() -> None:
@@ -278,6 +292,59 @@ def test_effective_weapons_mounted_override_validates_options() -> None:
     assert cm.collection_model_effective_weapons(model, {"10": None}) == {5: 1}
     # mounted broń spoza opcji (9) → fallback do zapisanego (7), bez wstrzyknięcia
     assert cm.collection_model_effective_weapons(model, {"10": 9}) == {5: 1, 7: 1}
+
+
+def test_parse_slots_ability_option_and_mounted_selection() -> None:
+    from app.routers.collections import _parse_slots
+    form = {
+        "slot_name_0": "Ulepszenie",
+        "slot_options_0": ["5", "7"],
+        "slot_ability_options_0": ["60:furia|6", "99:obce"],  # 99 spoza puli → odrzucone
+        "slot_selected_0": "a:60:furia|6",                     # montujemy zdolność
+        "slot_name_1": "Broń pokł.",
+        "slot_options_1": ["5"],
+        "slot_selected_1": "w:5",                              # montujemy broń
+    }
+    slots = _parse_slots(form, {5, 7}, {"60:furia|6"})
+    assert slots[0]["option_weapon_ids"] == [5, 7]
+    assert slots[0]["option_ability_keys"] == ["60:furia|6"]  # obca odfiltrowana
+    assert slots[0]["selected_ability_key"] == "60:furia|6"
+    assert slots[0]["selected_weapon_id"] is None
+    assert slots[1]["selected_weapon_id"] == 5
+    assert slots[1]["selected_ability_key"] is None
+
+
+def test_model_ability_keys_includes_slot_mounted_ability() -> None:
+    # Magnetyzacja może przełączać zdolność: slot z zamontowaną zdolnością „60:furia|6"
+    # dokłada ją do zdolności modelu (obok bazowej „50").
+    model = SimpleNamespace(
+        loadout_json=json.dumps({"weapons": {"5": 1}, "abilities": {"50": 1}}),
+        slots=[SimpleNamespace(
+            option_weapon_ids_json=None, selected_weapon_id=None,
+            option_ability_keys_json=json.dumps(["60:furia|6", "70"]),
+            selected_ability_key="60:furia|6",
+        )],
+    )
+    assert sorted(cm._model_ability_keys(model)) == ["50", "60:furia|6"]
+    assert sorted(cm._model_ability_base_ids(model)) == [50, 60]
+
+
+def test_describe_owned_models_slot_ability_in_summary_and_cost() -> None:
+    model = SimpleNamespace(
+        id=1, label="Sierżant", count=1,
+        loadout_json=json.dumps({"weapons": {"5": 1}}),
+        slots=[SimpleNamespace(
+            id=9, name="Ulepszenie", option_weapon_ids_json=None, selected_weapon_id=None,
+            option_ability_keys_json=json.dumps(["60:furia|6"]),
+            selected_ability_key="60:furia|6",
+        )],
+    )
+    out = cm.describe_owned_models([model], {5: "Bolter"},
+                                   {"60:furia|6": "Aura: Furia"}, {60: 4.0})
+    assert out[0]["abilities"] == ["Aura: Furia"]
+    assert out[0]["ability_cost"] == 4.0
+    # slot bez opcji broni nie tworzy pustego dropdownu broni w UI mount
+    assert out[0]["slots"] == []
 
 
 def test_describe_owned_models_unknown_weapon_name_fallback() -> None:
@@ -528,6 +595,141 @@ def test_derive_composition_picks_matching_mount() -> None:
         unit, {"weapons": {"5": 1, "7": 1}, "mode": "total"}, 1, [model], {1: 1}
     )
     assert selection == [{"id": 1, "qty": 1, "mounted": {"10": 7}}]
+
+
+def test_derive_composition_two_magnetized_models_different_mounts() -> None:
+    # 2 identyczne Sentinele, slot opcje {7,8}; loadout potrzebuje OBU (7 i 8) →
+    # oba przypisane jako POSIADANE, każdy z innym mountem (nie owned+proxy).
+    def _sentinel(mid: int) -> SimpleNamespace:
+        slot = SimpleNamespace(
+            id=10, name="Główna",
+            option_weapon_ids_json=json.dumps([7, 8]), selected_weapon_id=7,
+        )
+        return SimpleNamespace(
+            id=mid, label="Sentinel",
+            loadout_json=json.dumps({"weapons": {"5": 1}}), slots=[slot],
+        )
+    unit = SimpleNamespace(
+        default_weapon_id=5, default_weapon_loadout=[(SimpleNamespace(id=5), 1)],
+    )
+    owned = [_sentinel(1), _sentinel(2)]
+    selection = cm.derive_composition(
+        unit, {"weapons": {"5": 2, "7": 1, "8": 1}, "mode": "total"}, 2, owned, {1: 1, 2: 1}
+    )
+    assert all(e.get("id") is not None for e in selection), selection  # oba posiadane
+    mounts = sorted(next(iter(e["mounted"].values())) for e in selection)
+    assert mounts == [7, 8]  # jeden Sentinel z 7, drugi z 8
+    assert sum(int(e["qty"]) for e in selection) == 2
+
+
+def test_derive_composition_one_magnetized_model_extra_mount_is_proxy() -> None:
+    # 1 fizyczny Sentinel (available 1); loadout potrzebuje 2 różnych mountów (7 i 8)
+    # na 2 modele → 1 posiadany (mount 7) + PROXY z bronią 8 (NIE nadwyżka tego
+    # samego modelu z innym mountem — front trzyma jeden mount na model).
+    slot = SimpleNamespace(
+        id=10, name="Główna",
+        option_weapon_ids_json=json.dumps([7, 8]), selected_weapon_id=7,
+    )
+    model = SimpleNamespace(
+        id=1, label="Sentinel",
+        loadout_json=json.dumps({"weapons": {"5": 1}}), slots=[slot],
+    )
+    unit = SimpleNamespace(
+        default_weapon_id=5, default_weapon_loadout=[(SimpleNamespace(id=5), 1)],
+    )
+    selection = cm.derive_composition(
+        unit, {"weapons": {"5": 2, "7": 1, "8": 1}, "mode": "total"}, 2, [model], {1: 1}
+    )
+    owned = [e for e in selection if e.get("id") == 1]
+    proxy = [e for e in selection if e.get("id") is None]
+    assert len(owned) == 1 and owned[0]["mounted"] == {"10": 7} and int(owned[0]["qty"]) == 1
+    assert len(proxy) == 1 and proxy[0]["weapons"].get("8") == 1  # inny mount jako proxy
+    assert sum(int(e["qty"]) for e in selection) == 2
+
+
+def test_derive_composition_base_weapon_not_cloned_by_slot() -> None:
+    # Bug (roster 16/RU200): 2 Sentinele, każdy baza {Miażdżenie(275):2, Miotacz(182):1}
+    # + slot „Główna" z opcją 182. Loadout total {182:2, 275:4}, 2 modele. Baza obu
+    # modeli daje DOKŁADNIE {182:2, 275:4} — slot NIE może domontować 3. Miotacza
+    # (co dawniej robiło owned z 2 Miotaczami + proxy z Miażdżeniem). Oba posiadane,
+    # sloty puste, bez proxy.
+    def _sentinel(mid: int) -> SimpleNamespace:
+        slot = SimpleNamespace(
+            id=5, name="Główna",
+            option_weapon_ids_json=json.dumps([182, 209, 215, 221]), selected_weapon_id=182,
+        )
+        return SimpleNamespace(
+            id=mid, label="Sentinel",
+            loadout_json=json.dumps({"weapons": {"275": 2, "182": 1}}), slots=[slot],
+        )
+    unit = SimpleNamespace(
+        weapon_links=[
+            SimpleNamespace(weapon_id=182, weapon=SimpleNamespace(effective_range="18")),
+            SimpleNamespace(weapon_id=275, weapon=SimpleNamespace(effective_range="melee")),
+        ],
+        default_weapon_id=275,
+        default_weapon_loadout=[(SimpleNamespace(id=275), 2)],
+    )
+    owned = [_sentinel(3), _sentinel(6)]
+    selection = cm.derive_composition(
+        unit, {"weapons": {"182": 2, "275": 4}, "mode": "total"}, 2, owned, {3: 1, 6: 1}
+    )
+    assert all(e.get("id") is not None for e in selection), selection  # oba posiadane, brak proxy
+    assert sum(int(e["qty"]) for e in selection) == 2
+    # sloty puste (baza pokrywa) — żaden mount nie dokłada Miotacza
+    for e in selection:
+        assert all(v is None for v in (e.get("mounted") or {}).values()), e
+    # agregat = dokładnie loadout
+    total: dict[str, int] = {}
+    for e in selection:
+        eff = dict(cm.collection_model_effective_weapons(
+            next(m for m in owned if m.id == e["id"]),
+            e.get("mounted"),
+        ))
+        for w, c in eff.items():
+            total[str(w)] = total.get(str(w), 0) + c * int(e["qty"])
+    assert total == {"182": 2, "275": 4}, total
+
+
+def test_derive_composition_duplicate_entries_do_not_block_needed_mount() -> None:
+    # Bug (code-review #1): 2 SKOPIOWANE wpisy (przycisk „Kopiuj"), każdy avail=2,
+    # count=2. base_supply liczone z NAJWYŻEJ count modeli — inaczej K×count zawyżało
+    # podaż, zerowało mount_need i potrzebny mount 7 szedł jako fałszywe proxy.
+    # Loadout {7:3} = 2 bazowe (po 1 na model) + 1 zamontowany. Oczekiwane: oba
+    # posiadane, jeden montuje 7, brak proxy.
+    def _mdl(mid: int) -> SimpleNamespace:
+        slot = SimpleNamespace(id=9, name="Hardpoint",
+                               option_weapon_ids_json=json.dumps([7]), selected_weapon_id=None)
+        return SimpleNamespace(id=mid, label="Walker",
+                               loadout_json=json.dumps({"weapons": {"7": 1}}), slots=[slot])
+    unit = SimpleNamespace(
+        weapon_links=[SimpleNamespace(weapon_id=7, weapon=SimpleNamespace(effective_range="18"))],
+        default_weapon_id=7, default_weapon_loadout=[(SimpleNamespace(id=7), 1)],
+    )
+    owned = [_mdl(1), _mdl(2)]
+    selection = cm.derive_composition(
+        unit, {"weapons": {"7": 3}, "mode": "total"}, 2, owned, {1: 2, 2: 2}
+    )
+    assert all(e.get("id") is not None for e in selection), selection  # brak proxy
+    total = 0
+    for e in selection:
+        eff = cm.collection_model_effective_weapons(
+            next(m for m in owned if m.id == e["id"]), e.get("mounted"))
+        total += eff.get(7, 0) * int(e["qty"])
+    assert total == 3, selection  # 2 bazowe + 1 zamontowany, dokładnie loadout
+
+
+def test_best_mount_effective_two_slots_same_weapon_respects_budget() -> None:
+    # Bug (code-review #3): model z DWOMA slotami tej samej broni (7) nie może
+    # zamontować jej dwa razy ponad mount_need=1 (drugi slot pusty).
+    slot_a = SimpleNamespace(id=1, name="Lewy",
+                             option_weapon_ids_json=json.dumps([7]), selected_weapon_id=None)
+    slot_b = SimpleNamespace(id=2, name="Prawy",
+                             option_weapon_ids_json=json.dumps([7]), selected_weapon_id=None)
+    model = SimpleNamespace(loadout_json=json.dumps({"weapons": {}}), slots=[slot_a, slot_b])
+    eff, mounted = cm._best_mount_effective(model, {7: 2}, {7: 1})
+    assert eff.get(7, 0) == 1  # tylko JEDEN mount w ramach budżetu
+    assert sorted(mounted.values(), key=lambda v: v is None) == [7, None]
 
 
 def test_derive_composition_matches_model_with_ability() -> None:

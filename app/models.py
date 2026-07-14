@@ -575,6 +575,11 @@ class CollectionModelSlot(TimestampMixin, Base):
     selected_weapon_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("weapons.id"), nullable=True
     )
+    # Magnetyzacja może przełączać także zdolności (nie tylko broń). Opcje =
+    # pełne klucze zdolności oddziału (np. „50:kontra|6"); zamontowana = jedna z
+    # nich. Slot montuje broń XOR zdolność (jedno `selected_*` naraz).
+    option_ability_keys_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    selected_ability_key: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     collection_model: Mapped["CollectionModel"] = relationship(back_populates="slots")

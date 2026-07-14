@@ -1402,8 +1402,56 @@ def roster_unit_collection_models(
         )
     ability_names = collection_match.unit_ability_display(unit)
 
+    # Aktualny loadout z DB (autorytatywne pasywne; wyznacza też rolę do kosztów).
+    current_loadout: Any = {}
+    if roster_unit.extra_weapons_json:
+        try:
+            current_loadout = json.loads(roster_unit.extra_weapons_json)
+        except (json.JSONDecodeError, TypeError):
+            current_loadout = {}
+
+    # Koszty per-element z SILNIKA (SSOT) — DOKŁADNIE te wartości co widok klasyczny
+    # (`calculate_roster_unit_quote.item_costs`, role-aware `selected_traits`), zamiast
+    # ręcznego przeliczania w routerze/JS. Panel sumuje je jak menu: baza + Σ broń +
+    # Σ zdolności. count=1 → `components.base` to koszt bazowy JEDNEGO modelu.
+    quote = costs.calculate_roster_unit_quote(unit, current_loadout, 1, include_item_costs=True)
+    item_costs = quote.get("item_costs") or {}
+    base_cost = float((quote.get("components") or {}).get("base") or 0.0)
+    weapon_cost_map: dict[int, float] = {
+        int(wid): float(c) for wid, c in (item_costs.get("weapons") or {}).items()
+    }
+    # Aktywne + aury po BARE id (klucz item_costs to pełny link key „id:wartość").
+    ability_cost_map: dict[int, float] = {}
+    for _section in ("active", "aura"):
+        for link_key, c in (item_costs.get(_section) or {}).items():
+            base_id = str(link_key).split(":", 1)[0]
+            try:
+                ability_cost_map[int(base_id)] = float(c)
+            except (TypeError, ValueError):
+                continue
+    # Zdolności aktywne/aury do dodania proxy (bare id + nazwa display). Pasywne
+    # są ogólnooddziałowe (nie per-model), więc pomijamy. Dedup po bare id.
+    proxy_ability_options: list[dict[str, Any]] = []
+    seen_ability_ids: set[int] = set()
+    for link in getattr(unit, "abilities", []) or []:
+        if link.ability is None or link.ability_id is None:
+            continue
+        if link.ability.type not in ("active", "aura"):
+            continue
+        bid = int(link.ability_id)
+        if bid in seen_ability_ids:
+            continue
+        seen_ability_ids.add(bid)
+        key = costs.ability_link_loadout_key(link)
+        proxy_ability_options.append({
+            "id": bid,
+            "name": ability_names.get(key) or ability_names.get(str(bid)) or link.ability.name,
+        })
+
     owned = collection_match.fetch_owned_models(db, current_user.id, unit.id)
-    models_payload = collection_match.describe_owned_models(owned, weapon_names, ability_names)
+    models_payload = collection_match.describe_owned_models(
+        owned, weapon_names, ability_names, ability_cost_map
+    )
     owned_total = sum(item["count"] for item in models_payload)
 
     # Wspólna dostępność (2b.1d): odejmij sztuki użyte w INNYCH oddziałach tej
@@ -1415,15 +1463,6 @@ def roster_unit_collection_models(
         avail = max(int(item["count"]) - used_elsewhere.get(item["id"], 0), 0)
         item["available"] = avail
         available_map[item["id"]] = avail
-
-    # Aktualny loadout z DB (autorytatywne pasywne) — „Tryb modeli" podmienia
-    # broń/aktywne/aury z modeli, pasywne zachowuje (edytowalne w panelu).
-    current_loadout: Any = {}
-    if roster_unit.extra_weapons_json:
-        try:
-            current_loadout = json.loads(roster_unit.extra_weapons_json)
-        except (json.JSONDecodeError, TypeError):
-            current_loadout = {}
 
     # Selekcja: zapisana kompozycja, albo derywacja suma→modele (2b.1c).
     composed: Any
@@ -1448,7 +1487,11 @@ def roster_unit_collection_models(
         "composed": composed,
         "current_loadout": current_loadout,
         "weapon_names": {str(wid): name for wid, name in weapon_names.items()},
+        "weapon_costs": {str(wid): round(float(c), 2) for wid, c in weapon_cost_map.items()},
+        "ability_costs": {str(aid): round(float(c), 2) for aid, c in ability_cost_map.items()},
+        "base_cost": round(float(base_cost), 2),
         "ability_names": {str(aid): name for aid, name in ability_names.items()},
+        "proxy_ability_options": proxy_ability_options,
         "passive_items": unit_payload.get("passive_items", []),
         "passive_state": passive_state if isinstance(passive_state, dict) else {},
         "coverage": {"owned": owned_total, "needed": roster_unit.count},

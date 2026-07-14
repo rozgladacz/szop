@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from .. import models
 from ..data import abilities as ability_catalog
-from .costs import ability_link_loadout_key, normalize_range_value
+from .costs import ability_link_loadout_key, calculate_roster_unit_quote, normalize_range_value
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -76,6 +76,18 @@ def _slot_option_ids(slot: models.CollectionModelSlot) -> set[int]:
     if not isinstance(ids, list):
         return set()
     return {w for w in (_coerce_int(x) for x in ids) if w is not None}
+
+
+def _slot_option_ability_keys(slot: models.CollectionModelSlot) -> list[str]:
+    """Dozwolone zdolności slotu magnetyzacji (pełne klucze, `option_ability_keys_json`)."""
+    raw = getattr(slot, "option_ability_keys_json", None)
+    try:
+        keys = json.loads(raw) if raw else []
+    except (json.JSONDecodeError, TypeError):
+        keys = []
+    if not isinstance(keys, list):
+        return []
+    return [str(k) for k in keys if k]
 
 
 def collection_model_effective_weapons(
@@ -255,6 +267,7 @@ def describe_owned_models(
     collection_models: Iterable[models.CollectionModel],
     weapon_names: dict[int, str],
     ability_names: dict[str, str] | None = None,
+    ability_cost_map: dict[int, float] | None = None,
 ) -> list[dict[str, Any]]:
     """Formatuje modele do wyboru w „Trybie modeli": efektywna broń + zdolności.
 
@@ -263,8 +276,13 @@ def describe_owned_models(
     slotami frontend przelicza z ``base_weapons`` + wyborów ``slots``. ``summary``
     zawiera broń oraz (po „•") nazwy zdolności. ``ability_names`` mapuje **pełny
     klucz zdolności** → nazwa display (z wartością, np. „Aura: Kontra").
+
+    ``ability_cost_map`` (bare ability_id → koszt) pozwala policzyć ``ability_cost``
+    — koszt zdolności niesionych przez model. Front dolicza go do bazy + broni,
+    dając „pełny koszt modelu" w Rozpisce (broń liczona z żywej magnetyzacji).
     """
     ability_names = ability_names or {}
+    ability_cost_map = ability_cost_map or {}
     result: list[dict[str, Any]] = []
     for cm in collection_models:
         weapons = collection_model_effective_weapons(cm)
@@ -273,29 +291,40 @@ def describe_owned_models(
             name = weapon_names.get(wid, f"Broń #{wid}")
             cnt = weapons[wid]
             weapon_parts.append(f"{name} ×{cnt}" if cnt > 1 else name)
+        # Pełne klucze zdolności modelu (baza + sloty) — raz; z nich etykiety i koszt.
+        ability_keys = _model_ability_keys(cm)
         ability_labels = []
-        for k in _model_ability_keys(cm):
+        ability_cost = 0.0
+        for k in ability_keys:
             # Pełny klucz (z wartością); gdy nieznany (np. armia zmieniła wartość
             # po rejestracji modelu) — fallback do nazwy po gołym id, spójnie z
             # composition_groups (zamiast pomijać zdolność).
             name = ability_names.get(k) or ability_names.get(k.split(":", 1)[0])
             if name:
                 ability_labels.append(name)
+            bid = _coerce_int(k.split(":", 1)[0])
+            if bid is not None:
+                ability_cost += ability_cost_map.get(bid, 0.0)
         summary = ", ".join(weapon_parts) if weapon_parts else "—"
         if ability_labels:
             summary += " • " + ", ".join(ability_labels)
-        slots = [
-            {
+        # Tylko sloty z opcjami BRONI trafiają do UI mount (per-oddział wybór broni).
+        # Sloty czysto zdolnościowe niosą zdolność przez efektywne zdolności modelu
+        # (stała konfiguracja z Kolekcji) — bez pustego dropdownu broni.
+        slots = []
+        for slot in cm.slots:
+            opt_ids = _slot_option_ids(slot)
+            if not opt_ids:
+                continue
+            slots.append({
                 "id": slot.id,
                 "name": slot.name,
                 "selected": slot.selected_weapon_id,
                 "options": [
                     {"id": oid, "name": weapon_names.get(oid, f"Broń #{oid}")}
-                    for oid in sorted(_slot_option_ids(slot))
+                    for oid in sorted(opt_ids)
                 ],
-            }
-            for slot in cm.slots
-        ]
+            })
         result.append({
             "id": cm.id,
             "label": (cm.label or "").strip(),
@@ -304,6 +333,7 @@ def describe_owned_models(
             "base_weapons": {str(wid): cnt for wid, cnt in _model_base_weapons(cm).items()},
             "slots": slots,
             "abilities": ability_labels,
+            "ability_cost": round(ability_cost, 2),
             "summary": summary,
         })
     return result
@@ -336,7 +366,12 @@ def _unit_ability_types(unit: models.Unit) -> dict[int, str]:
 
 
 def _model_ability_keys(cm: models.CollectionModel) -> list[str]:
-    """Pełne klucze zdolności modelu (`ability_link_loadout_key`, np. `"50:kontra|6"`)."""
+    """Pełne klucze zdolności modelu (`ability_link_loadout_key`, np. `"50:kontra|6"`).
+
+    Obejmuje zdolności bazowe (`loadout_json.abilities`) ORAZ zamontowane w slotach
+    magnetyzacji (`slot.selected_ability_key`) — magnetyzacja może przełączać
+    zdolności, nie tylko broń.
+    """
     try:
         loadout = json.loads(cm.loadout_json) if cm.loadout_json else {}
     except (json.JSONDecodeError, TypeError):
@@ -347,6 +382,10 @@ def _model_ability_keys(cm: models.CollectionModel) -> list[str]:
         for key, val in abilities.items():
             if val:
                 keys.append(str(key))
+    for slot in getattr(cm, "slots", []) or []:
+        sk = getattr(slot, "selected_ability_key", None)
+        if sk:
+            keys.append(str(sk))
     return keys
 
 
@@ -465,6 +504,19 @@ def compose_loadout(
     return loadout, count
 
 
+def model_unit_cost(unit: models.Unit, cm: models.CollectionModel) -> float:
+    """Koszt oddziału złożonego z JEDNEGO danego modelu — silnikiem (SSOT).
+
+    Loadout budujemy jak przy komponowaniu (`compose_loadout`): efektywna broń
+    (baza + magnetyzacja) + aktywne/aury niesione przez model; `count=1` →
+    `selected_total` = koszt pojedynczego modelu (z rabatem roli jak w oddziale).
+    Zdolności pasywne — jak przy kompozycji — są oddziałowe, więc pomijane.
+    """
+    loadout, _ = compose_loadout(unit, [{"id": cm.id, "qty": 1}], {}, {cm.id: cm})
+    quote = calculate_roster_unit_quote(unit, loadout, 1, include_item_costs=False)
+    return round(float(quote.get("selected_total") or 0.0), 2)
+
+
 def parse_selection(raw: Any) -> list[dict[str, Any]]:
     """Parsuje ``composed_models_json`` do listy wpisów (puste przy błędzie)."""
     if isinstance(raw, list):
@@ -500,7 +552,9 @@ def used_in_other_units(
 
 
 def _best_mount_effective(
-    cm: models.CollectionModel, target: dict[int, int]
+    cm: models.CollectionModel,
+    target: dict[int, int],
+    mount_need: dict[int, int] | None = None,
 ) -> tuple[dict[int, int], dict[str, int | None] | None]:
     """Dla derywacji: dobierz zamontowaną broń modelu magnetyzowanego tak, by
     pasowała do `target` (loadout), zamiast zapisanej domyślnej. Zwraca
@@ -509,24 +563,39 @@ def _best_mount_effective(
     Dla każdego slotu wybiera opcję POTRZEBNĄ w loadoutcie (a nie np. zapisane
     „Działo Plazmowe", gdy oddział ma „Miotacz ognia"); jeśli żadna opcja nie jest
     potrzebna — zostawia zapisaną (o ile mieści się w loadoutcie), inaczej pusty.
+
+    Gdy podano ``mount_need`` (ile sztuk danej broni MUSI pochodzić z zamontowań,
+    bo nie pokrywa jej baza pozostałych modeli), slot montuje broń tylko w ramach
+    tego budżetu — nie klonuje broni, którą i tak dostarczy baza (np. Sentinel z
+    Miotaczem w bazie: 2 modele = 2 Miotacze bez montowania trzeciego).
     """
     slots = list(getattr(cm, "slots", []) or [])
     if not slots:
         return _model_base_weapons(cm), None
     eff = _model_base_weapons(cm)
+    # Lokalna kopia budżetu — dwa sloty TEGO modelu nie mogą zamontować tej samej
+    # broni ponad `mount_need` (globalny budżet dekrementuje dopiero caller po
+    # zafiksowaniu; tu pilnujemy limitu w obrębie modelu).
+    remaining = dict(mount_need) if mount_need is not None else None
+
+    def _needed(oid: int) -> bool:
+        if target.get(oid, 0) - eff.get(oid, 0) <= 0:
+            return False
+        return remaining is None or remaining.get(oid, 0) > 0
+
     mounted: dict[str, int | None] = {}
     for slot in slots:
         chosen: int | None = None
         for oid in sorted(_slot_option_ids(slot)):
-            if target.get(oid, 0) - eff.get(oid, 0) > 0:
+            if _needed(oid):
                 chosen = oid
                 break
-        if chosen is None and slot.selected_weapon_id is not None:
-            sid = int(slot.selected_weapon_id)
-            if target.get(sid, 0) - eff.get(sid, 0) > 0:
-                chosen = sid
+        if chosen is None and slot.selected_weapon_id is not None and _needed(int(slot.selected_weapon_id)):
+            chosen = int(slot.selected_weapon_id)
         if chosen is not None:
             eff[chosen] = eff.get(chosen, 0) + 1
+            if remaining is not None and chosen in remaining:
+                remaining[chosen] = max(remaining[chosen] - 1, 0)
         mounted[str(slot.id)] = chosen
     return eff, mounted
 
@@ -591,17 +660,41 @@ def derive_composition(
         weapon_is_melee.setdefault(int(dwid), normalize_range_value(rng) == 0)
 
     avail = {cm.id: int(available.get(cm.id, 0)) for cm in owned_models}
-    # Efektywna broń + dobrany mount (magnetyzacja pasująca do loadoutu, nie
-    # zapisana domyślna) — kluczowe dla modeli z magnesami (np. Sentinel).
-    weapons_of: dict[int, dict[int, int]] = {}
-    mount_of: dict[int, dict[str, int | None] | None] = {}
-    for cm in owned_models:
-        eff, mounted = _best_mount_effective(cm, weapon_target)
-        weapons_of[cm.id] = eff
-        mount_of[cm.id] = mounted
     abilities_of = {cm.id: set(_model_ability_base_ids(cm)) for cm in owned_models}
+    # Broń bazowa każdego modelu — policz raz (parsuje loadout_json). Reużywana w
+    # `base_supply` poniżej oraz jako `slotless_weapons` w pętli Fazy A (mount
+    # liczymy tylko dla slotowanych; modele bez slotów mają stałą broń = bazę).
+    base_weapons_of = {cm.id: _model_base_weapons(cm) for cm in owned_models}
+    slotless_weapons = {cm.id: base_weapons_of[cm.id] for cm in owned_models if not cm.slots}
+
+    # Budżet montowania: broń bazowa jest bezwarunkowa (każdy fizyczny model ją
+    # ma), więc sloty NIE powinny dodawać broni, którą i tak dostarczy baza innych
+    # modeli. `mount_need[wid]` = ile sztuk MUSI pochodzić z zamontowań =
+    # target − podaż bazowa. Bez tego 2 Sentinele z Miotaczem w bazie + slot na
+    # Miotacz klonowały 3. Miotacz i psuły sumę (owned z 2 Miotaczami + proxy).
+    # Podaż liczymy z NAJWYŻEJ `count` fizycznych modeli (tyle wejdzie do oddziału)
+    # — inaczej K skopiowanych wpisów (przycisk „Kopiuj") zawyżało podaż do K×count,
+    # zerowało mount_need i blokowało potrzebny mount → fałszywe proxy.
+    base_supply: dict[int, int] = {}
+    budget = max(int(count), 1)
+    for cm in owned_models:
+        if budget <= 0:
+            break
+        n = min(avail[cm.id], budget)
+        if n <= 0:
+            continue
+        for wid, c in base_weapons_of[cm.id].items():
+            base_supply[wid] = base_supply.get(wid, 0) + c * n
+        budget -= n
+    mount_need = {wid: max(c - base_supply.get(wid, 0), 0) for wid, c in weapon_target.items()}
 
     sel: dict[int, int] = {}
+    # Mount + efektywna broń ZAFIKSOWANE per model (id) przy pierwszym przypisaniu.
+    # Front trzyma jeden mount na model, więc ten sam fizyczny model NIE może mieć
+    # dwóch różnych zamontowań — kopia z innym mountem idzie jako PROXY, nie nadwyżka.
+    # Różne modele w kolekcji (różne id) mogą dostać różne mounty.
+    eff_of: dict[int, dict[int, int]] = {}
+    mount_of: dict[int, tuple | None] = {}
     proxy_entries: list[dict[str, Any]] = []
     assigned = 0
 
@@ -619,33 +712,48 @@ def derive_composition(
                 if ability_target[aid] == 0:
                     ability_target.pop(aid, None)
 
-    def assign_owned(cm_id: int) -> None:
-        nonlocal assigned
-        sel[cm_id] = sel.get(cm_id, 0) + 1
-        avail[cm_id] -= 1
-        assigned += 1
-        _consume_weapons(weapons_of[cm_id])
-        _consume_abilities(abilities_of[cm_id])
+    def _cand_eff_mount(cm: models.CollectionModel) -> tuple[dict[int, int], tuple | None]:
+        # Zafiksowane po pierwszym przypisaniu; inaczej najlepszy mount vs RESZTA.
+        if cm.id in eff_of:
+            return eff_of[cm.id], mount_of[cm.id]
+        if cm.id in slotless_weapons:
+            return slotless_weapons[cm.id], None
+        eff, mounted = _best_mount_effective(cm, weapon_target, mount_need)
+        return eff, (tuple(sorted(mounted.items())) if mounted else None)
 
     # FAZA A: przypisz posiadane modele, których PEŁNE uzbrojenie (i zdolności)
-    # mieści się w RESZCIE zapotrzebowania. Agregat = DOKŁADNIE loadout — nie
-    # dodajemy broni spoza rozpiski (np. modelu „Plazma gunner" z bronią, której
-    # oddział nie ma). Preferuj fizycznie dostępne (avail>0), potem większe
-    # pokrycie; nadwyżka ponad available dozwolona (miękki limit → proxy wariantu).
-    def _fits_residual(cm_id: int) -> bool:
-        ew = weapons_of[cm_id]
-        if not ew or not all(weapon_target.get(w, 0) >= c for w, c in ew.items()):
-            return False
-        return all(ability_target.get(aid, 0) > 0 for aid in abilities_of[cm_id])
-
-    def _coverage(cm_id: int) -> int:
-        return sum(weapons_of[cm_id].values()) + len(abilities_of[cm_id])
-
+    # mieści się w RESZCIE zapotrzebowania. Agregat = DOKŁADNIE loadout (bez broni
+    # spoza rozpiski). Preferuj fizycznie dostępne (avail>0), potem większe
+    # pokrycie; nadwyżka ponad available dozwolona (miękki limit → proxy wariantu),
+    # ale z tym samym mountem — inny mount trafia do Fazy B jako proxy.
     while assigned < count:
-        cands = [cm.id for cm in owned_models if _fits_residual(cm.id)]
-        if not cands:
+        best = None  # (cm, eff, mkey)
+        best_key = (False, 0)
+        for cm in owned_models:
+            eff, mkey = _cand_eff_mount(cm)
+            if not eff or not all(weapon_target.get(w, 0) >= c for w, c in eff.items()):
+                continue
+            if not all(ability_target.get(aid, 0) > 0 for aid in abilities_of[cm.id]):
+                continue
+            key = (avail[cm.id] > 0, sum(eff.values()) + len(abilities_of[cm.id]))
+            if key > best_key:
+                best_key = key
+                best = (cm, eff, mkey)
+        if best is None:
             break
-        assign_owned(max(cands, key=lambda cid: (avail[cid] > 0, _coverage(cid))))
+        cm, eff, mkey = best
+        if cm.id not in eff_of:  # zafiksuj mount tego modelu przy pierwszym użyciu
+            eff_of[cm.id] = eff
+            mount_of[cm.id] = mkey
+            if mkey:  # zdejmij zamontowaną broń z globalnego budżetu montowania
+                for _sid, wid in mkey:
+                    if wid is not None:
+                        mount_need[wid] = max(mount_need.get(wid, 0) - 1, 0)
+        sel[cm.id] = sel.get(cm.id, 0) + 1
+        avail[cm.id] -= 1
+        assigned += 1
+        _consume_weapons(eff)
+        _consume_abilities(abilities_of[cm.id])
 
     # FAZA B: RESZTĘ zapotrzebowania (residual po Fazie A) rozłóż na sloty proxy,
     # PARTYCJONUJĄC dokładnie broń i zdolności. Per KATEGORIA (wręcz/dystans):
@@ -709,9 +817,9 @@ def derive_composition(
         if q <= 0:
             continue
         entry: dict[str, Any] = {"id": cid, "qty": q}
-        mounted = mount_of.get(cid)
-        if mounted:  # magnetyzacja dobrana do loadoutu (per-oddział)
-            entry["mounted"] = dict(mounted)
+        mkey = mount_of.get(cid)
+        if mkey:  # magnetyzacja dobrana do loadoutu (per-oddział)
+            entry["mounted"] = dict(mkey)
         selection.append(entry)
     # Scal identyczne proxy (ten sam wariant) w jeden wpis z qty.
     merged: dict[tuple, dict[str, Any]] = {}

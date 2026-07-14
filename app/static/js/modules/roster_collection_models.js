@@ -202,6 +202,31 @@
       return parts.length ? parts.join(', ') : '—';
     }
 
+    // „Pełny koszt modelu" (Rozpiska): baza stat + broń (z żywej magnetyzacji) +
+    // zdolności modelu. base_cost/weapon_costs/ability_cost z serwera (SSOT).
+    const weaponCost = (wid) => Number(((data && data.weapon_costs) || {})[String(wid)]) || 0;
+    const baseCost = () => Number(data && data.base_cost) || 0;
+    const fmtCost = (v) => String(Math.round(Number(v) || 0));
+    function modelCost(m, eff) {
+      let c = baseCost() + (Number(m.ability_cost) || 0);
+      Object.entries(eff || effectiveWeapons(m)).forEach(([wid, n]) => { c += weaponCost(wid) * (Number(n) || 0); });
+      return c;
+    }
+    const abilityCost = (aid) => Number(((data && data.ability_costs) || {})[String(aid)]) || 0;
+    function proxyCost(p) {
+      let c = baseCost();
+      Object.entries(p.weapons || {}).forEach(([wid, n]) => { c += weaponCost(wid) * (Number(n) || 0); });
+      (p.abilities || []).forEach((aid) => { c += abilityCost(aid); });
+      return c;
+    }
+    // Opis modelu = broń z żywej magnetyzacji + zdolności (spójny z kosztem i
+    // agregatem, w przeciwieństwie do statycznego m.summary).
+    function modelDetail(m, eff) {
+      const wsum = aggregateSummary(eff || effectiveWeapons(m));
+      const abil = (m.abilities || []).join(', ');
+      return abil ? `${wsum} • ${abil}` : wsum;
+    }
+
     function ownedRowsHtml() {
       const models = (data && data.models) || [];
       if (!models.length) {
@@ -213,7 +238,9 @@
         const qty = selections.get(String(m.id)) || 0;
         const avail = availableOf(m);
         const overflow = Math.max(qty - avail, 0);
-        const labelLine = m.label ? `<div class="small fw-semibold">${escapeHtml(m.label)}</div>` : '';
+        const eff = effectiveWeapons(m);  // raz na wiersz — koszt i opis go współdzielą
+        const costChip = `<span class="badge text-bg-light border text-body-secondary fw-normal ms-1" data-model-cost="${m.id}">${fmtCost(modelCost(m, eff))} pkt</span>`;
+        const labelLine = `<div class="small fw-semibold">${m.label ? escapeHtml(m.label) : 'Model'}${costChip}</div>`;
         const proxyTag = overflow > 0
           ? ` <span class="badge text-bg-warning" title="Sztuki ponad dostępne traktowane jako proxy">proxy +${overflow}</span>`
           : '';
@@ -235,7 +262,7 @@
           <div class="d-flex align-items-center gap-2 border rounded p-2 mb-2">
             <div class="flex-grow-1">
               ${labelLine}
-              <div class="text-muted small">${escapeHtml(m.summary || '—')}${proxyTag}</div>
+              <div class="text-muted small">${escapeHtml(modelDetail(m, eff))}${proxyTag}</div>
               ${slotHtml}
             </div>
             <div class="d-flex align-items-center gap-1 flex-shrink-0">
@@ -251,6 +278,9 @@
       const opts = Object.keys((data && data.weapon_names) || {})
         .map((wid) => `<option value="${wid}">${escapeHtml(weaponName(wid))}</option>`)
         .join('');
+      const abilOpts = ((data && data.proxy_ability_options) || [])
+        .map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`)
+        .join('');
       const list = proxies.map((p, i) => {
         const wsum = aggregateSummary(
           Object.fromEntries(Object.entries(p.weapons || {}).map(([w, c]) => [w, Number(c) || 0])),
@@ -260,7 +290,8 @@
         return `
           <div class="d-flex align-items-center gap-2 border border-dashed rounded p-2 mb-2" data-proxy-row="${i}">
             <div class="flex-grow-1">
-              <div class="small fw-semibold">Proxy <span class="badge text-bg-secondary">brak w kolekcji</span></div>
+              <div class="small fw-semibold">Proxy <span class="badge text-bg-secondary">brak w kolekcji</span>
+                <span class="badge text-bg-light border text-body-secondary fw-normal ms-1">${fmtCost(proxyCost(p))} pkt</span></div>
               <div class="text-muted small">${detail}</div>
             </div>
             <div class="d-flex align-items-center gap-1 flex-shrink-0">
@@ -270,6 +301,15 @@
             </div>
           </div>`;
       }).join('');
+      const abilFooter = abilOpts
+        ? `<div class="d-flex align-items-center gap-2 mt-1">
+            <select class="form-select form-select-sm" style="max-width:14rem" data-proxy-ability>
+              <option value="">— zdolność —</option>
+              ${abilOpts}
+            </select>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add-ability title="Dodaj wybraną zdolność do ostatniego modelu proxy">+ Dodaj zdolność</button>
+          </div>`
+        : '';
       return `
         ${list}
         <div class="d-flex align-items-center gap-2 mt-1">
@@ -279,7 +319,8 @@
           </select>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add>+ Dodaj proxy</button>
           <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add-weapon title="Dodaj wybraną broń do ostatniego modelu proxy (proxy z wieloma broniami)">+ Dodaj broń</button>
-        </div>`;
+        </div>
+        ${abilFooter}`;
     }
 
     function renderPanel() {
@@ -479,7 +520,9 @@
       const cur = mountedByModel.get(String(mid)) || {};
       cur[String(sid)] = slotSel.value === '' ? null : Number(slotSel.value);
       mountedByModel.set(String(mid), cur);
-      refreshAfterChange();
+      // Re-render: broń i koszt wiersza zależą od zamontowania (żywa magnetyzacja).
+      renderPanel();
+      scheduleSave();
     });
 
     // Dodawanie/usuwanie proxy — click.
@@ -506,6 +549,20 @@
         } else {
           proxies.push({ weapons: { [String(wid)]: 1 }, abilities: [], qty: 1 });
         }
+        renderPanel();
+        scheduleSave();
+        return;
+      }
+      // Dodaj wybraną zdolność do OSTATNIEGO proxy (proxy ze zdolnością).
+      const addAbilBtn = event.target.closest('[data-proxy-add-ability]');
+      if (addAbilBtn) {
+        const sel = panel.querySelector('[data-proxy-ability]');
+        const aid = sel ? parseInt(sel.value, 10) : NaN;
+        if (!Number.isFinite(aid)) { setStatus('Wybierz zdolność do dodania.'); return; }
+        if (!proxies.length) proxies.push({ weapons: {}, abilities: [], qty: 1 });
+        const last = proxies[proxies.length - 1];
+        last.abilities = last.abilities || [];
+        if (!last.abilities.includes(aid)) last.abilities.push(aid);
         renderPanel();
         scheduleSave();
         return;
