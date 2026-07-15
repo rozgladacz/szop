@@ -19,7 +19,8 @@ from app.services.engine.actions import Action
 from app.services.engine.events import BattleEvent, json_to_event
 from app.services.engine.state import BattleState
 from app.services.engine.state_codec import battle_state_from_json
-from szop_client.types import SimulationSummary
+from szop_client.types import BattleStateCheckpoint, SimulationSummary
+from szop_client.wire import validate_event_delta
 
 if TYPE_CHECKING:
     from szop_client.protocol import ContinuationFn
@@ -164,8 +165,8 @@ class HttpClient:
 
     def get_events(self, battle_id: int, since: int = 0) -> tuple[BattleEvent, ...]:
         """Return battle events with `sequence > since` from the B4 polling API."""
-        if since < 0:
-            raise ValueError("since must be >= 0")
+        if type(since) is not int or since < 0:
+            raise ValueError("since must be an int >= 0")
         error_label = "GET battle events"
         payload = self._get_json(
             f"/battles/{battle_id}/events",
@@ -182,12 +183,55 @@ class HttpClient:
         events = payload.get("events")
         if not isinstance(events, list):
             raise HttpClientError("GET battle events returned malformed payload")
-        return tuple(_event_from_public_payload(item) for item in events)
+        try:
+            return validate_event_delta(
+                (_event_from_public_payload(item) for item in events),
+                since=since,
+            )
+        except ValueError as exc:
+            raise HttpClientError(
+                "GET battle events returned malformed payload"
+            ) from exc
+
+    def get_state_checkpoint(self, battle_id: int) -> BattleStateCheckpoint:
+        """Return state and sequence from the same versioned ``GET /state``."""
+        error_label = "GET battle state"
+        payload = self._get_json(
+            f"/battles/{battle_id}/state",
+            {},
+            error_label=error_label,
+        )
+        if not isinstance(payload, dict):
+            raise HttpClientError(f"{error_label} returned malformed payload")
+        _ensure_expected_battle_id(payload, battle_id, error_label=error_label)
+        try:
+            sequence_at = _required_int(payload, "sequence_at")
+            if sequence_at < 0:
+                raise TypeError("sequence_at")
+            schema = _required_str(payload, "schema")
+            version = _required_int(payload, "version")
+            state = battle_state_from_json(
+                {
+                    "schema": schema,
+                    "version": version,
+                    "state": payload["state"],
+                }
+            )
+            return BattleStateCheckpoint(
+                battle_id=battle_id,
+                sequence_at=sequence_at,
+                schema=schema,
+                version=version,
+                state=state,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HttpClientError(
+                f"{error_label} returned malformed payload"
+            ) from exc
 
     def get_state(self, battle_id: int) -> BattleState:
         """Return the participant-scoped current domain state of a battle."""
-        state, _ = self._get_state_checkpoint(battle_id)
-        return state
+        return self.get_state_checkpoint(battle_id).state
 
     def take_action(
         self,
@@ -206,7 +250,7 @@ class HttpClient:
                 "HttpClient.take_action does not support continuation callbacks"
             )
         wire_action = action_to_json(action)
-        _, expected_sequence = self._get_state_checkpoint(battle_id)
+        expected_sequence = self.get_state_checkpoint(battle_id).sequence_at
         error_label = "POST battle action"
         payload = self._request_json(
             "POST",
@@ -224,31 +268,6 @@ class HttpClient:
             expected_previous_sequence=expected_sequence,
             error_label=error_label,
         )
-
-    def _get_state_checkpoint(self, battle_id: int) -> tuple[BattleState, int]:
-        error_label = "GET battle state"
-        payload = self._get_json(
-            f"/battles/{battle_id}/state",
-            {},
-            error_label=error_label,
-        )
-        if not isinstance(payload, dict):
-            raise HttpClientError(f"{error_label} returned malformed payload")
-        _ensure_expected_battle_id(payload, battle_id, error_label=error_label)
-        try:
-            sequence_at = _required_int(payload, "sequence_at")
-            if sequence_at < 0:
-                raise TypeError("sequence_at")
-            state_payload = {
-                "schema": payload["schema"],
-                "version": _required_int(payload, "version"),
-                "state": payload["state"],
-            }
-            return battle_state_from_json(state_payload), sequence_at
-        except (KeyError, TypeError, ValueError) as exc:
-            raise HttpClientError(
-                f"{error_label} returned malformed payload"
-            ) from exc
 
     def _get_json(
         self,

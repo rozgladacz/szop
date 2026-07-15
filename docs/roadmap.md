@@ -297,10 +297,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### C1. Infrastruktura (3 tyg)
 - [x] `mcp_server/{server.py, config.py}` — **minimalny stdio slice DONE
-  2026-07-15**: stabilny MCP Python SDK v1, konfiguracja `SZOP_API_URL` +
-  redagowany `SZOP_API_TOKEN`, dokładnie jeden read-only tool
-  `simulate_engagement`. Serwer jest wyłącznie klientem publicznego API przez
-  `szop_client.HttpClient`; bez ORM/DB, write tools, RAG i executorów.
+  2026-07-15 + read-only battle observation DONE 2026-07-15**: stabilny MCP
+  Python SDK v1, konfiguracja `SZOP_API_URL` + redagowany `SZOP_API_TOKEN` oraz
+  dokładnie cztery read-only tools (`simulate_engagement`, metadata/state/events
+  bitwy). Serwer jest wyłącznie klientem publicznego API przez
+  `szop_client.HttpClient`; bez ORM/DB, write tools, resources/prompts, RAG i
+  executorów. Publiczny `BattleStateCheckpoint` gwarantuje state+`sequence_at`
+  z jednego GET; eventy mają stabilną, JSON-safe projekcję.
 - [x] Endpointy tokenów — **DONE 2026-06-28**: `POST /agent_tokens`, `GET /agent_tokens`, `DELETE /agent_tokens/{id}`. JSON API dla zalogowanego ownera; tworzy dedykowanego `User.role="agent"` bez hasła użytkowego, zapisuje tylko `AgentToken.token_hash`, zwraca raw bearer token tylko raz, limituje ownera do 20 aktywnych tokenów, listuje/cofa wyłącznie tokeny ownera i audytuje create/revoke bez sekretów. Brak UI; konsumenci B4/MCP nadal osobny zakres.
 - [x] Middleware `require_agent_scope(scope_name)` — **DONE 2026-06-27**: `app/security.py` hash bearer tokena (`sha256:`), lookup `AgentToken.token_hash`, scope JSON (`*` albo konkretny scope), odrzucenie expired/revoked/non-agent i `AgentAuditLog` z redakcją sekretów z query/path params. 8 testów. Konsumenci B4/MCP jeszcze niepodpięci.
 - [x] `AgentProposal` model + backend JSON endpointy — **backend slice DONE 2026-06-29**:
@@ -317,7 +320,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   pobiera `GET /agent_proposals`, pokazuje status/payload i pozwala wykonać
   `Zezwól`/`Odrzuć` przez istniejące endpointy approve/reject. Bez executora
   domenowego; zatwierdzona propozycja nadal tylko zapisuje consent.
-- [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy). ADR-0021 (MCP jako klient publicznego API) i ADR-0024 (Consent-gated writes) nadal otwarte (warstwa konsumenta/zapisów za zgodą).
+- [x] ADR-0021: MCP jako klient publicznego API — **Accepted 2026-07-15**: lokalna fasada deleguje wyłącznie do `HttpClient`, bez DB/ORM/własnego transportu; backend pozostaje SSOT auth/scope/audytu.
+- [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy). ADR-0024 (Consent-gated writes) nadal otwarte.
 
 ### C2. RAG (3 tyg)
 - [ ] `mcp_server/indexer.py` — chunki ~300 słów / 50 overlap z DOCX; embed via `paraphrase-multilingual-MiniLM-L12-v2`; store w `sqlite-vec`
@@ -333,6 +337,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `find_exploit_candidates(army_id)` — **leaf-CLI DONE 2026-06-29** (`scripts/find_exploit_candidates.py`): turniej istniejących rozpisek jednej armii z DB (round-robin, każda para przez `simulate_engagement`/`LocalClient.simulate_roster_ids`) → ranking kandydatów do ręcznej weryfikacji wg `win_rate/points` (`wr/100pkt`, jak `exploit_hunt`); `--list`/`--json`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Nie generuje rozpisek i nie zapisuje wyników. Wrapper MCP/HTTP gated C1/B4.
 - [x] `score_list(roster_id)` — **leaf-CLI DONE 2026-06-27** (`scripts/score_list.py`): ocena rozpiski przez agregację symulacji vs POLE pozostałych rozpisek z DB (per-przeciwnik win-rate + „siła w polu" + sygnał koszt↔wynik); reuse pairingu `simulate_engagement` (`LocalClient.simulate_roster_ids`); `--list`/`--vs`/`--army`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Później interpretacja dedykowanego agenta. Wrapper MCP/HTTP gated C1/B4.
 - [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. HTTP sandbox wrapper DONE 2026-07-10 (`POST /battles/simulate` + `HttpClient.simulate_roster_ids`); **minimalny MCP wrapper DONE 2026-07-15** (`mcp_server.server`, stdio, wyłącznie publiczne API, zakres 1–50 gier).
+- [x] `get_battle_metadata/state/events` — **MCP wrappers DONE 2026-07-15**: dokładnie jedno publiczne wywołanie `HttpClient` per tool; scope `battle:read` egzekwuje backend, state używa spójnego checkpointu bez RNG, events zachowują `since`/kolejność/`last_sequence`; brak write toola.
 
 ---
 
@@ -466,7 +471,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0016 | szop_client jako wydzielony moduł (Protocol + LocalClient slice) | ✓ |
 | 0017 | Telemetria od dnia 1: analiza offline z event-logu | ✓ |
 | 0020 | MCP runtime: Python SDK | — |
-| 0021 | MCP jako klient publicznego API | — |
+| 0021 | MCP jako klient publicznego API | ✓ |
 | 0022 | Vector store: sqlite-vec | — |
 | 0023 | Embeddings: sentence-transformers offline | — |
 | 0024 | Consent-gated agent writes | — |

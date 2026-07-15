@@ -11,6 +11,7 @@ from typing import Any
 
 _EXPORTS = {
     "BattleMetadata": ("szop_client.http", "BattleMetadata"),
+    "BattleStateCheckpoint": ("szop_client.types", "BattleStateCheckpoint"),
     "HttpClient": ("szop_client.http", "HttpClient"),
     "HttpClientError": ("szop_client.http", "HttpClientError"),
     "HttpClientTransportError": ("szop_client.http", "HttpClientTransportError"),
@@ -20,6 +21,13 @@ _EXPORTS = {
     "UnknownBattleError": ("szop_client.local", "UnknownBattleError"),
     "RosterNotFoundError": ("szop_client.local", "RosterNotFoundError"),
     "SimulationSummary": ("szop_client.types", "SimulationSummary"),
+    "battle_events_to_wire": ("szop_client.wire", "battle_events_to_wire"),
+    "battle_state_checkpoint_to_wire": (
+        "szop_client.wire",
+        "battle_state_checkpoint_to_wire",
+    ),
+    "ensure_json_safe": ("szop_client.wire", "ensure_json_safe"),
+    "validate_event_delta": ("szop_client.wire", "validate_event_delta"),
     "GameClient": ("szop_client.protocol", "GameClient"),
     "PlayerFactory": ("szop_client.protocol", "PlayerFactory"),
     "ContinuationFn": ("szop_client.protocol", "ContinuationFn"),

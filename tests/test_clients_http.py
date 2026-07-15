@@ -1,21 +1,45 @@
 from __future__ import annotations
 
 import json
+from typing import Any, get_args
+from unittest.mock import patch
 
 import pytest
 
 from app.services.engine.action_codec import action_from_json
 from app.services.engine.actions import DefendAction
-from app.services.engine.events import MoveExecuted, StatusAdded, event_to_json
+from app.services.engine.events import (
+    AbilityOverrideApplied,
+    AbilityOverridesCleared,
+    BattleEvent,
+    EffectApplied,
+    InitiativePassed,
+    InterruptTriggered,
+    MeleeBalanceReset,
+    MeleeResolved,
+    ModelKilled,
+    MoraleTestPassed,
+    MoveExecuted,
+    MutexCollision,
+    ObjectiveControlChanged,
+    RoundEnded,
+    ShotResolved,
+    StatusAdded,
+    StatusRemoved,
+    event_to_json,
+)
 from app.services.engine.state_codec import battle_state_to_json
 from szop_client import (
     BattleMetadata,
+    BattleStateCheckpoint,
     HttpClient,
     HttpClientError,
     HttpRequest,
     HttpResponse,
     LocalClient,
     SimulationSummary,
+    battle_events_to_wire,
+    battle_state_checkpoint_to_wire,
 )
 
 
@@ -374,8 +398,8 @@ def test_get_battle_metadata_rejects_mismatched_battle_id() -> None:
 def test_get_events_polls_b4_endpoint_and_decodes_engine_events() -> None:
     seen: list[HttpRequest] = []
     events = (
-        MoveExecuted(sequence=1, unit_id=10, from_pos=(0.0, 0.0), to_pos=(1.0, 2.0)),
-        StatusAdded(sequence=2, target_id=10, status="Aktywowany"),
+        MoveExecuted(sequence=8, unit_id=10, from_pos=(0.0, 0.0), to_pos=(1.0, 2.0)),
+        StatusAdded(sequence=9, target_id=10, status="Aktywowany"),
     )
 
     def transport(request: HttpRequest) -> HttpResponse:
@@ -415,12 +439,13 @@ def test_get_events_omits_authorization_header_without_token() -> None:
     assert "Authorization" not in seen[0].headers
 
 
-def test_get_events_rejects_negative_since_before_transport() -> None:
+@pytest.mark.parametrize("since", [-1, True])
+def test_get_events_rejects_invalid_since_before_transport(since) -> None:
     def transport(_request: HttpRequest) -> HttpResponse:
         raise AssertionError("transport should not be called")
 
     with pytest.raises(ValueError):
-        HttpClient("http://localhost", transport=transport).get_events(1, since=-1)
+        HttpClient("http://localhost", transport=transport).get_events(1, since=since)
 
 
 def test_get_events_raises_for_http_error_status() -> None:
@@ -451,6 +476,34 @@ def test_get_events_rejects_mismatched_battle_id() -> None:
     assert "GET battle events returned battle_id 99, expected 42" in str(
         exc_info.value
     )
+
+
+@pytest.mark.parametrize("sequences", [(7,), (9, 8), (8, 8)])
+def test_get_events_rejects_events_not_strictly_ordered_after_since(
+    sequences: tuple[int, ...],
+) -> None:
+    events = [
+        StatusAdded(sequence=sequence, target_id=10, status="Aktywowany")
+        for sequence in sequences
+    ]
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(
+            {
+                "battle_id": 42,
+                "events": [
+                    {
+                        "sequence": event.sequence,
+                        "event_type": type(event).__name__,
+                        "payload": event_to_json(event),
+                    }
+                    for event in events
+                ],
+            }
+        )
+
+    with pytest.raises(HttpClientError, match="malformed payload"):
+        HttpClient("http://localhost", transport=transport).get_events(42, since=7)
 
 
 def _equivalent_local_state():
@@ -500,6 +553,93 @@ def test_get_state_returns_domain_state_with_local_client_parity() -> None:
     assert seen[0].url == "https://szop.example/api/battles/42/state"
     assert seen[0].headers["Authorization"] == "Bearer raw-token"
     assert seen[0].body is None
+
+
+def test_get_state_checkpoint_exposes_one_coherent_public_snapshot() -> None:
+    local_state = _equivalent_local_state()
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(
+            {
+                **battle_state_to_json(local_state),
+                "battle_id": 42,
+                "sequence_at": 17,
+            }
+        )
+
+    checkpoint = HttpClient(
+        "http://localhost", transport=transport
+    ).get_state_checkpoint(42)
+
+    assert checkpoint == BattleStateCheckpoint(
+        battle_id=42,
+        sequence_at=17,
+        schema="szop.battle_state",
+        version=1,
+        state=local_state,
+    )
+    projected = battle_state_checkpoint_to_wire(checkpoint)
+    assert projected["battle_id"] == 42
+    assert projected["sequence_at"] == 17
+    assert "rng" not in projected
+    json.dumps(projected, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("battle_id", True),
+        ("battle_id", 0),
+        ("sequence_at", True),
+        ("sequence_at", -1),
+        ("schema", ""),
+        ("version", True),
+    ],
+)
+def test_battle_state_checkpoint_rejects_invalid_public_metadata(
+    field: str,
+    value: Any,
+) -> None:
+    values = {
+        "battle_id": 42,
+        "sequence_at": 17,
+        "schema": "szop.battle_state",
+        "version": 1,
+        "state": _equivalent_local_state(),
+    }
+    values[field] = value
+
+    with pytest.raises(ValueError):
+        BattleStateCheckpoint(**values)
+
+
+def test_get_state_delegates_to_public_checkpoint_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _equivalent_local_state()
+    checkpoint = BattleStateCheckpoint(
+        battle_id=42,
+        sequence_at=2,
+        schema="szop.battle_state",
+        version=1,
+        state=state,
+    )
+    client = HttpClient(
+        "http://localhost",
+        transport=lambda _request: (_ for _ in ()).throw(
+            AssertionError("transport should not be called")
+        ),
+    )
+    seen: list[int] = []
+
+    def get_checkpoint(battle_id: int) -> BattleStateCheckpoint:
+        seen.append(battle_id)
+        return checkpoint
+
+    monkeypatch.setattr(client, "get_state_checkpoint", get_checkpoint)
+
+    assert client.get_state(42) is state
+    assert seen == [42]
 
 
 def test_get_state_raises_for_http_error_status() -> None:
@@ -604,9 +744,15 @@ def test_take_action_fetches_fresh_sequence_posts_wire_and_matches_local_client(
         token="raw-token",
         transport=transport,
     )
-    result = client.take_action(42, DefendAction(unit_id=1), continuation=None)
+    with patch.object(
+        client,
+        "get_state_checkpoint",
+        wraps=client.get_state_checkpoint,
+    ) as get_checkpoint:
+        result = client.take_action(42, DefendAction(unit_id=1), continuation=None)
 
     assert result == local_result[0]
+    get_checkpoint.assert_called_once_with(42)
     assert [request.method for request in seen] == ["GET", "POST"]
     assert seen[1].url == "https://szop.example/api/battles/42/actions"
     assert seen[1].headers["Content-Type"] == "application/json"
@@ -698,3 +844,46 @@ def test_take_action_rejects_malformed_or_inconsistent_response(mutation) -> Non
             42,
             DefendAction(unit_id=1),
         )
+
+
+def test_all_current_battle_events_have_json_safe_public_projections() -> None:
+    events: tuple[BattleEvent, ...] = (
+        MoveExecuted(1, 1, (0.0, 0.0), (1.0, 2.0)),
+        ShotResolved(2, 1, 2, "karabin", 3, 2, 1, 0),
+        MeleeResolved(3, 1, 2, "miecz", 2, 1, 0, 0, 1),
+        ModelKilled(4, 2, 0, True, False, 1),
+        MoraleTestPassed(5, 2, (1, 6), 1, "pinned"),
+        EffectApplied(6, "leczenie", 1, 2, {"amount": 1}),
+        InterruptTriggered(7, "before_action", "rozkaz", 1, 2, {"x": 3}, True),
+        RoundEnded(8, 2, (2, 1)),
+        StatusAdded(9, 1, "Aktywowany"),
+        StatusRemoved(10, 1, "Przyszpilony"),
+        MeleeBalanceReset(11, 1),
+        MutexCollision(12, 1, ("Przyszpilony", "Przygotowany")),
+        ObjectiveControlChanged(13, 5, None, 0),
+        InitiativePassed(14, 0, 1),
+        AbilityOverrideApplied(15, 1, "furia", True, 2),
+        AbilityOverridesCleared(16, 1),
+    )
+
+    assert {type(event) for event in events} == set(get_args(BattleEvent))
+    projected, last_sequence = battle_events_to_wire(events, since=0)
+
+    assert [item["sequence"] for item in projected] == list(range(1, 17))
+    assert [item["type"] for item in projected] == [
+        type(event).__name__ for event in events
+    ]
+    assert last_sequence == 16
+    json.dumps(projected, allow_nan=False)
+
+
+def test_event_projection_rejects_non_finite_payloads() -> None:
+    event = EffectApplied(
+        sequence=1,
+        slug="bad",
+        target_unit_id=1,
+        payload={"value": float("nan")},
+    )
+
+    with pytest.raises(ValueError, match="not JSON-safe"):
+        battle_events_to_wire((event,), since=0)
