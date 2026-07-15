@@ -15,7 +15,12 @@ from app.main import app
 from app.routers import battles
 from app.security import hash_agent_token, hash_password
 from app.services.engine.events import MoveExecuted, StatusAdded
-from app.services.engine.persistence import load_events, save_events
+from app.services.engine.persistence import (
+    load_events,
+    load_latest_checkpoint,
+    save_events,
+)
+from app.services.engine.state_codec import battle_state_from_json
 from szop_client import LocalClient
 
 RAW_TOKEN = "battle-read-secret"
@@ -208,6 +213,8 @@ def test_battles_router_is_registered_in_app() -> None:
     assert "POST" in methods_by_path["/battles/simulate"]
     assert "/battles/{battle_id}/events" in route_paths
     assert "GET" in methods_by_path["/battles/{battle_id}/events"]
+    assert "/battles/{battle_id}/state" in route_paths
+    assert "GET" in methods_by_path["/battles/{battle_id}/state"]
 
 
 def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
@@ -236,8 +243,13 @@ def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
     assert battle.rng_seed == 777
     assert battle.status == "active"
     events = load_events(session, battle.id)
+    checkpoint = load_latest_checkpoint(session, battle.id)
     assert events
+    assert checkpoint is not None
     assert response.latest_sequence == len(events)
+    assert checkpoint.sequence_at == response.latest_sequence
+    assert checkpoint.state.round == battle.current_round
+    assert checkpoint.dice.seed == battle.rng_seed
     assert [event.sequence for event in events] == list(range(1, len(events) + 1))
 
 
@@ -627,6 +639,113 @@ def test_get_battle_events_rejects_non_participant_and_missing_battle() -> None:
             reader=battles.BattleReader(user_id=owner.id),
         )
     assert missing_info.value.status_code == 404
+
+
+def test_get_battle_state_returns_versioned_checkpoint_without_rng() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "state-owner")
+    roster_a = _seed_roster(session, name="State A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="State B", owner_id=owner.id)
+    created = battles.create_battle(
+        battles.BattleCreate(
+            p1_roster_id=roster_a.id,
+            p2_roster_id=roster_b.id,
+            rng_seed=4321,
+        ),
+        db=session,
+        creator=battles.BattleCreator(user_id=owner.id),
+    )
+
+    response = battles.get_battle_state(
+        created.battle_id,
+        db=session,
+        reader=battles.BattleReader(user_id=owner.id),
+    )
+    restored = battle_state_from_json(
+        {
+            "schema": response.checkpoint_schema,
+            "version": response.version,
+            "state": response.state,
+        }
+    )
+
+    assert response.battle_id == created.battle_id
+    assert response.sequence_at == created.latest_sequence
+    assert restored.round == 1
+    assert restored == load_latest_checkpoint(session, created.battle_id).state
+    public_json = json.dumps(response.model_dump(by_alias=True))
+    assert "rng_json" not in public_json
+    assert "random_state" not in public_json
+
+
+def test_get_battle_state_rejects_non_participant_and_missing_battle() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "state-owner-scope")
+    opponent = _seed_user(session, "state-opponent-scope")
+    stranger = _seed_user(session, "state-stranger-scope")
+    battle = _seed_battle(session, p1=owner, p2=opponent)
+
+    with pytest.raises(HTTPException) as stranger_info:
+        battles.get_battle_state(
+            battle.id,
+            db=session,
+            reader=battles.BattleReader(user_id=stranger.id),
+        )
+    assert stranger_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_info:
+        battles.get_battle_state(
+            battle.id + 999,
+            db=session,
+            reader=battles.BattleReader(user_id=owner.id),
+        )
+    assert missing_info.value.status_code == 404
+
+
+def test_get_battle_state_reports_conflict_for_participant_without_checkpoint() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "state-owner-no-checkpoint")
+    battle = _seed_battle(session, p1=owner, p2=owner)
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles.get_battle_state(
+            battle.id,
+            db=session,
+            reader=battles.BattleReader(user_id=owner.id),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+def test_get_battle_state_accepts_agent_scope_and_audits_request() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "state-agent-owner")
+    roster_a = _seed_roster(session, name="Agent State A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="Agent State B", owner_id=owner.id)
+    created = battles.create_battle(
+        battles.BattleCreate(p1_roster_id=roster_a.id, p2_roster_id=roster_b.id),
+        db=session,
+        creator=battles.BattleCreator(user_id=owner.id),
+    )
+    token = _seed_agent_token(session, owner=owner)
+    reader = battles._battle_reader(
+        request=_fake_request(
+            battle_id=created.battle_id,
+            path=f"/battles/{created.battle_id}/state",
+        ),
+        db=session,
+        current_user=None,
+    )
+
+    response = battles.get_battle_state(created.battle_id, db=session, reader=reader)
+
+    assert response.battle_id == created.battle_id
+    audit = session.execute(select(models.AgentAuditLog)).scalar_one()
+    assert audit.user_id == owner.id
+    assert audit.agent_user_id == token.agent_user_id
+    assert audit.route == f"/battles/{created.battle_id}/state"
+    assert json.loads(audit.params_json)["scope"] == battles.BATTLE_READ_SCOPE
+    assert RAW_TOKEN not in audit.params_json
 
 
 def test_battle_reader_accepts_session_user_without_agent_audit() -> None:

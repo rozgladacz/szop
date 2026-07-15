@@ -633,6 +633,11 @@ class Battle(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="BattleEvent.sequence",
     )
+    checkpoints: Mapped[List["BattleCheckpoint"]] = relationship(
+        back_populates="battle",
+        cascade="all, delete-orphan",
+        order_by="BattleCheckpoint.sequence_at",
+    )
 
 
 class BattleEvent(Base):
@@ -663,6 +668,26 @@ class BattleEvent(Base):
     )
 
     battle: Mapped[Battle] = relationship(back_populates="events")
+
+
+class BattleCheckpoint(Base):
+    """Versioned state + RNG checkpoint coherent with an event sequence."""
+
+    __tablename__ = "battle_checkpoints"
+    __table_args__ = (UniqueConstraint("battle_id", "sequence_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    battle_id: Mapped[int] = mapped_column(
+        ForeignKey("battles.id"), nullable=False, index=True
+    )
+    sequence_at: Mapped[int] = mapped_column(Integer, nullable=False)
+    state_json: Mapped[str] = mapped_column(Text, nullable=False)
+    rng_json: Mapped[str] = mapped_column(Text, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=utcnow, nullable=False
+    )
+
+    battle: Mapped[Battle] = relationship(back_populates="checkpoints")
 
 
 for cls in [

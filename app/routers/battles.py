@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -15,10 +15,18 @@ from ..services.agents import PLAYER_SEED_OFFSET, make_player, simulate_from_ros
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
 from ..services.agents.registry import FAST, bot_kinds
 from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
+from ..services.engine.dice import DeterministicDice
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
-from ..services.engine.persistence import latest_event_sequence, load_events, save_events
+from ..services.engine.persistence import (
+    latest_event_sequence,
+    load_events,
+    load_latest_checkpoint,
+    save_checkpoint,
+    save_events,
+)
 from ..services.engine.phases import deployment_round, setup_phase
+from ..services.engine.state_codec import battle_state_to_json
 
 router = APIRouter(prefix="/battles", tags=["battles"])
 
@@ -69,6 +77,16 @@ class BattleEventPublic(BaseModel):
 class BattleEventsPublic(BaseModel):
     battle_id: int
     events: list[BattleEventPublic]
+
+
+class BattleStatePublic(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    checkpoint_schema: str = Field(..., alias="schema")
+    version: int = Field(..., ge=1)
+    battle_id: int
+    sequence_at: int = Field(..., ge=0)
+    state: dict[str, Any]
 
 
 class RosterAdaptationPublic(BaseModel):
@@ -296,6 +314,14 @@ def create_battle(
     db.add(battle)
     db.flush()
     save_events(db, battle.id, deploy_events, expected_latest_sequence=0)
+    sequence_at = deploy_events[-1].sequence if deploy_events else 0
+    save_checkpoint(
+        db,
+        battle.id,
+        sequence_at,
+        state,
+        DeterministicDice(seed=payload.rng_seed),
+    )
     db.commit()
     db.refresh(battle)
     return _public_battle(
@@ -407,4 +433,27 @@ def get_battle_events(
     return BattleEventsPublic(
         battle_id=battle.id,
         events=[_public_event(event) for event in events],
+    )
+
+
+@router.get("/{battle_id}/state", response_model=BattleStatePublic)
+def get_battle_state(
+    battle_id: int,
+    db: Session = Depends(get_db),
+    reader: BattleReader = Depends(_battle_reader),
+) -> BattleStatePublic:
+    battle = _get_accessible_battle(db, battle_id=battle_id, reader=reader)
+    checkpoint = load_latest_checkpoint(db, battle.id)
+    if checkpoint is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Current battle checkpoint is unavailable",
+        )
+    serialized = battle_state_to_json(checkpoint.state)
+    return BattleStatePublic(
+        checkpoint_schema=str(serialized["schema"]),
+        version=int(serialized["version"]),
+        battle_id=battle.id,
+        sequence_at=checkpoint.sequence_at,
+        state=serialized["state"],
     )

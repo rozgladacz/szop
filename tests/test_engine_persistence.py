@@ -39,9 +39,12 @@ from app.services.engine.events import (  # noqa: E402
     StatusAdded,
 )
 from app.services.engine.persistence import (  # noqa: E402
+    BattleCheckpointSequenceConflict,
     BattleEventSequenceConflict,
     latest_event_sequence,
+    load_latest_checkpoint,
     load_events,
+    save_checkpoint,
     save_events,
 )
 from app.services.engine.phases import (  # noqa: E402
@@ -184,6 +187,99 @@ def test_roundtrip_covers_many_event_types() -> None:
     # Minimalny zestaw, który ta bitwa zawsze produkuje.
     assert {"MoveExecuted", "StatusAdded", "RoundEnded"}.issubset(types)
     assert len(types) >= 5
+
+
+def test_checkpoint_survives_session_reopen_with_state_and_rng(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite+pysqlite:///{tmp_path / 'checkpoint.db'}", future=True)
+    Base.metadata.create_all(bind=engine)
+    _, events, state = _play_smoke_battle()
+    dice = DeterministicDice(seed=314159)
+    dice.roll_d6(23)
+
+    with Session(bind=engine) as writer:
+        battle = models.Battle(rng_seed=dice.seed, status="active")
+        writer.add(battle)
+        writer.flush()
+        save_events(writer, battle.id, events)
+        sequence_at = latest_event_sequence(writer, battle.id)
+        save_checkpoint(writer, battle.id, sequence_at, state, dice)
+        battle_id = battle.id
+        writer.commit()
+
+    expected_rolls = dice.roll_d6(50)
+    with Session(bind=engine) as reader:
+        loaded = load_latest_checkpoint(reader, battle_id)
+
+    assert loaded is not None
+    assert loaded.battle_id == battle_id
+    assert loaded.sequence_at == max(event.sequence for event in events)
+    assert loaded.state == state
+    assert loaded.dice.roll_d6(50) == expected_rolls
+
+
+def test_checkpoint_requires_current_event_sequence() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    state, _, _ = _play_smoke_battle()
+
+    with pytest.raises(BattleCheckpointSequenceConflict) as exc_info:
+        save_checkpoint(
+            session,
+            battle.id,
+            1,
+            state,
+            DeterministicDice(seed=battle.rng_seed),
+        )
+
+    assert exc_info.value.latest_sequence == 0
+    assert session.query(models.BattleCheckpoint).count() == 0
+
+
+def test_checkpoint_rejects_boolean_sequence() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    state, _, _ = _play_smoke_battle()
+
+    with pytest.raises(ValueError, match="sequence_at"):
+        save_checkpoint(
+            session,
+            battle.id,
+            True,
+            state,
+            DeterministicDice(seed=battle.rng_seed),
+        )
+
+
+def test_latest_checkpoint_hides_stale_rng_position() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    state, _, _ = _play_smoke_battle()
+    dice = DeterministicDice(seed=battle.rng_seed)
+    save_checkpoint(session, battle.id, 0, state, dice)
+    save_events(
+        session,
+        battle.id,
+        [MoveExecuted(sequence=1, unit_id=1, from_pos=(0, 0), to_pos=(1, 1))],
+    )
+
+    assert load_latest_checkpoint(session, battle.id) is None
+
+
+def test_save_checkpoint_is_transactionally_neutral() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    state, _, _ = _play_smoke_battle()
+    save_checkpoint(
+        session,
+        battle.id,
+        0,
+        state,
+        DeterministicDice(seed=battle.rng_seed),
+    )
+
+    session.rollback()
+
+    assert session.query(models.BattleCheckpoint).count() == 0
 
 
 def test_event_type_column_matches_payload() -> None:

@@ -44,15 +44,17 @@ owner-only approval UI: fetch listy, statusy, payload w `<details>` oraz akcje
 `Zezwól`/`Odrzuć` wywołujące istniejące endpointy approve/reject. Konsumenci
 B4/MCP oraz executor zatwierdzonych propozycji pozostają osobnym zakresem.
 Pierwszy konsument B4 agent-scope to `app/routers/battles.py`: read-only
-`GET /battles/{id}` zwraca metadane bitwy + `latest_sequence`, a
-`GET /battles/{id}/events?since=N` zwraca event-log. Oba endpointy dopuszczają
+`GET /battles/{id}` zwraca metadane bitwy + `latest_sequence`,
+`GET /battles/{id}/events?since=N` zwraca event-log, a wersjonowany
+`GET /battles/{id}/state` zwraca bieżący `BattleState` z `sequence_at` bez
+wewnętrznego RNG. Endpointy dopuszczają
 sesję gracza albo bearer token ze scope `battle:read`, mapując agenta na
 `owner_user_id`. Dostęp do bitwy jest participant-scoped
 (`p1_user_id`/`p2_user_id`), a cudza albo nieistniejąca bitwa zwraca 404.
 Bearer path używa standardowego audytu `AgentAuditLog`. Addytywny write-slice
 `POST /battles` tworzy sandboxową bitwę dla ownera dwóch własnych rosterów
-(`battle:create` dla agenta), zapisuje metadane `Battle` oraz startowy event-log
-rozstawienia przez `persistence.save_events`; create response zawiera addytywny
+(`battle:create` dla agenta), zapisuje metadane `Battle`, startowy event-log
+rozstawienia oraz spójny checkpoint stanu+RNG w jednej transakcji; create response zawiera addytywny
 `adaptation_report` p1/p2 z raportu `roster_to_engine_roster`
 (`dropped_excluded`, `inert_incomplete`, `deferred_attached_heroes`), a GET
 metadata nie rekonstruuje tego raportu. `POST /battles/simulate` uruchamia
@@ -61,7 +63,8 @@ gier, tylko boty `fast` z rejestru) na app-level mapach i botach, zwracając
 agregat wyników bez zapisu `Battle` ani eventów. Pierwszy klient tego kontraktu
 to `szop_client.HttpClient`:
 `get_battle_metadata` odpytuje metadane bitwy, `get_events` odpytuje polling
-endpoint i deserializuje payload przez `json_to_event`, a `simulate_roster_ids`
+endpoint i deserializuje payload przez `json_to_event`, `get_state` zwraca
+domenowy `BattleState` przez bezpieczny wersjonowany codec, a `simulate_roster_ids`
 odpytuje sandbox simulation i zwraca `SimulationSummary`. Lokalny
 `mcp_server` jest klientem tego samego publicznego API: nie importuje ORM,
 `SessionLocal` ani `app.db` i nie czyta `data/szop.db`.
@@ -219,11 +222,14 @@ while not is_battle_over(state):
 
 ### Persystencja event-store (B2 slice, ADR-0050, 2026-06-10)
 
-`app/services/engine/persistence.py` — jedyny moduł `engine/` dotykający ORM (warstwa-granica; reszta silnika czysta). Dwie nowe tabele w `app/models.py`:
+`app/services/engine/persistence.py` — jedyny moduł `engine/` dotykający ORM (warstwa-granica; reszta silnika czysta). Trwałe tabele w `app/models.py`:
 - **`battles`** (`Battle`): metadane gry (`p1/p2_user_id?`, `p1/p2_roster_id?`, `winner_user_id?`, `current_round`, `rng_seed`, `status`). Przebieg NIE tu — event-sourced.
 - **`battle_events`** (`BattleEvent`, append-only): `event_type` + `payload_json` (`json.dumps(event_to_json(e))`) + `sequence`, `UniqueConstraint(battle_id, sequence)` (DB-level optimistic locking fallback).
+- **`battle_checkpoints`** (`BattleCheckpoint`, ADR-0053): pełny, wersjonowany
+  `BattleState` + stan `DeterministicDice` przy `sequence_at`, z unikalnością
+  `(battle_id, sequence_at)`. Addytywna tabela przez `create_all`, bez Alembic.
 
-`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0)` (rekonstrukcja przez `json_to_event`) + `latest_event_sequence(session, battle_id)`. Gdy przyszły write endpoint B4 zna ostatni widziany sequence, powinien wywołać `save_events(..., expected_latest_sequence=N)`: helper rzuci `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`), C1 helper `require_agent_scope(scope_name)` w `app/security.py` oraz owner-only endpointy tokenów `app/routers/agent_tokens.py`. Pierwsze B4 endpoints to `app/routers/battles.py`: `POST /battles` (owner-scoped sandbox create z dwóch własnych rosterów, `battle:create`, zapis `Battle` + startowego event-logu), `GET /battles/{id}` (participant-scoped metadane bitwy + `latest_sequence`) oraz `GET /battles/{id}/events?since=N` (participant-scoped polling event-logu), bez rekonstrukcji pełnego stanu HTTP. Odroczone: `BattleInvite`, `BattleSnapshot` i pozostałe B4 API.
+`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0)` (rekonstrukcja przez `json_to_event`) + `latest_event_sequence(session, battle_id)`. Gdy przyszły write endpoint B4 zna ostatni widziany sequence, powinien wywołać `save_events(..., expected_latest_sequence=N)`: helper rzuci `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. `save_checkpoint`/`load_latest_checkpoint` (ADR-0053) nie commitują i uznają checkpoint za bieżący wyłącznie przy `sequence_at == latest_event_sequence`; zapisują/odtwarzają wersjonowany `BattleState` i RNG bez `pickle`. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`), C1 helper `require_agent_scope(scope_name)` w `app/security.py` oraz owner-only endpointy tokenów `app/routers/agent_tokens.py`. B4 `POST /battles` zapisuje `Battle`, startowy event-log i checkpoint w jednej transakcji; participant-scoped `GET /battles/{id}/state` zwraca publiczny stan bez RNG. Odroczone: `BattleInvite` i pozostałe write API.
 
 ### Status B3 (zamknięte 2026-05-30) + B3.9 hardening (zamknięte 2026-06-02)
 

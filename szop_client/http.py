@@ -16,6 +16,8 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.services.engine.events import BattleEvent, json_to_event
+from app.services.engine.state import BattleState
+from app.services.engine.state_codec import battle_state_from_json
 from szop_client.types import SimulationSummary
 
 
@@ -177,6 +179,32 @@ class HttpClient:
         if not isinstance(events, list):
             raise HttpClientError("GET battle events returned malformed payload")
         return tuple(_event_from_public_payload(item) for item in events)
+
+    def get_state(self, battle_id: int) -> BattleState:
+        """Return the participant-scoped current domain state of a battle."""
+        error_label = "GET battle state"
+        payload = self._get_json(
+            f"/battles/{battle_id}/state",
+            {},
+            error_label=error_label,
+        )
+        if not isinstance(payload, dict):
+            raise HttpClientError(f"{error_label} returned malformed payload")
+        _ensure_expected_battle_id(payload, battle_id, error_label=error_label)
+        try:
+            sequence_at = _required_int(payload, "sequence_at")
+            if sequence_at < 0:
+                raise TypeError("sequence_at")
+            state_payload = {
+                "schema": payload["schema"],
+                "version": _required_int(payload, "version"),
+                "state": payload["state"],
+            }
+            return battle_state_from_json(state_payload)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HttpClientError(
+                f"{error_label} returned malformed payload"
+            ) from exc
 
     def _get_json(
         self,

@@ -24,12 +24,19 @@ INSERT (egzekwując `UniqueConstraint(battle_id, sequence)`) bez commitu.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     BattleEvent as EngineEvent,
     event_to_json,
     json_to_event,
+)
+from app.services.engine.state import BattleState
+from app.services.engine.state_codec import (
+    battle_state_from_json,
+    battle_state_to_json,
 )
 
 if TYPE_CHECKING:  # pragma: no cover - tylko type hints
@@ -54,6 +61,36 @@ class BattleEventSequenceConflict(RuntimeError):
             f"battle_id={battle_id}: expected latest "
             f"{expected_latest_sequence}, actual latest {actual_latest_sequence}"
         )
+
+
+class BattleCheckpointSequenceConflict(RuntimeError):
+    """Checkpoint sequence does not match the current end of the event log."""
+
+    def __init__(
+        self,
+        battle_id: int,
+        *,
+        sequence_at: int,
+        latest_sequence: int,
+    ) -> None:
+        self.battle_id = battle_id
+        self.sequence_at = sequence_at
+        self.latest_sequence = latest_sequence
+        super().__init__(
+            "Battle checkpoint sequence conflict for "
+            f"battle_id={battle_id}: checkpoint at {sequence_at}, "
+            f"latest event sequence {latest_sequence}"
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class LoadedBattleCheckpoint:
+    """Domain objects restored from one coherent persisted checkpoint."""
+
+    battle_id: int
+    sequence_at: int
+    state: BattleState
+    dice: DeterministicDice
 
 
 def latest_event_sequence(session: "Session", battle_id: int) -> int:
@@ -172,3 +209,79 @@ def load_events(
     ).scalars().all()
 
     return [json_to_event(json.loads(row.payload_json)) for row in rows]
+
+
+def save_checkpoint(
+    session: "Session",
+    battle_id: int,
+    sequence_at: int,
+    state: BattleState,
+    dice: DeterministicDice,
+    *,
+    flush: bool = True,
+) -> None:
+    """Persist state and RNG iff ``sequence_at`` is the current event-log end.
+
+    The helper is transactionally neutral: it never commits or rolls back.
+    Callers should save/flush events first and commit both writes together.
+    """
+    from app.models import BattleCheckpoint as BattleCheckpointRow
+
+    if type(sequence_at) is not int or sequence_at < 0:
+        raise ValueError("sequence_at must be >= 0")
+    latest_sequence = latest_event_sequence(session, battle_id)
+    if sequence_at != latest_sequence:
+        raise BattleCheckpointSequenceConflict(
+            battle_id,
+            sequence_at=sequence_at,
+            latest_sequence=latest_sequence,
+        )
+    row = BattleCheckpointRow(
+        battle_id=battle_id,
+        sequence_at=sequence_at,
+        state_json=_canonical_json(battle_state_to_json(state)),
+        rng_json=_canonical_json(dice.to_checkpoint()),
+    )
+    session.add(row)
+    if flush:
+        session.flush()
+
+
+def load_latest_checkpoint(
+    session: "Session",
+    battle_id: int,
+) -> LoadedBattleCheckpoint | None:
+    """Load the checkpoint exactly matching the current event-log end.
+
+    A stale checkpoint is not resumable because its RNG position may lag behind
+    persisted events, so this function returns ``None`` instead of exposing it.
+    """
+    from sqlalchemy import select
+
+    from app.models import BattleCheckpoint as BattleCheckpointRow
+
+    latest_sequence = latest_event_sequence(session, battle_id)
+    row = session.execute(
+        select(BattleCheckpointRow).where(
+            BattleCheckpointRow.battle_id == battle_id,
+            BattleCheckpointRow.sequence_at == latest_sequence,
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return LoadedBattleCheckpoint(
+        battle_id=row.battle_id,
+        sequence_at=row.sequence_at,
+        state=battle_state_from_json(json.loads(row.state_json)),
+        dice=DeterministicDice.from_checkpoint(json.loads(row.rng_json)),
+    )
+
+
+def _canonical_json(payload: dict) -> str:
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )

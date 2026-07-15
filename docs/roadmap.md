@@ -102,14 +102,14 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ### B2. Modele danych (4 tyg)
 
-> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). **Auth/agent schema slice DONE 2026-06-26:** `User.role`, `AgentToken`, `AgentAuditLog`; **runtime helper tokenów DONE 2026-06-27:** `security.require_agent_scope(scope_name)` weryfikuje bearer token hash + scope i zapisuje `AgentAuditLog`. **Endpointy tokenów DONE 2026-06-28:** `POST/GET/DELETE /agent_tokens` tworzą/listują/cofają własne tokeny ownera; raw bearer token wraca tylko przy tworzeniu. `BattleInvite` i snapshoty poza pierwszym krokiem. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
+> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Trwały checkpoint DONE 2026-07-15 (ADR-0053):** wersjonowany, bezpieczny codec pełnego `BattleState` + JSON-safe stan `DeterministicDice`, tabela `BattleCheckpoint` i helpery spójne z końcem event-store. **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). **Auth/agent schema slice DONE 2026-06-26:** `User.role`, `AgentToken`, `AgentAuditLog`; **runtime helper tokenów DONE 2026-06-27:** `security.require_agent_scope(scope_name)` weryfikuje bearer token hash + scope i zapisuje `AgentAuditLog`. **Endpointy tokenów DONE 2026-06-28:** `POST/GET/DELETE /agent_tokens` tworzą/listują/cofają własne tokeny ownera; raw bearer token wraca tylko przy tworzeniu. `BattleInvite` pozostaje poza tym krokiem. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
 
 **ORM — persistence layer (`app/models.py`):**
 - [x] `User` — `role ∈ {user, agent, admin}` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`; `is_admin` zostaje źródłem uprawnień UI w tym slice)
 - [x] `Battle` — `(p1_user_id?, p2_user_id?, p1_roster_id?, p2_roster_id?, winner_user_id?, current_round, rng_seed, status)` — tabela `battles` (ADR-0050)
 - [ ] `BattleInvite` — `(from_user_id, to_user_id?, roster_id, scenario, status ∈ {pending/accepted/declined/expired}, expires_at)`
 - [x] `BattleEvent` — append-only: `(battle_id, sequence, event_type, payload_json, timestamp)` + `UniqueConstraint(battle_id, sequence)` — tabela `battle_events` (ADR-0050)
-- [ ] `BattleSnapshot` — opcjonalny: `(battle_id, sequence_at, state_json)` (MVP: nie używany)
+- [x] `BattleCheckpoint` — `(battle_id, sequence_at, state_json, rng_json, timestamp)`; tylko checkpoint dokładnie na końcu event-logu jest bieżący (ADR-0053)
 - [x] `Unit` — `base_size_mm: int = 25`, `base_shape: str = "round"` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`)
 - [x] `AgentToken` — `(agent_user_id, owner_user_id, token_hash, scope_json, expires_at, revoked_at?, last_used_at)` (DONE 2026-06-26; `token_hash` zamiast raw tokena)
 - [x] `AgentAuditLog` — `(user_id?, agent_user_id?, route, params_json, timestamp)` (DONE 2026-06-26)
@@ -127,7 +127,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 **Persistence (`app/services/engine/persistence.py`):** — **DONE 2026-06-10** (ADR-0050)
 - [x] `save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` — append do BattleEvent (transakcyjnie neutralny) + optional optimistic precondition dla B4 write endpointów
 - [x] `load_events(session, battle_id, since=0)` — odczyt z db + rekonstrukcja przez `json_to_event`
-- [!] `create_snapshot()` — N/A w slice (MVP nie wywołuje snapshotów; `BattleSnapshot` model odroczony)
+- [x] `save_checkpoint()` / `load_latest_checkpoint()` — transakcyjnie neutralne, wersjonowany pełny state+RNG, brak stale fallback (ADR-0053)
 
 - [ ] ADR-0010: Event-sourced battle log ✓
 - [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence ✓ (scalone z 0010)
@@ -221,11 +221,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [~] `app/routers/battles.py` — **read-only slices DONE 2026-07-02/03,
   sandbox create DONE 2026-07-04, sandbox simulate DONE 2026-07-10**:
   `GET /battles/{id}` zwraca metadane bitwy z `battles` + `latest_sequence`
-  z event-store, a `GET /battles/{id}/events?since=N` zwraca zapisany event-log
-  przez `persistence.load_events` + `event_to_json`. `POST /battles` tworzy
+  z event-store, `GET /battles/{id}/events?since=N` zwraca zapisany event-log,
+  a `GET /battles/{id}/state` zwraca wersjonowany checkpoint `BattleState`
+  z `sequence_at` bez wewnętrznego RNG. `POST /battles` tworzy
   owner-scoped sandboxową bitwę z dwóch własnych rozpisek, adaptuje je przez
   `roster_to_engine_roster`, wykonuje setup/deployment i zapisuje startowy
-  event-log przez `persistence.save_events(..., expected_latest_sequence=0)`.
+  event-log przez `persistence.save_events(..., expected_latest_sequence=0)`
+  oraz checkpoint stanu+RNG w tej samej transakcji.
   Create response zwraca addytywny `adaptation_report` p1/p2 z raportu adaptera
   (`dropped_excluded`, `inert_incomplete`, `deferred_attached_heroes`), żeby
   sandbox nie ukrywał pominiętych zdolności/jednostek; GET metadata nie
@@ -253,10 +255,10 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19 + HttpClient read-only DONE 2026-07-02/03** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
 
-> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient slices 2026-07-02/10:** `get_battle_metadata` konsumuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events` konsumuje `GET /battles/{id}/events?since=N`; `create_battle` konsumuje sandbox `POST /battles`; `simulate_roster_ids` konsumuje sandbox `POST /battles/simulate` i zwraca `SimulationSummary`. Pełny `GameClient` HTTP i pakowanie nadal odłożone do kolejnych endpointów B4.
+> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient slices 2026-07-02/10/15:** `get_battle_metadata` konsumuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events` konsumuje `GET /battles/{id}/events?since=N`; `get_state` konsumuje wersjonowany `GET /battles/{id}/state` i zwraca domenowy `BattleState` z parity do `LocalClient`; `create_battle` konsumuje sandbox `POST /battles`; `simulate_roster_ids` konsumuje sandbox `POST /battles/simulate` i zwraca `SimulationSummary`. `take_action` i pakowanie nadal odłożone do kolejnych endpointów B4.
 
 - [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (`SimulationSummary` wydzielony do lekkiego `types.py` i re-eksportowany; `simulate` ma `deployment_zones` D5). `szop_client.__init__` ładuje eksporty leniwie, żeby klient HTTP/MCP nie importował ścieżki LocalClient/ORM. `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
-- [~] `szop_client/http.py` — `HttpClient(base_url, token)` — read-only `get_battle_metadata` DONE 2026-07-03 + `get_events` DONE 2026-07-02 + sandbox `create_battle` DONE 2026-07-04 (`POST /battles`, zwraca `BattleMetadata`; addytywny `adaptation_report` z API jest tolerowany, ale nie mapowany do metadata) + sandbox `simulate_roster_ids` DONE 2026-07-10 (`POST /battles/simulate`, zwraca `SimulationSummary`); pełne `get_state`/`take_action` czekają na kolejne endpointy B4. Protocol strukturalny → pełny klient dołączy bez dziedziczenia.
+- [~] `szop_client/http.py` — `HttpClient(base_url, token)` — read-only `get_battle_metadata` DONE 2026-07-03 + `get_events` DONE 2026-07-02 + `get_state` DONE 2026-07-15 (wersjonowany payload → domenowy `BattleState`, parity z `LocalClient`) + sandbox `create_battle` DONE 2026-07-04 (`POST /battles`, zwraca `BattleMetadata`; addytywny `adaptation_report` z API jest tolerowany, ale nie mapowany do metadata) + sandbox `simulate_roster_ids` DONE 2026-07-10 (`POST /battles/simulate`, zwraca `SimulationSummary`); pełne `take_action` czeka na kolejny endpoint B4. Protocol strukturalny → pełny klient dołączy bez dziedziczenia.
 - [x] `szop_client/local.py` — `LocalClient` in-process. Ścieżka **engine-dict** (rostery dict 1:1 z `build_initial_state`) + **ścieżka DB** (`LocalClient(session, user_id)` + `*_roster_ids`, most ORM→engine przez `roster_adapter`, read-only, ownership-scoped). DONE 2026-06-19.
 - [ ] `szop_client/setup.py` — `pip install -e` odłożone (sens dopiero z pełnym `HttpClient`; `LocalClient` z natury in-process z `app`).
 - [ ] `tests/test_clients_parity.py` — `HttpClient.simulate == LocalClient.simulate` odłożone do B4 simulate/action endpoints.
@@ -471,6 +473,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0050 | Persystencja event-store: Battle + BattleEvent + persistence.py (B2 slice) | ✓ |
 | 0051 | Aktywacja wieloakcyjna (pkt 11.b.iv): orkiestrator `apply_activation` + `continue_activation` | ✓ |
 | 0052 | Końcowy odstęp Manewru od innych oddziałów | ✓ |
+| 0053 | Wersjonowane checkpointy BattleState + RNG | ✓ |
 
 ---
 

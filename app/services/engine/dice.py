@@ -19,8 +19,15 @@ zwraca pełen `RollResult` z natural rolls, combat.py inspekcjonuje per kostkę.
 
 from __future__ import annotations
 
+import math
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
+
+
+DICE_CHECKPOINT_SCHEMA = "szop.deterministic_dice"
+DICE_CHECKPOINT_VERSION = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +69,40 @@ class DeterministicDice:
     @property
     def seed(self) -> int:
         return self._seed
+
+    def to_checkpoint(self) -> dict[str, Any]:
+        """Return a versioned, JSON-safe snapshot of the current RNG state."""
+        return {
+            "schema": DICE_CHECKPOINT_SCHEMA,
+            "version": DICE_CHECKPOINT_VERSION,
+            "seed": self._seed,
+            "random_state": _rng_state_to_json(self._rng.getstate()),
+        }
+
+    @classmethod
+    def from_checkpoint(cls, payload: Mapping[str, Any]) -> "DeterministicDice":
+        """Restore RNG position without pickle or payload-selected execution."""
+        if not isinstance(payload, Mapping):
+            raise ValueError("dice checkpoint must be an object")
+        if payload.get("schema") != DICE_CHECKPOINT_SCHEMA:
+            raise ValueError("unsupported dice checkpoint schema")
+        if (
+            type(payload.get("version")) is not int
+            or payload["version"] != DICE_CHECKPOINT_VERSION
+        ):
+            raise ValueError("unsupported dice checkpoint version")
+        if set(payload) != {"schema", "version", "seed", "random_state"}:
+            raise ValueError("dice checkpoint has unexpected fields")
+        seed = payload["seed"]
+        if type(seed) is not int:
+            raise ValueError("dice checkpoint seed must be an integer")
+        random_state = _rng_state_from_json(payload["random_state"])
+        dice = cls(seed)
+        try:
+            dice._rng.setstate(random_state)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("dice checkpoint contains invalid RNG state") from exc
+        return dice
 
     def roll_d6(self, count: int = 1) -> tuple[int, ...]:
         """Roll `count` k6. Returns natural values (1-6) jako tuple."""
@@ -119,3 +160,30 @@ class DeterministicDice:
             base_threshold=threshold,
             modifier=modifier,
         )
+
+
+def _rng_state_to_json(value: Any) -> Any:
+    if isinstance(value, tuple):
+        return [_rng_state_to_json(item) for item in value]
+    if value is None or type(value) is int:
+        return value
+    if type(value) is float and math.isfinite(value):
+        return value
+    raise TypeError(f"unsupported RNG state value: {type(value).__name__}")
+
+
+def _rng_state_from_json(value: Any) -> tuple[Any, ...]:
+    restored = _rng_state_value_from_json(value)
+    if not isinstance(restored, tuple):
+        raise ValueError("dice checkpoint RNG state must be a list")
+    return restored
+
+
+def _rng_state_value_from_json(value: Any) -> Any:
+    if isinstance(value, list):
+        return tuple(_rng_state_value_from_json(item) for item in value)
+    if value is None or type(value) is int:
+        return value
+    if type(value) is float and math.isfinite(value):
+        return value
+    raise ValueError("dice checkpoint RNG state contains an invalid value")

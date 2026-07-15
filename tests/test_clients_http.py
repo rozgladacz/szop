@@ -5,12 +5,14 @@ import json
 import pytest
 
 from app.services.engine.events import MoveExecuted, StatusAdded, event_to_json
+from app.services.engine.state_codec import battle_state_to_json
 from szop_client import (
     BattleMetadata,
     HttpClient,
     HttpClientError,
     HttpRequest,
     HttpResponse,
+    LocalClient,
     SimulationSummary,
 )
 
@@ -447,3 +449,88 @@ def test_get_events_rejects_mismatched_battle_id() -> None:
     assert "GET battle events returned battle_id 99, expected 42" in str(
         exc_info.value
     )
+
+
+def _equivalent_local_state():
+    local = LocalClient()
+    battle_id = local.create_battle(
+        [
+            {
+                "owner_player": 0,
+                "units": [
+                    {"id": 1, "position": (0, 0), "models": 2, "toughness": 3}
+                ],
+            },
+            {
+                "owner_player": 1,
+                "units": [
+                    {"id": 2, "position": (12, 0), "models": 2, "toughness": 3}
+                ],
+            },
+        ],
+        seed=77,
+        initiative_player=1,
+    )
+    return local.get_state(battle_id)
+
+
+def test_get_state_returns_domain_state_with_local_client_parity() -> None:
+    seen: list[HttpRequest] = []
+    local_state = _equivalent_local_state()
+    serialized = battle_state_to_json(local_state)
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(
+            {
+                **serialized,
+                "battle_id": 42,
+                "sequence_at": 2,
+            }
+        )
+
+    state = HttpClient(
+        "https://szop.example/api/", token="raw-token", transport=transport
+    ).get_state(42)
+
+    assert state == local_state
+    assert seen[0].method == "GET"
+    assert seen[0].url == "https://szop.example/api/battles/42/state"
+    assert seen[0].headers["Authorization"] == "Bearer raw-token"
+    assert seen[0].body is None
+
+
+def test_get_state_raises_for_http_error_status() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return HttpResponse(status_code=404, body=b'{"detail":"missing"}')
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).get_state(999)
+
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.pop("sequence_at"),
+        lambda payload: payload.update(sequence_at=True),
+        lambda payload: payload.update(version=999),
+        lambda payload: payload.update(battle_id=43),
+        lambda payload: payload["state"].update({"$dataclass": "__import__"}),
+        lambda payload: payload["state"]["fields"].update(round="bad"),
+    ],
+)
+def test_get_state_rejects_malformed_payload(mutation) -> None:
+    payload = {
+        **battle_state_to_json(_equivalent_local_state()),
+        "battle_id": 42,
+        "sequence_at": 2,
+    }
+    mutation(payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(HttpClientError):
+        HttpClient("http://localhost", transport=transport).get_state(42)
