@@ -11,6 +11,7 @@ from szop_client import (
     HttpClientError,
     HttpRequest,
     HttpResponse,
+    SimulationSummary,
 )
 
 
@@ -135,6 +136,151 @@ def test_create_battle_ignores_additive_adaptation_report() -> None:
     assert metadata.latest_sequence == 4
 
 
+def test_simulate_roster_ids_posts_payload_and_returns_summary() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(
+            {
+                "p1_roster_id": 100,
+                "p2_roster_id": 200,
+                "bot": "random",
+                "map_name": "lustrzana_a",
+                "n_games": 3,
+                "wins_p0": 1,
+                "wins_p1": 1,
+                "draws": 1,
+                "total_rounds": 12,
+                "win_rate_p0": 1 / 3,
+                "win_rate_p1": 1 / 3,
+                "draw_rate": 1 / 3,
+                "avg_rounds": 4.0,
+            }
+        )
+
+    client = HttpClient("https://szop.example/api/", token="raw-token", transport=transport)
+
+    summary = client.simulate_roster_ids(
+        p1_roster_id=100,
+        p2_roster_id=200,
+        bot="random",
+        n=3,
+        seed=5,
+        map_name="lustrzana_a",
+    )
+
+    assert summary == SimulationSummary(
+        n_games=3,
+        wins_p0=1,
+        wins_p1=1,
+        draws=1,
+        total_rounds=12,
+    )
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url == "https://szop.example/api/battles/simulate"
+    assert request.headers["Content-Type"] == "application/json"
+    assert request.headers["Authorization"] == "Bearer raw-token"
+    assert json.loads(request.body.decode("utf-8")) == {
+        "p1_roster_id": 100,
+        "p2_roster_id": 200,
+        "games": 3,
+        "bot": "random",
+        "seed": 5,
+        "map_name": "lustrzana_a",
+    }
+
+
+def test_simulate_roster_ids_raises_for_http_error_status() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return HttpResponse(status_code=400, body=b'{"detail":"bad bot"}')
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).simulate_roster_ids(
+            p1_roster_id=1, p2_roster_id=2
+        )
+
+    assert exc_info.value.status_code == 400
+
+
+def test_simulate_roster_ids_raises_for_malformed_payload() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response({"n_games": 1, "wins_p0": "bad"})
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).simulate_roster_ids(
+            p1_roster_id=1, p2_roster_id=2
+        )
+
+    assert "POST battle simulation returned malformed payload" in str(exc_info.value)
+
+
+def test_simulate_roster_ids_rejects_bool_integer_fields() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(
+            {
+                "n_games": 1,
+                "wins_p0": True,
+                "wins_p1": 0,
+                "draws": 0,
+                "total_rounds": 4,
+            }
+        )
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).simulate_roster_ids(
+            p1_roster_id=1, p2_roster_id=2
+        )
+
+    assert "POST battle simulation returned malformed payload" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {
+            "n_games": 2,
+            "wins_p0": 1,
+            "wins_p1": 0,
+            "draws": 0,
+            "total_rounds": 4,
+        },
+        {
+            "n_games": 1,
+            "wins_p0": 1,
+            "wins_p1": 0,
+            "draws": 0,
+            "total_rounds": -1,
+        },
+    ],
+)
+def test_simulate_roster_ids_rejects_inconsistent_summary_payload(
+    payload: dict[str, int],
+) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).simulate_roster_ids(
+            p1_roster_id=1, p2_roster_id=2
+        )
+
+    assert "POST battle simulation returned malformed payload" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("n", [0, -1])
+def test_simulate_roster_ids_rejects_nonpositive_n_before_transport(n: int) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    with pytest.raises(ValueError, match="n musi byc > 0"):
+        HttpClient("http://localhost", transport=transport).simulate_roster_ids(
+            p1_roster_id=1, p2_roster_id=2, n=n
+        )
+
+
 def test_get_battle_metadata_fetches_b4_metadata_endpoint() -> None:
     seen: list[HttpRequest] = []
 
@@ -194,6 +340,19 @@ def test_get_battle_metadata_raises_for_malformed_payload() -> None:
 
     with pytest.raises(HttpClientError):
         HttpClient("http://localhost", transport=transport).get_battle_metadata(1)
+
+
+def test_get_battle_metadata_rejects_bool_optional_integer_fields() -> None:
+    payload = _battle_public_payload(42)
+    payload["p2_roster_id"] = True
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).get_battle_metadata(42)
+
+    assert "GET battle metadata returned malformed payload" in str(exc_info.value)
 
 
 def test_get_battle_metadata_rejects_mismatched_battle_id() -> None:

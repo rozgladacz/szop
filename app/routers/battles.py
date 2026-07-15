@@ -11,6 +11,9 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
+from ..services.agents import PLAYER_SEED_OFFSET, make_player, simulate_from_rosters
+from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
+from ..services.agents.registry import FAST, bot_kinds
 from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
@@ -21,6 +24,9 @@ router = APIRouter(prefix="/battles", tags=["battles"])
 
 BATTLE_CREATE_SCOPE = "battle:create"
 BATTLE_READ_SCOPE = "battle:read"
+BATTLE_SIMULATE_SCOPE = "battle:simulate"
+MAX_SIMULATION_GAMES = 50
+BATTLE_SIMULATION_BOTS = bot_kinds(FAST)
 
 
 @dataclass(frozen=True)
@@ -33,11 +39,25 @@ class BattleReader:
     user_id: int
 
 
+@dataclass(frozen=True)
+class BattleSimulator:
+    user_id: int
+
+
 class BattleCreate(BaseModel):
     p1_roster_id: int = Field(..., ge=1)
     p2_roster_id: int = Field(..., ge=1)
     rng_seed: int = 0
     initiative_player: int = Field(0, ge=0, le=1)
+
+
+class BattleSimulate(BaseModel):
+    p1_roster_id: int = Field(..., ge=1)
+    p2_roster_id: int = Field(..., ge=1)
+    games: int = Field(10, ge=1, le=MAX_SIMULATION_GAMES)
+    bot: str = "priority"
+    seed: int = 0
+    map_name: str = "lustrzana_a"
 
 
 class BattleEventPublic(BaseModel):
@@ -74,6 +94,22 @@ class BattlePublic(BaseModel):
     status: str
     latest_sequence: int = Field(..., ge=0)
     adaptation_report: BattleAdaptationPublic | None = None
+
+
+class BattleSimulationPublic(BaseModel):
+    p1_roster_id: int
+    p2_roster_id: int
+    bot: str
+    map_name: str
+    n_games: int = Field(..., ge=1)
+    wins_p0: int = Field(..., ge=0)
+    wins_p1: int = Field(..., ge=0)
+    draws: int = Field(..., ge=0)
+    total_rounds: int = Field(..., ge=0)
+    win_rate_p0: float
+    win_rate_p1: float
+    draw_rate: float
+    avg_rounds: float
 
 
 def _authorization_header(request: Request) -> str | None:
@@ -130,6 +166,21 @@ def _battle_reader(
             db=db,
             current_user=current_user,
             agent_scope=BATTLE_READ_SCOPE,
+        )
+    )
+
+
+def _battle_simulator(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User | None = Depends(get_current_user(optional=True)),
+) -> BattleSimulator:
+    return BattleSimulator(
+        user_id=_authorized_owner_user_id(
+            request=request,
+            db=db,
+            current_user=current_user,
+            agent_scope=BATTLE_SIMULATE_SCOPE,
         )
     )
 
@@ -203,6 +254,14 @@ def _public_battle(
     )
 
 
+def _simulation_players(bot: str, base_seed: int, game_index: int):
+    seed = base_seed + game_index
+    return [
+        make_player(bot, seed),
+        make_player(bot, seed + PLAYER_SEED_OFFSET),
+    ]
+
+
 @router.post("", response_model=BattlePublic, status_code=status.HTTP_201_CREATED)
 def create_battle(
     payload: BattleCreate,
@@ -246,6 +305,83 @@ def create_battle(
             p1=_public_adaptation(adapted_p0),
             p2=_public_adaptation(adapted_p1),
         ),
+    )
+
+
+@router.post("/simulate", response_model=BattleSimulationPublic)
+def simulate_battle(
+    payload: BattleSimulate,
+    db: Session = Depends(get_db),
+    simulator: BattleSimulator = Depends(_battle_simulator),
+) -> BattleSimulationPublic:
+    roster_p0 = _get_owned_roster(
+        db, roster_id=payload.p1_roster_id, owner_user_id=simulator.user_id
+    )
+    roster_p1 = _get_owned_roster(
+        db, roster_id=payload.p2_roster_id, owner_user_id=simulator.user_id
+    )
+    try:
+        map_fixture = build_map(payload.map_name, payload.seed)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    bot = payload.bot.lower()
+    if bot not in BATTLE_SIMULATION_BOTS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Nieznany lub zbyt drogi bot {payload.bot!r}; dozwolone: "
+                f"{', '.join(BATTLE_SIMULATION_BOTS)}"
+            ),
+        )
+
+    rosters = [
+        roster_to_engine_roster(roster_p0, owner_player=0).units,
+        roster_to_engine_roster(roster_p1, owner_player=1).units,
+    ]
+    wins = [0, 0]
+    draws = 0
+    total_rounds = 0
+    for i in range(payload.games):
+        try:
+            players = _simulation_players(bot, payload.seed, i)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(exc),
+            ) from exc
+        result = simulate_from_rosters(
+            rosters,
+            players,
+            seed=payload.seed + i,
+            terrain=map_fixture.terrain,
+            objectives=map_fixture.objectives,
+            initiative_player=i % 2,
+            deployment_zones=DEFAULT_DEPLOYMENT_ZONES,
+        )
+        if result.winner is None:
+            draws += 1
+        else:
+            wins[result.winner] += 1
+        total_rounds += result.rounds_played
+
+    n_games = payload.games
+    return BattleSimulationPublic(
+        p1_roster_id=roster_p0.id,
+        p2_roster_id=roster_p1.id,
+        bot=bot,
+        map_name=payload.map_name.lower(),
+        n_games=n_games,
+        wins_p0=wins[0],
+        wins_p1=wins[1],
+        draws=draws,
+        total_rounds=total_rounds,
+        win_rate_p0=wins[0] / n_games,
+        win_rate_p1=wins[1] / n_games,
+        draw_rate=draws / n_games,
+        avg_rounds=total_rounds / n_games,
     )
 
 

@@ -16,6 +16,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.services.engine.events import BattleEvent, json_to_event
+from szop_client.protocol import SimulationSummary
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +111,36 @@ class HttpClient:
             error_label=error_label,
         )
         return _metadata_from_payload(payload, error_label=error_label)
+
+    def simulate_roster_ids(
+        self,
+        *,
+        p1_roster_id: int,
+        p2_roster_id: int,
+        bot: str = "priority",
+        n: int = 10,
+        seed: int = 0,
+        map_name: str = "lustrzana_a",
+    ) -> SimulationSummary:
+        """Run sandbox simulation via `POST /battles/simulate`."""
+        if n <= 0:
+            raise ValueError(f"n musi byc > 0, jest {n}")
+        error_label = "POST battle simulation"
+        payload = self._request_json(
+            "POST",
+            "/battles/simulate",
+            {},
+            json_body={
+                "p1_roster_id": p1_roster_id,
+                "p2_roster_id": p2_roster_id,
+                "games": n,
+                "bot": bot,
+                "seed": seed,
+                "map_name": map_name,
+            },
+            error_label=error_label,
+        )
+        return _simulation_summary_from_payload(payload, error_label=error_label)
 
     def get_battle_metadata(self, battle_id: int) -> BattleMetadata:
         """Return participant-scoped battle metadata from the B4 API."""
@@ -237,6 +268,36 @@ def _metadata_from_payload(
         raise HttpClientError(error_message) from exc
 
 
+def _simulation_summary_from_payload(
+    payload: Any,
+    *,
+    error_label: str,
+) -> SimulationSummary:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        summary = SimulationSummary(
+            n_games=_required_int(payload, "n_games"),
+            wins_p0=_required_int(payload, "wins_p0"),
+            wins_p1=_required_int(payload, "wins_p1"),
+            draws=_required_int(payload, "draws"),
+            total_rounds=_required_int(payload, "total_rounds"),
+        )
+    except (KeyError, TypeError) as exc:
+        raise HttpClientError(error_message) from exc
+    if (
+        summary.n_games <= 0
+        or summary.wins_p0 < 0
+        or summary.wins_p1 < 0
+        or summary.draws < 0
+        or summary.total_rounds < 0
+        or summary.wins_p0 + summary.wins_p1 + summary.draws != summary.n_games
+    ):
+        raise HttpClientError(error_message)
+    return summary
+
+
 def _ensure_expected_battle_id(
     payload: dict[str, Any],
     expected_battle_id: int,
@@ -256,7 +317,7 @@ def _ensure_expected_battle_id(
 
 def _required_int(payload: dict[str, Any], key: str) -> int:
     value = payload[key]
-    if not isinstance(value, int):
+    if type(value) is not int:
         raise TypeError(key)
     return value
 
@@ -265,7 +326,7 @@ def _optional_int(payload: dict[str, Any], key: str) -> int | None:
     value = payload[key]
     if value is None:
         return None
-    if not isinstance(value, int):
+    if type(value) is not int:
         raise TypeError(key)
     return value
 

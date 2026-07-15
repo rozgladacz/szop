@@ -219,7 +219,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### B4. API (3 tyg)
 - [~] `app/routers/battles.py` — **read-only slices DONE 2026-07-02/03,
-  sandbox create DONE 2026-07-04**:
+  sandbox create DONE 2026-07-04, sandbox simulate DONE 2026-07-10**:
   `GET /battles/{id}` zwraca metadane bitwy z `battles` + `latest_sequence`
   z event-store, a `GET /battles/{id}/events?since=N` zwraca zapisany event-log
   przez `persistence.load_events` + `event_to_json`. `POST /battles` tworzy
@@ -229,15 +229,21 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   Create response zwraca addytywny `adaptation_report` p1/p2 z raportu adaptera
   (`dropped_excluded`, `inert_incomplete`, `deferred_attached_heroes`), żeby
   sandbox nie ukrywał pominiętych zdolności/jednostek; GET metadata nie
-  rekonstruuje raportu. Invite'y i gra między różnymi ownerami nadal osobno.
+  rekonstruuje raportu. `POST /battles/simulate` uruchamia read-only batch dwóch
+  własnych rozpisek (`battle:simulate`, limit 50 gier, tylko boty `fast` z
+  rejestru), używa app-level map `app.services.agents.maps` + `make_player`
+  i zwraca agregat wyników bez zapisu `Battle`/eventów. Invite'y i gra między
+  różnymi ownerami nadal osobno.
   Pozostałe endpointy nadal
   otwarte: `POST /battles/invite`, `POST /battles/invite/{id}/accept`,
-  `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`, `POST
-  /battles/{id}/simulate`, `POST /battles/{id}/replay`.
+  `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`,
+  `POST /battles/{id}/replay`.
 - [~] Auth: read-only battle endpoints mają participant scope
   (`p1_user_id`/`p2_user_id`; cudza/nieistniejąca = 404) oraz agent bearer scope
   `battle:read` z audytem `AgentAuditLog`. `POST /battles` ma osobny agent scope
   `battle:create`, mapuje agenta na `owner_user_id` i wymaga obu rosterów z
+  `owner_id == owner`. `POST /battles/simulate` ma osobny scope
+  `battle:simulate`, mapuje agenta na `owner_user_id` i wymaga obu rosterów z
   `owner_id == owner`. Invite'y oraz pozostałe write endpointy nadal wymagają
   osobnego security-review.
 - [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych i
@@ -247,10 +253,10 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19 + HttpClient read-only DONE 2026-07-02/03** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
 
-> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient read-only slices 2026-07-02/03:** `get_battle_metadata` konsumuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events` konsumuje B4 `GET /battles/{id}/events?since=N` i deserializuje eventy przez `json_to_event`. Pełny `GameClient` HTTP i pakowanie nadal odłożone do kolejnych endpointów B4.
+> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient slices 2026-07-02/10:** `get_battle_metadata` konsumuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events` konsumuje `GET /battles/{id}/events?since=N`; `create_battle` konsumuje sandbox `POST /battles`; `simulate_roster_ids` konsumuje sandbox `POST /battles/simulate` i zwraca `SimulationSummary`. Pełny `GameClient` HTTP i pakowanie nadal odłożone do kolejnych endpointów B4.
 
 - [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (+ `SimulationSummary`; `simulate` ma `deployment_zones` D5). `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
-- [~] `szop_client/http.py` — `HttpClient(base_url, token)` — read-only `get_battle_metadata` DONE 2026-07-03 + `get_events` DONE 2026-07-02 + sandbox `create_battle` DONE 2026-07-04 (`POST /battles`, zwraca `BattleMetadata`; addytywny `adaptation_report` z API jest tolerowany, ale nie mapowany do metadata); `get_state`/`take_action`/`simulate` czekają na kolejne endpointy B4. Protocol strukturalny → pełny klient dołączy bez dziedziczenia.
+- [~] `szop_client/http.py` — `HttpClient(base_url, token)` — read-only `get_battle_metadata` DONE 2026-07-03 + `get_events` DONE 2026-07-02 + sandbox `create_battle` DONE 2026-07-04 (`POST /battles`, zwraca `BattleMetadata`; addytywny `adaptation_report` z API jest tolerowany, ale nie mapowany do metadata) + sandbox `simulate_roster_ids` DONE 2026-07-10 (`POST /battles/simulate`, zwraca `SimulationSummary`); pełne `get_state`/`take_action` czekają na kolejne endpointy B4. Protocol strukturalny → pełny klient dołączy bez dziedziczenia.
 - [x] `szop_client/local.py` — `LocalClient` in-process. Ścieżka **engine-dict** (rostery dict 1:1 z `build_initial_state`) + **ścieżka DB** (`LocalClient(session, user_id)` + `*_roster_ids`, most ORM→engine przez `roster_adapter`, read-only, ownership-scoped). DONE 2026-06-19.
 - [ ] `szop_client/setup.py` — `pip install -e` odłożone (sens dopiero z pełnym `HttpClient`; `LocalClient` z natury in-process z `app`).
 - [ ] `tests/test_clients_parity.py` — `HttpClient.simulate == LocalClient.simulate` odłożone do B4 simulate/action endpoints.
@@ -306,7 +312,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `validate_loadout(payload)` — **leaf-CLI DONE 2026-06-26** (`scripts/validate_loadout.py`): read-only diff validator raw→normalized (odrzucone id / sklampowane count i `mode` / nierozpoznane passive) + koszt przez `calculate_roster_unit_quote`; reuse `normalize_roster_unit_loadout` SSOT; `--list`, `--loadout`/`--loadout-file`, `--count`, `--json`, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
 - [x] `find_exploit_candidates(army_id)` — **leaf-CLI DONE 2026-06-29** (`scripts/find_exploit_candidates.py`): turniej istniejących rozpisek jednej armii z DB (round-robin, każda para przez `simulate_engagement`/`LocalClient.simulate_roster_ids`) → ranking kandydatów do ręcznej weryfikacji wg `win_rate/points` (`wr/100pkt`, jak `exploit_hunt`); `--list`/`--json`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Nie generuje rozpisek i nie zapisuje wyników. Wrapper MCP/HTTP gated C1/B4.
 - [x] `score_list(roster_id)` — **leaf-CLI DONE 2026-06-27** (`scripts/score_list.py`): ocena rozpiski przez agregację symulacji vs POLE pozostałych rozpisek z DB (per-przeciwnik win-rate + „siła w polu" + sygnał koszt↔wynik); reuse pairingu `simulate_engagement` (`LocalClient.simulate_roster_ids`); `--list`/`--vs`/`--army`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Później interpretacja dedykowanego agenta. Wrapper MCP/HTTP gated C1/B4.
-- [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
+- [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. HTTP sandbox wrapper DONE 2026-07-10 (`POST /battles/simulate` + `HttpClient.simulate_roster_ids`); MCP wrapper pozostaje gated na C1.
 
 ---
 
@@ -338,7 +344,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] **Real-run na danych usera DONE 2026-06-19** (sesja autonomiczna): 64 jednostki w 7 armiach. Pipeline DB→raport end-to-end OK. **Wynik:** sygnał exploitu jest **kompozycyjny, nie uniwersalny** — koszt agreguje siłę poprawnie przy dużych różnicach (global >10% droższa 74%, Necroni >10% droższa 81%), ale przy ~równym koszcie skład decyduje skrajnie (Gwardia budget-matched win-rate 12–79% przy ~równych pkt). Tania piechota/mobilne biją drogi pancerz/pojazdy (Gwardia `3×Weterani` 585 pkt → 93% vs Leman Russ/Sentinele 1022 pkt → 55%; Orkowie `2×Ultrasy+2×Szefuńcio` 781 pkt → 86%). Sterownik strukturalny: pkt 5.f (wygrana = kontrola 5 celów po 4 rundach → liczba mobilnych ciał > droga trwałość). **Caveat:** balans silnika MVP, nie potwierdzony exploit reguł (MVP pomija per-model/bohaterów/pełne zdolności/teren/r.4; cost-model celuje w pełną grę). Szczegóły + pytanie do usera (ADR DOCX vs akcept artefaktu MVP): `HANDOFF_faza-d-exploit-hunt.md`.
 - [x] Każdy exploit → ADR z propozycją zmiany DOCX — **RESOLVED 2026-06-20 (decyzja usera B): bez ADR.** Kompozycyjny sygnał (tania piechota/mobilne biją drogi pancerz przy ~równym koszcie) = świadomy artefakt wierności silnika MVP (pomija per-model/bohaterów/pełne zdolności/teren, kończy na r.4 — pkt 5.f), NIE błąd wyceny punktów. Cost-model Strumienia A poprawny. Temat do powrotu po podniesieniu wierności (E1 per-model + E2 teren + E3 zdolności). Wątek `faza-d-exploit-hunt` zarchiwizowany.
 
-> **Rejestr botów (SSOT, 2026-06-17):** `app/services/agents/registry.py` klasyfikuje boty dowolnym zbiorem **tagów** (rozszerzalne): status `useful` (do testów/analiz) | `reference` (nieaktualny, porównawczo); koszt `fast` | `expensive`. **Useful = `priority`, `priority3`, `claude_v3`**; reszta `reference`. Zapytania `bot_kinds(USEFUL, FAST)` (AND) — gotowe na przyszłe poziomy (np. useful-expensive) bez zmian API. `balance_report --players useful|fast|reference|all|<nazwa>` (domyślnie `useful`); `exploit_hunt --bot` domyślnie `priority`. Drift-guard: `tests/test_agents_registry.py` pilnuje spójności rejestr↔`make_player`.
+> **Rejestr botów (SSOT, 2026-06-17; factory app-level 2026-07-07):** `app/services/agents/registry.py` klasyfikuje boty dowolnym zbiorem **tagów** (rozszerzalne): status `useful` (do testów/analiz) | `reference` (nieaktualny, porównawczo); koszt `fast` | `expensive`. `app/services/agents/factory.py` konstruuje boty przez `make_player(kind, seed)` i re-export w `balance_simulate.py` zachowuje kompatybilność skryptów. **Useful = `priority`, `priority3`, `claude_v3`**; reszta `reference`. Zapytania `bot_kinds(USEFUL, FAST)` (AND) — gotowe na przyszłe poziomy (np. useful-expensive) bez zmian API. `balance_report --players useful|fast|reference|all|<nazwa>` (domyślnie `useful`); `exploit_hunt --bot` domyślnie `priority`. Drift-guard: `tests/test_agents_factory.py` pilnuje spójności rejestr↔factory, a `tests/test_agents_registry.py` tagów.
 
 ### D4. Adversarial play (4 tyg, opcjonalne)
 - [ ] Frontend UI "Play vs AI" — wybór agenta z listy

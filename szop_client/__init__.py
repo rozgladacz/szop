@@ -8,7 +8,8 @@ wewnętrznym silnikiem. Public API:
 - `LocalClient` — implementacja in-process (headless). Ścieżka engine-dict +
   ścieżka DB (`LocalClient(session, user_id)` + metody `*_roster_ids`,
   most ORM→engine przez `roster_adapter`).
-- `HttpClient` — HTTP metadata + polling + sandbox `create_battle` nad B4 battle API.
+- `HttpClient` — HTTP metadata + polling + sandbox `create_battle` oraz
+  `simulate_roster_ids` nad B4 battle API.
 - `SimulationSummary` — wynik batcha `simulate`.
 
 Pełny `HttpClient` zgodny z całym `GameClient` oraz pakowanie `pip install -e`

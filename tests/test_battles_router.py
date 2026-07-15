@@ -16,6 +16,7 @@ from app.routers import battles
 from app.security import hash_agent_token, hash_password
 from app.services.engine.events import MoveExecuted, StatusAdded
 from app.services.engine.persistence import load_events, save_events
+from szop_client import LocalClient
 
 RAW_TOKEN = "battle-read-secret"
 
@@ -203,6 +204,8 @@ def test_battles_router_is_registered_in_app() -> None:
     assert "GET" in methods_by_path["/battles/{battle_id}"]
     assert "/battles" in route_paths
     assert "POST" in methods_by_path["/battles"]
+    assert "/battles/simulate" in route_paths
+    assert "POST" in methods_by_path["/battles/simulate"]
     assert "/battles/{battle_id}/events" in route_paths
     assert "GET" in methods_by_path["/battles/{battle_id}/events"]
 
@@ -319,6 +322,198 @@ def test_create_battle_rejects_missing_and_cross_owner_rosters() -> None:
         )
     assert missing_info.value.status_code == 404
     assert session.execute(select(models.Battle)).scalars().all() == []
+
+
+def test_simulate_battle_returns_owner_scoped_summary_without_persisting_battle() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    roster_a = _seed_roster(session, name="A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B", owner_id=owner.id)
+
+    response = battles.simulate_battle(
+        battles.BattleSimulate(
+            p1_roster_id=roster_a.id,
+            p2_roster_id=roster_b.id,
+            games=2,
+            bot="random",
+            seed=3,
+            map_name="lustrzana_a",
+        ),
+        db=session,
+        simulator=battles.BattleSimulator(user_id=owner.id),
+    )
+
+    assert response.p1_roster_id == roster_a.id
+    assert response.p2_roster_id == roster_b.id
+    assert response.bot == "random"
+    assert response.map_name == "lustrzana_a"
+    assert response.n_games == 2
+    assert response.wins_p0 + response.wins_p1 + response.draws == 2
+    assert response.total_rounds > 0
+    assert response.win_rate_p0 + response.win_rate_p1 + response.draw_rate == pytest.approx(1.0)
+    assert session.execute(select(models.Battle)).scalars().all() == []
+
+
+def test_simulate_battle_matches_local_client_batch_methodology() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    roster_a = _seed_roster(session, name="A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B", owner_id=owner.id)
+    seed = 11
+    games = 3
+    map_name = "lustrzana_a"
+
+    response = battles.simulate_battle(
+        battles.BattleSimulate(
+            p1_roster_id=roster_a.id,
+            p2_roster_id=roster_b.id,
+            games=games,
+            bot="random",
+            seed=seed,
+            map_name=map_name,
+        ),
+        db=session,
+        simulator=battles.BattleSimulator(user_id=owner.id),
+    )
+    map_fixture = battles.build_map(map_name, seed)
+    summary = LocalClient(session=session, user_id=owner.id).simulate_roster_ids(
+        roster_a.id,
+        roster_b.id,
+        lambda i: battles._simulation_players("random", seed, i),
+        n=games,
+        seed=seed,
+        terrain=map_fixture.terrain,
+        objectives=map_fixture.objectives,
+        deployment_zones=battles.DEFAULT_DEPLOYMENT_ZONES,
+    )
+
+    assert response.n_games == summary.n_games
+    assert response.wins_p0 == summary.wins_p0
+    assert response.wins_p1 == summary.wins_p1
+    assert response.draws == summary.draws
+    assert response.total_rounds == summary.total_rounds
+    assert response.win_rate_p0 == pytest.approx(summary.win_rate_p0)
+    assert response.win_rate_p1 == pytest.approx(summary.win_rate_p1)
+    assert response.draw_rate == pytest.approx(summary.draw_rate)
+    assert response.avg_rounds == pytest.approx(summary.avg_rounds)
+
+
+def test_simulate_battle_accepts_agent_scope_and_audits_request() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    roster_a = _seed_roster(session, name="A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B", owner_id=owner.id)
+    token = _seed_agent_token(
+        session,
+        owner=owner,
+        scopes={battles.BATTLE_SIMULATE_SCOPE: True},
+    )
+
+    simulator = battles._battle_simulator(
+        request=_fake_request(method="POST", path="/battles/simulate", path_params={}),
+        db=session,
+        current_user=None,
+    )
+    response = battles.simulate_battle(
+        battles.BattleSimulate(
+            p1_roster_id=roster_a.id,
+            p2_roster_id=roster_b.id,
+            games=1,
+        ),
+        db=session,
+        simulator=simulator,
+    )
+
+    assert response.n_games == 1
+    audit = session.execute(select(models.AgentAuditLog)).scalar_one()
+    assert audit.user_id == owner.id
+    assert audit.agent_user_id == token.agent_user_id
+    assert audit.route == "/battles/simulate"
+    payload = json.loads(audit.params_json)
+    assert payload["scope"] == battles.BATTLE_SIMULATE_SCOPE
+    assert payload["method"] == "POST"
+    assert payload["path_params"] == {}
+    assert RAW_TOKEN not in audit.params_json
+
+
+def test_simulate_battle_rejects_cross_owner_and_missing_rosters() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    other = _seed_user(session, "other")
+    own_roster = _seed_roster(session, name="own", owner_id=owner.id)
+    other_roster = _seed_roster(session, name="other", owner_id=other.id)
+
+    with pytest.raises(HTTPException) as cross_owner_info:
+        battles.simulate_battle(
+            battles.BattleSimulate(
+                p1_roster_id=own_roster.id,
+                p2_roster_id=other_roster.id,
+                games=1,
+            ),
+            db=session,
+            simulator=battles.BattleSimulator(user_id=owner.id),
+        )
+    assert cross_owner_info.value.status_code == 404
+
+    with pytest.raises(HTTPException) as missing_info:
+        battles.simulate_battle(
+            battles.BattleSimulate(
+                p1_roster_id=own_roster.id,
+                p2_roster_id=99999,
+                games=1,
+            ),
+            db=session,
+            simulator=battles.BattleSimulator(user_id=owner.id),
+        )
+    assert missing_info.value.status_code == 404
+    assert session.execute(select(models.Battle)).scalars().all() == []
+
+
+def test_simulate_battle_rejects_unknown_bot_and_map() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+    roster_a = _seed_roster(session, name="A", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B", owner_id=owner.id)
+    simulator = battles.BattleSimulator(user_id=owner.id)
+
+    with pytest.raises(HTTPException) as map_info:
+        battles.simulate_battle(
+            battles.BattleSimulate(
+                p1_roster_id=roster_a.id,
+                p2_roster_id=roster_b.id,
+                games=1,
+                map_name="nieistniejaca",
+            ),
+            db=session,
+            simulator=simulator,
+        )
+    assert map_info.value.status_code == 400
+
+    with pytest.raises(HTTPException) as bot_info:
+        battles.simulate_battle(
+            battles.BattleSimulate(
+                p1_roster_id=roster_a.id,
+                p2_roster_id=roster_b.id,
+                games=1,
+                bot="nieistniejacy",
+            ),
+            db=session,
+            simulator=simulator,
+        )
+    assert bot_info.value.status_code == 400
+
+    with pytest.raises(HTTPException) as expensive_bot_info:
+        battles.simulate_battle(
+            battles.BattleSimulate(
+                p1_roster_id=roster_a.id,
+                p2_roster_id=roster_b.id,
+                games=1,
+                bot="minimax",
+            ),
+            db=session,
+            simulator=simulator,
+        )
+    assert expensive_bot_info.value.status_code == 400
 
 
 def test_get_battle_returns_owner_scoped_metadata_with_latest_sequence() -> None:
@@ -519,6 +714,33 @@ def test_battle_creator_rejects_missing_auth_and_missing_scope() -> None:
     with pytest.raises(HTTPException) as scope_info:
         battles._battle_creator(
             request=_fake_request(method="POST", path="/battles"),
+            db=session,
+            current_user=None,
+        )
+    assert scope_info.value.status_code == 403
+    assert session.execute(select(models.AgentAuditLog)).scalar_one_or_none() is None
+
+
+def test_battle_simulator_rejects_missing_auth_and_missing_scope() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner")
+
+    with pytest.raises(HTTPException) as missing_info:
+        battles._battle_simulator(
+            request=_fake_request(token=None, method="POST", path="/battles/simulate"),
+            db=session,
+            current_user=None,
+        )
+    assert missing_info.value.status_code == 401
+
+    _seed_agent_token(
+        session,
+        owner=owner,
+        scopes={battles.BATTLE_READ_SCOPE: True},
+    )
+    with pytest.raises(HTTPException) as scope_info:
+        battles._battle_simulator(
+            request=_fake_request(method="POST", path="/battles/simulate"),
             db=session,
             current_user=None,
         )

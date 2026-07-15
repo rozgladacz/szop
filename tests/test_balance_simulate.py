@@ -181,6 +181,15 @@ def test_player_factory_symbols_are_app_level_reexports():
     assert bs.PLAYER_SEED_OFFSET == agent_factory.PLAYER_SEED_OFFSET
 
 
+def test_map_symbols_are_app_level_reexports():
+    from app.services.agents import maps as agent_maps
+
+    assert bs.BattleFixture is agent_maps.BattleFixture
+    assert bs.build_map is agent_maps.build_map
+    assert bs.MAP_BUILDERS is agent_maps.MAP_BUILDERS
+    assert bs.DEFAULT_DEPLOYMENT_ZONES is agent_maps.DEFAULT_DEPLOYMENT_ZONES
+
+
 # --- inicjatywa --------------------------------------------------------------
 
 
