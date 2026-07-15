@@ -1,6 +1,6 @@
 # Podstawowe zależności aplikacji FastAPI
 fastapi==0.110.3
-uvicorn[standard]==0.29.0
+uvicorn[standard]>=0.31.1,<1.0
 jinja2==3.1.4
 sqlalchemy==2.0.48
 alembic==1.13.2
@@ -14,6 +14,9 @@ openpyxl==3.1.2       # opcjonalne: eksport XLSX
 
 # Konfiguracja
 python-dotenv==1.0.1
+
+# Lokalny serwer Model Context Protocol (stabilna linia v1)
+mcp>=1.27,<2
 
 # Deklaratywne reguły (Strumień A — feature toggle OPR_RULES_BACKEND)
 pydantic>=2.0,<3.0

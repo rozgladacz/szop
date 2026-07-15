@@ -18,7 +18,6 @@ Zakres B5-slice (patrz HANDOFF_faza-b-5-client): single-step play
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Callable, Optional, Protocol, Sequence, runtime_checkable
 
 from app.services.agents.base import Player
@@ -31,6 +30,7 @@ from app.services.engine.state import (
     TerrainCircle,
     TerrainLine,
 )
+from szop_client.types import SimulationSummary
 
 #: Teren akceptowany przy tworzeniu bitwy.
 Terrain = TerrainCircle | TerrainLine
@@ -46,38 +46,6 @@ ContinuationFn = Callable[[BattleState, int, tuple[Action, ...]], Optional[Actio
 #: na symetrycznej planszy grają lustrzanie i zawyżają remisy (finding F2,
 #: `HANDOFF.md` LOG 2026-06-11). To odpowiedzialność fabryki.
 PlayerFactory = Callable[[int], Sequence[Player]]
-
-
-@dataclass(frozen=True, slots=True)
-class SimulationSummary:
-    """Zagregowany wynik N gier batcha `simulate`.
-
-    `wins_p0`/`wins_p1` liczone per `owner_player` (0/1), nie per inicjatywa —
-    inicjatywa naprzemienna usuwa bias pierwszego gracza, ale wynik zawsze
-    przypisany właścicielowi (pkt 5.f). `None`-zwycięzca = remis.
-    """
-
-    n_games: int
-    wins_p0: int
-    wins_p1: int
-    draws: int
-    total_rounds: int
-
-    @property
-    def win_rate_p0(self) -> float:
-        return self.wins_p0 / self.n_games if self.n_games else 0.0
-
-    @property
-    def win_rate_p1(self) -> float:
-        return self.wins_p1 / self.n_games if self.n_games else 0.0
-
-    @property
-    def draw_rate(self) -> float:
-        return self.draws / self.n_games if self.n_games else 0.0
-
-    @property
-    def avg_rounds(self) -> float:
-        return self.total_rounds / self.n_games if self.n_games else 0.0
 
 
 @runtime_checkable

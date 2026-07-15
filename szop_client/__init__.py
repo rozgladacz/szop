@@ -1,55 +1,43 @@
-"""`szop_client` — klient gry Strumienia B (B5, ADR-0016).
+"""Public, lazily loaded API for the SZOP game clients.
 
-Stabilny seam między konsumentami (C3 `simulate_engagement`, D-stream, UI) a
-wewnętrznym silnikiem. Public API:
-
-- `GameClient` — Protocol (pełny kontrakt klienta; `LocalClient` go spełnia,
-  `HttpClient` rośnie slice'ami wraz z B4 API).
-- `LocalClient` — implementacja in-process (headless). Ścieżka engine-dict +
-  ścieżka DB (`LocalClient(session, user_id)` + metody `*_roster_ids`,
-  most ORM→engine przez `roster_adapter`).
-- `HttpClient` — HTTP metadata + polling + sandbox `create_battle` oraz
-  `simulate_roster_ids` nad B4 battle API.
-- `SimulationSummary` — wynik batcha `simulate`.
-
-Pełny `HttpClient` zgodny z całym `GameClient` oraz pakowanie `pip install -e`
-— odłożone do kolejnych endpointów B4. Patrz `docs/handoffs/HANDOFF_faza-b-5-client.md`.
+Keeping imports lazy lets HTTP-only consumers use ``HttpClient`` without
+loading the in-process engine, cost modules, ORM, or database configuration.
 """
 
-from szop_client.http import (
-    BattleMetadata,
-    HttpClient,
-    HttpClientError,
-    HttpClientTransportError,
-    HttpRequest,
-    HttpResponse,
-)
-from szop_client.local import (
-    LocalClient,
-    RosterNotFoundError,
-    UnknownBattleError,
-)
-from szop_client.protocol import (
-    ContinuationFn,
-    GameClient,
-    PlayerFactory,
-    SimulationSummary,
-    Terrain,
-)
+from __future__ import annotations
 
-__all__ = [
-    "GameClient",
-    "BattleMetadata",
-    "HttpClient",
-    "HttpClientError",
-    "HttpClientTransportError",
-    "HttpRequest",
-    "HttpResponse",
-    "LocalClient",
-    "UnknownBattleError",
-    "RosterNotFoundError",
-    "SimulationSummary",
-    "PlayerFactory",
-    "ContinuationFn",
-    "Terrain",
-]
+from importlib import import_module
+from typing import Any
+
+_EXPORTS = {
+    "BattleMetadata": ("szop_client.http", "BattleMetadata"),
+    "HttpClient": ("szop_client.http", "HttpClient"),
+    "HttpClientError": ("szop_client.http", "HttpClientError"),
+    "HttpClientTransportError": ("szop_client.http", "HttpClientTransportError"),
+    "HttpRequest": ("szop_client.http", "HttpRequest"),
+    "HttpResponse": ("szop_client.http", "HttpResponse"),
+    "LocalClient": ("szop_client.local", "LocalClient"),
+    "UnknownBattleError": ("szop_client.local", "UnknownBattleError"),
+    "RosterNotFoundError": ("szop_client.local", "RosterNotFoundError"),
+    "SimulationSummary": ("szop_client.types", "SimulationSummary"),
+    "GameClient": ("szop_client.protocol", "GameClient"),
+    "PlayerFactory": ("szop_client.protocol", "PlayerFactory"),
+    "ContinuationFn": ("szop_client.protocol", "ContinuationFn"),
+    "Terrain": ("szop_client.protocol", "Terrain"),
+}
+
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name: str) -> Any:
+    try:
+        module_name, attribute_name = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}") from exc
+    value = getattr(import_module(module_name), attribute_name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted((*globals(), *__all__))

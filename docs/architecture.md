@@ -62,7 +62,9 @@ agregat wyników bez zapisu `Battle` ani eventów. Pierwszy klient tego kontrakt
 to `szop_client.HttpClient`:
 `get_battle_metadata` odpytuje metadane bitwy, `get_events` odpytuje polling
 endpoint i deserializuje payload przez `json_to_event`, a `simulate_roster_ids`
-odpytuje sandbox simulation i zwraca `SimulationSummary`.
+odpytuje sandbox simulation i zwraca `SimulationSummary`. Lokalny
+`mcp_server` jest klientem tego samego publicznego API: nie importuje ORM,
+`SessionLocal` ani `app.db` i nie czyta `data/szop.db`.
 
 ## Dokumentacja reguł gry — read-only
 
@@ -277,11 +279,31 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 
 | Moduł | Zawartość |
 |---|---|
-| `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` z `deployment_zones` D5) + `SimulationSummary` (frozen, win_rate/draw_rate/avg_rounds) |
+| `types.py` | lekki `SimulationSummary` (frozen, win_rate/draw_rate/avg_rounds), współdzielony bez importowania silnika/ORM |
+| `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` z `deployment_zones` D5), re-eksportuje `SimulationSummary` dla kompatybilności |
 | `local.py` | `LocalClient(session=None, user_id=None)` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); **ścieżka DB** `simulate_roster_ids`/`create_battle_from_roster_ids` (wczytuje `Roster` po id, adapter ORM→engine, ownership-scoped); `UnknownBattleError`/`RosterNotFoundError` |
 | `http.py` | `HttpClient(base_url, token)` slices — `get_battle_metadata(battle_id)` odpytuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events(battle_id, since)` odpytuje B4 `GET /battles/{id}/events?since=N`; `create_battle(p1_roster_id, p2_roster_id, rng_seed, initiative_player)` woła sandbox `POST /battles` (JSON body + `Content-Type`) i zwraca `BattleMetadata`, tolerując addytywny `adaptation_report` bez mapowania do metadata; `simulate_roster_ids(p1_roster_id, p2_roster_id, bot, n, seed, map_name)` woła sandbox `POST /battles/simulate` i zwraca `SimulationSummary`; wszystkie dodają bearer token gdy podany, eventy dekodowane przez `json_to_event`; pełny `GameClient` HTTP czeka na pozostałe endpointy B4 |
 
+`szop_client.__init__` ładuje publiczne symbole leniwie, więc konsument
+HTTP-only nie uruchamia importów `LocalClient`, kosztów, ORM ani konfiguracji DB.
+
 **Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient.get_battle_metadata`, `HttpClient.get_events` read-only + `HttpClient.create_battle` sandbox write + `HttpClient.simulate_roster_ids` sandbox read-only batch) dla metadanych bitwy, zapisanego event-logu, tworzenia sandboxowej bitwy i symulacji dwóch własnych rosterów. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia (Ufortyfikowany pkt 13.c) — spójna z `persistence.save_events`. **Odłożone:** pełny `HttpClient` zgodny z całym `GameClient`, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, wierność `take_action == apply_activation`, DB-path (seeded in-memory SQLite, ownership scoping), HTTP URL/header/error handling i dekodowanie payloadu metadanych, eventów oraz agregatu symulacji.
+
+## Lokalny serwer MCP — `mcp_server/` (minimalny slice C1/C3, 2026-07-15)
+
+`mcp_server/server.py` uruchamia stabilną linię v1 MCP Python SDK przez stdio i
+publikuje dokładnie jeden read-only tool: `simulate_engagement(roster_a,
+roster_b, games, bot, seed, map_name)`. Tool deleguje jednoznacznie do
+`szop_client.http.HttpClient.simulate_roster_ids`; nie ma alternatywnej ścieżki
+in-process ani bezpośredniego dostępu do bazy. Limit `games` wynosi 1–50 i ma
+test parity z publicznym kontraktem `POST /battles/simulate`.
+
+`mcp_server/config.py` czyta URL z `SZOP_API_URL` (domyślnie
+`http://127.0.0.1:8000`) oraz opcjonalny bearer token z `SZOP_API_TOKEN`.
+Token ma wyłączony `repr` i nie jest dołączany do komunikatów błędów/logów;
+trafia wyłącznie do nagłówka `Authorization` budowanego przez `HttpClient`.
+Brak write tools, resources/prompts, RAG, embeddingów, executorów propozycji,
+`get_state` i `take_action` jest świadomą granicą tego slice'u.
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 

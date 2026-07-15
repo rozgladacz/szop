@@ -16,7 +16,7 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.services.engine.events import BattleEvent, json_to_event
-from szop_client.protocol import SimulationSummary
+from szop_client.types import SimulationSummary
 
 
 @dataclass(frozen=True, slots=True)
