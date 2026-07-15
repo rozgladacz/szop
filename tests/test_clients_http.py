@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from app.services.engine.action_codec import action_from_json
+from app.services.engine.actions import DefendAction
 from app.services.engine.events import MoveExecuted, StatusAdded, event_to_json
 from app.services.engine.state_codec import battle_state_to_json
 from szop_client import (
@@ -534,3 +536,165 @@ def test_get_state_rejects_malformed_payload(mutation) -> None:
 
     with pytest.raises(HttpClientError):
         HttpClient("http://localhost", transport=transport).get_state(42)
+
+
+def test_take_action_fetches_fresh_sequence_posts_wire_and_matches_local_client() -> None:
+    seen: list[HttpRequest] = []
+    local = LocalClient()
+    local_battle_id = local.create_battle(
+        [
+            {
+                "owner_player": 0,
+                "units": [
+                    {"id": 1, "position": (0, 0), "models": 2, "toughness": 3}
+                ],
+            },
+            {
+                "owner_player": 1,
+                "units": [
+                    {"id": 2, "position": (12, 0), "models": 2, "toughness": 3}
+                ],
+            },
+        ],
+        seed=77,
+    )
+    initial_events = local.get_events(local_battle_id)
+    initial_sequence = initial_events[-1].sequence
+    local_result: list[tuple] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        if request.method == "GET":
+            serialized = battle_state_to_json(local.get_state(local_battle_id))
+            return _json_response(
+                {
+                    **serialized,
+                    "battle_id": 42,
+                    "sequence_at": initial_sequence,
+                }
+            )
+        body = json.loads(request.body.decode("utf-8"))
+        assert body["expected_sequence"] == initial_sequence
+        decoded_action = action_from_json(body["action"])
+        state, events = local.take_action(
+            local_battle_id,
+            decoded_action,
+            continuation=None,
+        )
+        local_result.append((state, events))
+        return _json_response(
+            {
+                "battle_id": 42,
+                "previous_sequence": initial_sequence,
+                "new_sequence": events[-1].sequence,
+                "state": battle_state_to_json(state),
+                "events": [
+                    {
+                        "sequence": event.sequence,
+                        "event_type": type(event).__name__,
+                        "payload": event_to_json(event),
+                    }
+                    for event in events
+                ],
+            }
+        )
+
+    client = HttpClient(
+        "https://szop.example/api",
+        token="raw-token",
+        transport=transport,
+    )
+    result = client.take_action(42, DefendAction(unit_id=1), continuation=None)
+
+    assert result == local_result[0]
+    assert [request.method for request in seen] == ["GET", "POST"]
+    assert seen[1].url == "https://szop.example/api/battles/42/actions"
+    assert seen[1].headers["Content-Type"] == "application/json"
+    assert seen[1].headers["Authorization"] == "Bearer raw-token"
+    posted = json.loads(seen[1].body.decode("utf-8"))
+    assert action_from_json(posted["action"]) == DefendAction(unit_id=1)
+
+
+def test_take_action_rejects_continuation_before_transport() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    client = HttpClient("http://localhost", transport=transport)
+
+    with pytest.raises(ValueError, match="does not support continuation"):
+        client.take_action(
+            1,
+            DefendAction(unit_id=1),
+            continuation=lambda *_args: None,
+        )
+
+
+def test_take_action_surfaces_sequence_conflict() -> None:
+    state = _equivalent_local_state()
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        if request.method == "GET":
+            return _json_response(
+                {
+                    **battle_state_to_json(state),
+                    "battle_id": 42,
+                    "sequence_at": 2,
+                }
+            )
+        return HttpResponse(status_code=409, body=b'{"detail":"conflict"}')
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).take_action(
+            42,
+            DefendAction(unit_id=1),
+        )
+
+    assert exc_info.value.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(battle_id=99),
+        lambda payload: payload.update(previous_sequence=True),
+        lambda payload: payload.update(previous_sequence=1),
+        lambda payload: payload.update(new_sequence=True),
+        lambda payload: payload["events"][0].update(sequence=99),
+        lambda payload: payload["events"][0].update(event_type="WrongEvent"),
+        lambda payload: payload["state"].update(version=999),
+    ],
+)
+def test_take_action_rejects_malformed_or_inconsistent_response(mutation) -> None:
+    state = _equivalent_local_state()
+    event = StatusAdded(sequence=3, target_id=1, status="Aktywowany")
+    response_payload = {
+        "battle_id": 42,
+        "previous_sequence": 2,
+        "new_sequence": 3,
+        "state": battle_state_to_json(state),
+        "events": [
+            {
+                "sequence": event.sequence,
+                "event_type": type(event).__name__,
+                "payload": event_to_json(event),
+            }
+        ],
+    }
+    mutation(response_payload)
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        if request.method == "GET":
+            return _json_response(
+                {
+                    **battle_state_to_json(state),
+                    "battle_id": 42,
+                    "sequence_at": 2,
+                }
+            )
+        return _json_response(response_payload)
+
+    with pytest.raises(HttpClientError):
+        HttpClient("http://localhost", transport=transport).take_action(
+            42,
+            DefendAction(unit_id=1),
+        )

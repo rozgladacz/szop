@@ -1,24 +1,28 @@
-"""HTTP client slices for the B4 battle API.
+"""HTTP client for the public B4 battle API.
 
-The full `GameClient` HTTP implementation is still waiting for the remaining
-B4 endpoints. This module implements the shipped slices: read-only metadata
-fetch (`get_battle_metadata`) and event polling (`get_events`), plus the
-sandbox write slice `create_battle` backed by `POST /battles`.
+The client keeps no mutable battle-state or sequence cache. Mutating one action
+first reads the current checkpoint sequence, then sends it as an explicit
+optimistic precondition and consumes the returned state/event delta.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from app.services.engine.action_codec import action_to_json
+from app.services.engine.actions import Action
 from app.services.engine.events import BattleEvent, json_to_event
 from app.services.engine.state import BattleState
 from app.services.engine.state_codec import battle_state_from_json
 from szop_client.types import SimulationSummary
+
+if TYPE_CHECKING:
+    from szop_client.protocol import ContinuationFn
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,7 +76,7 @@ class HttpClientTransportError(HttpClientError):
 
 
 class HttpClient:
-    """Minimal HTTP client for battle metadata, event polling and sandbox create."""
+    """HTTP client for checkpointed single-action play and sandbox operations."""
 
     def __init__(
         self,
@@ -182,6 +186,46 @@ class HttpClient:
 
     def get_state(self, battle_id: int) -> BattleState:
         """Return the participant-scoped current domain state of a battle."""
+        state, _ = self._get_state_checkpoint(battle_id)
+        return state
+
+    def take_action(
+        self,
+        battle_id: int,
+        action: Action,
+        *,
+        continuation: "ContinuationFn | None" = None,
+    ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+        """Persist one action with a freshly read optimistic sequence guard.
+
+        Callback continuations are process-local behavior and cannot cross the
+        HTTP boundary in this single-action API slice.
+        """
+        if continuation is not None:
+            raise ValueError(
+                "HttpClient.take_action does not support continuation callbacks"
+            )
+        wire_action = action_to_json(action)
+        _, expected_sequence = self._get_state_checkpoint(battle_id)
+        error_label = "POST battle action"
+        payload = self._request_json(
+            "POST",
+            f"/battles/{battle_id}/actions",
+            {},
+            json_body={
+                "expected_sequence": expected_sequence,
+                "action": wire_action,
+            },
+            error_label=error_label,
+        )
+        return _action_result_from_payload(
+            payload,
+            expected_battle_id=battle_id,
+            expected_previous_sequence=expected_sequence,
+            error_label=error_label,
+        )
+
+    def _get_state_checkpoint(self, battle_id: int) -> tuple[BattleState, int]:
         error_label = "GET battle state"
         payload = self._get_json(
             f"/battles/{battle_id}/state",
@@ -200,7 +244,7 @@ class HttpClient:
                 "version": _required_int(payload, "version"),
                 "state": payload["state"],
             }
-            return battle_state_from_json(state_payload)
+            return battle_state_from_json(state_payload), sequence_at
         except (KeyError, TypeError, ValueError) as exc:
             raise HttpClientError(
                 f"{error_label} returned malformed payload"
@@ -326,6 +370,46 @@ def _simulation_summary_from_payload(
     return summary
 
 
+def _action_result_from_payload(
+    payload: Any,
+    *,
+    expected_battle_id: int,
+    expected_previous_sequence: int,
+    error_label: str,
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    _ensure_expected_battle_id(
+        payload,
+        expected_battle_id,
+        error_label=error_label,
+    )
+    try:
+        previous_sequence = _required_int(payload, "previous_sequence")
+        new_sequence = _required_int(payload, "new_sequence")
+        if (
+            previous_sequence != expected_previous_sequence
+            or new_sequence < previous_sequence
+        ):
+            raise TypeError("action sequence")
+        state_payload = payload["state"]
+        if not isinstance(state_payload, dict):
+            raise TypeError("state")
+        state = battle_state_from_json(state_payload)
+        raw_events = payload["events"]
+        if not isinstance(raw_events, list):
+            raise TypeError("events")
+        events = tuple(_event_from_public_payload(item) for item in raw_events)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
+
+    expected_sequences = tuple(range(previous_sequence + 1, new_sequence + 1))
+    if tuple(event.sequence for event in events) != expected_sequences:
+        raise HttpClientError(error_message)
+    return state, events
+
+
 def _ensure_expected_battle_id(
     payload: dict[str, Any],
     expected_battle_id: int,
@@ -370,9 +454,14 @@ def _event_from_public_payload(item: Any) -> BattleEvent:
     if not isinstance(item, dict) or not isinstance(item.get("payload"), dict):
         raise HttpClientError("Battle event payload is malformed")
     try:
-        return json_to_event(item["payload"])
+        sequence = _required_int(item, "sequence")
+        event_type = _required_str(item, "event_type")
+        event = json_to_event(item["payload"])
     except (KeyError, TypeError, ValueError) as exc:
         raise HttpClientError("Battle event payload cannot be decoded") from exc
+    if event.sequence != sequence or type(event).__name__ != event_type:
+        raise HttpClientError("Battle event envelope does not match its payload")
+    return event
 
 
 def _urlopen_transport(request: HttpRequest) -> HttpResponse:

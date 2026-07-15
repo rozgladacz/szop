@@ -1,25 +1,35 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, sessionmaker
 
 from app import models
 from app.db import Base
 from app.main import app
 from app.routers import battles
 from app.security import hash_agent_token, hash_password
-from app.services.engine.events import MoveExecuted, StatusAdded
+from app.services.engine.action_codec import action_to_json
+from app.services.engine.actions import DefendAction, ManeuverAction, ShootAction
+from app.services.engine.dice import DeterministicDice
+from app.services.engine.events import MoveExecuted, StatusAdded, json_to_event
 from app.services.engine.persistence import (
     load_events,
     load_latest_checkpoint,
+    save_checkpoint,
     save_events,
 )
+from app.services.engine.phases import deployment_round, round_end_phase, setup_phase
+from app.services.engine.resolver import apply, should_end_round
+from app.services.engine.state import Objective, Position
 from app.services.engine.state_codec import battle_state_from_json
 from szop_client import LocalClient
 
@@ -68,6 +78,101 @@ def _seed_events(session: Session, battle: models.Battle) -> None:
         ],
     )
     session.commit()
+
+
+def _action_state(*, objectives: tuple[Objective, ...] = ()):
+    weapon = {
+        "slug": "test-rifle",
+        "name": "Test rifle",
+        "range_inches": 24,
+        "attacks": 1,
+        "ap": 0,
+    }
+    state = setup_phase(
+        [
+            {
+                "owner_player": 0,
+                "units": [
+                    {
+                        "id": 1,
+                        "position": (0, 0),
+                        "models": 3,
+                        "toughness": 10,
+                        "weapons": [weapon],
+                    }
+                ],
+            },
+            {
+                "owner_player": 1,
+                "units": [
+                    {
+                        "id": 2,
+                        "position": (12, 0),
+                        "models": 3,
+                        "toughness": 10,
+                        "weapons": [weapon],
+                    }
+                ],
+            },
+        ],
+        objectives=objectives,
+        initiative_player=0,
+    )
+    state, _ = deployment_round(state, ())
+    return state
+
+
+def _persist_action_battle(
+    session: Session,
+    *,
+    p1: models.User,
+    p2: models.User,
+    state,
+    seed: int = 2026,
+) -> models.Battle:
+    battle = models.Battle(
+        p1_user_id=p1.id,
+        p2_user_id=p2.id,
+        current_round=state.round,
+        rng_seed=seed,
+        status="active",
+    )
+    session.add(battle)
+    session.flush()
+    save_checkpoint(
+        session,
+        battle.id,
+        0,
+        state,
+        DeterministicDice(seed),
+    )
+    session.commit()
+    session.refresh(battle)
+    return battle
+
+
+def _action_db_snapshot(session: Session, battle_id: int) -> tuple:
+    session.expire_all()
+    battle = session.get(models.Battle, battle_id)
+    events = session.execute(
+        select(models.BattleEvent).where(models.BattleEvent.battle_id == battle_id)
+    ).scalars().all()
+    checkpoints = session.execute(
+        select(models.BattleCheckpoint).where(
+            models.BattleCheckpoint.battle_id == battle_id
+        )
+    ).scalars().all()
+    latest = load_latest_checkpoint(session, battle_id)
+    return (
+        len(events),
+        len(checkpoints),
+        battle.current_round,
+        battle.status,
+        battle.winner_user_id,
+        latest.sequence_at if latest is not None else None,
+        latest.state if latest is not None else None,
+        latest.dice.to_checkpoint() if latest is not None else None,
+    )
 
 
 def _seed_agent_token(
@@ -215,6 +320,8 @@ def test_battles_router_is_registered_in_app() -> None:
     assert "GET" in methods_by_path["/battles/{battle_id}/events"]
     assert "/battles/{battle_id}/state" in route_paths
     assert "GET" in methods_by_path["/battles/{battle_id}/state"]
+    assert "/battles/{battle_id}/actions" in route_paths
+    assert "POST" in methods_by_path["/battles/{battle_id}/actions"]
 
 
 def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
@@ -885,3 +992,517 @@ def test_agent_reader_cannot_read_battle_owned_by_other_user() -> None:
         battles.get_battle_events(battle.id, db=session, reader=reader)
 
     assert exc_info.value.status_code == 404
+
+
+def test_take_battle_action_persists_contiguous_delta_checkpoint_and_metadata() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "action-owner")
+    battle = _persist_action_battle(
+        session,
+        p1=owner,
+        p2=owner,
+        state=_action_state(),
+    )
+    before = _action_db_snapshot(session, battle.id)
+
+    response = battles.take_battle_action(
+        battle.id,
+        battles.BattleActionCreate(
+            expected_sequence=0,
+            action=action_to_json(DefendAction(unit_id=1)),
+        ),
+        db=session,
+        actor=battles.BattleActor(user_id=owner.id),
+    )
+
+    after = _action_db_snapshot(session, battle.id)
+    restored = battle_state_from_json(response.state.model_dump(by_alias=True))
+    persisted = load_events(session, battle.id)
+    assert response.previous_sequence == 0
+    assert response.new_sequence == len(response.events)
+    assert [event.sequence for event in response.events] == list(
+        range(1, response.new_sequence + 1)
+    )
+    assert tuple(json_to_event(event.payload) for event in response.events) == tuple(
+        persisted
+    )
+    assert restored == load_latest_checkpoint(session, battle.id).state
+    assert after[0] == before[0] + len(response.events)
+    assert after[1] == before[1] + 1
+    assert after[2:5] == (1, "active", None)
+    assert after[5] == response.new_sequence
+
+
+def test_take_battle_action_stale_sequence_does_not_mutate_db() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "stale-owner")
+    battle = _persist_action_battle(
+        session,
+        p1=owner,
+        p2=owner,
+        state=_action_state(),
+    )
+    before = _action_db_snapshot(session, battle.id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles.take_battle_action(
+            battle.id,
+            battles.BattleActionCreate(
+                expected_sequence=1,
+                action=action_to_json(DefendAction(unit_id=1)),
+            ),
+            db=session,
+            actor=battles.BattleActor(user_id=owner.id),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert _action_db_snapshot(session, battle.id) == before
+
+
+def test_take_battle_action_invalid_wire_is_safe_422_without_mutation() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "invalid-wire-owner")
+    battle = _persist_action_battle(
+        session,
+        p1=owner,
+        p2=owner,
+        state=_action_state(),
+    )
+    before = _action_db_snapshot(session, battle.id)
+    invalid_wire = action_to_json(DefendAction(unit_id=1))
+    invalid_wire["unexpected"] = "field"
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles.take_battle_action(
+            battle.id,
+            battles.BattleActionCreate(
+                expected_sequence=0,
+                action=invalid_wire,
+            ),
+            db=session,
+            actor=battles.BattleActor(user_id=owner.id),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Invalid action payload"
+    assert _action_db_snapshot(session, battle.id) == before
+
+
+def test_battle_action_request_rejects_bool_expected_sequence() -> None:
+    with pytest.raises(ValueError):
+        battles.BattleActionCreate(
+            expected_sequence=True,
+            action=action_to_json(DefendAction(unit_id=1)),
+        )
+
+
+def test_take_battle_action_race_rolls_back_flushed_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _build_session()
+    owner = _seed_user(session, "race-owner")
+    battle = _persist_action_battle(
+        session,
+        p1=owner,
+        p2=owner,
+        state=_action_state(),
+    )
+    before = _action_db_snapshot(session, battle.id)
+
+    def fail_checkpoint(*_args, **_kwargs):
+        raise IntegrityError("checkpoint race", {}, Exception("unique"))
+
+    monkeypatch.setattr(battles, "save_checkpoint", fail_checkpoint)
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles.take_battle_action(
+            battle.id,
+            battles.BattleActionCreate(
+                expected_sequence=0,
+                action=action_to_json(DefendAction(unit_id=1)),
+            ),
+            db=session,
+            actor=battles.BattleActor(user_id=owner.id),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert _action_db_snapshot(session, battle.id) == before
+
+
+def test_take_battle_action_illegal_action_does_not_mutate_db() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "illegal-owner")
+    battle = _persist_action_battle(
+        session,
+        p1=owner,
+        p2=owner,
+        state=_action_state(),
+    )
+    before = _action_db_snapshot(session, battle.id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles.take_battle_action(
+            battle.id,
+            battles.BattleActionCreate(
+                expected_sequence=0,
+                action=action_to_json(
+                    ManeuverAction(unit_id=1, target_position=Position(100, 100))
+                ),
+            ),
+            db=session,
+            actor=battles.BattleActor(user_id=owner.id),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Illegal action"
+    assert _action_db_snapshot(session, battle.id) == before
+
+
+def test_take_battle_action_invalid_target_is_safe_422_without_mutation() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "invalid-target-owner")
+    state = _action_state()
+    battle = _persist_action_battle(
+        session,
+        p1=owner,
+        p2=owner,
+        state=state,
+    )
+    before = _action_db_snapshot(session, battle.id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles.take_battle_action(
+            battle.id,
+            battles.BattleActionCreate(
+                expected_sequence=0,
+                action=action_to_json(
+                    ShootAction(
+                        unit_id=1,
+                        target_id=999,
+                        weapon=state.blobs[0].ranged_weapons[0],
+                    )
+                ),
+            ),
+            db=session,
+            actor=battles.BattleActor(user_id=owner.id),
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == "Illegal action"
+    assert _action_db_snapshot(session, battle.id) == before
+
+
+def test_take_battle_action_rejects_other_side_without_mutation() -> None:
+    session = _build_session()
+    p1 = _seed_user(session, "side-p1")
+    p2 = _seed_user(session, "side-p2")
+    battle = _persist_action_battle(
+        session,
+        p1=p1,
+        p2=p2,
+        state=_action_state(),
+    )
+    before = _action_db_snapshot(session, battle.id)
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles.take_battle_action(
+            battle.id,
+            battles.BattleActionCreate(
+                expected_sequence=0,
+                action=action_to_json(DefendAction(unit_id=2)),
+            ),
+            db=session,
+            actor=battles.BattleActor(user_id=p1.id),
+        )
+
+    assert exc_info.value.status_code == 403
+    assert _action_db_snapshot(session, battle.id) == before
+
+
+def test_take_battle_action_same_user_can_control_both_sandbox_sides() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "both-sides-owner")
+    battle = _persist_action_battle(
+        session,
+        p1=owner,
+        p2=owner,
+        state=_action_state(),
+    )
+    first = battles.take_battle_action(
+        battle.id,
+        battles.BattleActionCreate(
+            expected_sequence=0,
+            action=action_to_json(DefendAction(unit_id=1)),
+        ),
+        db=session,
+        actor=battles.BattleActor(user_id=owner.id),
+    )
+
+    second = battles.take_battle_action(
+        battle.id,
+        battles.BattleActionCreate(
+            expected_sequence=first.new_sequence,
+            action=action_to_json(DefendAction(unit_id=2)),
+        ),
+        db=session,
+        actor=battles.BattleActor(user_id=owner.id),
+    )
+
+    assert second.new_sequence > first.new_sequence
+    assert any(event.event_type == "RoundEnded" for event in second.events)
+    assert battle_state_from_json(second.state.model_dump(by_alias=True)).round == 2
+
+
+def test_take_battle_action_nonparticipant_and_missing_are_same_404() -> None:
+    session = _build_session()
+    p1 = _seed_user(session, "oracle-p1")
+    p2 = _seed_user(session, "oracle-p2")
+    stranger = _seed_user(session, "oracle-stranger")
+    battle = _persist_action_battle(
+        session,
+        p1=p1,
+        p2=p2,
+        state=_action_state(),
+    )
+    payload = battles.BattleActionCreate(
+        expected_sequence=0,
+        action=action_to_json(DefendAction(unit_id=1)),
+    )
+
+    for battle_id in (battle.id, battle.id + 999):
+        with pytest.raises(HTTPException) as exc_info:
+            battles.take_battle_action(
+                battle_id,
+                payload,
+                db=session,
+                actor=battles.BattleActor(user_id=stranger.id),
+            )
+        assert exc_info.value.status_code == 404
+
+
+def test_take_battle_action_automatically_ends_round_and_updates_winner() -> None:
+    session = _build_session()
+    p1 = _seed_user(session, "winner-p1")
+    p2 = _seed_user(session, "winner-p2")
+    state = _action_state(objectives=(Objective(id=1, position=Position(0, 0)),))
+    state = replace(
+        state,
+        round=4,
+        blobs=(state.blobs[0], replace(state.blobs[1], models_alive=0)),
+    )
+    battle = _persist_action_battle(session, p1=p1, p2=p2, state=state)
+
+    response = battles.take_battle_action(
+        battle.id,
+        battles.BattleActionCreate(
+            expected_sequence=0,
+            action=action_to_json(DefendAction(unit_id=1)),
+        ),
+        db=session,
+        actor=battles.BattleActor(user_id=p1.id),
+    )
+
+    final_state = battle_state_from_json(response.state.model_dump(by_alias=True))
+    session.refresh(battle)
+    assert any(event.event_type == "RoundEnded" for event in response.events)
+    assert final_state.is_game_over is True
+    assert final_state.score == (1, 0)
+    assert battle.current_round == 4
+    assert battle.status == "finished"
+    assert battle.winner_user_id == p1.id
+
+
+def test_take_battle_action_reopened_session_preserves_next_rng_action(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(
+        f"sqlite+pysqlite:///{tmp_path / 'http-action-rng.db'}",
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine, future=True)
+    seed = 314159
+    initial_state = _action_state()
+    reference_dice = DeterministicDice(seed)
+
+    with SessionLocal() as writer:
+        p1 = _seed_user(writer, "rng-p1")
+        p2 = _seed_user(writer, "rng-p2")
+        battle = _persist_action_battle(
+            writer,
+            p1=p1,
+            p2=p2,
+            state=initial_state,
+            seed=seed,
+        )
+        battle_id = battle.id
+        p1_id = p1.id
+        p2_id = p2.id
+        first_action = ShootAction(
+            unit_id=1,
+            target_id=2,
+            weapon=initial_state.blobs[0].ranged_weapons[0],
+        )
+        reference_first = apply(initial_state, first_action, reference_dice, sequence=1)
+        first_response = battles.take_battle_action(
+            battle.id,
+            battles.BattleActionCreate(
+                expected_sequence=0,
+                action=action_to_json(first_action),
+            ),
+            db=writer,
+            actor=battles.BattleActor(user_id=p1.id),
+        )
+        assert battle_state_from_json(
+            first_response.state.model_dump(by_alias=True)
+        ) == reference_first.state
+
+    with SessionLocal() as reader:
+        checkpoint = load_latest_checkpoint(reader, battle_id)
+        assert checkpoint is not None
+        second_action = ShootAction(
+            unit_id=2,
+            target_id=1,
+            weapon=checkpoint.state.blobs[1].ranged_weapons[0],
+        )
+        reference_second = apply(
+            reference_first.state,
+            second_action,
+            reference_dice,
+            sequence=reference_first.next_sequence,
+        )
+        reference_state = reference_second.state
+        reference_events = list(reference_second.events)
+        if should_end_round(reference_state):
+            reference_state, round_events = round_end_phase(
+                reference_state,
+                sequence=reference_second.next_sequence,
+            )
+            reference_events.extend(round_events)
+
+        second_response = battles.take_battle_action(
+            battle_id,
+            battles.BattleActionCreate(
+                expected_sequence=checkpoint.sequence_at,
+                action=action_to_json(second_action),
+            ),
+            db=reader,
+            actor=battles.BattleActor(user_id=p2_id),
+        )
+
+        assert battle_state_from_json(
+            second_response.state.model_dump(by_alias=True)
+        ) == reference_state
+        assert tuple(
+            json_to_event(event.payload) for event in second_response.events
+        ) == tuple(reference_events)
+        checkpoint_count = len(
+            reader.execute(
+                select(models.BattleCheckpoint).where(
+                    models.BattleCheckpoint.battle_id == battle_id
+                )
+            ).scalars().all()
+        )
+        assert checkpoint_count == 3
+        assert reader.get(models.Battle, battle_id).p1_user_id == p1_id
+
+
+def test_battle_actor_accepts_session_user_without_agent_audit() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "actor-session-owner")
+
+    actor = battles._battle_actor(
+        request=_fake_request(
+            token=None,
+            method="POST",
+            path="/battles/7/actions",
+        ),
+        db=session,
+        current_user=owner,
+    )
+
+    assert actor == battles.BattleActor(user_id=owner.id)
+    assert session.execute(select(models.AgentAuditLog)).scalar_one_or_none() is None
+
+
+def test_battle_actor_accepts_agent_scope_and_audits_request() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "actor-agent-owner")
+    token = _seed_agent_token(
+        session,
+        owner=owner,
+        scopes={battles.BATTLE_ACT_SCOPE: True},
+    )
+
+    actor = battles._battle_actor(
+        request=_fake_request(
+            method="POST",
+            path="/battles/7/actions",
+        ),
+        db=session,
+        current_user=None,
+    )
+
+    assert actor == battles.BattleActor(user_id=owner.id)
+    audit = session.execute(select(models.AgentAuditLog)).scalar_one()
+    assert audit.user_id == owner.id
+    assert audit.agent_user_id == token.agent_user_id
+    assert audit.route == "/battles/7/actions"
+    assert json.loads(audit.params_json)["scope"] == battles.BATTLE_ACT_SCOPE
+    assert RAW_TOKEN not in audit.params_json
+
+
+def test_battle_actor_rejects_missing_auth_and_missing_scope() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "actor-scope-owner")
+
+    with pytest.raises(HTTPException) as missing_info:
+        battles._battle_actor(
+            request=_fake_request(
+                token=None,
+                method="POST",
+                path="/battles/7/actions",
+            ),
+            db=session,
+            current_user=None,
+        )
+    assert missing_info.value.status_code == 401
+
+    _seed_agent_token(
+        session,
+        owner=owner,
+        scopes={battles.BATTLE_READ_SCOPE: True},
+    )
+    with pytest.raises(HTTPException) as scope_info:
+        battles._battle_actor(
+            request=_fake_request(method="POST", path="/battles/7/actions"),
+            db=session,
+            current_user=None,
+        )
+    assert scope_info.value.status_code == 403
+
+
+@pytest.mark.parametrize("invalid_token", ["expired", "revoked"])
+def test_battle_actor_rejects_expired_and_revoked_tokens(invalid_token: str) -> None:
+    session = _build_session()
+    owner = _seed_user(session, f"actor-{invalid_token}-owner")
+    token = _seed_agent_token(
+        session,
+        owner=owner,
+        scopes={battles.BATTLE_ACT_SCOPE: True},
+    )
+    if invalid_token == "expired":
+        token.expires_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(seconds=1)
+    else:
+        token.revoked_at = datetime.now(UTC).replace(tzinfo=None)
+    session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        battles._battle_actor(
+            request=_fake_request(method="POST", path="/battles/7/actions"),
+            db=session,
+            current_user=None,
+        )
+
+    assert exc_info.value.status_code == 401
+    assert session.execute(select(models.AgentAuditLog)).scalar_one_or_none() is None

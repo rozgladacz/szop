@@ -236,9 +236,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   rejestru), używa app-level map `app.services.agents.maps` + `make_player`
   i zwraca agregat wyników bez zapisu `Battle`/eventów. Invite'y i gra między
   różnymi ownerami nadal osobno.
-  Pozostałe endpointy nadal
-  otwarte: `POST /battles/invite`, `POST /battles/invite/{id}/accept`,
-  `POST /battles/{id}/actions`, `POST /battles/{id}/interrupts`,
+  `POST /battles/{id}/actions` **DONE 2026-07-15 (ADR-0054)**: pojedyncza
+  wersjonowana akcja, obowiązkowy `expected_sequence`, wznowienie state+RNG,
+  `resolver.apply`, automatyczny round-end przez istniejące helpery i atomowy
+  zapis eventów + dokładnie jednego checkpointu + metadanych; odpowiedź zwraca
+  nowy state i deltę eventów. Pozostałe endpointy nadal otwarte:
+  `POST /battles/invite`, `POST /battles/invite/{id}/accept`,
+  `POST /battles/{id}/interrupts`,
   `POST /battles/{id}/replay`.
 - [~] Auth: read-only battle endpoints mają participant scope
   (`p1_user_id`/`p2_user_id`; cudza/nieistniejąca = 404) oraz agent bearer scope
@@ -246,19 +250,29 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `battle:create`, mapuje agenta na `owner_user_id` i wymaga obu rosterów z
   `owner_id == owner`. `POST /battles/simulate` ma osobny scope
   `battle:simulate`, mapuje agenta na `owner_user_id` i wymaga obu rosterów z
-  `owner_id == owner`. Invite'y oraz pozostałe write endpointy nadal wymagają
-  osobnego security-review.
-- [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych i
-  event-logu (`BattlePublic`, `BattleEventsPublic`) w routerze gotowe; shared
-  `BattleState`, `BattleEvent` i polimorficzne `Action` nadal otwarte.
-- [~] Optimistic locking na `BattleEvent.sequence` — persistence helper DONE 2026-07-04 (`save_events(..., expected_latest_sequence=N)` + `BattleEventSequenceConflict`; DB `UniqueConstraint` nadal łapie race między check a INSERT); wire-in do przyszłych write endpointów B4 nadal otwarty
+  `owner_id == owner`. `POST /battles/{id}/actions` ma scope `battle:act`,
+  participant/no-oracle check oraz kontrolę strony `owner_player`; auth i zapis
+  przeszły osobny security-review. Invite'y i pozostałe write endpointy nadal
+  wymagają osobnego security-review.
+- [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych,
+  event-logu, state i action w routerze gotowe. Bezpieczny wspólny codec
+  `app/services/engine/action_codec.py` (`szop.action/v1`, zamknięty union 5
+  akcji) DONE 2026-07-15; przeniesienie modeli do wspólnego `schemas.py` nie jest
+  potrzebne dla obecnego klienta.
+- [x] Optimistic locking na `BattleEvent.sequence` — helper persistence +
+  `expected_sequence` w `POST /actions`; precondition i DB race mapowane na 409,
+  cała transakcja rollbackowana (ADR-0054)
 
 ### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19 + HttpClient read-only DONE 2026-07-02/03** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016)
 
-> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient slices 2026-07-02/10/15:** `get_battle_metadata` konsumuje B4 `GET /battles/{id}` i zwraca `BattleMetadata`; `get_events` konsumuje `GET /battles/{id}/events?since=N`; `get_state` konsumuje wersjonowany `GET /battles/{id}/state` i zwraca domenowy `BattleState` z parity do `LocalClient`; `create_battle` konsumuje sandbox `POST /battles`; `simulate_roster_ids` konsumuje sandbox `POST /battles/simulate` i zwraca `SimulationSummary`. `take_action` i pakowanie nadal odłożone do kolejnych endpointów B4.
+> Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient slices 2026-07-02/10/15:** metadata/events/state/create/simulate oraz `take_action` (ADR-0054). Klient akcji pobiera świeży checkpoint sequence, POST-uje wspólny wire `Action`, dekoduje state + deltę bez GET po sukcesie i odrzuca continuation przed transportem.
 
 - [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (`SimulationSummary` wydzielony do lekkiego `types.py` i re-eksportowany; `simulate` ma `deployment_zones` D5). `szop_client.__init__` ładuje eksporty leniwie, żeby klient HTTP/MCP nie importował ścieżki LocalClient/ORM. `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
-- [~] `szop_client/http.py` — `HttpClient(base_url, token)` — read-only `get_battle_metadata` DONE 2026-07-03 + `get_events` DONE 2026-07-02 + `get_state` DONE 2026-07-15 (wersjonowany payload → domenowy `BattleState`, parity z `LocalClient`) + sandbox `create_battle` DONE 2026-07-04 (`POST /battles`, zwraca `BattleMetadata`; addytywny `adaptation_report` z API jest tolerowany, ale nie mapowany do metadata) + sandbox `simulate_roster_ids` DONE 2026-07-10 (`POST /battles/simulate`, zwraca `SimulationSummary`); pełne `take_action` czeka na kolejny endpoint B4. Protocol strukturalny → pełny klient dołączy bez dziedziczenia.
+- [~] `szop_client/http.py` — metadata/events/state/create/simulate oraz
+  `take_action` DONE 2026-07-15: świeży GET sequence → optimistic POST jednej
+  akcji, wspólny codec, domenowy `(BattleState, tuple[BattleEvent, ...])`, brak
+  cache i brak GET po sukcesie; `continuation != None` jawnie niedostępne.
+  Pozostałe luki pełnego klienta to invite/interrupt/replay i pakowanie.
 - [x] `szop_client/local.py` — `LocalClient` in-process. Ścieżka **engine-dict** (rostery dict 1:1 z `build_initial_state`) + **ścieżka DB** (`LocalClient(session, user_id)` + `*_roster_ids`, most ORM→engine przez `roster_adapter`, read-only, ownership-scoped). DONE 2026-06-19.
 - [ ] `szop_client/setup.py` — `pip install -e` odłożone (sens dopiero z pełnym `HttpClient`; `LocalClient` z natury in-process z `app`).
 - [ ] `tests/test_clients_parity.py` — `HttpClient.simulate == LocalClient.simulate` odłożone do B4 simulate/action endpoints.
@@ -474,6 +488,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0051 | Aktywacja wieloakcyjna (pkt 11.b.iv): orkiestrator `apply_activation` + `continue_activation` | ✓ |
 | 0052 | Końcowy odstęp Manewru od innych oddziałów | ✓ |
 | 0053 | Wersjonowane checkpointy BattleState + RNG | ✓ |
+| 0054 | Atomowe pojedyncze akcje bitwy przez HTTP | ✓ |
 
 ---
 

@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models
@@ -15,23 +16,36 @@ from ..services.agents import PLAYER_SEED_OFFSET, make_player, simulate_from_ros
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
 from ..services.agents.registry import FAST, bot_kinds
 from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
+from ..services.engine.action_codec import ActionCodecError, action_from_json
 from ..services.engine.dice import DeterministicDice
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
 from ..services.engine.persistence import (
+    BattleCheckpointSequenceConflict,
+    BattleEventSequenceConflict,
     latest_event_sequence,
     load_events,
     load_latest_checkpoint,
     save_checkpoint,
     save_events,
 )
-from ..services.engine.phases import deployment_round, setup_phase
+from ..services.engine.phases import (
+    deployment_round,
+    round_end_phase,
+    setup_phase,
+)
+from ..services.engine.resolver import (
+    IllegalActionError,
+    apply,
+    should_end_round,
+)
 from ..services.engine.state_codec import battle_state_to_json
 
 router = APIRouter(prefix="/battles", tags=["battles"])
 
 BATTLE_CREATE_SCOPE = "battle:create"
 BATTLE_READ_SCOPE = "battle:read"
+BATTLE_ACT_SCOPE = "battle:act"
 BATTLE_SIMULATE_SCOPE = "battle:simulate"
 MAX_SIMULATION_GAMES = 50
 BATTLE_SIMULATION_BOTS = bot_kinds(FAST)
@@ -44,6 +58,11 @@ class BattleCreator:
 
 @dataclass(frozen=True)
 class BattleReader:
+    user_id: int
+
+
+@dataclass(frozen=True)
+class BattleActor:
     user_id: int
 
 
@@ -87,6 +106,29 @@ class BattleStatePublic(BaseModel):
     battle_id: int
     sequence_at: int = Field(..., ge=0)
     state: dict[str, Any]
+
+
+class BattleStateWirePublic(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    checkpoint_schema: str = Field(..., alias="schema")
+    version: int = Field(..., ge=1)
+    state: dict[str, Any]
+
+
+class BattleActionCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_sequence: int = Field(..., ge=0, strict=True)
+    action: dict[str, Any]
+
+
+class BattleActionPublic(BaseModel):
+    battle_id: int
+    previous_sequence: int = Field(..., ge=0)
+    new_sequence: int = Field(..., ge=0)
+    state: BattleStateWirePublic
+    events: list[BattleEventPublic]
 
 
 class RosterAdaptationPublic(BaseModel):
@@ -188,6 +230,21 @@ def _battle_reader(
     )
 
 
+def _battle_actor(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User | None = Depends(get_current_user(optional=True)),
+) -> BattleActor:
+    return BattleActor(
+        user_id=_authorized_owner_user_id(
+            request=request,
+            db=db,
+            current_user=current_user,
+            agent_scope=BATTLE_ACT_SCOPE,
+        )
+    )
+
+
 def _battle_simulator(
     request: Request,
     db: Session = Depends(get_db),
@@ -204,7 +261,7 @@ def _battle_simulator(
 
 
 def _get_accessible_battle(
-    db: Session, *, battle_id: int, reader: BattleReader
+    db: Session, *, battle_id: int, reader: BattleReader | BattleActor
 ) -> models.Battle:
     battle = db.execute(
         select(models.Battle).where(
@@ -270,6 +327,16 @@ def _public_battle(
         latest_sequence=latest_event_sequence(db, battle.id),
         adaptation_report=adaptation_report,
     )
+
+
+def _winner_user_id(
+    battle: models.Battle, score: tuple[int, int]
+) -> int | None:
+    if score[0] > score[1]:
+        return battle.p1_user_id
+    if score[1] > score[0]:
+        return battle.p2_user_id
+    return None
 
 
 def _simulation_players(bot: str, base_seed: int, game_index: int):
@@ -408,6 +475,126 @@ def simulate_battle(
         win_rate_p1=wins[1] / n_games,
         draw_rate=draws / n_games,
         avg_rounds=total_rounds / n_games,
+    )
+
+
+@router.post("/{battle_id}/actions", response_model=BattleActionPublic)
+def take_battle_action(
+    battle_id: int,
+    payload: BattleActionCreate,
+    db: Session = Depends(get_db),
+    actor: BattleActor = Depends(_battle_actor),
+) -> BattleActionPublic:
+    battle = _get_accessible_battle(db, battle_id=battle_id, reader=actor)
+    checkpoint = load_latest_checkpoint(db, battle.id)
+    if checkpoint is None:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Current battle checkpoint is unavailable",
+        )
+    if payload.expected_sequence != checkpoint.sequence_at:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Battle event sequence conflict",
+        )
+
+    try:
+        action = action_from_json(payload.action)
+    except ActionCodecError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid action payload",
+        ) from exc
+
+    acting_blob = next(
+        (blob for blob in checkpoint.state.blobs if blob.id == action.unit_id),
+        None,
+    )
+    if acting_blob is None:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Illegal action",
+        )
+    player_user_ids = (battle.p1_user_id, battle.p2_user_id)
+    if (
+        acting_blob.owner_player not in (0, 1)
+        or player_user_ids[acting_blob.owner_player] != actor.user_id
+    ):
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
+
+    try:
+        result = apply(
+            checkpoint.state,
+            action,
+            checkpoint.dice,
+            sequence=checkpoint.sequence_at + 1,
+        )
+        new_state = result.state
+        persisted_events = list(result.events)
+        next_sequence = result.next_sequence
+        if should_end_round(new_state):
+            new_state, round_events = round_end_phase(
+                new_state,
+                sequence=next_sequence,
+            )
+            persisted_events.extend(round_events)
+            next_sequence += len(round_events)
+
+        new_sequence = next_sequence - 1
+        save_events(
+            db,
+            battle.id,
+            persisted_events,
+            expected_latest_sequence=checkpoint.sequence_at,
+        )
+        save_checkpoint(
+            db,
+            battle.id,
+            new_sequence,
+            new_state,
+            checkpoint.dice,
+        )
+        battle.current_round = new_state.round
+        battle.status = "finished" if new_state.is_game_over else "active"
+        battle.winner_user_id = (
+            _winner_user_id(battle, new_state.score)
+            if new_state.is_game_over
+            else None
+        )
+        db.commit()
+    except (IllegalActionError, TypeError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Illegal action",
+        ) from exc
+    except (
+        BattleEventSequenceConflict,
+        BattleCheckpointSequenceConflict,
+        IntegrityError,
+    ) as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Battle event sequence conflict",
+        ) from exc
+
+    serialized_state = battle_state_to_json(new_state)
+    return BattleActionPublic(
+        battle_id=battle.id,
+        previous_sequence=checkpoint.sequence_at,
+        new_sequence=new_sequence,
+        state=BattleStateWirePublic(
+            checkpoint_schema=str(serialized_state["schema"]),
+            version=int(serialized_state["version"]),
+            state=serialized_state["state"],
+        ),
+        events=[_public_event(event) for event in persisted_events],
     )
 
 
