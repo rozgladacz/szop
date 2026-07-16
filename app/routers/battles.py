@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import or_, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -16,7 +16,15 @@ from ..services.agents import PLAYER_SEED_OFFSET, make_player, simulate_from_ros
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
 from ..services.agents.registry import FAST, bot_kinds
 from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
-from ..services.engine.action_codec import ActionCodecError, action_from_json
+from ..services.battle_actions import (
+    BattleActionForbidden,
+    BattleActionInvalid,
+    BattleActionNotFound,
+    BattleActionSequenceConflict,
+    BattleActionUnavailable,
+    get_participant_battle,
+    stage_battle_action,
+)
 from ..services.engine.dice import DeterministicDice
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
@@ -31,13 +39,7 @@ from ..services.engine.persistence import (
 )
 from ..services.engine.phases import (
     deployment_round,
-    round_end_phase,
     setup_phase,
-)
-from ..services.engine.resolver import (
-    IllegalActionError,
-    apply,
-    should_end_round,
 )
 from ..services.engine.state_codec import battle_state_to_json
 
@@ -263,18 +265,14 @@ def _battle_simulator(
 def _get_accessible_battle(
     db: Session, *, battle_id: int, reader: BattleReader | BattleActor
 ) -> models.Battle:
-    battle = db.execute(
-        select(models.Battle).where(
-            models.Battle.id == battle_id,
-            or_(
-                models.Battle.p1_user_id == reader.user_id,
-                models.Battle.p2_user_id == reader.user_id,
-            ),
+    try:
+        return get_participant_battle(
+            db,
+            battle_id=battle_id,
+            user_id=reader.user_id,
         )
-    ).scalar_one_or_none()
-    if battle is None:
+    except BattleActionNotFound:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return battle
 
 
 def _get_owned_roster(
@@ -327,16 +325,6 @@ def _public_battle(
         latest_sequence=latest_event_sequence(db, battle.id),
         adaptation_report=adaptation_report,
     )
-
-
-def _winner_user_id(
-    battle: models.Battle, score: tuple[int, int]
-) -> int | None:
-    if score[0] > score[1]:
-        return battle.p1_user_id
-    if score[1] > score[0]:
-        return battle.p2_user_id
-    return None
 
 
 def _simulation_players(bot: str, base_seed: int, game_index: int):
@@ -486,94 +474,27 @@ def take_battle_action(
     actor: BattleActor = Depends(_battle_actor),
 ) -> BattleActionPublic:
     battle = _get_accessible_battle(db, battle_id=battle_id, reader=actor)
-    checkpoint = load_latest_checkpoint(db, battle.id)
-    if checkpoint is None:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Current battle checkpoint is unavailable",
-        )
-    if payload.expected_sequence != checkpoint.sequence_at:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Battle event sequence conflict",
-        )
-
     try:
-        action = action_from_json(payload.action)
-    except ActionCodecError as exc:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Invalid action payload",
-        ) from exc
-
-    acting_blob = next(
-        (blob for blob in checkpoint.state.blobs if blob.id == action.unit_id),
-        None,
-    )
-    if acting_blob is None:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Illegal action",
-        )
-    player_user_ids = (battle.p1_user_id, battle.p2_user_id)
-    if (
-        acting_blob.owner_player not in (0, 1)
-        or player_user_ids[acting_blob.owner_player] != actor.user_id
-    ):
-        db.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
-
-    try:
-        result = apply(
-            checkpoint.state,
-            action,
-            checkpoint.dice,
-            sequence=checkpoint.sequence_at + 1,
-        )
-        new_state = result.state
-        persisted_events = list(result.events)
-        next_sequence = result.next_sequence
-        if should_end_round(new_state):
-            new_state, round_events = round_end_phase(
-                new_state,
-                sequence=next_sequence,
-            )
-            persisted_events.extend(round_events)
-            next_sequence += len(round_events)
-
-        new_sequence = next_sequence - 1
-        save_events(
+        prepared = stage_battle_action(
             db,
-            battle.id,
-            persisted_events,
-            expected_latest_sequence=checkpoint.sequence_at,
-        )
-        save_checkpoint(
-            db,
-            battle.id,
-            new_sequence,
-            new_state,
-            checkpoint.dice,
-        )
-        battle.current_round = new_state.round
-        battle.status = "finished" if new_state.is_game_over else "active"
-        battle.winner_user_id = (
-            _winner_user_id(battle, new_state.score)
-            if new_state.is_game_over
-            else None
+            battle=battle,
+            actor_user_id=actor.user_id,
+            expected_sequence=payload.expected_sequence,
+            action_payload=payload.action,
         )
         db.commit()
-    except (IllegalActionError, TypeError, ValueError) as exc:
+    except BattleActionInvalid as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Illegal action",
+            detail=exc.detail,
         ) from exc
+    except BattleActionForbidden as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN) from exc
     except (
+        BattleActionUnavailable,
+        BattleActionSequenceConflict,
         BattleEventSequenceConflict,
         BattleCheckpointSequenceConflict,
         IntegrityError,
@@ -584,17 +505,17 @@ def take_battle_action(
             detail="Battle event sequence conflict",
         ) from exc
 
-    serialized_state = battle_state_to_json(new_state)
+    serialized_state = battle_state_to_json(prepared.state)
     return BattleActionPublic(
         battle_id=battle.id,
-        previous_sequence=checkpoint.sequence_at,
-        new_sequence=new_sequence,
+        previous_sequence=prepared.previous_sequence,
+        new_sequence=prepared.new_sequence,
         state=BattleStateWirePublic(
             checkpoint_schema=str(serialized_state["schema"]),
             version=int(serialized_state["version"]),
             state=serialized_state["state"],
         ),
-        events=[_public_event(event) for event in persisted_events],
+        events=[_public_event(event) for event in prepared.events],
     )
 
 

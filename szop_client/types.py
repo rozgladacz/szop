@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from app.services.engine.state import BattleState
@@ -28,6 +28,39 @@ class BattleStateCheckpoint:
             raise ValueError("schema must be a non-empty string")
         if type(self.version) is not int or self.version < 1:
             raise ValueError("version must be an int >= 1")
+
+
+@dataclass(frozen=True, slots=True)
+class BattleActionProposal:
+    """Frozen consent request returned by the public proposal endpoint."""
+
+    proposal_id: int
+    owner_user_id: int
+    agent_user_id: int
+    token_id: int | None
+    battle_id: int
+    expected_sequence: int
+    action: dict[str, Any]
+    summary: str
+    status: str
+
+    def __post_init__(self) -> None:
+        for name in ("proposal_id", "owner_user_id", "agent_user_id", "battle_id"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{name} must be an int >= 1")
+        if self.token_id is not None and (
+            type(self.token_id) is not int or self.token_id < 1
+        ):
+            raise ValueError("token_id must be an int >= 1 or None")
+        if type(self.expected_sequence) is not int or self.expected_sequence < 0:
+            raise ValueError("expected_sequence must be an int >= 0")
+        if type(self.action) is not dict:
+            raise ValueError("action must be a JSON object")
+        if not isinstance(self.summary, str) or not self.summary:
+            raise ValueError("summary must be a non-empty string")
+        if self.status != "pending":
+            raise ValueError("new battle action proposal must be pending")
 
 
 @dataclass(frozen=True, slots=True)

@@ -15,6 +15,8 @@ from mcp.client.stdio import stdio_client
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from app.routers import battles
+from app.services.engine.action_codec import action_to_json
+from app.services.engine.actions import DefendAction
 from app.services.engine.events import EffectApplied, StatusAdded
 from app.services.engine.state import (
     BattleState,
@@ -34,6 +36,7 @@ from mcp_server.server import (
     create_server,
 )
 from szop_client import (
+    BattleActionProposal,
     BattleMetadata,
     BattleStateCheckpoint,
     HttpClient,
@@ -116,7 +119,7 @@ def test_config_uses_local_default_and_rejects_empty_url_without_secret() -> Non
     assert RAW_TOKEN not in str(exc_info.value)
 
 
-def test_server_registers_exactly_the_four_read_only_tools() -> None:
+def test_server_registers_exactly_the_five_consent_gated_tools() -> None:
     tools = asyncio.run(_list_tools(create_server(McpConfig("http://localhost"))))
 
     assert [tool.name for tool in tools.tools] == list(TOOL_NAMES)
@@ -446,6 +449,117 @@ def test_empty_battle_event_delta_has_stable_last_sequence() -> None:
         "events": [],
         "last_sequence": 7,
     }
+
+
+def test_propose_battle_action_calls_only_public_client_proposal_method() -> None:
+    client = Mock(spec=HttpClient)
+    wire_action = action_to_json(DefendAction(unit_id=11))
+    client.propose_battle_action.return_value = BattleActionProposal(
+        proposal_id=17,
+        owner_user_id=10,
+        agent_user_id=20,
+        token_id=30,
+        battle_id=42,
+        expected_sequence=9,
+        action=wire_action,
+        summary="Oddział 11: obrona",
+        status="pending",
+    )
+
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            {
+                "battle_id": 42,
+                "expected_sequence": 9,
+                "action": wire_action,
+                "summary": "Oddział 11: obrona",
+            },
+            tool_name="propose_battle_action",
+        )
+    )
+
+    client.propose_battle_action.assert_called_once_with(
+        42,
+        expected_sequence=9,
+        action=wire_action,
+        summary="Oddział 11: obrona",
+    )
+    client.take_action.assert_not_called()
+    assert result.structuredContent == {
+        "proposal_id": 17,
+        "owner_user_id": 10,
+        "agent_user_id": 20,
+        "token_id": 30,
+        "battle_id": 42,
+        "expected_sequence": 9,
+        "action": wire_action,
+        "summary": "Oddział 11: obrona",
+        "status": "pending",
+    }
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {
+            "battle_id": 0,
+            "expected_sequence": 0,
+            "action": {},
+            "summary": "x",
+        },
+        {
+            "battle_id": 1,
+            "expected_sequence": True,
+            "action": {},
+            "summary": "x",
+        },
+        {
+            "battle_id": 1,
+            "expected_sequence": 0,
+            "action": {},
+            "summary": "",
+        },
+    ],
+)
+def test_propose_battle_action_rejects_invalid_shape_before_client_call(
+    arguments: dict[str, Any],
+) -> None:
+    client = Mock(spec=HttpClient)
+
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name="propose_battle_action",
+            raise_exceptions=False,
+        )
+    )
+
+    assert result.isError is True
+    client.propose_battle_action.assert_not_called()
+
+
+def test_propose_battle_action_rejects_invalid_wire_before_http() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("HTTP transport should not be called")
+
+    client = HttpClient("http://localhost", transport=transport)
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            {
+                "battle_id": 1,
+                "expected_sequence": 0,
+                "action": {},
+                "summary": "Niepoprawna akcja",
+            },
+            tool_name="propose_battle_action",
+            raise_exceptions=False,
+        )
+    )
+
+    assert result.isError is True
 
 
 @pytest.mark.parametrize(

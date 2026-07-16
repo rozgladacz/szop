@@ -26,7 +26,9 @@ USER_ROLE_AGENT = "agent"
 USER_ROLE_ADMIN = "admin"
 AGENT_PROPOSAL_STATUS_PENDING = "pending"
 AGENT_PROPOSAL_STATUS_APPROVED = "approved"
+AGENT_PROPOSAL_STATUS_EXECUTED = "executed"
 AGENT_PROPOSAL_STATUS_REJECTED = "rejected"
+AGENT_PROPOSAL_STATUS_STALE = "stale"
 
 
 class TimestampMixin:
@@ -115,6 +117,7 @@ class AgentProposal(TimestampMixin, Base):
     action: Mapped[str] = mapped_column(String(120), nullable=False)
     summary: Mapped[str] = mapped_column(String(500), nullable=False)
     payload_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    result_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         String(20), default=AGENT_PROPOSAL_STATUS_PENDING, nullable=False
     )

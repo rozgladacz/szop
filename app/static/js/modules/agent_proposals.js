@@ -2,7 +2,9 @@
   const STATUS_META = {
     pending: { label: 'Oczekuje', badgeClass: 'text-bg-warning' },
     approved: { label: 'Zezwolono', badgeClass: 'text-bg-success' },
+    executed: { label: 'Wykonano', badgeClass: 'text-bg-success' },
     rejected: { label: 'Odrzucono', badgeClass: 'text-bg-secondary' },
+    stale: { label: 'Nieaktualna', badgeClass: 'text-bg-danger' },
   };
 
   function normalizeAgentProposals(proposals) {
@@ -41,6 +43,28 @@
     } catch (err) {
       return '{}';
     }
+  }
+
+  function agentProposalResultText(proposal) {
+    const result = proposal && proposal.result;
+    if (!result || typeof result !== 'object') {
+      return '';
+    }
+    if (proposal.status === 'executed') {
+      return [
+        `Akcja wykonana w bitwie #${result.battle_id}.`,
+        `Sekwencja: ${result.previous_sequence} → ${result.new_sequence}.`,
+        `Zapisane zdarzenia: ${result.event_count}.`,
+      ].join(' ');
+    }
+    if (proposal.status === 'stale') {
+      return [
+        `Akcja nie została wykonana w bitwie #${result.battle_id}.`,
+        `Oczekiwana sekwencja ${result.expected_sequence},`,
+        `aktualna ${result.actual_sequence}.`,
+      ].join(' ');
+    }
+    return '';
   }
 
   function replaceAgentProposal(proposals, updatedProposal) {
@@ -130,6 +154,11 @@
       );
     }
 
+    const resultText = agentProposalResultText(proposal);
+    if (resultText) {
+      appendText(item, 'p', 'alert alert-light border py-2 px-3 mt-3 mb-0 small', resultText);
+    }
+
     const details = documentRef.createElement('details');
     details.className = 'mt-3';
     item.appendChild(details);
@@ -147,7 +176,15 @@
       actions.className = 'd-flex justify-content-end gap-2 mt-3';
       item.appendChild(actions);
 
-      const approveButton = appendText(actions, 'button', 'btn btn-sm btn-success', 'Zezwól');
+      const approveLabel = proposal.action === 'battle:action'
+        ? 'Zezwól i wykonaj'
+        : 'Zezwól';
+      const approveButton = appendText(
+        actions,
+        'button',
+        'btn btn-sm btn-success',
+        approveLabel,
+      );
       approveButton.type = 'button';
       approveButton.setAttribute('data-agent-proposal-action', 'approve');
 
@@ -220,7 +257,13 @@
       .then((updatedProposal) => {
         const next = replaceAgentProposal(panel.__szopAgentProposals || [], updatedProposal);
         renderAgentProposals(panel, next);
-        setPanelMessage(panel, 'Decyzja zapisana.', 'success');
+        if (updatedProposal.status === 'executed') {
+          setPanelMessage(panel, 'Akcja została wykonana.', 'success');
+        } else if (updatedProposal.status === 'stale') {
+          setPanelMessage(panel, 'Akcja nie została wykonana, bo stan bitwy się zmienił.', 'warning');
+        } else {
+          setPanelMessage(panel, 'Decyzja zapisana.', 'success');
+        }
         return updatedProposal;
       })
       .catch((err) => {
@@ -268,6 +311,7 @@
   const api = {
     agentProposalDecisionUrl,
     agentProposalPayloadText,
+    agentProposalResultText,
     agentProposalStatusMeta,
     countPendingAgentProposals,
     decideAgentProposal,

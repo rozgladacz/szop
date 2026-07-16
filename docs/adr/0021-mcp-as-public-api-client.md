@@ -19,9 +19,11 @@ kontrakt HTTP. Odczyt stanu wymaga także jednego spójnego checkpointu: stan i
    operacje domenowe deleguje do wstrzykniętego/publicznego
    `szop_client.HttpClient`; nie importuje ORM, modeli, `Session`, `app.db`,
    routerów ani własnego transportu HTTP.
-2. Aktualna powierzchnia MCP zawiera dokładnie cztery read-only tools:
+2. Powierzchnia obserwacyjna MCP zawiera dokładnie cztery read-only tools:
    `simulate_engagement`, `get_battle_metadata`, `get_battle_state` i
-   `get_battle_events`. Nie publikuje write tools, resources ani prompts.
+   `get_battle_events`. Addytywne `propose_battle_action` (ADR-0024) tworzy
+   wyłącznie consent request przez publiczny API; nie wykonuje akcji i nie
+   publikuje `take_action`. Brak resources i prompts.
 3. `HttpClient.get_state_checkpoint()` jest publicznym kontraktem jednego
    `GET /battles/{id}/state`. Zwraca `BattleStateCheckpoint` z `battle_id`,
    `sequence_at`, schemą, wersją i domenowym `BattleState`. Dotychczasowe
@@ -47,8 +49,9 @@ kontrakt HTTP. Odczyt stanu wymaga także jednego spójnego checkpointu: stan i
   wersjonowania co pozostałe klienty publicznego API.
 - Każdy read-only tool wykonuje dokładnie jedno istniejące wywołanie endpointu;
   `get_battle_state` nie ma race między stanem i sekwencją.
-- Rozszerzenie MCP o zapis wymaga osobnej decyzji consent-gated; publiczne
-  `HttpClient.take_action` nie oznacza automatycznego wystawienia write toola.
+- Consent-gated proposal write jest określony w ADR-0024; publiczne
+  `HttpClient.take_action` nadal nie oznacza wystawienia bezpośredniego write
+  toola.
 - Zmiana schemy stanu lub eventów wymaga zgodnej zmiany publicznych projekcji i
   testów JSON-safety.
 

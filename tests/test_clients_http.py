@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.services.engine.action_codec import action_from_json
+from app.services.engine.action_codec import action_from_json, action_to_json
 from app.services.engine.actions import DefendAction
 from app.services.engine.events import (
     AbilityOverrideApplied,
@@ -843,6 +843,138 @@ def test_take_action_rejects_malformed_or_inconsistent_response(mutation) -> Non
         HttpClient("http://localhost", transport=transport).take_action(
             42,
             DefendAction(unit_id=1),
+        )
+
+
+def test_propose_battle_action_posts_frozen_wire_without_state_read() -> None:
+    seen: list[HttpRequest] = []
+    wire_action = action_to_json(DefendAction(unit_id=1))
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        body = json.loads(request.body.decode("utf-8"))
+        return _json_response(
+            {
+                "id": 17,
+                "owner_user_id": 10,
+                "agent_user_id": 11,
+                "token_id": 12,
+                "action": "battle:action",
+                "summary": body["summary"],
+                "payload": {
+                    "battle_id": body["battle_id"],
+                    "expected_sequence": body["expected_sequence"],
+                    "action": body["action"],
+                },
+                "result": None,
+                "status": "pending",
+                "created_at": "2026-07-16T10:00:00",
+                "updated_at": "2026-07-16T10:00:00",
+                "decided_at": None,
+                "decided_by_user_id": None,
+            }
+        )
+
+    proposal = HttpClient(
+        "https://szop.example/api",
+        token="proposal-token",
+        transport=transport,
+    ).propose_battle_action(
+        42,
+        expected_sequence=9,
+        action=wire_action,
+        summary="  Oddział 1: obrona  ",
+    )
+
+    assert proposal.proposal_id == 17
+    assert proposal.battle_id == 42
+    assert proposal.expected_sequence == 9
+    assert proposal.action == wire_action
+    assert proposal.summary == "Oddział 1: obrona"
+    assert proposal.status == "pending"
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url == "https://szop.example/api/agent_proposals/battle-actions"
+    assert request.headers["Authorization"] == "Bearer proposal-token"
+    assert json.loads(request.body.decode("utf-8")) == {
+        "battle_id": 42,
+        "expected_sequence": 9,
+        "action": wire_action,
+        "summary": "Oddział 1: obrona",
+    }
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"battle_id": True, "expected_sequence": 0, "action": {}, "summary": "x"},
+        {"battle_id": 1, "expected_sequence": True, "action": {}, "summary": "x"},
+        {"battle_id": 1, "expected_sequence": 0, "action": {}, "summary": "x"},
+        {
+            "battle_id": 1,
+            "expected_sequence": 0,
+            "action": action_to_json(DefendAction(unit_id=1)),
+            "summary": " ",
+        },
+    ],
+)
+def test_propose_battle_action_rejects_invalid_input_before_transport(
+    arguments,
+) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    with pytest.raises(ValueError):
+        HttpClient("http://localhost", transport=transport).propose_battle_action(
+            **arguments
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(id=True),
+        lambda payload: payload.update(action="other"),
+        lambda payload: payload.update(status="executed"),
+        lambda payload: payload.update(summary="other"),
+        lambda payload: payload["payload"].update(battle_id=99),
+        lambda payload: payload["payload"].update(expected_sequence=True),
+        lambda payload: payload["payload"].update(action={}),
+    ],
+)
+def test_propose_battle_action_rejects_malformed_response(mutation) -> None:
+    wire_action = action_to_json(DefendAction(unit_id=1))
+    response_payload = {
+        "id": 17,
+        "owner_user_id": 10,
+        "agent_user_id": 11,
+        "token_id": 12,
+        "action": "battle:action",
+        "summary": "Oddział 1: obrona",
+        "payload": {
+            "battle_id": 42,
+            "expected_sequence": 9,
+            "action": wire_action,
+        },
+        "result": None,
+        "status": "pending",
+        "created_at": "2026-07-16T10:00:00",
+        "updated_at": "2026-07-16T10:00:00",
+        "decided_at": None,
+        "decided_by_user_id": None,
+    }
+    mutation(response_payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(response_payload)
+
+    with pytest.raises(HttpClientError):
+        HttpClient("http://localhost", transport=transport).propose_battle_action(
+            42,
+            expected_sequence=9,
+            action=wire_action,
+            summary="Oddział 1: obrona",
         )
 
 

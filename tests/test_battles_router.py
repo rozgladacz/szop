@@ -17,6 +17,7 @@ from app.db import Base
 from app.main import app
 from app.routers import battles
 from app.security import hash_agent_token, hash_password
+from app.services import battle_actions as battle_action_service
 from app.services.engine.action_codec import action_to_json
 from app.services.engine.actions import DefendAction, ManeuverAction, ShootAction
 from app.services.engine.dice import DeterministicDice
@@ -1112,7 +1113,7 @@ def test_take_battle_action_race_rolls_back_flushed_events(
     def fail_checkpoint(*_args, **_kwargs):
         raise IntegrityError("checkpoint race", {}, Exception("unique"))
 
-    monkeypatch.setattr(battles, "save_checkpoint", fail_checkpoint)
+    monkeypatch.setattr(battle_action_service, "save_checkpoint", fail_checkpoint)
 
     with pytest.raises(HTTPException) as exc_info:
         battles.take_battle_action(

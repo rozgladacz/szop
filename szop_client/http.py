@@ -8,18 +8,27 @@ optimistic precondition and consumes the returned state/event delta.
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-from app.services.engine.action_codec import action_to_json
+from app.services.engine.action_codec import (
+    ActionCodecError,
+    action_from_json,
+    action_to_json,
+)
 from app.services.engine.actions import Action
 from app.services.engine.events import BattleEvent, json_to_event
 from app.services.engine.state import BattleState
 from app.services.engine.state_codec import battle_state_from_json
-from szop_client.types import BattleStateCheckpoint, SimulationSummary
+from szop_client.types import (
+    BattleActionProposal,
+    BattleStateCheckpoint,
+    SimulationSummary,
+)
 from szop_client.wire import validate_event_delta
 
 if TYPE_CHECKING:
@@ -233,6 +242,49 @@ class HttpClient:
         """Return the participant-scoped current domain state of a battle."""
         return self.get_state_checkpoint(battle_id).state
 
+    def propose_battle_action(
+        self,
+        battle_id: int,
+        *,
+        expected_sequence: int,
+        action: Mapping[str, Any],
+        summary: str,
+    ) -> BattleActionProposal:
+        """Create a validated consent request without mutating the battle."""
+        if type(battle_id) is not int or battle_id < 1:
+            raise ValueError("battle_id must be an int >= 1")
+        if type(expected_sequence) is not int or expected_sequence < 0:
+            raise ValueError("expected_sequence must be an int >= 0")
+        if not isinstance(summary, str) or not summary.strip():
+            raise ValueError("summary must be a non-empty string")
+        try:
+            canonical_action = action_to_json(action_from_json(action))
+        except (ActionCodecError, TypeError, ValueError) as exc:
+            raise ValueError("action must be a valid szop.action/v1 payload") from exc
+
+        normalized_summary = summary.strip()
+        error_label = "POST battle action proposal"
+        payload = self._request_json(
+            "POST",
+            "/agent_proposals/battle-actions",
+            {},
+            json_body={
+                "battle_id": battle_id,
+                "expected_sequence": expected_sequence,
+                "action": canonical_action,
+                "summary": normalized_summary,
+            },
+            error_label=error_label,
+        )
+        return _battle_action_proposal_from_payload(
+            payload,
+            expected_battle_id=battle_id,
+            expected_sequence=expected_sequence,
+            expected_action=canonical_action,
+            expected_summary=normalized_summary,
+            error_label=error_label,
+        )
+
     def take_action(
         self,
         battle_id: int,
@@ -427,6 +479,56 @@ def _action_result_from_payload(
     if tuple(event.sequence for event in events) != expected_sequences:
         raise HttpClientError(error_message)
     return state, events
+
+
+def _battle_action_proposal_from_payload(
+    payload: Any,
+    *,
+    expected_battle_id: int,
+    expected_sequence: int,
+    expected_action: dict[str, Any],
+    expected_summary: str,
+    error_label: str,
+) -> BattleActionProposal:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        if _required_str(payload, "action") != "battle:action":
+            raise TypeError("action")
+        if _required_str(payload, "status") != "pending":
+            raise TypeError("status")
+        if _required_str(payload, "summary") != expected_summary:
+            raise TypeError("summary")
+        proposal_payload = payload["payload"]
+        if (
+            not isinstance(proposal_payload, dict)
+            or set(proposal_payload)
+            != {"battle_id", "expected_sequence", "action"}
+        ):
+            raise TypeError("payload")
+        battle_id = _required_int(proposal_payload, "battle_id")
+        sequence = _required_int(proposal_payload, "expected_sequence")
+        action = proposal_payload["action"]
+        if (
+            battle_id != expected_battle_id
+            or sequence != expected_sequence
+            or action != expected_action
+        ):
+            raise TypeError("proposal payload")
+        return BattleActionProposal(
+            proposal_id=_required_int(payload, "id"),
+            owner_user_id=_required_int(payload, "owner_user_id"),
+            agent_user_id=_required_int(payload, "agent_user_id"),
+            token_id=_optional_int(payload, "token_id"),
+            battle_id=battle_id,
+            expected_sequence=sequence,
+            action=action,
+            summary=expected_summary,
+            status="pending",
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
 
 
 def _ensure_expected_battle_id(

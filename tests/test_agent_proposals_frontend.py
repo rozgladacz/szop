@@ -87,10 +87,20 @@ def test_agent_proposals_module_exports_pure_helpers() -> None:
           ]),
           approveUrl: api.agentProposalDecisionUrl('abc/1', 'approve'),
           rejectedLabel: api.agentProposalStatusMeta('rejected').label,
+          executedLabel: api.agentProposalStatusMeta('executed').label,
+          staleLabel: api.agentProposalStatusMeta('stale').label,
           unknownLabel: api.agentProposalStatusMeta('').label,
           invalidDecisionRejected,
           invalidTimestamp: api.formatAgentProposalTimestamp('not-a-date'),
           payloadText: api.agentProposalPayloadText({{ nested: {{ value: '<safe>' }} }}),
+          executedResult: api.agentProposalResultText({{
+            status: 'executed',
+            result: {{ battle_id: 4, previous_sequence: 7, new_sequence: 10, event_count: 3 }},
+          }}),
+          staleResult: api.agentProposalResultText({{
+            status: 'stale',
+            result: {{ battle_id: 4, expected_sequence: 7, actual_sequence: 9 }},
+          }}),
           nextIds: next.map((proposal) => proposal.id),
           nextStatuses: next.map((proposal) => proposal.status),
           registeredEvents,
@@ -103,10 +113,14 @@ def test_agent_proposals_module_exports_pure_helpers() -> None:
     assert result["pendingCount"] == 1
     assert result["approveUrl"] == "/agent_proposals/abc%2F1/approve"
     assert result["rejectedLabel"] == "Odrzucono"
+    assert result["executedLabel"] == "Wykonano"
+    assert result["staleLabel"] == "Nieaktualna"
     assert result["unknownLabel"] == "Nieznany"
     assert result["invalidDecisionRejected"] is True
     assert result["invalidTimestamp"] == "not-a-date"
     assert '"<safe>"' in result["payloadText"]
+    assert "Sekwencja: 7 → 10" in result["executedResult"]
+    assert "Oczekiwana sekwencja 7" in result["staleResult"]
     assert result["nextIds"] == [1, 2]
     assert result["nextStatuses"] == ["rejected", "approved"]
     assert result["registeredEvents"] == ["DOMContentLoaded"]
@@ -217,7 +231,7 @@ def test_agent_proposals_module_renders_empty_and_pending_states() -> None:
         api.renderAgentProposals(panel, [
           {{
             id: 10,
-            action: 'rosters.update',
+            action: 'battle:action',
             summary: 'Zmień rozpiskę',
             status: 'pending',
             payload: {{ roster_id: 3 }},
@@ -232,9 +246,21 @@ def test_agent_proposals_module_renders_empty_and_pending_states() -> None:
             created_at: '2026-07-01T09:00:00Z',
             decided_at: '2026-07-01T09:30:00Z',
           }},
+          {{
+            id: 12,
+            action: 'battle:action',
+            summary: 'Obrona wykonana',
+            status: 'executed',
+            payload: {{ battle_id: 4 }},
+            result: {{ battle_id: 4, previous_sequence: 7, new_sequence: 10, event_count: 3 }},
+            created_at: '2026-07-01T08:00:00Z',
+            decided_at: '2026-07-01T08:05:00Z',
+          }},
         ]);
         const buttons = collect(list).filter((node) => node.attributes['data-agent-proposal-action']);
         const payloadPre = collect(list).find((node) => node.tagName === 'pre');
+        const actionButton = buttons.find((node) => node.attributes['data-agent-proposal-action'] === 'approve');
+        const resultAlert = collect(list).find((node) => node.className.includes('alert-light'));
 
         console.log(JSON.stringify({{
           emptyText,
@@ -242,8 +268,10 @@ def test_agent_proposals_module_renders_empty_and_pending_states() -> None:
           renderedItems: list.children.length,
           pendingCountLabel: count.textContent,
           buttonActions: buttons.map((button) => button.attributes['data-agent-proposal-action']),
+          approveLabel: actionButton.textContent,
           firstTitle: collect(list.children[0]).find((node) => node.tagName === 'h3').textContent,
           payloadText: payloadPre.textContent,
+          resultText: resultAlert.textContent,
           registeredEvents,
         }}));
         """
@@ -253,9 +281,11 @@ def test_agent_proposals_module_renders_empty_and_pending_states() -> None:
 
     assert result["emptyText"] == "Brak propozycji agentów."
     assert result["emptyCount"] == "Brak oczekujących"
-    assert result["renderedItems"] == 2
+    assert result["renderedItems"] == 3
     assert result["pendingCountLabel"] == "1 oczekuje"
     assert result["buttonActions"] == ["approve", "reject"]
+    assert result["approveLabel"] == "Zezwól i wykonaj"
     assert result["firstTitle"] == "Zmień rozpiskę"
     assert '"roster_id": 3' in result["payloadText"]
+    assert "Akcja wykonana w bitwie #4" in result["resultText"]
     assert result["registeredEvents"] == ["DOMContentLoaded"]

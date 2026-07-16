@@ -328,6 +328,15 @@ def _migrate_schema() -> None:
                     text("UPDATE users SET role = 'admin' WHERE is_admin = 1")
                 )
 
+        if "agent_proposals" in table_names:
+            columns = inspector.get_columns("agent_proposals")
+            column_names = {column["name"] for column in columns}
+            if "result_json" not in column_names:
+                logger.info("Adding result_json column to agent_proposals table")
+                connection.execute(
+                    text("ALTER TABLE agent_proposals ADD COLUMN result_json TEXT")
+                )
+
         if "weapons" in table_names:
             columns = inspector.get_columns("weapons")
             column_names = {column["name"] for column in columns}

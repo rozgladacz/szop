@@ -1,4 +1,4 @@
-"""Read-only MCP facade over the public SZOP HTTP API."""
+"""Consent-gated MCP facade over the public SZOP HTTP API."""
 
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ TOOL_NAMES = (
     "get_battle_metadata",
     "get_battle_state",
     "get_battle_events",
+    "propose_battle_action",
 )
 
 _AUTHORIZATION_RE = re.compile(
@@ -37,12 +38,14 @@ _ResultT = TypeVar("_ResultT")
 RosterId = Annotated[int, Field(strict=True, ge=1)]
 BattleId = Annotated[int, Field(strict=True, ge=1)]
 Since = Annotated[int, Field(strict=True, ge=0)]
+ExpectedSequence = Annotated[int, Field(strict=True, ge=0)]
 GameCount = Annotated[
     int,
     Field(strict=True, ge=1, le=MAX_SIMULATION_GAMES),
 ]
 Seed = Annotated[int, Field(strict=True)]
 NonEmptyName = Annotated[str, Field(min_length=1)]
+ProposalSummary = Annotated[str, Field(min_length=1, max_length=500)]
 
 
 def _redact_error_message(message: str, bearer_token: str | None) -> str:
@@ -79,7 +82,7 @@ def create_server(
     *,
     client: HttpClient | None = None,
 ) -> FastMCP:
-    """Build the MCP server with exactly the shipped read-only tools."""
+    """Build the MCP server with the shipped observation and proposal tools."""
     settings = config or McpConfig.from_env()
     http_client = (
         client
@@ -91,7 +94,10 @@ def create_server(
     )
     server = FastMCP(
         "SZOP",
-        instructions="Read-only tools backed by the public SZOP HTTP API.",
+        instructions=(
+            "Battle observation plus consent-gated action proposals backed by "
+            "the public SZOP HTTP API."
+        ),
     )
 
     @server.tool(name=TOOL_NAME)
@@ -177,6 +183,40 @@ def create_server(
                 "events": projected,
                 "last_sequence": last_sequence,
             }
+
+        return _run_safely(operation, bearer_token=settings.bearer_token)
+
+    @server.tool(name="propose_battle_action")
+    def propose_battle_action(
+        battle_id: BattleId,
+        expected_sequence: ExpectedSequence,
+        action: dict[str, Any],
+        summary: ProposalSummary,
+    ) -> dict[str, Any]:
+        """Request owner consent for one frozen ``szop.action/v1`` action."""
+        def operation() -> dict[str, Any]:
+            proposal = http_client.propose_battle_action(
+                battle_id,
+                expected_sequence=expected_sequence,
+                action=action,
+                summary=summary,
+            )
+            _require_expected_battle_id(proposal.battle_id, battle_id)
+            if proposal.expected_sequence != expected_sequence:
+                raise ValueError("client returned a mismatched expected_sequence")
+            return ensure_json_safe(
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "owner_user_id": proposal.owner_user_id,
+                    "agent_user_id": proposal.agent_user_id,
+                    "token_id": proposal.token_id,
+                    "battle_id": proposal.battle_id,
+                    "expected_sequence": proposal.expected_sequence,
+                    "action": proposal.action,
+                    "summary": proposal.summary,
+                    "status": proposal.status,
+                }
+            )
 
         return _run_safely(operation, bearer_token=settings.bearer_token)
 

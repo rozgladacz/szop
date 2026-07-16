@@ -297,13 +297,15 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### C1. Infrastruktura (3 tyg)
 - [x] `mcp_server/{server.py, config.py}` — **minimalny stdio slice DONE
-  2026-07-15 + read-only battle observation DONE 2026-07-15**: stabilny MCP
+  2026-07-15 + battle observation DONE 2026-07-15 + consent proposal DONE
+  2026-07-16**: stabilny MCP
   Python SDK v1, konfiguracja `SZOP_API_URL` + redagowany `SZOP_API_TOKEN` oraz
-  dokładnie cztery read-only tools (`simulate_engagement`, metadata/state/events
-  bitwy). Serwer jest wyłącznie klientem publicznego API przez
-  `szop_client.HttpClient`; bez ORM/DB, write tools, resources/prompts, RAG i
-  executorów. Publiczny `BattleStateCheckpoint` gwarantuje state+`sequence_at`
-  z jednego GET; eventy mają stabilną, JSON-safe projekcję.
+  cztery read-only tools (`simulate_engagement`, metadata/state/events bitwy)
+  oraz `propose_battle_action`. Serwer jest wyłącznie klientem publicznego API
+  przez `szop_client.HttpClient`; bez ORM/DB, bezpośredniego `take_action`,
+  resources/prompts, RAG i ogólnego executora. Publiczny
+  `BattleStateCheckpoint` gwarantuje state+`sequence_at` z jednego GET; eventy
+  mają stabilną, JSON-safe projekcję.
 - [x] Endpointy tokenów — **DONE 2026-06-28**: `POST /agent_tokens`, `GET /agent_tokens`, `DELETE /agent_tokens/{id}`. JSON API dla zalogowanego ownera; tworzy dedykowanego `User.role="agent"` bez hasła użytkowego, zapisuje tylko `AgentToken.token_hash`, zwraca raw bearer token tylko raz, limituje ownera do 20 aktywnych tokenów, listuje/cofa wyłącznie tokeny ownera i audytuje create/revoke bez sekretów. Brak UI; konsumenci B4/MCP nadal osobny zakres.
 - [x] Middleware `require_agent_scope(scope_name)` — **DONE 2026-06-27**: `app/security.py` hash bearer tokena (`sha256:`), lookup `AgentToken.token_hash`, scope JSON (`*` albo konkretny scope), odrzucenie expired/revoked/non-agent i `AgentAuditLog` z redakcją sekretów z query/path params. 8 testów. Konsumenci B4/MCP jeszcze niepodpięci.
 - [x] `AgentProposal` model + backend JSON endpointy — **backend slice DONE 2026-06-29**:
@@ -313,15 +315,22 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   czyta pojedynczą; cudza/nieistniejąca = 404), `POST /agent_proposals/{id}/approve`
   (owner zatwierdza własną propozycję idempotentnie) + `POST
   /agent_proposals/{id}/reject` (owner odrzuca własną propozycję idempotentnie).
-  Decyzja zapisuje status/`decided_at`, ale **nie wykonuje jeszcze akcji
-  domenowej**; wykonawca zatwierdzonych propozycji zostaje w B4/MCP.
+  **Battle-action executor DONE 2026-07-16 (ADR-0024):**
+  `POST /agent_proposals/battle-actions` zamraża zweryfikowane
+  `battle_id`/`expected_sequence`/`szop.action/v1`, a approval ownera wykonuje
+  akcję atomowo dokładnie raz. Statusy wykonawcze:
+  `pending/executed/rejected/stale`; osobne `result_json`, pełny audit i
+  concurrency CAS.
 - [x] Frontend: approval UI — **DONE 2026-06-30**:
   `app/static/js/modules/agent_proposals.js` + panel na stronie głównej ownera
-  pobiera `GET /agent_proposals`, pokazuje status/payload i pozwala wykonać
-  `Zezwól`/`Odrzuć` przez istniejące endpointy approve/reject. Bez executora
-  domenowego; zatwierdzona propozycja nadal tylko zapisuje consent.
+  pobiera `GET /agent_proposals`, pokazuje status/payload/result i pozwala
+  wykonać `Zezwól i wykonaj`/`Odrzuć` przez endpointy approve/reject.
 - [x] ADR-0021: MCP jako klient publicznego API — **Accepted 2026-07-15**: lokalna fasada deleguje wyłącznie do `HttpClient`, bez DB/ORM/własnego transportu; backend pozostaje SSOT auth/scope/audytu.
-- [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy). ADR-0024 (Consent-gated writes) nadal otwarte.
+- [x] ADR-0024: Consent-gated agent writes — **Accepted 2026-07-16**:
+  propozycja wymaga `battle:read` + `agent_proposals:create`, approval ownera
+  wykonuje akcję dokładnie raz przez wspólną atomową ścieżkę, stale nie zmienia
+  bitwy, a MCP nie publikuje `take_action`.
+- [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy).
 
 ### C2. RAG (3 tyg)
 - [ ] `mcp_server/indexer.py` — chunki ~300 słów / 50 overlap z DOCX; embed via `paraphrase-multilingual-MiniLM-L12-v2`; store w `sqlite-vec`
@@ -337,7 +346,12 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `find_exploit_candidates(army_id)` — **leaf-CLI DONE 2026-06-29** (`scripts/find_exploit_candidates.py`): turniej istniejących rozpisek jednej armii z DB (round-robin, każda para przez `simulate_engagement`/`LocalClient.simulate_roster_ids`) → ranking kandydatów do ręcznej weryfikacji wg `win_rate/points` (`wr/100pkt`, jak `exploit_hunt`); `--list`/`--json`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Nie generuje rozpisek i nie zapisuje wyników. Wrapper MCP/HTTP gated C1/B4.
 - [x] `score_list(roster_id)` — **leaf-CLI DONE 2026-06-27** (`scripts/score_list.py`): ocena rozpiski przez agregację symulacji vs POLE pozostałych rozpisek z DB (per-przeciwnik win-rate + „siła w polu" + sygnał koszt↔wynik); reuse pairingu `simulate_engagement` (`LocalClient.simulate_roster_ids`); `--list`/`--vs`/`--army`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Później interpretacja dedykowanego agenta. Wrapper MCP/HTTP gated C1/B4.
 - [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. HTTP sandbox wrapper DONE 2026-07-10 (`POST /battles/simulate` + `HttpClient.simulate_roster_ids`); **minimalny MCP wrapper DONE 2026-07-15** (`mcp_server.server`, stdio, wyłącznie publiczne API, zakres 1–50 gier).
-- [x] `get_battle_metadata/state/events` — **MCP wrappers DONE 2026-07-15**: dokładnie jedno publiczne wywołanie `HttpClient` per tool; scope `battle:read` egzekwuje backend, state używa spójnego checkpointu bez RNG, events zachowują `since`/kolejność/`last_sequence`; brak write toola.
+- [x] `get_battle_metadata/state/events` — **MCP wrappers DONE 2026-07-15**: dokładnie jedno publiczne wywołanie `HttpClient` per tool; scope `battle:read` egzekwuje backend, state używa spójnego checkpointu bez RNG, events zachowują `since`/kolejność/`last_sequence`; brak bezpośredniego toola wykonującego akcję.
+- [x] `propose_battle_action` — **MCP + public API DONE 2026-07-16
+  (ADR-0024)**: tworzy zweryfikowaną, zamrożoną propozycję przez
+  `HttpClient.propose_battle_action`; wymaga `battle:read` +
+  `agent_proposals:create`, nie `battle:act`; wykonanie następuje wyłącznie po
+  kliknięciu ownera.
 
 ---
 
@@ -474,7 +488,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0021 | MCP jako klient publicznego API | ✓ |
 | 0022 | Vector store: sqlite-vec | — |
 | 0023 | Embeddings: sentence-transformers offline | — |
-| 0024 | Consent-gated agent writes | — |
+| 0024 | Consent-gated agent writes | ✓ |
 | 0025 | Rola agent + scoped tokens (schema + helper + endpointy) | ✓ |
 | 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |

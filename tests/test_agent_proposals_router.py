@@ -159,6 +159,7 @@ def test_create_agent_proposal_persists_pending_owner_scoped_request() -> None:
     [
         _create_payload(summary="  "),
         _create_payload(payload={"blob": "x" * 20_001}),
+        _create_payload(payload={"value": float("nan")}),
     ],
 )
 def test_create_agent_proposal_rejects_invalid_payload_without_side_effects(
@@ -169,6 +170,30 @@ def test_create_agent_proposal_rejects_invalid_payload_without_side_effects(
 
     with pytest.raises(HTTPException) as exc_info:
         agent_proposals.create_agent_proposal(payload, db=session, principal=principal)
+
+    assert exc_info.value.status_code == 400
+    assert _count_rows(session, models.AgentProposal) == 0
+    assert _count_rows(session, models.AgentAuditLog) == 0
+
+
+def test_generic_create_rejects_reserved_battle_action_type() -> None:
+    session = _build_session()
+    _, _, _, principal = _seed_agent_principal(session)
+
+    with pytest.raises(HTTPException) as exc_info:
+        agent_proposals.create_agent_proposal(
+            agent_proposals.AgentProposalCreate(
+                action=agent_proposals.BATTLE_ACTION_PROPOSAL,
+                summary="Obejście dedykowanego endpointu",
+                payload={
+                    "battle_id": 7,
+                    "expected_sequence": 0,
+                    "action": {"schema": "szop.action"},
+                },
+            ),
+            db=session,
+            principal=principal,
+        )
 
     assert exc_info.value.status_code == 400
     assert _count_rows(session, models.AgentProposal) == 0

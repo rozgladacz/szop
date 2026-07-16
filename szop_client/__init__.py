@@ -10,6 +10,7 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
+    "BattleActionProposal": ("szop_client.types", "BattleActionProposal"),
     "BattleMetadata": ("szop_client.http", "BattleMetadata"),
     "BattleStateCheckpoint": ("szop_client.types", "BattleStateCheckpoint"),
     "HttpClient": ("szop_client.http", "HttpClient"),

@@ -54,12 +54,23 @@ def test_unit_base_geometry_defaults_on_fresh_schema():
             route="/api/battles",
             params_json='{"battle_id": 1}',
         )
-        session.add_all([user, agent, ruleset, armory, army, unit, token, audit])
+        proposal = models.AgentProposal(
+            owner_user=user,
+            agent_user=agent,
+            token=token,
+            action="battle:action",
+            summary="Obrona oddziału",
+            payload_json="{}",
+        )
+        session.add_all(
+            [user, agent, ruleset, armory, army, unit, token, audit, proposal]
+        )
         session.commit()
         session.refresh(unit)
         session.refresh(user)
         session.refresh(token)
         session.refresh(audit)
+        session.refresh(proposal)
 
         assert user.role == models.USER_ROLE_USER
         assert unit.base_size_mm == 25
@@ -71,6 +82,7 @@ def test_unit_base_geometry_defaults_on_fresh_schema():
         assert audit.user_id == user.id
         assert audit.agent_user_id == agent.id
         assert audit.timestamp is not None
+        assert proposal.result_json is None
 
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
@@ -86,6 +98,10 @@ def test_unit_base_geometry_defaults_on_fresh_schema():
         column["name"]: column for column in inspector.get_columns("agent_audit_logs")
     }
     assert audit_columns["route"]["nullable"] is False
+    proposal_columns = {
+        column["name"]: column for column in inspector.get_columns("agent_proposals")
+    }
+    assert proposal_columns["result_json"]["nullable"] is True
 
 
 def test_migrate_schema_adds_unit_base_geometry_columns(monkeypatch):
@@ -187,3 +203,42 @@ def test_migrate_schema_adds_user_role_column(monkeypatch):
         {"username": "admin", "role": models.USER_ROLE_ADMIN},
         {"username": "regular", "role": models.USER_ROLE_USER},
     ]
+
+
+def test_migrate_schema_adds_agent_proposal_result_column(monkeypatch):
+    engine = _memory_engine()
+    with engine.begin() as connection:
+        connection.execute(
+            text("CREATE TABLE armories (id INTEGER PRIMARY KEY, owner_id INTEGER)")
+        )
+        connection.execute(text("INSERT INTO armories (id, owner_id) VALUES (1, NULL)"))
+        connection.execute(
+            text(
+                """
+                CREATE TABLE agent_proposals (
+                    id INTEGER PRIMARY KEY,
+                    owner_user_id INTEGER NOT NULL,
+                    agent_user_id INTEGER NOT NULL,
+                    token_id INTEGER,
+                    action VARCHAR(120) NOT NULL,
+                    summary VARCHAR(500) NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    decided_at DATETIME,
+                    decided_by_user_id INTEGER,
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME NOT NULL
+                )
+                """
+            )
+        )
+
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DB_URL", "sqlite://")
+    db._migrate_schema()
+
+    columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("agent_proposals")
+    }
+    assert columns["result_json"]["nullable"] is True

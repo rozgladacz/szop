@@ -150,15 +150,18 @@ def _redacted_mapping(values: Mapping[str, Any]) -> dict[str, Any]:
     return redacted
 
 
-def _agent_audit_payload(request: Request, scope_name: str) -> str:
+def _agent_audit_payload(request: Request, scope_names: tuple[str, ...]) -> str:
     path_params = getattr(request, "path_params", {}) or {}
     query_params = getattr(request, "query_params", {}) or {}
     payload = {
-        "scope": scope_name,
         "method": getattr(request, "method", ""),
         "path_params": _redacted_mapping(dict(path_params)),
         "query_params": _redacted_mapping(dict(query_params)),
     }
+    if len(scope_names) == 1:
+        payload["scope"] = scope_names[0]
+    else:
+        payload["scopes"] = list(scope_names)
     return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
 
@@ -172,7 +175,7 @@ def _request_path(request: Request) -> str:
 
 
 def _authenticate_agent(
-    request: Request, db: Session, scope_name: str
+    request: Request, db: Session, scope_names: tuple[str, ...]
 ) -> AgentPrincipal:
     token_hash = hash_agent_token(_extract_bearer_token(request))
     token = db.execute(
@@ -187,7 +190,7 @@ def _authenticate_agent(
         raise _unauthorized_agent()
 
     scopes = _parse_agent_scopes(token.scope_json)
-    if not _scope_allows(scopes, scope_name):
+    if not all(_scope_allows(scopes, scope_name) for scope_name in scope_names):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN)
 
     principal = AgentPrincipal(
@@ -202,7 +205,7 @@ def _authenticate_agent(
             user_id=token.owner_user_id,
             agent_user_id=token.agent_user_id,
             route=_request_path(request),
-            params_json=_agent_audit_payload(request, scope_name),
+            params_json=_agent_audit_payload(request, scope_names),
         )
     )
     try:
@@ -217,9 +220,18 @@ def _authenticate_agent(
 def require_agent_scope(scope_name: str):
     """FastAPI dependency factory for scoped bearer-token agent access."""
 
+    return require_agent_scopes(scope_name)
+
+
+def require_agent_scopes(*scope_names: str):
+    """FastAPI dependency requiring every named scope on one bearer token."""
+    required = tuple(scope_names)
+    if not required:
+        raise ValueError("at least one agent scope is required")
+
     def dependency(
         request: Request, db: Session = Depends(get_db)
     ) -> AgentPrincipal:
-        return _authenticate_agent(request, db, scope_name)
+        return _authenticate_agent(request, db, required)
 
     return dependency

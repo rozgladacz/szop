@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app import models
 from app.db import Base
-from app.security import hash_agent_token, require_agent_scope
+from app.security import hash_agent_token, require_agent_scope, require_agent_scopes
 
 
 RAW_TOKEN = "agent-secret-token"
@@ -120,6 +120,43 @@ def test_require_agent_scope_accepts_wildcard_scope() -> None:
 
     assert principal.token_id == token.id
     assert principal.scopes == frozenset({"*"})
+
+
+def test_require_agent_scopes_requires_all_and_audits_the_scope_set() -> None:
+    session = _build_session()
+    token = _seed_agent_token(
+        session,
+        scopes={
+            "battle:read": True,
+            "agent_proposals:create": True,
+        },
+    )
+
+    principal = require_agent_scopes(
+        "battle:read",
+        "agent_proposals:create",
+    )(request=_fake_request(), db=session)
+
+    assert principal.token_id == token.id
+    audit = session.execute(select(models.AgentAuditLog)).scalar_one()
+    assert json.loads(audit.params_json)["scopes"] == [
+        "battle:read",
+        "agent_proposals:create",
+    ]
+
+
+def test_require_agent_scopes_rejects_when_one_scope_is_missing() -> None:
+    session = _build_session()
+    _seed_agent_token(session, scopes={"battle:read": True})
+
+    with pytest.raises(HTTPException) as exc_info:
+        require_agent_scopes(
+            "battle:read",
+            "agent_proposals:create",
+        )(request=_fake_request(), db=session)
+
+    assert exc_info.value.status_code == 403
+    assert session.execute(select(models.AgentAuditLog)).scalar_one_or_none() is None
 
 
 def test_require_agent_scope_rejects_missing_bearer_token() -> None:
