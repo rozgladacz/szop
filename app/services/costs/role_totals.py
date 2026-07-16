@@ -51,6 +51,11 @@ from .primitives import (
     extract_number,
     normalize_name,
 )
+from .crowding import (
+    crowded_melee_total,
+    melee_crowding_factors,
+    melee_vector_from_counts,
+)
 from .unit_helpers import (
     _ability_link_is_default,
     ability_cost,
@@ -65,6 +70,7 @@ def roster_unit_role_totals(
     payload: dict[str, dict[str, int]] | None = None,
     *,
     _passive_state: PassiveState | None = None,
+    melee_factors: Sequence[float] | None = None,
 ) -> dict[str, float]:
     """Return totals for both role variants for one roster unit.
 
@@ -75,6 +81,17 @@ def roster_unit_role_totals(
     ``_passive_state`` — optional pre-computed result of ``compute_passive_state``.
     When provided, avoids the redundant second call to ``compute_passive_state``
     (e.g. when the caller already computed it).
+
+    ``melee_factors`` — optional pre-computed melee crowding multipliers
+    (see costs/crowding.py), one per model, aligned to this unit's own
+    per-model melee vector (length must equal the unit's normalized
+    ``count``). When omitted, factors are self-computed from this unit's
+    OWN vector and ``unit.base_size`` — correct for a standalone unit. Group
+    classification (base unit + attached heroes, see rosters.py's
+    ``_classification_map``) pools melee vectors across the group before
+    ranking and passes each member's slice of the pooled factors here, so
+    the base_size limits apply to the group as a whole rather than each
+    member in isolation.
     """
     unit = getattr(roster_unit, "unit", None)
     if unit is None:
@@ -200,10 +217,12 @@ def roster_unit_role_totals(
                 )
         return results
 
-    def _aggregate_weapon_buckets(
+    def _aggregate_ranged_total(
         components_map: Mapping[int, Mapping[str, float]],
-    ) -> dict[str, float]:
-        melee_total = 0.0
+    ) -> float:
+        # Melee is intentionally NOT aggregated here -- the crowding-adjusted
+        # melee contribution comes from _melee_effective (computed once,
+        # role-independent, below) instead of a raw per-weapon sum.
         ranged_total = 0.0
         for weapon_id, stored_count in weapons_counts.items():
             components = components_map.get(weapon_id)
@@ -212,12 +231,8 @@ def roster_unit_role_totals(
             selected_count = _to_total(stored_count)
             if selected_count <= 0:
                 continue
-            melee_total += float(components.get("melee") or 0.0) * selected_count
             ranged_total += float(components.get("ranged") or 0.0) * selected_count
-        return {
-            "melee": round(melee_total, 2),
-            "ranged": round(ranged_total, 2),
-        }
+        return round(ranged_total, 2)
 
     # Memoize per (sorted traits) — _passive_entries does an expensive
     # ability_cost_components_from_name call per passive (~0.5-2ms each).
@@ -338,6 +353,24 @@ def roster_unit_role_totals(
     # Pre-compute weapon components once (role-independent: role slug is stripped)
     _shared_weapon_components = _weapon_components_map(base_traits)
 
+    # Melee crowding discount (base_size) — role-independent (same weapon
+    # selection for both wojownik/strzelec), computed once. Reuses
+    # _shared_weapon_components's already-computed melee costs, no extra
+    # weapon_cost_components calls. See costs/crowding.py.
+    _melee_cost_by_weapon = {
+        wid: float(components.get("melee") or 0.0)
+        for wid, components in _shared_weapon_components.items()
+    }
+    _melee_vector = melee_vector_from_counts(
+        weapons_counts, _melee_cost_by_weapon, model_count, mode_total=total_mode
+    )
+    _resolved_melee_factors = (
+        melee_factors
+        if melee_factors is not None
+        else melee_crowding_factors(_melee_vector, getattr(unit, "base_size", None))
+    )
+    _melee_effective = crowded_melee_total(_melee_vector, _resolved_melee_factors)
+
     # Selected_active_set is also role-independent (depends only on
     # active_counts/aura_counts which are part of the loadout, not the role).
     # active_counts/aura_counts are now keyed by the full "ability_id:value"
@@ -360,16 +393,21 @@ def roster_unit_role_totals(
         )
         base_per_model = base_value
         passive_entries = _passive_entries(current_traits)
-        weapon_buckets = _aggregate_weapon_buckets(_shared_weapon_components)
+        ranged_total = _aggregate_ranged_total(_shared_weapon_components)
 
         total = base_per_model * model_count
         if passive_total:
             total += passive_total * (1 if total_mode else ability_multiplier)
-        weapon_total = weapon_buckets["melee"] + weapon_buckets["ranged"]
+        # _melee_effective (crowding-adjusted, computed once above) stands in
+        # for a raw melee aggregate here: the melee crowding discount
+        # (base_size) must be applied BEFORE the role multiplier below, so an
+        # "excess" model's discounted melee cost is what gets halved for a
+        # strzelec-classified unit, not the raw cost.
+        weapon_total = _melee_effective + ranged_total
         if selected_role == "wojownik":
-            weapon_total -= weapon_buckets["ranged"] * 0.5
+            weapon_total -= ranged_total * 0.5
         elif selected_role == "strzelec":
-            weapon_total -= weapon_buckets["melee"] * 0.5
+            weapon_total -= _melee_effective * 0.5
         total += weapon_total
         for ability_id, stored_count in {**active_counts, **aura_counts}.items():
             cost_value = ability_map.get(ability_id)

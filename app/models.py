@@ -24,6 +24,11 @@ from .db import Base
 
 ARMY_SPELL_NAME_MAX_LENGTH = 60
 
+# Display-only labels for Unit.base_size. Slugs/limits used for cost
+# computation live in app/services/costs/_engine.py (BASE_SIZE_MELEE_LIMITS) —
+# not imported here to avoid models.py -> services.costs -> models.py cycle.
+BASE_SIZE_LABELS = {"mala": "Mała", "srednia": "Średnia", "duza": "Duża"}
+
 
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
@@ -350,6 +355,7 @@ class Unit(TimestampMixin, Base):
     quality: Mapped[int] = mapped_column(Integer, nullable=False)
     defense: Mapped[int] = mapped_column(Integer, nullable=False)
     toughness: Mapped[int] = mapped_column(Integer, nullable=False)
+    base_size: Mapped[str] = mapped_column(String(10), nullable=False, default="srednia")
     flags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     passive_custom_names_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     default_weapon_id: Mapped[Optional[int]] = mapped_column(ForeignKey("weapons.id"), nullable=True)
@@ -388,6 +394,10 @@ class Unit(TimestampMixin, Base):
         if value < 1:
             value = 1
         return value
+
+    @property
+    def base_size_label(self) -> str:
+        return BASE_SIZE_LABELS.get(self.base_size, self.base_size)
 
     @property
     def default_weapons(self) -> List[Weapon]:

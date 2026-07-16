@@ -1401,6 +1401,7 @@ def _apply_unit_form_data(
     defense: int,
     toughness: int,
     typical_models: int | None = None,
+    base_size: str | None = None,
     passive_items: list[dict],
     active_items: list[dict],
     aura_items: list[dict],
@@ -1456,6 +1457,9 @@ def _apply_unit_form_data(
     if normalized_models < 1:
         normalized_models = 1
     unit.typical_models = normalized_models
+    if base_size not in costs.BASE_SIZE_MELEE_LIMITS:
+        base_size = getattr(unit, "base_size", None) or costs.DEFAULT_BASE_SIZE
+    unit.base_size = base_size
     unit.flags = utils.passive_payload_to_flags(sanitized_passives)
 
     weapon_links: list[models.UnitWeapon] = []
@@ -3024,6 +3028,7 @@ def update_unit(
     defense: int = Form(...),
     toughness: int = Form(...),
     typical_models: int = Form(1),
+    base_size: str = Form(costs.DEFAULT_BASE_SIZE),
     weapons: str | None = Form(None),
     passive_abilities: str | None = Form(None),
     active_abilities: str | None = Form(None),
@@ -3063,6 +3068,7 @@ def update_unit(
             defense=defense,
             toughness=toughness,
             typical_models=typical_models,
+            base_size=base_size,
             passive_items=passive_items,
             active_items=active_items,
             aura_items=aura_items,
@@ -3078,6 +3084,7 @@ def update_unit(
             defense=defense,
             toughness=toughness,
             typical_models=typical_models,
+            base_size=base_size,
             passive_items=passive_items,
             active_items=active_items,
             aura_items=aura_items,

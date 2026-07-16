@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Generator
 
 from sqlalchemy import create_engine, text
@@ -216,6 +217,51 @@ def _initialize_unit_ability_positions(connection) -> None:
         offsets[unit_id] = position + 1
 
 
+def _initialize_unit_base_sizes(connection) -> None:
+    """Backfill base_size from toughness: T<=2 mala, 3-5 srednia, T>=6 duza.
+
+    Bohaterowie (unit ma link do zdolnosci o slugu "bohater") licza sie jak dla
+    polowy wytrzymalosci (floor), a nastepnie te same progi -- zgodnie z
+    decyzja D4 (zob. HANDOFF_rozmiar-podstawki.md). Hero detection replikuje
+    unit_is_hero (app/services/rules.py): link do zdolnosci "bohater" na
+    jednostce, bez sprawdzania flagi default (jak w runtime).
+    """
+    logger.info("Backfilling base_size column on units table from toughness")
+    ability_rows = connection.execute(
+        text("SELECT id, config_json, name FROM abilities")
+    ).mappings().all()
+    hero_ability_ids = {
+        row["id"]
+        for row in ability_rows
+        if ability_registry.ability_slug(
+            SimpleNamespace(config_json=row["config_json"], name=row["name"])
+        )
+        == "bohater"
+    }
+    hero_unit_ids: set[int] = set()
+    if hero_ability_ids:
+        link_rows = connection.execute(
+            text("SELECT unit_id, ability_id FROM unit_abilities")
+        ).all()
+        hero_unit_ids = {row[0] for row in link_rows if row[1] in hero_ability_ids}
+    rows = connection.execute(text("SELECT id, toughness FROM units")).all()
+    for row in rows:
+        mapping = row._mapping
+        unit_id = mapping["id"]
+        toughness = mapping["toughness"] or 1
+        effective = toughness // 2 if unit_id in hero_unit_ids else toughness
+        if effective <= 2:
+            base_size = "mala"
+        elif effective <= 5:
+            base_size = "srednia"
+        else:
+            base_size = "duza"
+        connection.execute(
+            text("UPDATE units SET base_size = :base_size WHERE id = :id"),
+            {"base_size": base_size, "id": unit_id},
+        )
+
+
 def _normalize_roster_unit_loadouts(connection) -> None:
     logger.info("Normalizing roster unit loadouts before removing selected_weapon_id")
     rows = connection.execute(
@@ -371,6 +417,15 @@ def _migrate_schema() -> None:
                 connection.execute(
                     text("ALTER TABLE units ADD COLUMN passive_custom_names_json TEXT")
                 )
+            if "base_size" not in column_names:
+                logger.info("Adding base_size column to units table")
+                connection.execute(
+                    text(
+                        "ALTER TABLE units ADD COLUMN base_size VARCHAR(10) "
+                        "NOT NULL DEFAULT 'srednia'"
+                    )
+                )
+                _initialize_unit_base_sizes(connection)
 
         if "roster_units" in table_names:
             columns = inspector.get_columns("roster_units")

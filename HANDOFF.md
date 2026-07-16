@@ -1,7 +1,7 @@
 # HANDOFF — Meta
 
-> **Co tu jest:** spis aktywnych wątków + zablokowane zasoby + szybkozmienne notatki cross-wątkowe + LOG SESJI.
-> **Czego tu NIE ma:** wiedzy stabilnej (mapa submodułów, architektura) — to jest w `docs/architecture.md`.
+> **Co tu jest:** spis aktywnych wątków + zablokowane zasoby + szybkozmienne notatki cross-wątkowe + LOG SESJI (najnowsze).
+> **Czego tu NIE ma:** wiedzy stabilnej (mapa submodułów, architektura) — to jest w `docs/architecture.md`. Starsze wpisy LOG → [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).
 > **Per-wątek:** szczegóły w `docs/handoffs/HANDOFF_<slug>.md`.
 > **Workflow:** uruchom `/load-context` na początku sesji. Detale konwencji: [docs/handoffs/README.md](docs/handoffs/README.md).
 
@@ -11,23 +11,25 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_kolekcja](docs/handoffs/HANDOFF_kolekcja.md) | Faza 1: CRUD fizycznych modeli w kolekcji użytkownika (bazy danych + UI) | `app/models.py`, `app/routers/collections.py`, `app/templates/collection_unit_detail.html` | In progress |
-| [HANDOFF_demoralizacja-mag](docs/handoffs/HANDOFF_demoralizacja-mag.md) | Demoralizacja + koszt Maga + koszty/tabela Rozkaz-Klątwa-Oznaczenie + UI trudności zaklęć | `app/data/abilities.py`, `app/services/costs/abilities.py`, `app/services/ability_registry.py`, `app/routers/armies.py`, `app/models.py`, `app/db.py`, `app/templates/army_spells.html` | In progress |
+| [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
 ## Zasoby zablokowane (reverse lookup)
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `app/models.py` | kolekcja | +CollectionModel, +CollectionModelSlot |
-| `app/routers/collections.py` | kolekcja | nowy router (NEW) |
-| `app/templates/collection_unit_detail.html` | kolekcja | nowy szablon (NEW) |
-| `app/models.py` | demoralizacja-mag | +`ArmySpell.cast_difficulty` (zmiana rozłączna z kolekcją) |
-| `app/data/abilities.py` | demoralizacja-mag | Demoralizacja + tagi psujących cech + opis Maga |
-| `app/services/costs/abilities.py` | demoralizacja-mag | koszty Mag/Rozkaz/Klątwa/Oznaczenie/Demoralizacja |
-| `app/services/ability_registry.py` | demoralizacja-mag | filtrowanie pickerów tag-driven |
-| `app/routers/armies.py` | demoralizacja-mag | spell details + add-ability + weapon preview + ability-cost-preview |
-| `app/templates/army_spells.html` | demoralizacja-mag | UI wyboru trudności + kolumna Trudność |
+| `app/models.py` | rozmiar-podstawki | `+Unit.base_size` |
+| `app/services/costs/_engine.py` | rozmiar-podstawki | `BASE_SIZE_MELEE_LIMITS`, bump `COST_ENGINE_VERSION` |
+| `app/services/costs/crowding.py` | rozmiar-podstawki | nowy moduł (NEW) — SSOT zniżki „tłok" |
+| `app/services/costs/quote.py` | rozmiar-podstawki | zniżka przed `_roster_unit_classification` |
+| `app/services/costs/role_totals.py` | rozmiar-podstawki | param `melee_factors` |
+| `app/routers/rosters.py` | rozmiar-podstawki | `_classification_map`, endpoint `/quote` |
+| `app/routers/export.py` | rozmiar-podstawki | battle-state: `melee_fighting_default` |
+| `app/routers/armies.py` | rozmiar-podstawki | edycja jednostki: odczyt/zapis `base_size` |
+| `app/templates/unit_form.html` | rozmiar-podstawki | select rozmiaru podstawki |
+| `app/templates/roster_battle_state.html` | rozmiar-podstawki | kontener „Walczące modele" |
+| `app/static/js/battle_state.js` | rozmiar-podstawki | UI „Walczące modele" |
+| `app/static/js/payload_adapters.js` | rozmiar-podstawki | nowe pola quote |
 
 > **Zasada:** zanim dotkniesz pliku z tej tabeli, sprawdź czy wątek blokujący jest aktywny. Jeśli tak — koordynuj z odpowiednim `HANDOFF_<slug>.md`.
 
@@ -39,18 +41,23 @@
 
 - **2026-05-20:** Lokalny runtime na Windows — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu. `make`/`pytest` poza PATH. Workaround: `python -m pytest` bezpośrednio.
 - **2026-05-12:** Merge conflicts gałęzi Klasyfikacja nadal nierozwiązane — blokują SSOT Phase 5. Patrz [docs/roadmap.md](docs/roadmap.md).
-- **2026-07-10:** `/security-review` (uruchomiony w wątku demoralizacja-mag) znalazł i naprawił IDOR w `app/routers/collections.py` (plik zablokowany przez wątek `kolekcja`) — brak sprawdzenia własności jednostki w `POST /collections/units/{unit_id}/models/add`. Fix + regresja `tests/test_collections_authz.py`. Szczegóły w [HANDOFF_kolekcja.md](docs/handoffs/HANDOFF_kolekcja.md) sekcja „Notatki".
 
 ---
 
 ## LOG SESJI
 
-*(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Po archiwizacji wątku przez `/handoff-archive` trafia tutaj 1–2 zdania podsumowania.)*
+*(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Starsze wpisy w [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).)*
 
-### 2026-05-22 — widok-rozpiski-ostrzezenia (archived)
-- Nowy moduł `roster_warnings.js` z badge `⚠ N` + tooltip (8 reguł: liczność, bohaterowie, limit punktów, nierównowaga cenowa, broń vs wytrzymałość). Backend: `weapon_cost` w `roster_items`. BUG FIX: `_roster_unit_weapon_components_sum` — zastąpiono `_unit_army_flags` wywołaniem `costs.compute_passive_state` + `_strip_role_traits` (wynik 51.94 → 98.17 dla Widmy, zgodny z oczekiwaniem).
-- Pliki: `roster_warnings.js` (NEW), `roster_edit.html`, `roster_editor.js`, `roster_rendering.js`, `rosters.py`.
-- Weryfikacja: pytest 176/176, smoke roster/3 i roster/13 OK, konsola czysta. Commit `588d27c`.
+### 2026-07-14 — kolekcja (archived)
+- Kolekcja fizycznych modeli użytkownika: **Faza 1** (CRUD modeli per oddział + magnetyzacja broni i zdolności + „Kopiuj") oraz **Faza 2** — integracja z rozpiską. „Tryb modeli" komponuje oddział z posiadanych egzemplarzy + proxy (broń i zdolności); derywacja suma→modele z budżetem montowania (`mount_need`, liczony z najwyżej `count` modeli). **Koszt modelu w Kolekcji** i **pełny koszt modelu w Rozpisce** liczone silnikiem (`calculate_roster_unit_quote.item_costs`) — SSOT, te same wartości co widok klasyczny. **Stan Bitewny** (2c/2d): eliminacja/wycofanie egzemplarzy, tryb „Modele", indywidualne nazwy zdolności, przekreślanie zdolności po eliminacji, czerwone ostrzeżenia zdrowia grupy.
+- Pliki: `app/models.py` (+`CollectionModel`/`CollectionModelSlot` + kolumny slotu zdolności), `app/db.py` (migracje), `app/routers/{collections,rosters,export}.py`, `app/services/collection_match.py` (NEW), `app/templates/{collections_list,collection_unit_detail,roster_edit,roster_battle_state}.html`, `app/static/js/{battle_state.js, modules/roster_collection_models.js}`, `tests/test_collection_match.py`.
+- Weryfikacja: pytest 291/291, `/simplify` + `/code-review` medium (findings #1/#3 naprawione, koszt przez SSOT #2), `/security-review` (IDOR naprawiony wcześniej). Commity: `199858b` (Faza 1), `9390cd7` (2b), `6830c92` (2b.1/2b.2), `9dd48a2` (fix IDOR), `9078499` (2c/2d/2e), `b061532` (koszt SSOT + magnetyzacja zdolności + Kopiuj + fix derive).
+
+### 2026-07-10 — demoralizacja-mag (archived)
+- Nowa zdolność Demoralizacja (koszt 25); przebudowa kosztu Maga (`X × clamp(T,6,18)` po rebalansie); rozdzielone formuły Rozkaz (`T_eff±2`) / Klątwa+Oznaczenie (`×6`) + tabela psujących cech jako tagi w `AbilityDefinition` (SSOT, zastąpiła hardcoded listy w `ability_registry`); lista zaklęć z wyborem trudności rzucania 2+..6+ (radio buttony, koszt pkt+żet na żywo, edycja mocy w miejscu dodawania, podgląd listy dla armii view-only); trudność widoczna w Stanie Bitewnym/wydrukach/eksporcie.
+- Po drodze: `/security-review` znalazł i naprawił **IDOR (HIGH)** w `app/routers/collections.py` — `POST /collections/units/{unit_id}/models/add` nie sprawdzał własności jednostki, w odróżnieniu od sąsiedniego GET. Fix + regresja w osobnym commicie.
+- Pliki: `app/data/abilities.py`, `app/services/costs/{abilities,_engine}.py`, `app/services/ability_registry.py`, `app/routers/armies.py`, `app/models.py` (+`ArmySpell.cast_difficulty`), `app/templates/{army_spells,armory_weapon_form,army_edit,roster_battle_state}.html`, `app/static/js/modules/spell_{ability_forms,weapon_cost_preview}.js`, `tests/test_{active_costs,spell_difficulty,army_spell_view_access,collections_authz}.py`; security fix: `app/routers/collections.py`.
+- Weryfikacja: pytest 280/280, `/simplify` ×3, `/code-review` xhigh, `/security-review` (1 HIGH naprawiony). Commity: `746b661` (feature), `9dd48a2` (security fix).
 
 ### 2026-06-04 — primary-weapon-flag (archived)
 - Klikalna flaga ⚑ broni podstawowej w edytorze rozpiski z zapisem override w `loadout_json.primary_weapon` (per typ: melee/ranged). Backend `_loadout_weapon_details` honoruje override przy budowaniu `weapon_details` dla Stanu Bitewnego. Dodatkowe fixy: null-override gubiony w `createLoadoutState` (deserialization), `assignDefaultWeapon` przepinane na `isCurrentPrimary` zamiast `isPrimaryWeapon` (slot-filler podąża za flagą).
@@ -62,33 +69,4 @@
 - Pliki: `app/data/strategic_cards.py` (NEW), `app/models.py`, `app/routers/rosters.py`, `app/templates/roster_edit.html`, `app/templates/roster_strategic_cards{,_print}.html` (NEW), `tests/test_strategic_cards.py` (NEW, 27 testów).
 - Weryfikacja: pytest 203/203, smoke przeglądarkowy OK, wydruk PDF zweryfikowany ręcznie. Migracja: `ALTER TABLE rosters ADD COLUMN strategic_cards_json TEXT`.
 
-### 2026-05-20 — handoff-template polish (follow-up do refactor-agents-md)
-- Rozszerzono stany kroków HANDOFF z 2 do 4: `[ ]` TODO / `[~]` rozpoczęto / `[x]` sukces / `[!]` błąd-porzucone. Legenda w `docs/handoffs/README.md`, zaktualizowane skille `handoff-archive` (sprawdza stany finalne), `handoff-status` (pokazuje progres `5[x] / 1[~] / 2[ ]`), `handoff-start` (zachowuje Definition of Done w szablonie).
-- Dodano "Definition of Done" w `docs/planning.md`: pytest + `/simplify` (zawsze) + `/review` (warunkowo: diff >50 linii / hot path / SSOT) + `/security-review` (warunkowo: auth, user input → DB). Szablon `HANDOFF_<slug>.md` zawiera te kroki w "Faza N — Weryfikacja end-to-end".
-- AGENTS.md: nowy [REQUIRED] #7 + Workflow oczekiwany krok 3/4 zaktualizowany. Długość 74 linii (cel ~90).
-- Weryfikacja: pytest 221/221 passed.
-
-### 2026-05-20 — refactor-agents-md (archived)
-- Podział AGENTS.md (267 → 73 linii) na manifest `[CRITICAL]/[REQUIRED]/[RECOMMENDED]` + szczegóły w `docs/`. HANDOFF.md przebudowany na meta-spis (95 → 61 linii). System per-wątek `docs/handoffs/HANDOFF_<slug>.md` + 5 skilli (`/handoff-start`, `/handoff-archive`, `/handoff-status`, `/load-context`, `/handoff-sync`) + obowiązkowy SessionStart hook w `.claude/settings.json`.
-- Pliki: AGENTS.md, HANDOFF.md, `docs/{README,overview,architecture,roadmap,planning,developing,testing,git-workflow,app-js-guide}.md`, `docs/handoffs/README.md`, `.claude/settings.json`, `.claude/skills/handoff-{start,archive,status,sync}/SKILL.md`, `.claude/skills/load-context/SKILL.md`.
-- Weryfikacja: pytest 172/172 passed, 0 zbitych linków w 13 plikach, JSON `.claude/settings.json` poprawny, SessionStart hook output zweryfikowany ręcznie.
-
-### 2026-05-14 — Faza III modułów pomocniczych app.js (zaimplementowana)
-- Wydzielono 8 sekcji do modułów IIFE: text parsing, UI pickers, spell weapon preview, spell ability forms, roster rendering, loadout state, editor renderers, roster adders.
-- Dodano `docs/frontend_js_modules.md` jako mapę zależności i call-site checklist.
-- Weryfikacja: `node --check` dla nowych modułów i `app.js`, sandbox load-test, call-site grep — przeszły.
-- Pytest/full smoke zablokowany niedostępnym Python/make w lokalnym środowisku Windows (dalej notatka cross-wątkowa wyżej).
-- Commity: `b1ccd78` (faza I-III), `ef4bbf7` (faza IV), `65f8b6f` (merge).
-
-### 2026-05-14 — Faza II payload adapters (zakończona)
-- Dodano `payload_adapters.js`, flagę `window.SZOP_DEV_MODE`, podpięcia w `app.js` i testy regresyjne (`tests/test_frontend_payload_adapters.py`).
-- Weryfikacja automatyczna: pełne `pytest -q` przeszło.
-- Smoke przeglądarkowy wymagał ręcznej akceptacji w UI.
-
-### 2026-05-13 — Start Fazy II payload adapters
-- Zamknięto etap startowej modularizacji jako kontekst bazowy.
-- Cel: adaptery i walidatory payloadów przed dalszym podziałem `app.js`.
-
-### 2026-05-12 — Start modularizacji app.js
-- Zamknięto stan "BRAK AKTYWNEGO ZADANIA".
-- Nowy cel: sekcyjna ekstrakcja `app.js` z zachowaniem 1:1 i pełną weryfikacją parity/smoke.
+> Starsze wpisy: [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md)

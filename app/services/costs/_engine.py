@@ -86,7 +86,22 @@ _RULESET_FALLBACK_PATH = (
 )
 
 ORDER_LIKE_ACTIVE_SLUGS = {"rozkaz", "klatwa", "oznaczenie"}
-COST_ENGINE_VERSION = "quote-v1"
+COST_ENGINE_VERSION = "quote-v2"
+
+# Rozmiar podstawki -> (limit1, limit2) modeli skutecznie walczacych w zwarciu.
+# Modele powyzej limit1 licza koszt broni wrecz *0.5, powyzej limit2 *0.1.
+# Limity brane sa z base_size oddzialu BAZOWEGO (dolaczeni bohaterowie nie
+# zmieniaja limitow, ale ich modele wchodza do wspolnej puli sortowania).
+BASE_SIZE_MELEE_LIMITS: dict[str, tuple[int, int]] = {
+    "mala": (8, 12),
+    "srednia": (6, 8),
+    "duza": (2, 4),
+}
+DEFAULT_BASE_SIZE = "srednia"
+
+
+def base_size_melee_limits(base_size: str | None) -> tuple[int, int]:
+    return BASE_SIZE_MELEE_LIMITS.get(base_size or "", BASE_SIZE_MELEE_LIMITS[DEFAULT_BASE_SIZE])
 
 
 # ============================================================

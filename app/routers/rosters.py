@@ -262,8 +262,10 @@ def _classification_map(
     }
     totals_by_id: dict[int, dict[str, float]] = {}
     classifications: dict[int, dict[str, Any] | None] = {}
+    melee_vectors_by_id: dict[int, list[float]] = {}
 
-    # Phase 1: independent per-unit role totals (no cross-unit influence yet).
+    # Phase 1: independent per-unit role totals + melee vectors (no
+    # cross-unit influence yet -- group pooling happens in Phase 1.5 below).
     for unit_id, roster_unit in units_by_id.items():
         loadout_payload = loadouts.get(unit_id)
         quote = _internal_roster_unit_quote(roster_unit, loadout_payload)
@@ -271,12 +273,13 @@ def _classification_map(
             "wojownik": float(quote.get("warrior_total") or 0.0),
             "strzelec": float(quote.get("shooter_total") or 0.0),
         }
+        melee_vectors_by_id[unit_id] = [
+            float(v) for v in (quote.get("melee_per_model") or [])
+        ]
 
-    # Phase 2: join heroes with their parent unit and decide the Wojownik /
-    # Strzelec classification once per group from the *summed* role totals.
-    # This is the sole documented exception to the rule that the cost of one
-    # roster unit must not depend on another (joined hero + unit share the
-    # role decision, even though individual role totals stay independent).
+    # Group membership: base (non-hero) unit + its attached heroes share one
+    # anchor. Used both by Phase 1.5 (melee pool) and Phase 2 (role decision)
+    # below.
     group_members: dict[int, list[int]] = {}
     for unit_id, roster_unit in units_by_id.items():
         parent_id = getattr(roster_unit, "parent_roster_unit_id", None)
@@ -285,6 +288,51 @@ def _classification_map(
             anchor = parent_id
         group_members.setdefault(anchor, []).append(unit_id)
 
+    # Phase 1.5: pool melee vectors across each group (base unit + attached
+    # heroes) and re-rank crowding factors over the POOLED pool, using the
+    # BASE unit's base_size for the limits (heroes never change the limits,
+    # but their models join the shared pool -- HANDOFF_rozmiar-podstawki.md
+    # decision "limity z oddzialu bazowego"). Grouped members' totals are
+    # RECOMPUTED with the pooled factors, overwriting the Phase 1 standalone
+    # values. Standalone units (no attachment either way) are skipped --
+    # their Phase 1 totals (self-computed factors) are already correct.
+    for anchor_id, member_ids in group_members.items():
+        if len(member_ids) <= 1:
+            continue
+        # Deterministic order (anchor/base unit first, then heroes by id) so
+        # tie-breaking inside melee_crowding_factors is stable across calls.
+        ordered_ids = [anchor_id] + sorted(mid for mid in member_ids if mid != anchor_id)
+        pooled_vector: list[float] = []
+        member_slices: dict[int, tuple[int, int]] = {}
+        for mid in ordered_ids:
+            vector = melee_vectors_by_id.get(mid) or []
+            start = len(pooled_vector)
+            pooled_vector.extend(vector)
+            member_slices[mid] = (start, len(pooled_vector))
+        if not pooled_vector:
+            continue
+        anchor_unit = getattr(units_by_id.get(anchor_id), "unit", None)
+        anchor_base_size = getattr(anchor_unit, "base_size", None)
+        pooled_factors = costs.melee_crowding_factors(pooled_vector, anchor_base_size)
+        for mid in member_ids:
+            start, end = member_slices.get(mid, (0, 0))
+            member_factors = pooled_factors[start:end]
+            if not member_factors:
+                continue
+            loadout_payload = loadouts.get(mid)
+            quote = _internal_roster_unit_quote(
+                units_by_id[mid], loadout_payload, melee_factors_override=member_factors
+            )
+            totals_by_id[mid] = {
+                "wojownik": float(quote.get("warrior_total") or 0.0),
+                "strzelec": float(quote.get("shooter_total") or 0.0),
+            }
+
+    # Phase 2: join heroes with their parent unit and decide the Wojownik /
+    # Strzelec classification once per group from the *summed* role totals.
+    # This is the sole documented exception to the rule that the cost of one
+    # roster unit must not depend on another (joined hero + unit share the
+    # role decision, even though individual role totals stay independent).
     for anchor_id, member_ids in group_members.items():
         warrior_sum = sum(
             float(totals_by_id.get(mid, {}).get("wojownik") or 0.0)
@@ -357,6 +405,8 @@ def _internal_roster_unit_quote(
     roster_unit: models.RosterUnit,
     loadout: dict[str, Any] | None = None,
     include_item_costs: bool = False,
+    *,
+    melee_factors_override: Sequence[float] | None = None,
 ) -> dict[str, Any]:
     """Internal adapter that routes all roster-unit quote calculations via costs.py."""
     normalized_count = costs.normalize_roster_unit_count(
@@ -367,6 +417,7 @@ def _internal_roster_unit_quote(
         loadout,
         normalized_count,
         include_item_costs=include_item_costs,
+        melee_factors_override=melee_factors_override,
     )
 
 
@@ -3520,6 +3571,15 @@ def _loadout_weapon_details(
                 "ap": option.get("ap"),
                 "traits": option.get("traits"),
                 "is_primary": is_primary,
+                # Per-model weapon cost (melee+ranged combined, from
+                # _unit_weapon_options -- already computed there, no extra
+                # weapon_cost call). For pure melee weapons (range=0, the
+                # common case) this equals the melee-only cost exactly;
+                # dual-purpose Assault weapons are a minor overestimate.
+                # Used by Stan Bitewny ("Walczące modele") to rank weapon
+                # instances by cost -- a UI ordering heuristic, not a stored
+                # game value, so this approximation is acceptable.
+                "cost": option.get("cost"),
             }
         )
     return details

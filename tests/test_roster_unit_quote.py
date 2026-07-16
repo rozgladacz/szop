@@ -51,7 +51,9 @@ def test_calculate_roster_unit_quote_returns_contract_fields() -> None:
 
     assert quote["cost_engine_version"] == costs.COST_ENGINE_VERSION
     assert quote["selected_role"] in {"wojownik", "strzelec"}
-    assert set(quote["components"]) == {"base", "weapon", "active", "aura", "passive"}
+    assert set(quote["components"]) == {
+        "base", "weapon", "active", "aura", "passive", "melee_crowding",
+    }
     assert quote["selected_total"] == max(quote["warrior_total"], quote["shooter_total"])
 
 
@@ -348,12 +350,15 @@ def test_calculate_roster_unit_quote_returns_zero_contract_for_non_positive_or_u
     assert quote["warrior_total"] == 0.0
     assert quote["shooter_total"] == 0.0
     assert quote["selected_total"] == 0.0
+    assert quote["selected_total_full"] == 0.0
+    assert quote["melee_per_model"] == []
     assert quote["components"] == {
         "base": 0.0,
         "weapon": 0.0,
         "active": 0.0,
         "aura": 0.0,
         "passive": 0.0,
+        "melee_crowding": 0.0,
     }
     assert quote["loadout"]["mode"] == "total"
 

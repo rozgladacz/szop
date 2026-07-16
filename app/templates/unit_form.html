@@ -26,17 +26,25 @@
             </div>
           </div>
           <div class="row g-3">
-            <div class="col-12 col-md-4">
+            <div class="col-12 col-md-3">
               <label class="form-label" for="quality">Jakość</label>
               <input class="form-control" id="quality" name="quality" type="number" min="2" max="6" value="{{ unit.quality }}" required />
             </div>
-            <div class="col-12 col-md-4">
+            <div class="col-12 col-md-3">
               <label class="form-label" for="defense">Obrona</label>
               <input class="form-control" id="defense" name="defense" type="number" min="2" max="6" value="{{ unit.defense }}" required />
             </div>
-            <div class="col-12 col-md-4">
+            <div class="col-12 col-md-3">
               <label class="form-label" for="toughness">Wytrzymałość</label>
               <input class="form-control" id="toughness" name="toughness" type="number" min="1" value="{{ unit.toughness }}" required />
+            </div>
+            <div class="col-12 col-md-3">
+              <label class="form-label" for="base-size">Rozmiar podstawki</label>
+              <select class="form-select" id="base-size" name="base_size" required>
+                <option value="mala" {% if unit.base_size == "mala" %}selected{% endif %}>Mała</option>
+                <option value="srednia" {% if unit.base_size == "srednia" %}selected{% endif %}>Średnia</option>
+                <option value="duza" {% if unit.base_size == "duza" %}selected{% endif %}>Duża</option>
+              </select>
             </div>
           </div>
           <div class="mb-3 mt-3">

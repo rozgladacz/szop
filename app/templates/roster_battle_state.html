@@ -234,6 +234,7 @@
          data-initial-models="{{ unit_count }}"
          data-toughness="{{ member.toughness or 1 }}"
          data-is-hero="{{ 'true' if member.is_hero else 'false' }}"
+         data-melee-fighting-default="{{ member.melee_fighting_default | default(0) }}"
          data-weapons-json='{{ member.weapon_details | tojson | e }}'
          data-collection-groups='{{ member.collection_groups | default([], true) | tojson | e }}'>
       <div class="unit-header d-flex justify-content-between align-items-start gap-2">

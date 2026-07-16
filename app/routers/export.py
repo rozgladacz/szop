@@ -98,6 +98,21 @@ def _army_rule_labels(army: models.Army | None) -> list[str]:
     return labels
 
 
+def _apply_melee_fighting_defaults(
+    anchor_unit: models.Unit | None, group_members: list[dict[str, Any]]
+) -> None:
+    """Set ``melee_fighting_default`` on each battle-group member (mutates in
+    place). Default = dolny limit crowdingu (limit1) z rozmiaru podstawki
+    BAZOWEGO oddziału (ten sam anchor co znizka grupowa w rosters.py's
+    _classification_map), clamped do faktycznej liczebności członka.
+    Dołączeni bohaterowie dziedziczą limit bazowego oddziału, nie własny
+    base_size."""
+    anchor_limit1, _ = costs.base_size_melee_limits(getattr(anchor_unit, "base_size", None))
+    for member in group_members:
+        member_count = int(member.get("count") or 0)
+        member["melee_fighting_default"] = min(anchor_limit1, member_count) if member_count > 0 else 0
+
+
 def _army_rule_detail(army: models.Army | None) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     for entry in costs.army_rules(army=army):
@@ -402,6 +417,8 @@ def roster_battle_state(
             key=lambda h: getattr(h.get("instance"), "position", 0) or 0,
         )
         group_members = attached + [entry]
+        _apply_melee_fighting_defaults(getattr(ru, "unit", None), group_members)
+
         mode_set: set[str] = set()
         for member in group_members:
             for key in _mode_keys(member):

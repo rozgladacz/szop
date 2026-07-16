@@ -121,8 +121,13 @@
       const c = parseInt(w.count, 10);
       weaponCounts[key] = Number.isFinite(c) && c >= 0 ? c : 0;
     });
+    const meleeFightingDefault = parseInt(card.dataset.meleeFightingDefault || "0", 10) || 0;
     return {
       activeModels: initialModels,
+      // "Walczące modele" (rozmiar podstawki) — domyślnie limit1 z base_size
+      // bazowego oddziału (server-rendered), spadek do initialModels gdyby
+      // atrybut brakował/był 0 (nigdy nie chcemy 0 walczących modeli).
+      meleeFighting: meleeFightingDefault > 0 ? meleeFightingDefault : initialModels,
       weapons: weaponCounts,
       primaryOverrides: {},
       struckAbilities: [],
@@ -130,6 +135,41 @@
       withdrawn: {},
       eliminationMode: false,
     };
+  }
+
+  // Aktualna, wyklamrowana wartość "walczących modeli": [1, activeModels].
+  // Wołane przy każdym renderze (self-healing, jak inne defensywne mutacje
+  // stanu w renderUnit — patrz np. eliminated/withdrawn init w trybie „Modele").
+  function clampMeleeFighting(unitState) {
+    const max = Math.max(parseInt(unitState.activeModels, 10) || 0, 0);
+    if (max <= 0) return 0;
+    const raw = parseInt(unitState.meleeFighting, 10);
+    const value = Number.isFinite(raw) ? raw : max;
+    return Math.max(1, Math.min(value, max));
+  }
+
+  // Wybiera F "instancji" broni wręcz o najwyższym koszcie (F = walczące
+  // modele), przycinając activeCount każdego wpisu aż do wyczerpania budżetu.
+  // Koszt bierzemy z weapon.cost (server-rendered, SSOT — patrz
+  // _loadout_weapon_details w rosters.py); remisy wg oryginalnej kolejności
+  // (stabilny sort) dla determinizmu. Zwraca NOWE wpisy (nie mutuje `filtered`).
+  function selectTopMeleeInstances(filtered, budget) {
+    if (!Number.isFinite(budget) || budget <= 0) return [];
+    const ranked = filtered.map((entry, order) => {
+      const cost = parseFloat(entry.weapon.cost);
+      return { entry, cost: Number.isFinite(cost) ? cost : 0, order };
+    });
+    ranked.sort((a, b) => (b.cost - a.cost) || (a.order - b.order));
+    let remaining = budget;
+    const result = [];
+    ranked.forEach(({ entry }) => {
+      if (remaining <= 0) return;
+      const used = Math.min(entry.activeCount || 0, remaining);
+      if (used <= 0) return;
+      result.push(Object.assign({}, entry, { activeCount: used }));
+      remaining -= used;
+    });
+    return result;
   }
 
   // 2c: grupy wariantów modeli (oddziały komponowane) z data-collection-groups.
@@ -150,6 +190,19 @@
     g.className = "counter-group";
     [dec, valueSpan, totalSpan, inc].forEach((el) => g.appendChild(el));
     return g;
+  }
+
+  // Prosty przycisk licznika (−/+) o stałym wyglądzie — dla liczników bez
+  // warunkowego stylu (np. "Walczące modele"). Tryb Modele/Wyposażenie mają
+  // własne warianty (ikony/klasy zależne od trybu eliminacji lub primary
+  // toggle) i celowo NIE korzystają z tego helpera.
+  function counterButton(text, datasetKey, datasetValue) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-outline-secondary btn-sm counter-btn";
+    btn.textContent = text;
+    btn.dataset[datasetKey] = datasetValue;
+    return btn;
   }
 
   // 2d: klucze etykiet do auto-przekreślenia po eliminacji modelu (#4). Dla każdej
@@ -336,6 +389,35 @@
   function formatAttacks(value) {
     if (Math.abs(value - Math.round(value)) < 0.01) return String(Math.round(value));
     return value.toFixed(1);
+  }
+
+  // "Walczące modele" — licznik (−/wartość/+) jako pierwsza pozycja
+  // podsumowania trybu Wręcz. Nie modyfikuje unitState — wołający ustawia
+  // unitState.meleeFighting PRZED wywołaniem (renderUnit) i obsługuje mutację
+  // w event handlerach (data-melee-fighting-decrement/increment).
+  function renderMeleeFightingCounter(unitState, fighting) {
+    const row = document.createElement("div");
+    row.className = "attack-summary-row";
+
+    const dec = counterButton("−", "meleeFightingDecrement", "1");
+
+    const valueSpan = document.createElement("span");
+    valueSpan.className = "counter-value";
+    valueSpan.textContent = fighting;
+
+    const totalSpan = document.createElement("span");
+    totalSpan.className = "text-muted small";
+    totalSpan.textContent = "/ " + (unitState.activeModels || 0);
+
+    const inc = counterButton("+", "meleeFightingIncrement", "1");
+
+    const label = document.createElement("span");
+    label.className = "small text-muted ms-1";
+    label.textContent = "Walczące modele";
+
+    row.appendChild(counterGroup(dec, valueSpan, totalSpan, inc));
+    row.appendChild(label);
+    return row;
   }
 
   function disposeTooltipsIn(container) {
@@ -559,14 +641,26 @@
     filtered.forEach((entry) => { entry.activeCount = unitState.weapons[entry.key] || 0; });
 
     summary.classList.remove("d-none");
-    if (filtered.length === 0) {
+
+    // "Walczące modele" (tylko widok Wręcz, pomijane dla pojedynczego modelu)
+    // — pierwsza pozycja widoku; ogranicza podsumowanie do F najdroższych
+    // instancji broni wręcz (F = liczba walczących modeli).
+    let attackFiltered = filtered;
+    if (groupState.mode === "melee" && (unitState.activeModels || 0) > 1) {
+      const fighting = clampMeleeFighting(unitState);
+      unitState.meleeFighting = fighting;
+      summary.appendChild(renderMeleeFightingCounter(unitState, fighting));
+      attackFiltered = selectTopMeleeInstances(filtered, fighting);
+    }
+
+    if (attackFiltered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "text-muted small";
       empty.textContent = "Brak dostępnych ataków w tym trybie.";
       summary.appendChild(empty);
       return;
     }
-    const groups = groupAttacks(filtered);
+    const groups = groupAttacks(attackFiltered);
     groups.forEach((g) => {
       const row = document.createElement("div");
       row.className = "attack-summary-row";
@@ -735,6 +829,7 @@
       if (stored) {
         migrated.units[uid] = {
           activeModels: typeof stored.activeModels === "number" ? stored.activeModels : init.activeModels,
+          meleeFighting: typeof stored.meleeFighting === "number" ? stored.meleeFighting : init.meleeFighting,
           weapons: {},
           primaryOverrides: (stored.primaryOverrides && typeof stored.primaryOverrides === "object") ? stored.primaryOverrides : {},
           struckAbilities: Array.isArray(stored.struckAbilities) ? stored.struckAbilities : [],
@@ -790,6 +885,16 @@
         if (!state.groups[gid]) state.groups[gid] = groupInitialState();
       });
     }
+
+    // Backfill "walczące modele" for state saved before this field existed
+    // (existing unit entries, not just newly-added ones handled above).
+    cards.forEach((card) => {
+      const uid = card.dataset.rosterUnitId;
+      const us = state.units[uid];
+      if (us && typeof us.meleeFighting !== "number") {
+        us.meleeFighting = unitInitialState(card).meleeFighting;
+      }
+    });
 
     // Guard: ensure every group card has a valid state entry regardless of
     // migration path (handles stale localStorage with mismatched group IDs).
@@ -961,6 +1066,19 @@
             });
           }
           us.activeModels = newCount;
+          commit();
+          return;
+        }
+
+        // "Walczące modele" (widok Wręcz): [−]/[+] w granicach [1, activeModels].
+        if (target.matches("[data-melee-fighting-decrement]")) {
+          us.meleeFighting = Math.max(1, clampMeleeFighting(us) - 1);
+          commit();
+          return;
+        }
+        if (target.matches("[data-melee-fighting-increment]")) {
+          const max = Math.max(us.activeModels || 0, 0);
+          us.meleeFighting = Math.min(max, clampMeleeFighting(us) + 1);
           commit();
           return;
         }

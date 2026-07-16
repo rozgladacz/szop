@@ -44,11 +44,13 @@ from ._engine import (
     AP_LANCE,
     ARTILLERY_RANGE_BONUS,
     BASE_COST_FACTOR,
+    BASE_SIZE_MELEE_LIMITS,
     BLAST_MULTIPLIER,
     BRUTALNY_AP_COST,
     CAUTIOUS_HIT_BONUS,
     COST_ENGINE_VERSION,
     DEADLY_MULTIPLIER,
+    DEFAULT_BASE_SIZE,
     DEFENSE_ABILITY_MODIFIERS,
     DEFENSE_ABILITY_SLUGS,
     DEFENSE_BASE_VALUES,
@@ -62,6 +64,7 @@ from ._engine import (
     TRANSPORT_MULTIPLIERS,
     UNWIELDY_RANGE_PENALTY,
     WAAGH_AP_MODIFIER,
+    base_size_melee_limits,
 )
 
 # Dataclasses --------------------------------------------------------------
@@ -105,7 +108,7 @@ from ._engine import _weapon_cost
 # Usage:  monkeypatch.setattr(costs.weapons,       "_weapon_cost", fake)
 #         monkeypatch.setattr(costs._engine,        "ability_cost_from_name", fake)
 #         monkeypatch.setattr(costs._engine,        "compute_passive_state", fake)
-from . import _engine, weapons, abilities, passive_state, unit_helpers, roster, role_totals, quote  # noqa: F401
+from . import _engine, weapons, abilities, passive_state, unit_helpers, roster, role_totals, quote, crowding  # noqa: F401
 
 # Army / unit helpers & passive state --------------------------------------
 from ._engine import (
@@ -156,6 +159,13 @@ from ._engine import (
     roster_unit_role_totals,
 )
 
+# Melee crowding discount (base_size) ---------------------------------------
+from .crowding import (
+    crowded_melee_total,
+    melee_cost_per_model,
+    melee_crowding_factors,
+)
+
 # Roster-level aggregation -------------------------------------------------
 from ._engine import (
     ensure_cached_costs,
@@ -171,11 +181,13 @@ __all__ = [
     "AP_LANCE",
     "ARTILLERY_RANGE_BONUS",
     "BASE_COST_FACTOR",
+    "BASE_SIZE_MELEE_LIMITS",
     "BLAST_MULTIPLIER",
     "BRUTALNY_AP_COST",
     "CAUTIOUS_HIT_BONUS",
     "COST_ENGINE_VERSION",
     "DEADLY_MULTIPLIER",
+    "DEFAULT_BASE_SIZE",
     "DEFENSE_ABILITY_MODIFIERS",
     "DEFENSE_ABILITY_SLUGS",
     "DEFENSE_BASE_VALUES",
@@ -189,6 +201,7 @@ __all__ = [
     "TRANSPORT_MULTIPLIERS",
     "UNWIELDY_RANGE_PENALTY",
     "WAAGH_AP_MODIFIER",
+    "base_size_melee_limits",
     # dataclasses
     "AbilityCostComponents",
     "PassiveState",
@@ -241,6 +254,10 @@ __all__ = [
     # quote / role totals
     "calculate_roster_unit_quote",
     "roster_unit_role_totals",
+    # melee crowding discount (base_size)
+    "crowded_melee_total",
+    "melee_cost_per_model",
+    "melee_crowding_factors",
     # roster aggregation
     "ensure_cached_costs",
     "recalculate_roster_costs",

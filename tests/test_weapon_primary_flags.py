@@ -128,3 +128,66 @@ def test_apply_unit_form_data_sets_primary_flags_on_links():
     assert all(isinstance(link, models.UnitWeapon) for link in unit.weapon_links)
     assert [link.is_primary for link in unit.weapon_links] == [True, True]
     assert unit.default_weapon is weapon_a
+
+
+def _base_unit() -> models.Unit:
+    armory = models.Armory(name="Test Armory")
+    ruleset = models.RuleSet(name="Test Ruleset")
+    army = models.Army(name="Test Army", ruleset=ruleset, armory=armory)
+    return models.Unit(
+        name="Base", quality=4, defense=3, toughness=4, army=army, flags=""
+    )
+
+
+def test_apply_unit_form_data_sets_valid_base_size():
+    unit = _base_unit()
+    armies._apply_unit_form_data(
+        unit,
+        name="Test",
+        quality=4,
+        defense=3,
+        toughness=4,
+        base_size="duza",
+        passive_items=[],
+        active_items=[],
+        aura_items=[],
+        weapon_entries=[],
+        db=DummySession(),
+    )
+    assert unit.base_size == "duza"
+
+
+def test_apply_unit_form_data_rejects_invalid_base_size_keeps_existing():
+    unit = _base_unit()
+    unit.base_size = "mala"
+    armies._apply_unit_form_data(
+        unit,
+        name="Test",
+        quality=4,
+        defense=3,
+        toughness=4,
+        base_size="giant",  # not a known slug
+        passive_items=[],
+        active_items=[],
+        aura_items=[],
+        weapon_entries=[],
+        db=DummySession(),
+    )
+    assert unit.base_size == "mala"
+
+
+def test_apply_unit_form_data_missing_base_size_defaults_to_srednia():
+    unit = _base_unit()
+    armies._apply_unit_form_data(
+        unit,
+        name="Test",
+        quality=4,
+        defense=3,
+        toughness=4,
+        passive_items=[],
+        active_items=[],
+        aura_items=[],
+        weapon_entries=[],
+        db=DummySession(),
+    )
+    assert unit.base_size == "srednia"
