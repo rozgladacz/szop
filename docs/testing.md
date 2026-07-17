@@ -147,3 +147,24 @@ make rules-drift                # DOCX vs YAML → build/drift_report.md
 Po świadomej edycji source files: `python scripts/rules_sources_check.py --update` regeneruje `app/rulesets/v1/source_hashes.yaml`.
 
 Detale: [scripts/README.md](../scripts/README.md), [docs/adr/0006-pipeline-drift.md](adr/0006-pipeline-drift.md).
+
+## C2.2 — offline BM25 retrieval
+
+Korpus, pojedyncze wyszukiwanie i stały benchmark nie przyjmują ścieżek od
+klienta i nie korzystają z DB/HTTP:
+
+```bash
+make rag-corpus
+python -m mcp_server.search --query "pkt 14.d.i" --limit 5
+make rag-bm25-eval
+```
+
+`rag-bm25-eval` najpierw odtwarza gitignored `build/rag_corpus.jsonl`, a potem
+uruchamia top-5 dla dokładnie 30 rekordów `mcp_server/rag_evaluation.jsonl`.
+Hit wymaga zgodności istniejących `source`, `ref` i `anchor`; exit code jest
+niezerowy poniżej progu 70%. Baseline C2.2 z 2026-07-17: **24/30,
+recall@5 = 0,800**. Targeted suite:
+
+```bash
+python -X utf8 -m pytest tests/test_rag_corpus.py tests/test_rag_search.py -q
+```

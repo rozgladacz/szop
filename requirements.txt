@@ -18,6 +18,9 @@ python-dotenv==1.0.1
 # Lokalny serwer Model Context Protocol (stabilna linia v1)
 mcp>=1.27,<2
 
+# Lekki leksykalny retrieval offline (Strumień C — C2.2)
+rank-bm25==0.2.2
+
 # Deklaratywne reguły (Strumień A — feature toggle OPR_RULES_BACKEND)
 pydantic>=2.0,<3.0
 PyYAML>=6.0,<7.0

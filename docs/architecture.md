@@ -373,7 +373,26 @@ tolerancja 180–450 oraz atomowy blok do 400 słów. Manifest
 wykryte referencje i SHA-256 treści. `mcp_server/evaluation.py` waliduje stały
 30-rekordowy `rag_evaluation.jsonl` i wymaga pokrycia każdego
 `source`/`ref`/`anchor` przez korpus. To corpus-coverage gate, nie metryka
-retrievalu; embeddingi, vector store, BM25/hybrid i recall@5 pozostają poza C2.1.
+retrievalu; embeddingi, vector store i recall@5 pozostają poza C2.1.
+
+### Leksykalny retrieval BM25 C2.2 (2026-07-17)
+
+`mcp_server/search.py` buduje mały indeks `rank-bm25` bezpośrednio z publicznego
+`indexer.build_corpus()`. Deterministyczny tokenizer stosuje Unicode NFKD,
+case-folding, usuwanie znaków diakrytycznych i podział po interpunkcji. Pole
+indeksowane obejmuje treść oraz jawnie ważone metadane chunku: stałą nazwę
+źródła, nagłówki i referencje. Remisy zachowują kolejność korpusu C2.1.
+Publiczne `search(query, limit)` waliduje query do 200 znaków i limit 1–10,
+zwraca ograniczony tekst oraz skończony JSON-safe score. CLI przyjmuje wyłącznie
+`--query` i `--limit`; nie przyjmuje ścieżki indeksu ani źródła.
+
+`mcp_server/evaluation.py --retrieval` uruchamia top-5 dla każdego z dokładnie
+30 niezmienionych rekordów i uznaje hit tylko wtedy, gdy zwrócony chunk spełnia
+jednocześnie istniejące `expected.source`, `expected.ref` i `expected.anchor`.
+Zmierzony baseline C2.2 to **24/30, recall@5 = 0,800**. Jest to wyłącznie
+leksykalny slice offline: bez ORM/DB/HTTP, bez podpięcia do runtime MCP i bez
+wpływu na hot path aplikacji. MiniLM, `sqlite-vec`, dense+BM25 hybrid i pełny
+RAG pozostają osobnym, otwartym zakresem.
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 

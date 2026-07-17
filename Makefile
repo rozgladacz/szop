@@ -1,7 +1,7 @@
 
 .PHONY: dev test test-fast test-parity lint smoke check safe-edit profile \
         rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check \
-        rag-corpus rag-eval-check
+        rag-corpus rag-eval-check rag-bm25-eval
 
 # Force UTF-8 for every Python invocation in this Makefile.  Windows console
 # defaults to cp1250 which crashes any script that prints arrows or Polish
@@ -101,3 +101,8 @@ rag-corpus:
 
 rag-eval-check: rag-corpus
 	python -m mcp_server.evaluation
+
+# C2.2 — uczciwy leksykalny benchmark na stałych 30 pytaniach. Nadal bez
+# embeddingów, vector store i runtime MCP discovery.
+rag-bm25-eval: rag-corpus
+	python -m mcp_server.evaluation --retrieval

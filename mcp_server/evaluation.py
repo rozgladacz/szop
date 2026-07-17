@@ -10,9 +10,12 @@ from pathlib import Path
 from typing import Sequence
 
 from mcp_server.indexer import CANONICAL_SOURCES, CorpusChunk, build_corpus
+from mcp_server.search import search
 
 EVALUATION_PATH = Path(__file__).with_name("rag_evaluation.jsonl")
 EXPECTED_EVALUATION_COUNT = 30
+RETRIEVAL_LIMIT = 5
+MIN_RECALL_AT_5 = 0.70
 _EVALUATION_ID_RE = re.compile(r"^eval-(?:rules|abilities)-[0-9]{3}$")
 _ALLOWED_SOURCES = {source.filename for source in CANONICAL_SOURCES}
 
@@ -40,6 +43,22 @@ class CoverageReport:
     total: int
     covered: int
     sources: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RetrievalCaseResult:
+    case_id: str
+    hit: bool
+    rank: int | None
+    chunk_id: str | None
+
+
+@dataclass(frozen=True)
+class RetrievalReport:
+    total: int
+    hits: int
+    recall_at_5: float
+    cases: tuple[RetrievalCaseResult, ...]
 
 
 def parse_evaluation_jsonl(data: bytes) -> tuple[EvaluationCase, ...]:
@@ -93,12 +112,7 @@ def validate_evaluation(
 
     missing: list[str] = []
     for case in selected_cases:
-        if not any(
-            chunk.source == case.expected.source
-            and case.expected.ref in chunk.refs
-            and case.expected.anchor in chunk.text
-            for chunk in selected_chunks
-        ):
+        if not any(_matches_expected(chunk, case.expected) for chunk in selected_chunks):
             missing.append(case.case_id)
     if missing:
         raise EvaluationError(
@@ -108,6 +122,52 @@ def validate_evaluation(
         total=len(selected_cases),
         covered=len(selected_cases),
         sources=sources,
+    )
+
+
+def benchmark_retrieval(
+    cases: Sequence[EvaluationCase] | None = None,
+) -> RetrievalReport:
+    """Measure BM25 recall@5 against the fixed source/ref/anchor gold set."""
+    selected_cases = tuple(cases) if cases is not None else load_evaluation_cases()
+    chunks = build_corpus()
+    validate_evaluation(cases=selected_cases, chunks=chunks)
+    chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+
+    case_results: list[RetrievalCaseResult] = []
+    for case in selected_cases:
+        matched_rank: int | None = None
+        matched_chunk_id: str | None = None
+        for result in search(case.query, RETRIEVAL_LIMIT):
+            chunk = chunks_by_id[result["chunk_id"]]
+            if _matches_expected(chunk, case.expected):
+                matched_rank = result["rank"]
+                matched_chunk_id = chunk.chunk_id
+                break
+        case_results.append(
+            RetrievalCaseResult(
+                case_id=case.case_id,
+                hit=matched_rank is not None,
+                rank=matched_rank,
+                chunk_id=matched_chunk_id,
+            )
+        )
+
+    hits = sum(result.hit for result in case_results)
+    total = len(case_results)
+    return RetrievalReport(
+        total=total,
+        hits=hits,
+        recall_at_5=hits / total,
+        cases=tuple(case_results),
+    )
+
+
+def _matches_expected(chunk: CorpusChunk, expected: ExpectedAnchor) -> bool:
+    return (
+        chunk.source == expected.source
+        and expected.ref in chunk.refs
+        and expected.anchor in chunk.text
     )
 
 
@@ -142,12 +202,25 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Validate the fixed 30-question evaluation set against the C2.1 corpus.",
     )
-    parser.parse_args(argv)
+    parser.add_argument(
+        "--retrieval",
+        action="store_true",
+        help="also run the fixed 30-question BM25 recall@5 benchmark",
+    )
+    args = parser.parse_args(argv)
     report = validate_evaluation()
     print(
         f"Corpus coverage: {report.covered}/{report.total} anchors across "
         f"{len(report.sources)} canonical sources"
     )
+    if args.retrieval:
+        retrieval = benchmark_retrieval()
+        print(
+            f"BM25 retrieval: {retrieval.hits}/{retrieval.total} hits; "
+            f"recall@5={retrieval.recall_at_5:.3f}"
+        )
+        if retrieval.recall_at_5 < MIN_RECALL_AT_5:
+            return 1
     return 0
 
 

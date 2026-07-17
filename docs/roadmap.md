@@ -344,10 +344,19 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   anchorów. `make rag-corpus` + `make rag-eval-check`; offline, bez DB/ORM,
   dowolnych ścieżek, embeddingów i vector store. To corpus-coverage gate, nie
   deklaracja recall@5.
+- [x] **C2.2 deterministyczny leksykalny BM25 DONE 2026-07-17:**
+  `mcp_server/search.py` używa `rank-bm25` nad korpusem C2.1, indeksuje treść,
+  źródło, nagłówki i referencje po deterministycznym Unicode/case/diacritics
+  foldingu, waliduje publiczne `query`/`limit` i zwraca stabilne JSON-safe
+  top-k. Offline CLI: `python -m mcp_server.search --query ... --limit 5`.
+  `python -m mcp_server.evaluation --retrieval` oraz `make rag-bm25-eval`
+  mierzą niezmienione 30 rekordów wyłącznie po `source`/`ref`/`anchor`.
+  Rzeczywisty baseline: **24/30, recall@5 = 0,800**. To nie jest pełny RAG ani
+  runtime tool MCP; brak DB/ORM/HTTP i arbitralnych ścieżek.
 - [ ] Embeddingi `paraphrase-multilingual-MiniLM-L12-v2` i store w `sqlite-vec`
-- [ ] `mcp_server/search.py` — hybrid: dense + BM25 (`rank_bm25`)
+- [ ] Rozszerzenie `mcp_server/search.py` do dense+BM25 hybrid
 - [ ] `make reindex-rules` — rebuild vector store
-- [ ] Ewaluacja retrievalu: ≥70% recall@5 na kanonicznych 30 Q&A
+- [ ] Docelowa ewaluacja dense+BM25 hybrid na kanonicznych 30 Q&A
 - [ ] ADR-0022: sqlite-vec; ADR-0023: sentence-transformers offline
 
 ### C3. Narzędzia MCP (3 tyg)
