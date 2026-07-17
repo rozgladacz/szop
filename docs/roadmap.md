@@ -334,10 +334,20 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] ADR-0025: Rola agent + scoped tokens — **DONE 2026-06-28** (`docs/adr/0025-agent-scoped-tokens.md`, Accepted): spisuje zaimplementowaną infrastrukturę (rola `agent`, `AgentToken` z `token_hash`, scope JSON `*`/konkretny, `require_agent_scope`, audyt bez sekretów, owner-only endpointy).
 
 ### C2. RAG (3 tyg)
-- [ ] `mcp_server/indexer.py` — chunki ~300 słów / 50 overlap z DOCX; embed via `paraphrase-multilingual-MiniLM-L12-v2`; store w `sqlite-vec`
+- [x] **C2.1 deterministyczny korpus + kanoniczna ewaluacja DONE 2026-07-17:**
+  `mcp_server/indexer.py` czyta wyłącznie stałą allowlistę obu kanonicznych MD,
+  zachowuje granice punktów/sekcji, nagłówki i referencje, generuje stabilny
+  manifest JSONL (cel 300 słów, 50 overlap; jawna tolerancja 180–450) z ID i
+  SHA-256 do gitignored `build/`. `mcp_server/rag_evaluation.jsonl` zawiera
+  dokładnie 30 ręcznie sprawdzonych pytań obejmujących oba źródła, a
+  `mcp_server/evaluation.py` egzekwuje schemat, unikalność i pełne pokrycie
+  anchorów. `make rag-corpus` + `make rag-eval-check`; offline, bez DB/ORM,
+  dowolnych ścieżek, embeddingów i vector store. To corpus-coverage gate, nie
+  deklaracja recall@5.
+- [ ] Embeddingi `paraphrase-multilingual-MiniLM-L12-v2` i store w `sqlite-vec`
 - [ ] `mcp_server/search.py` — hybrid: dense + BM25 (`rank_bm25`)
 - [ ] `make reindex-rules` — rebuild vector store
-- [ ] Ewaluacja: ≥70% recall@5 na 30 ręcznych Q&A
+- [ ] Ewaluacja retrievalu: ≥70% recall@5 na kanonicznych 30 Q&A
 - [ ] ADR-0022: sqlite-vec; ADR-0023: sentence-transformers offline
 
 ### C3. Narzędzia MCP (3 tyg)

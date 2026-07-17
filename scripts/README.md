@@ -212,6 +212,34 @@ PR-ach modyfikujących `app/static/docs/**`, `app/rulesets/**`,
 `app/data/abilities.py` (path-filtered, zero overhead dla niepowiązanych
 zmian).
 
+### `make rag-corpus` / `make rag-eval-check` (C2.1)
+
+Offline'owy, deterministyczny etap przygotowania danych pod przyszły RAG.
+`mcp_server.indexer` czyta wyłącznie stałą allowlistę dwóch kanonicznych plików:
+`SZOP_Rozjemca.md` i `SZOP_Zdolnosci.md`. CLI nie przyjmuje ścieżki wejścia ani
+wyjścia. `make rag-corpus` zapisuje stabilny JSONL do
+`build/rag_corpus.jsonl`; `build/` jest gitignored i artefaktu nie commitujemy.
+
+```powershell
+python -m mcp_server.indexer
+python -m mcp_server.evaluation
+# albo łącznie (generacja + coverage gate):
+make rag-eval-check
+```
+
+Chunking używa granic pełnych punktów reguł i sekcji/nagłówków Markdown przed
+cięciem mechanicznym. Jawne parametry C2.1: cel 300 słów, dokładnie 50 słów
+overlapu po pierwszym chunku, tolerancja 180–450 słów i atomowy blok
+semantyczny do 400 słów. Słowo oznacza token rozdzielony białym znakiem.
+Każdy rekord zachowuje źródło, nagłówki, wykryte referencje, stabilne ID oraz
+SHA-256 treści; serializacja ma stabilne klucze, kolejność źródeł i LF.
+
+`mcp_server/rag_evaluation.jsonl` zawiera dokładnie 30 ręcznie sprawdzonych
+pytań z oczekiwanym źródłem, referencją i dosłownym anchorem. Validator
+sprawdza schemat, unikalność i pokrycie wszystkich anchorów w korpusie. Jest to
+wyłącznie corpus-coverage gate — nie mierzy jeszcze recall@5 i nie używa
+embeddingów, BM25, sqlite-vec ani bazy danych.
+
 ---
 
 ## Inne skrypty

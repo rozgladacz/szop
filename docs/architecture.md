@@ -359,6 +359,22 @@ embeddingów, semantycznego RAG i ogólnego executora; publiczne
 `HttpClient.take_action` nie jest
 tool-em MCP.
 
+### Deterministyczny korpus C2.1 (2026-07-17)
+
+`mcp_server/indexer.py` jest czystą, offline'ową warstwą przygotowania korpusu.
+Czyta tylko stałą allowlistę `SZOP_Rozjemca.md` + `SZOP_Zdolnosci.md`; publiczne
+funkcje i CLI nie przyjmują ścieżek źródłowych ani wyjściowych. Rozwiązanie nie
+importuje ORM/DB i nie jest podpięte do runtime MCP, HTTP ani hot path aplikacji.
+
+Chunking zachowuje pełne punkty reguł i sekcje Markdown jako preferowane
+granice semantyczne. Parametry są jawne: cel 300 słów, 50 słów overlapu,
+tolerancja 180–450 oraz atomowy blok do 400 słów. Manifest
+`build/rag_corpus.jsonl` ma stałą kolejność, stabilne ID, `source`, nagłówki,
+wykryte referencje i SHA-256 treści. `mcp_server/evaluation.py` waliduje stały
+30-rekordowy `rag_evaluation.jsonl` i wymaga pokrycia każdego
+`source`/`ref`/`anchor` przez korpus. To corpus-coverage gate, nie metryka
+retrievalu; embeddingi, vector store, BM25/hybrid i recall@5 pozostają poza C2.1.
+
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 
 **Headless-first (ADR-0013):** silnik nie zależy od prezentacji; UI/replay to opcjonalni konsumenci publicznego API + strumienia eventów. `battle_replay.py` to **skrypt-liść** renderujący event-log bitwy na czytelny tekst.

@@ -1,6 +1,7 @@
 
 .PHONY: dev test test-fast test-parity lint smoke check safe-edit profile \
-        rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check
+        rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check \
+        rag-corpus rag-eval-check
 
 # Force UTF-8 for every Python invocation in this Makefile.  Windows console
 # defaults to cp1250 which crashes any script that prints arrows or Polish
@@ -91,3 +92,12 @@ rules-classify:
 
 rules-sources-check:
 	python scripts/rules_sources_check.py
+
+# ---------------------------------------------------------------------------
+# Strumień C, C2.1 — deterministyczny korpus bez embeddingów/vector store.
+# Oba entry pointy mają stałe wejścia repozytoryjne i nie przyjmują ścieżek.
+rag-corpus:
+	python -m mcp_server.indexer
+
+rag-eval-check: rag-corpus
+	python -m mcp_server.evaluation

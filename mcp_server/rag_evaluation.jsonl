@@ -1,0 +1,30 @@
+{"id":"eval-rules-001","query":"Z ilu oddziałów i bohaterów składa się armia?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 2.a","anchor":"Armia składa się z 4–8 oddziałów oraz 1–4 bohaterów"}}
+{"id":"eval-rules-002","query":"Ile celów umieszcza się na polu bitwy?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 5.a","anchor":"Umieszczanych jest 5 celów."}}
+{"id":"eval-rules-003","query":"Po ilu rundach kończy się gra?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 5.g","anchor":"Gra kończy się po 4 rundach."}}
+{"id":"eval-rules-004","query":"Jaki modyfikator trafienia daje osłona?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 19","anchor":"atakujący otrzymuje −1 do trafienia"}}
+{"id":"eval-rules-005","query":"Ile akcji może wykonać oddział w jednej aktywacji?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 11.b.iv","anchor":"Oddział wykonał mniej niż dwie akcje w tej aktywacji."}}
+{"id":"eval-rules-006","query":"Czego nie wolno używać w rundzie rozstawienia?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 9.a","anchor":"Nie można korzystać ze zdolności aktywnych"}}
+{"id":"eval-rules-007","query":"Jaki jest podstawowy maksymalny dystans ruchu modelu?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 15.a","anchor":"Każdy model oddziału przesuwa się o maksymalnie 6″."}}
+{"id":"eval-rules-008","query":"Czy naturalna szóstka zawsze zdaje test?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 1.b","anchor":"Naturalna 6 zawsze jest sukcesem"}}
+{"id":"eval-rules-009","query":"Kiedy w rundzie sprawdza się kontrolę celów?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 8.c.ii","anchor":"Sprawdzamy kontrolę celów"}}
+{"id":"eval-rules-010","query":"Czy oddział Przyszpilony kontroluje cele?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 22.b.ii","anchor":"Oddział nie kontroluje celów"}}
+{"id":"eval-rules-011","query":"Co stan Przygotowany daje do obrony?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 22.c.i","anchor":"Oddział ma +1 do testów obrony"}}
+{"id":"eval-rules-012","query":"Kiedy niebezpieczny teren zadaje ranę?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 4.c.v","anchor":"Za każdą wyrzuconą 1 oddział otrzymuje ranę."}}
+{"id":"eval-rules-013","query":"Ile celów można wskazać podczas Szarży?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 14.d.i","anchor":"Oddział wskazuje od jednego do dwóch celów."}}
+{"id":"eval-rules-014","query":"Co się dzieje przy trzech porażkach Przegrupowania?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 20.f.iii","anchor":"trzy i więcej: oddział zostaje pokonany."}}
+{"id":"eval-rules-015","query":"Czy model Eliminowany może wrócić do gry?","expected":{"source":"SZOP_Rozjemca.md","ref":"pkt 27.c","anchor":"Model w lokalizacji Eliminowany NIE może wrócić do gry."}}
+{"id":"eval-abilities-001","query":"Co daje zdolność Bastion po kontrataku?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:1","anchor":"Nie zostajesz wyczerpany po kontrataku."}}
+{"id":"eval-abilities-002","query":"Jak działa Furia podczas szarży?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:7","anchor":"Podczas szarży naturalne 6 dają dodatkowe trafienie."}}
+{"id":"eval-abilities-003","query":"Kiedy Maskowanie zapewnia osłonę?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:12","anchor":"Ma osłonę, gdy jest dalej niż 3\" od wrogów."}}
+{"id":"eval-abilities-004","query":"Co umożliwia Niestrudzony?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:14","anchor":"Może wykonywać tę samą akcję wielokrotnie w aktywacji."}}
+{"id":"eval-abilities-005","query":"Do jakiej strefy pozwala wejść Rezerwa?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:27","anchor":"Jak zasadzka, ale tylko do twojej strefy rozstawienia."}}
+{"id":"eval-abilities-006","query":"Gdzie pozwala rozstawić oddział Zasadzka?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:39","anchor":"Podczas pierwszej rundy, zamiast normalnej aktywacji rozstaw w dowolnym miejscu."}}
+{"id":"eval-abilities-007","query":"Jak długo działa Klątwa użyta na wrogim oddziale?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:45","anchor":"Raz na rundę możesz przerwać, aby wrogi oddział w zasięgu 12\" od teraz do końca aktywacji"}}
+{"id":"eval-abilities-008","query":"Ile żetonów mocy może zgromadzić Mag(X)?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:47","anchor":"Otrzymuje X żetonów mocy na początku każdej rundy, do maksymalnie 2X."}}
+{"id":"eval-abilities-009","query":"Co robi Demoralizacja?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:51","anchor":"Raz na rundę możesz przerwać, aby wrogi oddział w zasięgu 12″ wykonał test Przegrupowania."}}
+{"id":"eval-abilities-010","query":"Jaki zasięg połączenia daje Radio?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:53","anchor":"może wybrać oddział sojuszniczy odległy do 24\", który też ma radio."}}
+{"id":"eval-abilities-011","query":"Jak AP(X) wpływa na obronę?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:55","anchor":"-X do rzutów na obronę przed trafieniami tą bronią."}}
+{"id":"eval-abilities-012","query":"Czy broń Niebezpośrednia wymaga linii wzroku?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:62","anchor":"Nie wymaga linii wzroku."}}
+{"id":"eval-abilities-013","query":"Jak Rozprysk(X) zmienia liczbę trafień?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:72","anchor":"Przed wykonaniem testów obrony liczba trafień jest mnożona przez X"}}
+{"id":"eval-abilities-014","query":"Jaki skutek dla powrotu modeli ma Zguba?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:76","anchor":"Modele pokonane przez przydzielenie pierwszych ran do tej liczby nie mogą wrócić do gry."}}
+{"id":"eval-abilities-015","query":"Ile razy w grze można użyć broni Zużywalnej?","expected":{"source":"SZOP_Zdolnosci.md","ref":"ability:77","anchor":"Można użyć tylko raz na grę."}}
