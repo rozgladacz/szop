@@ -300,8 +300,9 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   2026-07-15 + battle observation DONE 2026-07-15 + consent proposal DONE
   2026-07-16**: stabilny MCP
   Python SDK v1, konfiguracja `SZOP_API_URL` + redagowany `SZOP_API_TOKEN` oraz
-  cztery read-only tools (`simulate_engagement`, metadata/state/events bitwy)
-  oraz `propose_battle_action`. Serwer jest wyłącznie klientem publicznego API
+  sześć read-only tools (`simulate_engagement`, `lookup_rule`,
+  `explain_ability`, metadata/state/events bitwy) oraz
+  `propose_battle_action`. Serwer jest wyłącznie klientem publicznego API
   przez `szop_client.HttpClient`; bez ORM/DB, bezpośredniego `take_action`,
   resources/prompts, RAG i ogólnego executora. Publiczny
   `BattleStateCheckpoint` gwarantuje state+`sequence_at` z jednego GET; eventy
@@ -340,8 +341,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] ADR-0022: sqlite-vec; ADR-0023: sentence-transformers offline
 
 ### C3. Narzędzia MCP (3 tyg)
-- [x] `lookup_rule(query)` — **leaf-CLI (strukturalny) DONE 2026-06-29** (`scripts/lookup_rule.py`): parser hierarchicznej numeracji `SZOP_Rozjemca.md` (punkty 0–27, `N.`→`a.`→`i.`, myślniki 4. poziomu doklejane do rodzica) → resolver referencji `pkt X` (tekst punktu + kontekst rodzica + podpunkty) + wyszukiwanie słów kluczowych (fold akcentów, substring); `--list`/`--search`/`--limit`/`--json`/`--rules-file`, testy bez DB/sieci (stdlib only). Wspiera AGENTS [REQUIRED] #8 (cytuj `pkt X` ze źródła). **Pełny RAG semantyczny** (embeddingi nad DOCX, sqlite-vec) = C2, świadomie odłożony. Zdolności pokrywa `explain_ability`.
-- [x] `explain_ability(slug)` — **leaf-CLI DONE 2026-06-24** (`scripts/explain_ability.py`): strukturalny lookup po slug/nazwie PL z katalogu SSOT `app.data.abilities`, `--list`, `--type`, `--json`, testy bez DB. Wrapper MCP/HTTP pozostaje gated na C1/B4.
+- [x] `lookup_rule(query)` — **leaf-CLI DONE 2026-06-29 + public API/HttpClient/MCP DONE 2026-07-16**: wspólny parser `app.services.rule_lookup` obsługuje hierarchiczną numerację kanonicznego `SZOP_Rozjemca.md` (`N.`→`a.`→`i.`, myślniki 4. poziomu doklejane do rodzica), dokładny resolver `pkt X` oraz tekstowe wyszukiwanie z normalizacją polskich znaków. Publiczny `GET /rules/lookup`, `HttpClient.lookup_rule()` i MCP mają schemę `szop.lookup_rule/v1`, limit 1–10, query do 200 znaków, stałą etykietę źródła bez ścieżki systemowej i nie przyjmują pliku od klienta. CLI zachowuje `--list`/`--search`/`--limit`/`--json`/`--rules-file`, ale publiczna ścieżka zawsze używa SSOT. **Pełny RAG semantyczny** (embeddingi nad DOCX, sqlite-vec) = C2, świadomie odłożony.
+- [x] `explain_ability(slug)` — **leaf-CLI DONE 2026-06-24 + public API/HttpClient/MCP DONE 2026-07-16**: wspólna warstwa `app.services.ability_lookup` rozwiązuje slug/nazwę PL wyłącznie przez katalog SSOT `app.data.abilities`; publiczny `GET /abilities/explain`, `HttpClient.explain_ability()` i MCP zwracają `szop.explain_ability/v1`, nie dotykają DB i limitują query do 100 znaków. CLI zachowuje `--list`, `--type` i `--json`.
 - [x] `validate_loadout(payload)` — **leaf-CLI DONE 2026-06-26** (`scripts/validate_loadout.py`): read-only diff validator raw→normalized (odrzucone id / sklampowane count i `mode` / nierozpoznane passive) + koszt przez `calculate_roster_unit_quote`; reuse `normalize_roster_unit_loadout` SSOT; `--list`, `--loadout`/`--loadout-file`, `--count`, `--json`, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
 - [x] `find_exploit_candidates(army_id)` — **leaf-CLI DONE 2026-06-29** (`scripts/find_exploit_candidates.py`): turniej istniejących rozpisek jednej armii z DB (round-robin, każda para przez `simulate_engagement`/`LocalClient.simulate_roster_ids`) → ranking kandydatów do ręcznej weryfikacji wg `win_rate/points` (`wr/100pkt`, jak `exploit_hunt`); `--list`/`--json`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Nie generuje rozpisek i nie zapisuje wyników. Wrapper MCP/HTTP gated C1/B4.
 - [x] `score_list(roster_id)` — **leaf-CLI DONE 2026-06-27** (`scripts/score_list.py`): ocena rozpiski przez agregację symulacji vs POLE pozostałych rozpisek z DB (per-przeciwnik win-rate + „siła w polu" + sygnał koszt↔wynik); reuse pairingu `simulate_engagement` (`LocalClient.simulate_roster_ids`); `--list`/`--vs`/`--army`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Później interpretacja dedykowanego agenta. Wrapper MCP/HTTP gated C1/B4.

@@ -13,6 +13,9 @@ from mcp_server.config import McpConfig
 from szop_client import (
     HttpClient,
     HttpClientError,
+    MAX_ABILITY_QUERY_LENGTH,
+    MAX_RULE_QUERY_LENGTH,
+    MAX_RULE_RESULTS,
     battle_events_to_wire,
     battle_state_checkpoint_to_wire,
     ensure_json_safe,
@@ -22,6 +25,8 @@ MAX_SIMULATION_GAMES = 50
 TOOL_NAME = "simulate_engagement"
 TOOL_NAMES = (
     TOOL_NAME,
+    "lookup_rule",
+    "explain_ability",
     "get_battle_metadata",
     "get_battle_state",
     "get_battle_events",
@@ -46,6 +51,12 @@ GameCount = Annotated[
 Seed = Annotated[int, Field(strict=True)]
 NonEmptyName = Annotated[str, Field(min_length=1)]
 ProposalSummary = Annotated[str, Field(min_length=1, max_length=500)]
+RuleQuery = Annotated[str, Field(min_length=1, max_length=MAX_RULE_QUERY_LENGTH)]
+RuleLimit = Annotated[int, Field(strict=True, ge=1, le=MAX_RULE_RESULTS)]
+AbilityQuery = Annotated[
+    str,
+    Field(min_length=1, max_length=MAX_ABILITY_QUERY_LENGTH),
+]
 
 
 def _redact_error_message(message: str, bearer_token: str | None) -> str:
@@ -82,7 +93,7 @@ def create_server(
     *,
     client: HttpClient | None = None,
 ) -> FastMCP:
-    """Build the MCP server with the shipped observation and proposal tools."""
+    """Build the MCP server with the shipped knowledge, battle, and proposal tools."""
     settings = config or McpConfig.from_env()
     http_client = (
         client
@@ -95,8 +106,8 @@ def create_server(
     server = FastMCP(
         "SZOP",
         instructions=(
-            "Battle observation plus consent-gated action proposals backed by "
-            "the public SZOP HTTP API."
+            "Canonical rule and ability lookup, battle observation, and "
+            "consent-gated action proposals backed by the public SZOP HTTP API."
         ),
     )
 
@@ -134,6 +145,27 @@ def create_server(
             )
 
         return _run_safely(operation, bearer_token=settings.bearer_token)
+
+    @server.tool(name="lookup_rule")
+    def lookup_rule(
+        query: RuleQuery,
+        limit: RuleLimit = 5,
+    ) -> dict[str, Any]:
+        """Find canonical numbered rules by exact ``pkt X`` or folded text."""
+        return _run_safely(
+            lambda: ensure_json_safe(
+                http_client.lookup_rule(query, limit=limit)
+            ),
+            bearer_token=settings.bearer_token,
+        )
+
+    @server.tool(name="explain_ability")
+    def explain_ability(query: AbilityQuery) -> dict[str, Any]:
+        """Explain one canonical ability by slug or normalized Polish name."""
+        return _run_safely(
+            lambda: ensure_json_safe(http_client.explain_ability(query)),
+            bearer_token=settings.bearer_token,
+        )
 
     @server.tool(name="get_battle_metadata")
     def get_battle_metadata(battle_id: BattleId) -> dict[str, Any]:

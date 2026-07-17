@@ -9,8 +9,9 @@ Uruchom:
 
 Deliverable Strumienia C3 (`explain_ability(slug)` — roadmap „Narzędzia MCP",
 `docs/roadmap.md`) w formie **skryptu-liścia** (ADR-0013), równolegle do
-`simulate_engagement.py`/`exploit_hunt.py`/`battle_replay.py`. Pełna forma
-MCP-tool/HTTP czeka na serwer C1/B4.
+`simulate_engagement.py`/`exploit_hunt.py`/`battle_replay.py`. Publiczne API,
+`HttpClient` i MCP korzystają z tej samej warstwy
+`app.services.ability_lookup`.
 
 Źródło = katalog SSOT `app.data.abilities` (ten sam, którego używają warstwa
 kosztów i UI) — `find_definition`/`slug_for_name`/`definitions_by_type`/`to_dict`.
@@ -46,6 +47,10 @@ if str(_repo_root) not in sys.path:
 
 from app.data import abilities as ability_catalog  # noqa: E402
 from app.data.abilities import AbilityDefinition  # noqa: E402
+from app.services.ability_lookup import (  # noqa: E402
+    ability_to_json,
+    resolve_ability,
+)
 
 #: Czytelne etykiety PL typów zdolności (klucz = `AbilityDefinition.type`).
 TYPE_LABELS = {
@@ -64,31 +69,8 @@ def _type_label(ability_type: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Lookup (reuse katalogu SSOT)
-# ---------------------------------------------------------------------------
-
-
-def resolve_ability(text: str) -> AbilityDefinition | None:
-    """Znajduje zdolność po slug LUB nazwie PL (reuse `slug_for_name` SSOT).
-
-    `slug_for_name` normalizuje wejście (casefold, bez ogonków/myślników) i dopasowuje
-    do slug, nazwy oraz `display_name` — więc rozpoznaje `furia`, `Furia` i `Podwójny`
-    (wyświetlana nazwa broni o slug `rozrywajacy`). Zwraca `None` gdy brak dopasowania.
-    """
-    slug = ability_catalog.slug_for_name(text)
-    if slug is None:
-        return None
-    return ability_catalog.find_definition(slug)
-
-
-# ---------------------------------------------------------------------------
 # Render (czyste funkcje — testowalne bez I/O)
 # ---------------------------------------------------------------------------
-
-
-def ability_to_json(definition: AbilityDefinition) -> dict:
-    """Maszynowy rekord zdolności (reuse `catalog.to_dict` + flaga `blocked`)."""
-    return {**ability_catalog.to_dict(definition), "blocked": definition.blocked}
 
 
 def format_ability(definition: AbilityDefinition) -> str:

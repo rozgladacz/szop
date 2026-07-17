@@ -8,6 +8,7 @@ from . import (
     battles,
     export,
     export_xlsx,
+    reference,
     rosters,
     users,
 )
@@ -22,6 +23,7 @@ __all__ = [
     "battles",
     "export",
     "export_xlsx",
+    "reference",
     "rosters",
     "users",
 ]

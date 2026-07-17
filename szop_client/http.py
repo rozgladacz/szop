@@ -34,6 +34,17 @@ from szop_client.wire import validate_event_delta
 if TYPE_CHECKING:
     from szop_client.protocol import ContinuationFn
 
+RULE_LOOKUP_SCHEMA = "szop.lookup_rule/v1"
+ABILITY_EXPLANATION_SCHEMA = "szop.explain_ability/v1"
+REFERENCE_API_VERSION = 1
+RULE_SOURCE = "SZOP_Rozjemca.md"
+ABILITY_SOURCE = "app.data.abilities"
+MAX_RULE_QUERY_LENGTH = 200
+MAX_RULE_RESULTS = 10
+MAX_RULE_TEXT_LENGTH = 4000
+MAX_RULE_CHILDREN = 20
+MAX_ABILITY_QUERY_LENGTH = 100
+
 
 @dataclass(frozen=True, slots=True)
 class HttpRequest:
@@ -242,6 +253,47 @@ class HttpClient:
         """Return the participant-scoped current domain state of a battle."""
         return self.get_state_checkpoint(battle_id).state
 
+    def lookup_rule(self, query: str, *, limit: int = 5) -> dict[str, Any]:
+        """Look up canonical rule points through the public read-only API."""
+        normalized_query = _normalize_reference_query(
+            query,
+            max_length=MAX_RULE_QUERY_LENGTH,
+        )
+        if type(limit) is not int or not 1 <= limit <= MAX_RULE_RESULTS:
+            raise ValueError(
+                f"limit must be an int between 1 and {MAX_RULE_RESULTS}"
+            )
+        error_label = "GET rule lookup"
+        payload = self._get_json(
+            "/rules/lookup",
+            {"query": normalized_query, "limit": limit},
+            error_label=error_label,
+        )
+        return _rule_lookup_from_payload(
+            payload,
+            expected_query=normalized_query,
+            requested_limit=limit,
+            error_label=error_label,
+        )
+
+    def explain_ability(self, query: str) -> dict[str, Any]:
+        """Explain one canonical ability by slug or normalized display name."""
+        normalized_query = _normalize_reference_query(
+            query,
+            max_length=MAX_ABILITY_QUERY_LENGTH,
+        )
+        error_label = "GET ability explanation"
+        payload = self._get_json(
+            "/abilities/explain",
+            {"query": normalized_query},
+            error_label=error_label,
+        )
+        return _ability_explanation_from_payload(
+            payload,
+            expected_query=normalized_query,
+            error_label=error_label,
+        )
+
     def propose_battle_action(
         self,
         battle_id: int,
@@ -377,6 +429,219 @@ def _decode_json(body: bytes) -> Any:
         return json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HttpClientError("HTTP response body is not valid JSON") from exc
+
+
+def _normalize_reference_query(query: str, *, max_length: int) -> str:
+    if not isinstance(query, str):
+        raise ValueError("query must be a string")
+    normalized = query.strip()
+    if not normalized:
+        raise ValueError("query must not be empty")
+    if len(normalized) > max_length:
+        raise ValueError(f"query must contain at most {max_length} characters")
+    return normalized
+
+
+def _rule_lookup_from_payload(
+    payload: Any,
+    *,
+    expected_query: str,
+    requested_limit: int,
+    error_label: str,
+) -> dict[str, Any]:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        schema = _required_str(payload, "schema")
+        version = _required_int(payload, "version")
+        source = _required_str(payload, "source")
+        query = _required_str(payload, "query")
+        normalized_query = _bounded_required_str(
+            payload,
+            "normalized_query",
+            max_length=MAX_RULE_QUERY_LENGTH,
+        )
+        mode = _required_str(payload, "mode")
+        raw_matches = payload["matches"]
+        if (
+            schema != RULE_LOOKUP_SCHEMA
+            or version != REFERENCE_API_VERSION
+            or source != RULE_SOURCE
+            or query != expected_query
+            or mode not in {"reference", "search"}
+            or not isinstance(raw_matches, list)
+            or len(raw_matches) > requested_limit
+        ):
+            raise TypeError("rule lookup envelope")
+        matches = [
+            _rule_match_from_payload(item, mode=mode)
+            for item in raw_matches
+        ]
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
+    return {
+        "schema": schema,
+        "version": version,
+        "source": source,
+        "query": query,
+        "normalized_query": normalized_query,
+        "mode": mode,
+        "matches": matches,
+    }
+
+
+def _rule_match_from_payload(item: Any, *, mode: str) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        raise TypeError("rule match")
+    ref = _bounded_required_str(item, "ref", max_length=32)
+    text = _bounded_required_str(
+        item,
+        "text",
+        max_length=MAX_RULE_TEXT_LENGTH,
+        allow_empty=True,
+    )
+    parents = _rule_context_list(item["parents"], max_items=2)
+    children = _rule_context_list(
+        item["children"],
+        max_items=MAX_RULE_CHILDREN,
+    )
+    score = item["score"]
+    if mode == "reference":
+        if score is not None:
+            raise TypeError("reference score")
+    elif type(score) is not int or score < 1:
+        raise TypeError("search score")
+    return {
+        "ref": ref,
+        "text": text,
+        "parents": parents,
+        "children": children,
+        "score": score,
+    }
+
+
+def _rule_context_list(value: Any, *, max_items: int) -> list[dict[str, str]]:
+    if not isinstance(value, list) or len(value) > max_items:
+        raise TypeError("rule context")
+    contexts: list[dict[str, str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise TypeError("rule context")
+        contexts.append(
+            {
+                "ref": _bounded_required_str(item, "ref", max_length=32),
+                "text": _bounded_required_str(
+                    item,
+                    "text",
+                    max_length=MAX_RULE_TEXT_LENGTH,
+                    allow_empty=True,
+                ),
+            }
+        )
+    return contexts
+
+
+def _ability_explanation_from_payload(
+    payload: Any,
+    *,
+    expected_query: str,
+    error_label: str,
+) -> dict[str, Any]:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        schema = _required_str(payload, "schema")
+        version = _required_int(payload, "version")
+        source = _required_str(payload, "source")
+        query = _required_str(payload, "query")
+        if (
+            schema != ABILITY_EXPLANATION_SCHEMA
+            or version != REFERENCE_API_VERSION
+            or source != ABILITY_SOURCE
+            or query != expected_query
+        ):
+            raise TypeError("ability explanation envelope")
+        ability = _ability_from_payload(payload["ability"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
+    return {
+        "schema": schema,
+        "version": version,
+        "source": source,
+        "query": query,
+        "ability": ability,
+    }
+
+
+def _ability_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("ability")
+    value_label = _optional_bounded_str(payload, "value_label", max_length=100)
+    value_type = _optional_bounded_str(payload, "value_type", max_length=50)
+    requires_value = payload["requires_value"]
+    blocked = payload["blocked"]
+    raw_choices = payload["value_choices"]
+    if (
+        type(requires_value) is not bool
+        or type(blocked) is not bool
+        or not isinstance(raw_choices, list)
+        or len(raw_choices) > 50
+        or any(
+            not isinstance(choice, str) or len(choice) > 100
+            for choice in raw_choices
+        )
+    ):
+        raise TypeError("ability fields")
+    return {
+        "slug": _bounded_required_str(payload, "slug", max_length=100),
+        "name": _bounded_required_str(payload, "name", max_length=200),
+        "display_name": _bounded_required_str(
+            payload,
+            "display_name",
+            max_length=250,
+        ),
+        "type": _bounded_required_str(payload, "type", max_length=50),
+        "description": _bounded_required_str(
+            payload,
+            "description",
+            max_length=10_000,
+            allow_empty=True,
+        ),
+        "value_label": value_label,
+        "value_type": value_type,
+        "requires_value": requires_value,
+        "value_choices": list(raw_choices),
+        "blocked": blocked,
+    }
+
+
+def _bounded_required_str(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    max_length: int,
+    allow_empty: bool = False,
+) -> str:
+    value = _required_str(payload, key)
+    if len(value) > max_length or (not allow_empty and not value):
+        raise TypeError(key)
+    return value
+
+
+def _optional_bounded_str(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    max_length: int,
+) -> str | None:
+    value = payload[key]
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value or len(value) > max_length:
+        raise TypeError(key)
+    return value
 
 
 def _metadata_from_payload(

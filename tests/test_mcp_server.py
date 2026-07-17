@@ -15,6 +15,9 @@ from mcp.client.stdio import stdio_client
 from mcp.shared.memory import create_connected_server_and_client_session
 
 from app.routers import battles
+from app.services.ability_lookup import (
+    MAX_ABILITY_QUERY_LENGTH as API_ABILITY_QUERY_LENGTH,
+)
 from app.services.engine.action_codec import action_to_json
 from app.services.engine.actions import DefendAction
 from app.services.engine.events import EffectApplied, StatusAdded
@@ -28,8 +31,15 @@ from app.services.engine.state import (
     UnitBlob,
     WeaponProfile,
 )
+from app.services.rule_lookup import (
+    MAX_RULE_QUERY_LENGTH as API_RULE_QUERY_LENGTH,
+    MAX_RULE_RESULTS as API_RULE_RESULTS,
+)
 from mcp_server.config import McpConfig
 from mcp_server.server import (
+    MAX_ABILITY_QUERY_LENGTH,
+    MAX_RULE_QUERY_LENGTH,
+    MAX_RULE_RESULTS,
     MAX_SIMULATION_GAMES,
     TOOL_NAME,
     TOOL_NAMES,
@@ -119,7 +129,7 @@ def test_config_uses_local_default_and_rejects_empty_url_without_secret() -> Non
     assert RAW_TOKEN not in str(exc_info.value)
 
 
-def test_server_registers_exactly_the_five_consent_gated_tools() -> None:
+def test_server_registers_exactly_the_seven_public_api_tools() -> None:
     tools = asyncio.run(_list_tools(create_server(McpConfig("http://localhost"))))
 
     assert [tool.name for tool in tools.tools] == list(TOOL_NAMES)
@@ -239,6 +249,104 @@ def test_simulate_engagement_posts_public_api_request_and_returns_result() -> No
         "seed": 5,
         "map_name": "lustrzana_a",
     }
+
+
+def test_reference_tools_delegate_once_to_public_http_client() -> None:
+    client = Mock(spec=HttpClient)
+    client.lookup_rule.return_value = {
+        "schema": "szop.lookup_rule/v1",
+        "version": 1,
+        "source": "SZOP_Rozjemca.md",
+        "query": "pkt 14.d.iv",
+        "normalized_query": "14.d.iv",
+        "mode": "reference",
+        "matches": [
+            {
+                "ref": "14.d.iv",
+                "text": "Obrońca może wykonać kontratak.",
+                "parents": [],
+                "children": [],
+                "score": None,
+            }
+        ],
+    }
+    client.explain_ability.return_value = {
+        "schema": "szop.explain_ability/v1",
+        "version": 1,
+        "source": "app.data.abilities",
+        "query": "Podwojny",
+        "ability": {
+            "slug": "rozrywajacy",
+            "name": "Podwójny",
+            "display_name": "Podwójny",
+            "type": "weapon",
+            "description": "Naturalne 6 dają dodatkowe trafienie.",
+            "value_label": None,
+            "value_type": None,
+            "requires_value": False,
+            "value_choices": [],
+            "blocked": False,
+        },
+    }
+    server = create_server(McpConfig("http://localhost"), client=client)
+
+    rule_result = asyncio.run(
+        _call_tool(
+            server,
+            {"query": "pkt 14.d.iv", "limit": 3},
+            tool_name="lookup_rule",
+        )
+    )
+    ability_result = asyncio.run(
+        _call_tool(
+            server,
+            {"query": "Podwojny"},
+            tool_name="explain_ability",
+        )
+    )
+
+    client.lookup_rule.assert_called_once_with("pkt 14.d.iv", limit=3)
+    client.explain_ability.assert_called_once_with("Podwojny")
+    assert rule_result.structuredContent == client.lookup_rule.return_value
+    assert ability_result.structuredContent == client.explain_ability.return_value
+    json.dumps(rule_result.structuredContent, ensure_ascii=False, allow_nan=False)
+    json.dumps(ability_result.structuredContent, ensure_ascii=False, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    ("tool_name", "arguments", "method_name"),
+    [
+        ("lookup_rule", {"query": "", "limit": 1}, "lookup_rule"),
+        ("lookup_rule", {"query": "x" * 201, "limit": 1}, "lookup_rule"),
+        ("lookup_rule", {"query": "osłona", "limit": 0}, "lookup_rule"),
+        ("lookup_rule", {"query": "osłona", "limit": True}, "lookup_rule"),
+        ("explain_ability", {"query": ""}, "explain_ability"),
+        ("explain_ability", {"query": "x" * 101}, "explain_ability"),
+    ],
+)
+def test_reference_tools_reject_invalid_input_before_client_call(
+    tool_name: str,
+    arguments: dict[str, Any],
+    method_name: str,
+) -> None:
+    client = Mock(spec=HttpClient)
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name=tool_name,
+            raise_exceptions=False,
+        )
+    )
+
+    assert result.isError is True
+    getattr(client, method_name).assert_not_called()
+
+
+def test_reference_tool_limits_match_public_api_contract() -> None:
+    assert MAX_RULE_QUERY_LENGTH == API_RULE_QUERY_LENGTH
+    assert MAX_RULE_RESULTS == API_RULE_RESULTS
+    assert MAX_ABILITY_QUERY_LENGTH == API_ABILITY_QUERY_LENGTH
 
 
 @pytest.mark.parametrize(

@@ -19,9 +19,12 @@ kontrakt HTTP. Odczyt stanu wymaga także jednego spójnego checkpointu: stan i
    operacje domenowe deleguje do wstrzykniętego/publicznego
    `szop_client.HttpClient`; nie importuje ORM, modeli, `Session`, `app.db`,
    routerów ani własnego transportu HTTP.
-2. Powierzchnia obserwacyjna MCP zawiera dokładnie cztery read-only tools:
-   `simulate_engagement`, `get_battle_metadata`, `get_battle_state` i
-   `get_battle_events`. Addytywne `propose_battle_action` (ADR-0024) tworzy
+2. Powierzchnia MCP zawiera dokładnie sześć read-only tools:
+   `simulate_engagement`, `lookup_rule`, `explain_ability`,
+   `get_battle_metadata`, `get_battle_state` i `get_battle_events`.
+   Odczyty wiedzy korzystają z publicznych, wersjonowanych endpointów i nie
+   czytają plików ani katalogu zdolności w procesie MCP. Addytywne
+   `propose_battle_action` (ADR-0024) tworzy
    wyłącznie consent request przez publiczny API; nie wykonuje akcji i nie
    publikuje `take_action`. Brak resources i prompts.
 3. `HttpClient.get_state_checkpoint()` jest publicznym kontraktem jednego
@@ -42,6 +45,10 @@ kontrakt HTTP. Odczyt stanu wymaga także jednego spójnego checkpointu: stan i
 6. Błędy klienta zachowują znaczenie i status HTTP dla operatora, ale granica
    MCP redaguje bearer token oraz wartości nagłówka `Authorization`. Tokeny i
    sekretne payloady nie są logowane.
+7. `lookup_rule` i `explain_ability` delegują po jednym wywołaniu do
+   `HttpClient`. Backend czyta wyłącznie stały `SZOP_Rozjemca.md` oraz katalog
+   SSOT `app.data.abilities`; publiczny kontrakt nie przyjmuje ścieżki pliku,
+   ogranicza query i rozmiar odpowiedzi oraz zwraca logiczną etykietę źródła.
 
 ## Konsekwencje
 

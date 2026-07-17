@@ -505,8 +505,11 @@ i udostępnia dwa tryby: **resolver referencji** `pkt X` (zwraca dokładny tekst
 punktu + kontekst rodzica + podpunkty) oraz **wyszukiwanie słów kluczowych**
 (fold akcentów, substring — dla form odmienionych szukaj rdzenia, np. `osłon`).
 Wspiera workflow agentów (AGENTS [REQUIRED] #8 — cytuj `pkt X` ze źródła).
-Leaf-CLI dla roadmap C3; pełny RAG semantyczny nad DOCX to Strumień C2
-(odłożony). Zdolności mają osobne narzędzie (`explain_ability.py`).
+Leaf-CLI dla roadmap C3. Parser i resolver są współdzielone z publicznym
+`GET /rules/lookup`, `HttpClient.lookup_rule()` i narzędziem MCP. Publiczna
+ścieżka zawsze czyta kanoniczny `SZOP_Rozjemca.md` i nie przyjmuje
+`--rules-file`; pełny RAG semantyczny nad DOCX to Strumień C2 (odłożony).
+Zdolności mają osobne narzędzie (`explain_ability.py`).
 
 ```powershell
 python scripts/lookup_rule.py 14.d.iv
@@ -527,8 +530,9 @@ python scripts/lookup_rule.py 14.d.iv --json
 Strukturalny lookup zdolności po slug albo nazwie PL z katalogu SSOT
 `app.data.abilities` (ten sam katalog konsumowany przez koszty i UI). Zwraca
 nazwę, typ, opis, parametr `X`, dozwolone wartości i flagę `blocked`; nie
-parsuje ręcznie YAML i nie dotyka DB. To leaf-CLI dla roadmap C3; pełny
-MCP-tool/HTTP wrapper czeka na C1/B4.
+parsuje ręcznie YAML i nie dotyka DB. To leaf-CLI dla roadmap C3 korzystające
+z tej samej warstwy rozwiązywania nazw co publiczny `GET /abilities/explain`,
+`HttpClient.explain_ability()` i narzędzie MCP.
 
 ```powershell
 python scripts/explain_ability.py --list

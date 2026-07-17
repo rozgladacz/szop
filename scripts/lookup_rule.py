@@ -11,7 +11,8 @@ Uruchom:
 Deliverable Strumienia C3 (`lookup_rule(query)` — roadmap „Narzędzia MCP",
 `docs/roadmap.md`) w formie **skryptu-liścia** (ADR-0013), równolegle do
 `explain_ability.py`/`validate_loadout.py`/`simulate_engagement.py`/`score_list.py`/
-`find_exploit_candidates.py`. Pełna forma MCP-tool/HTTP czeka na serwer C1/B4.
+`find_exploit_candidates.py`. Publiczne API, `HttpClient` i MCP korzystają z
+tej samej implementacji parsera w `app.services.rule_lookup`.
 
 **Zakres MVP (strukturalny, bezzależnościowy):** parser hierarchicznej numeracji
 `SZOP_Rozjemca.md` (punkty 0–27, poziomy `N.` → `a.` → `i.`; myślnikowe
@@ -38,8 +39,6 @@ import os
 import pathlib
 import re
 import sys
-import unicodedata
-from dataclasses import dataclass, field
 from typing import Sequence
 
 # UTF-8 stdout (tekst reguł PL na Windows cp1250 — jak explain_ability.py).
@@ -54,154 +53,21 @@ _repo_root = pathlib.Path(__file__).resolve().parent.parent
 if str(_repo_root) not in sys.path:
     sys.path.insert(0, str(_repo_root))
 
-#: Domyślny plik źródłowy reguł przebiegu gry (SSOT silnika).
-DEFAULT_RULES_PATH = _repo_root / "app" / "static" / "docs" / "SZOP_Rozjemca.md"
-
-#: Schemat maszynowego wyjścia (`--json`).
-JSON_SCHEMA = "szop.lookup_rule/v1"
+from app.services.rule_lookup import (  # noqa: E402
+    DEFAULT_RULES_PATH,
+    RULE_LOOKUP_SCHEMA as JSON_SCHEMA,
+    RuleNode,
+    load_rules,
+    node_to_json,
+    normalize_ref,
+    parse_rules,
+    resolve_ref,
+    resolve_to_json,
+    search_rules,
+)
 
 #: Etykieta poziomu po liczbie kropek w referencji (do czytelnego renderu).
 _LEVEL_LABELS = ("punkt", "podpunkt", "podpunkt")
-
-# Linia punktu: po zdjęciu wiodących tabów — etykieta (cyfry albo litery, w tym
-# rzymskie zapisane małymi literami) + kropka + separator (tab lub spacja) + treść.
-_POINT_RE = re.compile(r"^([0-9]+|[a-z]+)\.[\t ]+(\S.*)$")
-
-
-@dataclass
-class RuleNode:
-    """Pojedynczy punkt reguł z kanoniczną referencją (np. ``14.d.iv``)."""
-
-    ref: str
-    label: str  # ostatni człon referencji (np. ``iv``)
-    text: str
-    parent_ref: str | None
-    depth: int  # 0 = punkt, 1 = podpunkt litera, 2 = podpunkt rzymski
-    children: list[str] = field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Parser (czysta funkcja — testowalna bez I/O)
-# ---------------------------------------------------------------------------
-
-
-def parse_rules(text: str) -> dict[str, RuleNode]:
-    """Parsuje markdown reguł na słownik ``ref -> RuleNode`` w kolejności dokumentu.
-
-    Wcięcie (liczba wiodących tabów) wyznacza poziom: 0 = punkt ``N.``,
-    1 = podpunkt ``a.``, 2 = podpunkt rzymski ``i.``. Linie głębsze (myślnikowe
-    podpunkty 4. poziomu) oraz wszystko, co nie zaczyna się od poprawnej etykiety,
-    traktujemy jako kontynuację tekstu bieżącego (najgłębszego) punktu — dzięki
-    czemu zwracany punkt jest kompletną jednostką logiczną. Słownik zachowuje
-    kolejność wstawiania (Python 3.7+) = kolejność dokumentu.
-    """
-    nodes: dict[str, RuleNode] = {}
-    last_top: str | None = None
-    last_letter_ref: str | None = None
-    current_ref: str | None = None
-
-    for raw in text.splitlines():
-        line = raw.rstrip()
-        if not line.strip():
-            continue
-        stripped = line.lstrip("\t")
-        depth = len(line) - len(stripped)
-        match = _POINT_RE.match(stripped)
-
-        # Linia bez poprawnej etykiety albo głębsza niż poziom rzymski (np.
-        # myślnik 11.b.iv) = kontynuacja tekstu bieżącego punktu.
-        if match is None or depth > 2:
-            if current_ref is not None:
-                node = nodes[current_ref]
-                cont = _clean_text(stripped)
-                node.text = f"{node.text}\n{cont}" if cont else node.text
-            continue
-
-        label, body = match.group(1), _clean_text(match.group(2))
-
-        if depth == 0:
-            ref = label
-            parent_ref = None
-            last_top = ref
-            last_letter_ref = None
-        elif depth == 1:
-            if last_top is None:
-                continue  # podpunkt bez punktu nadrzędnego — pomijamy defensywnie
-            ref = f"{last_top}.{label}"
-            parent_ref = last_top
-            last_letter_ref = ref
-        else:  # depth == 2
-            if last_letter_ref is None:
-                continue  # podpunkt rzymski bez litery nadrzędnej — pomijamy
-            ref = f"{last_letter_ref}.{label}"
-            parent_ref = last_letter_ref
-
-        nodes[ref] = RuleNode(
-            ref=ref, label=label, text=body, parent_ref=parent_ref, depth=depth
-        )
-        if parent_ref is not None and parent_ref in nodes:
-            nodes[parent_ref].children.append(ref)
-        current_ref = ref
-
-    return nodes
-
-
-def _clean_text(value: str) -> str:
-    """Normalizuje białe znaki w obrębie linii (taby wewnętrzne → spacja)."""
-    return re.sub(r"\s+", " ", value.replace("\t", " ")).strip()
-
-
-# ---------------------------------------------------------------------------
-# Resolver + wyszukiwanie (czyste funkcje)
-# ---------------------------------------------------------------------------
-
-
-def normalize_ref(query: str) -> str:
-    """Sprowadza wejście do kanonicznej referencji: ``pkt 14.D.IV`` → ``14.d.iv``."""
-    text = query.strip().casefold()
-    text = re.sub(r"^pkt\.?\s*", "", text)  # opcjonalny prefiks „pkt"
-    text = text.strip().strip(".")  # końcowa kropka, otaczające spacje
-    text = re.sub(r"\s+", "", text)  # „14. d . iv" → „14.d.iv" (defensywnie)
-    return text
-
-
-def resolve_ref(nodes: dict[str, RuleNode], query: str) -> RuleNode | None:
-    """Zwraca punkt o danej referencji (``14.d.iv``) albo ``None``."""
-    return nodes.get(normalize_ref(query))
-
-
-def _fold(value: str) -> str:
-    """Fold akcentów + casefold (NFKD, usuwa znaki łączące) do wyszukiwania."""
-    decomposed = unicodedata.normalize("NFKD", value)
-    without_marks = "".join(ch for ch in decomposed if not unicodedata.combining(ch))
-    return without_marks.casefold()
-
-
-def search_rules(
-    nodes: dict[str, RuleNode], query: str, *, limit: int = 10
-) -> list[tuple[RuleNode, int]]:
-    """Wyszukuje punkty zawierające WSZYSTKIE słowa zapytania (fold akcentów).
-
-    Wynik: lista ``(node, score)`` posortowana malejąco po liczbie wystąpień słów,
-    remisy rozstrzyga kolejność dokumentu. ``score`` = suma wystąpień wszystkich
-    tokenów zapytania w tekście punktu.
-    """
-    tokens = [_fold(t) for t in query.split() if t.strip()]
-    if not tokens:
-        return []
-
-    ordered = list(nodes.values())  # kolejność dokumentu
-    matches: list[tuple[int, int, RuleNode]] = []  # (−score, idx, node) do sortu
-    for idx, node in enumerate(ordered):
-        folded = _fold(node.text)
-        if not all(tok in folded for tok in tokens):
-            continue
-        score = sum(folded.count(tok) for tok in tokens)
-        matches.append((-score, idx, node))
-
-    matches.sort()
-    return [(node, -neg_score) for neg_score, _idx, node in matches[:limit]]
-
 
 # ---------------------------------------------------------------------------
 # Render (czyste funkcje — testowalne bez I/O)
@@ -212,30 +78,6 @@ def _snippet(text: str, *, width: int = 160) -> str:
     """Jednoliniowy skrót tekstu punktu do podglądu w liście/wyszukiwaniu."""
     flat = re.sub(r"\s+", " ", text).strip()
     return flat if len(flat) <= width else flat[: width - 1].rstrip() + "…"
-
-
-def node_to_json(node: RuleNode) -> dict:
-    """Maszynowy rekord pojedynczego punktu (bez kontekstu)."""
-    return {"ref": node.ref, "text": node.text, "children": list(node.children)}
-
-
-def resolve_to_json(nodes: dict[str, RuleNode], node: RuleNode) -> dict:
-    """Maszynowy rekord punktu z kontekstem (rodzice + podpunkty)."""
-    parents = []
-    parent_ref = node.parent_ref
-    while parent_ref is not None and parent_ref in nodes:
-        parent = nodes[parent_ref]
-        parents.append({"ref": parent.ref, "text": parent.text})
-        parent_ref = parent.parent_ref
-    parents.reverse()
-    children = [node_to_json(nodes[ref]) for ref in node.children if ref in nodes]
-    return {
-        "schema": JSON_SCHEMA,
-        "ref": node.ref,
-        "text": node.text,
-        "parents": parents,
-        "children": children,
-    }
 
 
 def format_resolved(nodes: dict[str, RuleNode], node: RuleNode) -> str:
@@ -294,11 +136,6 @@ def format_list(nodes: dict[str, RuleNode]) -> str:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
-
-
-def load_rules(path: pathlib.Path = DEFAULT_RULES_PATH) -> dict[str, RuleNode]:
-    """Wczytuje i parsuje plik reguł (UTF-8)."""
-    return parse_rules(path.read_text(encoding="utf-8"))
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:

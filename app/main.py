@@ -28,6 +28,7 @@ from .routers import (
     battles,
     export,
     export_xlsx,
+    reference,
     rosters,
     users,
 )
@@ -122,6 +123,7 @@ app.include_router(users.router)
 app.include_router(agent_tokens.router)
 app.include_router(agent_proposals.router)
 app.include_router(battles.router)
+app.include_router(reference.router)
 app.include_router(admin.router)
 
 

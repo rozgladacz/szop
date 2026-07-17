@@ -308,19 +308,36 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 | `types.py` | lekkie frozen typy `SimulationSummary` oraz `BattleStateCheckpoint` (`battle_id`, `sequence_at`, schema/version, domenowy state; adnotacja state bez runtime importu silnika/ORM) |
 | `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` z `deployment_zones` D5), re-eksportuje `SimulationSummary` dla kompatybilności |
 | `local.py` | `LocalClient(session=None, user_id=None)` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); **ścieżka DB** `simulate_roster_ids`/`create_battle_from_roster_ids` (wczytuje `Roster` po id, adapter ORM→engine, ownership-scoped); `UnknownBattleError`/`RosterNotFoundError` |
-| `http.py` | `HttpClient(base_url, token)` — metadane/eventy/state/create/simulate, `take_action` oraz consent-only `propose_battle_action`; publiczny `get_state_checkpoint()` dekoduje jeden spójny GET state+sequence, `get_state()` deleguje, a bezpośredni zapis używa tej samej metody bez cache (ADR-0054/0024) |
+| `http.py` | `HttpClient(base_url, token)` — metadane/eventy/state/create/simulate, publiczne odczyty reguł/zdolności, `take_action` oraz consent-only `propose_battle_action`; publiczny `get_state_checkpoint()` dekoduje jeden spójny GET state+sequence, `get_state()` deleguje, a bezpośredni zapis używa tej samej metody bez cache (ADR-0054/0024) |
 | `wire.py` | publiczne lekkie projekcje checkpointu/eventów do stabilnego JSON; walidują `sequence > since`, ścisłą kolejność i odrzucają NaN/Infinity przez `allow_nan=False` |
 
 `szop_client.__init__` ładuje publiczne symbole leniwie, więc konsument
 HTTP-only nie uruchamia importów `LocalClient`, kosztów, ORM ani konfiguracji DB.
 
-**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, pojedynczego `take_action` oraz `propose_battle_action`). Bezpośrednia akcja ma optimistic precondition pobierane świeżym GET-em, bez cache; propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia i obejmuje automatyczny koniec rundy wskazany przez engine. **Odłożone:** HTTP continuation/multi-action callback, interrupts, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, parity `HttpClient.take_action(..., continuation=None)` z `LocalClient`, DB-path, URL/header/error handling i ścisłe dekodowanie state/event delta/propozycji.
+**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, `lookup_rule`, `explain_ability`, pojedynczego `take_action` oraz `propose_battle_action`). Bezpośrednia akcja ma optimistic precondition pobierane świeżym GET-em, bez cache; propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia i obejmuje automatyczny koniec rundy wskazany przez engine. **Odłożone:** HTTP continuation/multi-action callback, interrupts, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, parity `HttpClient.take_action(..., continuation=None)` z `LocalClient`, DB-path, URL/header/error handling i ścisłe dekodowanie state/event delta/propozycji/odczytów wiedzy.
+
+## Publiczne odczyty reguł i zdolności (C3, 2026-07-16)
+
+Router `app/routers/reference.py` publikuje dwa endpointy bez mutacji i bez DB:
+`GET /rules/lookup` oraz `GET /abilities/explain`. Pierwszy korzysta wyłącznie
+z `app/services/rule_lookup.py`, który czyta stały kanoniczny
+`app/static/docs/SZOP_Rozjemca.md`; parametr ścieżki ani nazwy pliku nie jest
+częścią kontraktu. Drugi deleguje do `app/services/ability_lookup.py`, a ten do
+katalogu SSOT `app.data.abilities`. Te same serwisy są używane przez istniejące
+CLI, więc parser reguł i resolver zdolności nie mają alternatywnej implementacji.
+
+Oba kontrakty mają jawne schemy v1, identyfikują logiczne źródło bez ujawniania
+ścieżki systemowej i ograniczają query/rozmiar wyników. `HttpClient` dekoduje je
+ściśle, a MCP wykonuje dokładnie jedno wywołanie odpowiedniej metody klienta.
+Publiczne pliki reguł były już dostępne statycznie; endpointy nie wprowadzają
+nowego scope ani danych ownera.
 
 ## Lokalny serwer MCP — `mcp_server/` (C1/C3, 2026-07-15/16, ADR-0021/0024)
 
 `mcp_server/server.py` uruchamia stabilną linię v1 MCP Python SDK przez stdio i
-publikuje cztery read-only tools (`simulate_engagement`,
-`get_battle_metadata`, `get_battle_state`, `get_battle_events`) oraz jeden
+publikuje sześć read-only tools (`simulate_engagement`, `lookup_rule`,
+`explain_ability`, `get_battle_metadata`, `get_battle_state`,
+`get_battle_events`) oraz jeden
 consent-gated write request `propose_battle_action`. Każdy deleguje do
 odpowiadającej publicznej metody wstrzykniętego `HttpClient`; MCP nie ma
 alternatywnej ścieżki in-process, własnego transportu HTTP ani bezpośredniego
@@ -338,7 +355,8 @@ Token ma wyłączony `repr` i nie jest dołączany do komunikatów błędów/log
 trafia wyłącznie do nagłówka `Authorization` budowanego przez `HttpClient`.
 Granica błędów MCP redaguje też bearer/`Authorization`, zachowując status
 `HttpClientError`. Brak bezpośredniego write toola, resources/prompts, RAG,
-embeddingów i ogólnego executora; publiczne `HttpClient.take_action` nie jest
+embeddingów, semantycznego RAG i ogólnego executora; publiczne
+`HttpClient.take_action` nie jest
 tool-em MCP.
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)

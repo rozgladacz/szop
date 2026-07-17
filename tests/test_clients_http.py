@@ -34,6 +34,7 @@ from szop_client import (
     BattleStateCheckpoint,
     HttpClient,
     HttpClientError,
+    HttpClientTransportError,
     HttpRequest,
     HttpResponse,
     LocalClient,
@@ -63,6 +64,211 @@ def _battle_public_payload(battle_id: int) -> dict:
         "status": "active",
         "latest_sequence": 4,
     }
+
+
+def _rule_lookup_payload() -> dict:
+    return {
+        "schema": "szop.lookup_rule/v1",
+        "version": 1,
+        "source": "SZOP_Rozjemca.md",
+        "query": "osłona",
+        "normalized_query": "oslona",
+        "mode": "search",
+        "matches": [
+            {
+                "ref": "19",
+                "text": "Osłona zmienia test trafienia.",
+                "parents": [],
+                "children": [],
+                "score": 1,
+            }
+        ],
+    }
+
+
+def _ability_explanation_payload() -> dict:
+    return {
+        "schema": "szop.explain_ability/v1",
+        "version": 1,
+        "source": "app.data.abilities",
+        "query": "Podwojny",
+        "ability": {
+            "slug": "rozrywajacy",
+            "name": "Podwójny",
+            "display_name": "Podwójny",
+            "type": "weapon",
+            "description": "Naturalne 6 dają dodatkowe trafienie.",
+            "value_label": None,
+            "value_type": None,
+            "requires_value": False,
+            "value_choices": [],
+            "blocked": False,
+        },
+    }
+
+
+def test_lookup_rule_gets_encoded_query_and_returns_validated_contract() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_rule_lookup_payload())
+
+    payload = HttpClient(
+        "https://szop.example/api/",
+        token="raw-token",
+        transport=transport,
+    ).lookup_rule("  osłona  ", limit=1)
+
+    assert payload == _rule_lookup_payload()
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "GET"
+    assert (
+        request.url
+        == "https://szop.example/api/rules/lookup?query=os%C5%82ona&limit=1"
+    )
+    assert request.headers["Authorization"] == "Bearer raw-token"
+    assert request.body is None
+
+
+def test_explain_ability_gets_encoded_name_and_returns_validated_contract() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_ability_explanation_payload())
+
+    payload = HttpClient(
+        "https://szop.example/api",
+        transport=transport,
+    ).explain_ability("Podwojny")
+
+    assert payload == _ability_explanation_payload()
+    assert seen[0].method == "GET"
+    assert (
+        seen[0].url
+        == "https://szop.example/api/abilities/explain?query=Podwojny"
+    )
+
+
+@pytest.mark.parametrize(
+    ("method_name", "args", "kwargs"),
+    [
+        ("lookup_rule", ("",), {}),
+        ("lookup_rule", ("   ",), {}),
+        ("lookup_rule", ("x" * 201,), {}),
+        ("lookup_rule", ("osłona",), {"limit": True}),
+        ("lookup_rule", ("osłona",), {"limit": 0}),
+        ("lookup_rule", ("osłona",), {"limit": 11}),
+        ("explain_ability", ("",), {}),
+        ("explain_ability", ("x" * 101,), {}),
+    ],
+)
+def test_reference_methods_reject_invalid_input_before_transport(
+    method_name: str,
+    args: tuple,
+    kwargs: dict,
+) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    client = HttpClient("http://localhost", transport=transport)
+    with pytest.raises(ValueError):
+        getattr(client, method_name)(*args, **kwargs)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(schema="wrong"),
+        lambda payload: payload.update(version=True),
+        lambda payload: payload.update(source=r"C:\secret\rules.md"),
+        lambda payload: payload.update(query="different"),
+        lambda payload: payload.update(mode="semantic"),
+        lambda payload: payload.update(matches="bad"),
+        lambda payload: payload["matches"][0].update(score=None),
+        lambda payload: payload["matches"][0].update(text="x" * 4001),
+        lambda payload: payload["matches"][0].update(parents=[{}]),
+    ],
+)
+def test_lookup_rule_rejects_malformed_payload(mutation) -> None:
+    payload = _rule_lookup_payload()
+    mutation(payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(
+        HttpClientError,
+        match="GET rule lookup returned malformed payload",
+    ):
+        HttpClient("http://localhost", transport=transport).lookup_rule(
+            "osłona",
+            limit=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(schema="wrong"),
+        lambda payload: payload.update(version="1"),
+        lambda payload: payload.update(source="/tmp/abilities.py"),
+        lambda payload: payload.update(query="different"),
+        lambda payload: payload.update(ability=[]),
+        lambda payload: payload["ability"].update(slug=""),
+        lambda payload: payload["ability"].update(requires_value=1),
+        lambda payload: payload["ability"].update(value_choices=[1]),
+        lambda payload: payload["ability"].pop("description"),
+    ],
+)
+def test_explain_ability_rejects_malformed_payload(mutation) -> None:
+    payload = _ability_explanation_payload()
+    mutation(payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(
+        HttpClientError,
+        match="GET ability explanation returned malformed payload",
+    ):
+        HttpClient("http://localhost", transport=transport).explain_ability(
+            "Podwojny"
+        )
+
+
+@pytest.mark.parametrize("method_name", ["lookup_rule", "explain_ability"])
+def test_reference_methods_reject_invalid_json(method_name: str) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return HttpResponse(status_code=200, body=b"{not-json")
+
+    client = HttpClient("http://localhost", transport=transport)
+    with pytest.raises(HttpClientError, match="not valid JSON"):
+        getattr(client, method_name)("osłona")
+
+
+@pytest.mark.parametrize("method_name", ["lookup_rule", "explain_ability"])
+def test_reference_methods_preserve_transport_error(method_name: str) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise HttpClientTransportError("HTTP transport failed: offline")
+
+    client = HttpClient("http://localhost", transport=transport)
+    with pytest.raises(HttpClientTransportError, match="offline"):
+        getattr(client, method_name)("osłona")
+
+
+@pytest.mark.parametrize("method_name", ["lookup_rule", "explain_ability"])
+def test_reference_methods_preserve_http_error_status(method_name: str) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return HttpResponse(status_code=404, body=b'{"detail":"missing"}')
+
+    client = HttpClient("http://localhost", transport=transport)
+    with pytest.raises(HttpClientError) as exc_info:
+        getattr(client, method_name)("osłona")
+
+    assert exc_info.value.status_code == 404
 
 
 def test_create_battle_posts_rosters_and_returns_metadata() -> None:
