@@ -118,6 +118,21 @@ Przed analizą backendu **ustal pełną ścieżkę wywołania:** JS event → fe
 - Windows fallback: `python -X utf8 -m pytest -x --tb=short -q`
 - Windows/Codex fallback gdy `python` nie jest w PATH: `.\.venv\Scripts\python.exe -X utf8 -m pytest -x --tb=short -q`
 
+## B5.1 — real-transport parity klientów gry
+
+`tests/test_clients_parity.py` używa seeded SQLite in-memory (`StaticPool`) i
+rzeczywistego routera FastAPI z auth bearer. Mały adapter przekazuje publiczne
+`HttpRequest` klienta HTTP do `TestClient` i zwraca `HttpResponse`; routery,
+serwisy, adapter ORM, codeki i decodery nie są mockowane. Gate porównuje pełny
+`SimulationSummary` dla dwóch szybkich botów, dwóch map, `n=1`/`n>1` i dwóch
+seedów, a w osobnym świeżym świecie kanoniczny stan, checkpoint sequence oraz
+eventy create/read/jednej akcji. Pokrywa też powtarzalność, brak domenowych
+zapisów po simulate, no-oracle i odrzucenie HTTP continuation przed transportem.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_parity.py tests/test_clients_local.py tests/test_clients_http.py tests/test_battles_router.py tests/test_engine_regression.py tests/test_engine_persistence.py tests/test_engine_checkpoints.py tests/test_engine_action_codec.py tests/test_engine_multi_action.py tests/test_battle_action_proposals.py
+```
+
 ## A4 drift pipeline — `make rules-check`
 
 Orchestrator pipeline'u drift detection (ADR-0006). Uruchamia 5 skryptów sekwencyjnie z fail-fast:

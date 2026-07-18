@@ -330,6 +330,13 @@ HTTP-only nie uruchamia importów `LocalClient`, kosztów, ORM ani konfiguracji 
 
 **Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, `lookup_rule`, `search_rules`, `explain_ability`, `validate_loadout`, `score_list`, `find_exploit_candidates`, pojedynczego `take_action` oraz `propose_battle_action`). `search_rules` używa jednego POST i lokalnego timeoutu co najmniej 30 s; `score_list` oraz `find_exploit_candidates` używają po jednym POST i lokalnego timeoutu 120 s dla limitowanego workloadu do 50 gier; `validate_loadout` używa globalnego timeoutu. Bezpośrednia akcja ma optimistic precondition pobierane świeżym GET-em, bez cache; propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia i obejmuje automatyczny koniec rundy wskazany przez engine. **Odłożone:** HTTP continuation/multi-action callback, interrupts, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, parity `HttpClient.take_action(..., continuation=None)` z `LocalClient`, DB-path, URL/header/error handling i ścisłe dekodowanie state/event delta/propozycji/odczytów wiedzy.
 
+Integracyjny gate `tests/test_clients_parity.py` przechodzi przez rzeczywisty
+FastAPI auth/router/serializację i transport `TestClient`, z bearerem obejmującym
+scope create/read/act/simulate. Seeded SQLite `StaticPool` jest odrębnym,
+in-memory światem bez `data/szop.db`; produkcyjne adaptery rosterów, mapy, factory
+graczy i codeki pozostają SSOT. Gate porównuje pełne summary symulacji oraz
+kanoniczne state/event sequence po create/read/jednej akcji, a także no-oracle.
+
 ## Publiczne odczyty reguł i zdolności (C3, 2026-07-16)
 
 Router `app/routers/reference.py` publikuje dwa endpointy bez mutacji i bez DB:
