@@ -280,8 +280,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 
 ### B6. Prezentacja (opcjonalne, 3–4 tyg) — **CLI replay slice DONE 2026-06-15** (wątek `faza-b-6-replay`, ADR-0013)
 - [x] `scripts/battle_replay.py` — CLI terminal output: narracja PL per event (16 typów), grupowanie w rundy (delimiter `RoundEnded`), podsumowanie (wynik celów pkt 5.f + rozkład typów + zwycięzca). Rdzeń = czyste funkcje (`format_event`/`render_battle_log`, bez I/O). Dwa źródła: `--fixture`/`--map` (reuse `balance_simulate` SSOT + `simulate_from_rosters`, ADR-0032) oraz `--from-db <id>` (`persistence.load_events`, ADR-0050, read-only). Render z samego event-logu (bez rekonstrukcji stanu — jednolite dla obu trybów). 16 testów. Skrypt-liść (zero zmian w rdzeniu). **Odłożone:** bogatszy widok stanu (po N-tym evencie via `apply_events`) — narracja per-event wystarcza MVP.
-- [ ] SSE stream `GET /battles/{id}/events` — polling B4 read endpoint DONE
-  2026-07-02; prawdziwy stream SSE nadal otwarty
+- [x] SSE stream `GET /battles/{id}/events` — **DONE 2026-07-19 (B6.1)**:
+  ta sama participant-scoped trasa negocjuje `text/event-stream` przez `Accept`,
+  zachowując bez zmian JSON polling. Wznawianie używa `since`/`Last-Event-ID`,
+  backlog jest czytany bounded batchami, idle emituje keep-alive, `finished`
+  kończy stream, a krótkie sesje per poll respektują production i testowy
+  `get_db`. Auth/no-oracle/audit obowiązują przy zestawieniu połączenia; koszt
+  polla to 1 SELECT z eventami i najwyżej 2 na idle/terminal check.
 - [ ] `app/static/js/modules/battle_canvas.js` — minimalny 2D canvas (Konva.js lub goły Canvas)
 - [x] ADR-0013: Engine headless-first, UI opcjonalne (Accepted)
 

@@ -490,6 +490,30 @@ def test_load_since_filter() -> None:
     assert [e.sequence for e in tail] == [4, 5]
 
 
+def test_load_events_optional_limit_returns_bounded_ordered_prefix() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    events = [
+        StatusAdded(sequence=i, target_id=i, status="Aktywowany")
+        for i in range(1, 6)
+    ]
+    save_events(session, battle.id, events)
+    session.commit()
+
+    assert load_events(session, battle.id, limit=2) == events[:2]
+    assert load_events(session, battle.id, since=2, limit=2) == events[2:4]
+    assert load_events(session, battle.id) == events
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5])
+def test_load_events_rejects_invalid_limit(limit) -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+
+    with pytest.raises(ValueError, match="limit must be a positive integer"):
+        load_events(session, battle.id, limit=limit)
+
+
 def test_load_empty_battle_returns_empty() -> None:
     session = _build_session()
     battle = _new_battle(session)

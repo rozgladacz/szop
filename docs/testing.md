@@ -133,6 +133,20 @@ zapisów po simulate, no-oracle i odrzucenie HTTP continuation przed transportem
 .\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_parity.py tests/test_clients_local.py tests/test_clients_http.py tests/test_battles_router.py tests/test_engine_regression.py tests/test_engine_persistence.py tests/test_engine_checkpoints.py tests/test_engine_action_codec.py tests/test_engine_multi_action.py tests/test_battle_action_proposals.py
 ```
 
+## B6.1 — uwierzytelniony, wznawialny stream SSE eventów bitwy
+
+`tests/test_battle_event_stream.py` łączy realny `FastAPI TestClient` dla
+zakończonych streamów i auth/headers z deterministycznymi testami serwisu dla
+aktywnego follow. Wstrzykiwany sleeper/clock eliminuje rzeczywiste oczekiwanie.
+Gate obejmuje parity JSON, dokładne ramki UTF-8, cursory `since`/
+`Last-Event-ID`, keep-alive/disconnect, terminal close, lifecycle krótkich sesji,
+testowy `get_db` override, audit/no-oracle oraz koszt SQL: 1 SELECT z eventami,
+maksymalnie 2 na idle/terminal poll.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_battle_event_stream.py tests/test_battles_router.py tests/test_engine_persistence.py tests/test_clients_http.py tests/test_clients_parity.py tests/test_battle_action_proposals.py
+```
+
 ## A4 drift pipeline — `make rules-check`
 
 Orchestrator pipeline'u drift detection (ADR-0006). Uruchamia 5 skryptów sekwencyjnie z fail-fast:

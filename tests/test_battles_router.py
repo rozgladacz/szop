@@ -729,6 +729,7 @@ def test_get_battle_events_returns_owner_scoped_event_log_with_since_filter() ->
 
     response = battles.get_battle_events(
         battle.id,
+        request=_fake_request(token=None, battle_id=battle.id),
         since=1,
         db=session,
         reader=battles.BattleReader(user_id=owner.id),
@@ -750,6 +751,7 @@ def test_get_battle_events_rejects_non_participant_and_missing_battle() -> None:
     with pytest.raises(HTTPException) as stranger_info:
         battles.get_battle_events(
             battle.id,
+            request=_fake_request(token=None, battle_id=battle.id),
             db=session,
             reader=battles.BattleReader(user_id=stranger.id),
         )
@@ -758,6 +760,7 @@ def test_get_battle_events_rejects_non_participant_and_missing_battle() -> None:
     with pytest.raises(HTTPException) as missing_info:
         battles.get_battle_events(
             battle.id + 999,
+            request=_fake_request(token=None, battle_id=battle.id + 999),
             db=session,
             reader=battles.BattleReader(user_id=owner.id),
         )
@@ -1005,7 +1008,12 @@ def test_agent_reader_cannot_read_battle_owned_by_other_user() -> None:
         current_user=None,
     )
     with pytest.raises(HTTPException) as exc_info:
-        battles.get_battle_events(battle.id, db=session, reader=reader)
+        battles.get_battle_events(
+            battle.id,
+            request=_fake_request(token=None, battle_id=battle.id),
+            db=session,
+            reader=reader,
+        )
 
     assert exc_info.value.status_code == 404
 

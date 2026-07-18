@@ -182,6 +182,8 @@ def load_events(
     session: "Session",
     battle_id: int,
     since: int = 0,
+    *,
+    limit: int | None = None,
 ) -> list[EngineEvent]:
     """Odczytuje eventy bitwy w kolejności `sequence`, rekonstruując dataclassy.
 
@@ -190,6 +192,8 @@ def load_events(
         battle_id: id bitwy.
         since: zwraca tylko eventy z `sequence > since` (0 = wszystkie). Dla
             inkrementalnego pollingu (B4 `GET /battles/{id}/events?since=N`).
+        limit: opcjonalny maksymalny rozmiar batcha. `None` zachowuje historyczne
+            zachowanie bez limitu.
 
     Returns:
         Lista `events.BattleEvent` (dataclassy) posortowana rosnąco po
@@ -199,14 +203,20 @@ def load_events(
 
     from app.models import BattleEvent as BattleEventRow
 
-    rows = session.execute(
+    if limit is not None and (type(limit) is not int or limit < 1):
+        raise ValueError("limit must be a positive integer or None")
+
+    statement = (
         select(BattleEventRow)
         .where(
             BattleEventRow.battle_id == battle_id,
             BattleEventRow.sequence > since,
         )
         .order_by(BattleEventRow.sequence)
-    ).scalars().all()
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
+    rows = session.execute(statement).scalars().all()
 
     return [json_to_event(json.loads(row.payload_json)) for row in rows]
 

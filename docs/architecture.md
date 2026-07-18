@@ -74,6 +74,23 @@ domenowy `BattleState` przez bezpieczny wersjonowany codec, a `simulate_roster_i
 odpytuje sandbox simulation i zwraca `SimulationSummary`. Lokalny
 `mcp_server` jest klientem tego samego publicznego API: nie importuje ORM,
 `SessionLocal` ani `app.db` i nie czyta `data/szop.db`.
+
+**B6.1 SSE na tej samej trasie:** `Accept` obejmujący `text/event-stream`
+przełącza `GET /battles/{id}/events` na wznawialny stream; brak tego media type
+nadal zwraca niezmieniony `BattleEventsPublic` JSON (`since` domyślnie 0).
+Cursor SSE pochodzi z `since` albo dziesiętnego `Last-Event-ID`; jawnie podane,
+różne wartości dają 400, a eventy mają zawsze `sequence > cursor`. Każda ramka
+ma `id`, `event: battle_event` i jedno kompaktowe, ścisłe JSON `data` z tej samej
+projekcji `BattleEventPublic`; idle emituje komentarz keep-alive. Backlog jest
+czytany batchami po 100: poll z eventami wykonuje 1 SELECT, idle/terminal check
+maksymalnie 2, bez zapytań per event. Requestowa sesja auth/access jest zamykana
+przed wysyłaniem body; stream tworzy krótką sesję per poll z bindu aktywnego
+`get_db` (również jego override w testach). `finished` kończy stream po
+opróżnieniu backlogu, a disconnect anuluje generator. Auth, participant scope i
+no-oracle są sprawdzane przy zestawieniu połączenia; świadomy kontrakt MVP nie
+waliduje ponownie tokenu na każdy poll. Audit nie zapisuje bearera ani
+`Last-Event-ID`.
+
 Read-only `POST /units/{unit_id}/validate-loadout` wymaga wyłącznie bearer scope
 `loadout:validate` (bez session fallbacku), bo jednostki są globalnym katalogiem.
 Generyczny audit zachowuje bezpieczny `unit_id`, ale nie czyta body ani kosztu.
@@ -263,7 +280,7 @@ while not is_battle_over(state):
   `BattleState` + stan `DeterministicDice` przy `sequence_at`, z unikalnością
   `(battle_id, sequence_at)`. Addytywna tabela przez `create_all`, bez Alembic.
 
-`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0)` (rekonstrukcja przez `json_to_event`) + `latest_event_sequence(session, battle_id)`. `POST /battles/{id}/actions` (ADR-0054) przekazuje ostatni widziany sequence do `save_events(..., expected_latest_sequence=N)`: helper rzuca `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. `save_checkpoint`/`load_latest_checkpoint` (ADR-0053) nie commitują i uznają checkpoint za bieżący wyłącznie przy `sequence_at == latest_event_sequence`; zapisują/odtwarzają wersjonowany `BattleState` i RNG bez `pickle`. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`), C1 helper `require_agent_scope(scope_name)` w `app/security.py` oraz owner-only endpointy tokenów `app/routers/agent_tokens.py`. B4 `POST /battles` zapisuje `Battle`, startowy event-log i checkpoint w jednej transakcji; participant-scoped `GET /battles/{id}/state` zwraca publiczny stan bez RNG. Odroczone: `BattleInvite` i endpointy spoza pojedynczej akcji (interrupts/replay).
+`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0, *, limit=None)` (rekonstrukcja przez `json_to_event`; brak limitu zachowuje historyczne zachowanie) + `latest_event_sequence(session, battle_id)`. `POST /battles/{id}/actions` (ADR-0054) przekazuje ostatni widziany sequence do `save_events(..., expected_latest_sequence=N)`: helper rzuca `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. `save_checkpoint`/`load_latest_checkpoint` (ADR-0053) nie commitują i uznają checkpoint za bieżący wyłącznie przy `sequence_at == latest_event_sequence`; zapisują/odtwarzają wersjonowany `BattleState` i RNG bez `pickle`. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`), C1 helper `require_agent_scope(scope_name)` w `app/security.py` oraz owner-only endpointy tokenów `app/routers/agent_tokens.py`. B4 `POST /battles` zapisuje `Battle`, startowy event-log i checkpoint w jednej transakcji; participant-scoped `GET /battles/{id}/state` zwraca publiczny stan bez RNG. Odroczone: `BattleInvite` i endpointy spoza pojedynczej akcji (interrupts/replay).
 
 ### Status B3 (zamknięte 2026-05-30) + B3.9 hardening (zamknięte 2026-06-02)
 

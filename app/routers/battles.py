@@ -1,19 +1,25 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from starlette.responses import StreamingResponse
 
 from .. import models
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
 from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
+from ..services.battle_event_stream import (
+    session_factory_from_session,
+    stream_battle_events,
+)
 from ..services.battle_actions import (
     BattleActionForbidden,
     BattleActionInvalid,
@@ -54,6 +60,7 @@ BATTLE_READ_SCOPE = "battle:read"
 BATTLE_ACT_SCOPE = "battle:act"
 BATTLE_SIMULATE_SCOPE = "battle:simulate"
 MAX_SIMULATION_GAMES = MAX_PUBLIC_SIMULATION_GAMES
+_MAX_EVENT_CURSOR = (1 << 63) - 1
 
 
 @dataclass(frozen=True)
@@ -301,6 +308,53 @@ def _public_event(event: EngineBattleEvent) -> BattleEventPublic:
     )
 
 
+def _public_event_payload(event: EngineBattleEvent) -> dict[str, Any]:
+    return _public_event(event).model_dump()
+
+
+def _accepts_event_stream(request: Request) -> bool:
+    accept = request.headers.get("accept", "")
+    return any(
+        item.split(";", 1)[0].strip().lower() == "text/event-stream"
+        for item in accept.split(",")
+    )
+
+
+def _event_stream_cursor(
+    *,
+    since: int | None,
+    last_event_id: str | None,
+) -> int:
+    if last_event_id is None:
+        cursor = since if since is not None else 0
+        if cursor > _MAX_EVENT_CURSOR:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="since cursor is outside the event sequence range",
+            )
+        return cursor
+    if re.fullmatch(r"[0-9]+", last_event_id) is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Last-Event-ID must be a non-negative decimal sequence",
+        )
+    try:
+        header_cursor = int(last_event_id)
+    except ValueError:
+        header_cursor = _MAX_EVENT_CURSOR + 1
+    if header_cursor > _MAX_EVENT_CURSOR:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Last-Event-ID must be a non-negative decimal sequence",
+        )
+    if since is not None and since != header_cursor:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="since and Last-Event-ID cursors must match",
+        )
+    return header_cursor
+
+
 def _public_adaptation(result: AdaptResult) -> RosterAdaptationPublic:
     return RosterAdaptationPublic(
         dropped_excluded=list(result.dropped_excluded),
@@ -498,15 +552,46 @@ def get_battle(
     return _public_battle(db, battle)
 
 
-@router.get("/{battle_id}/events", response_model=BattleEventsPublic)
+@router.get(
+    "/{battle_id}/events",
+    response_model=BattleEventsPublic,
+    responses={200: {"content": {"text/event-stream": {}}}},
+)
 def get_battle_events(
     battle_id: int,
-    since: int = Query(0, ge=0),
+    request: Request,
+    since: Annotated[int | None, Query(ge=0)] = None,
     db: Session = Depends(get_db),
     reader: BattleReader = Depends(_battle_reader),
-) -> BattleEventsPublic:
+) -> BattleEventsPublic | StreamingResponse:
+    wants_event_stream = _accepts_event_stream(request)
+    cursor = (
+        _event_stream_cursor(
+            since=since,
+            last_event_id=request.headers.get("last-event-id"),
+        )
+        if wants_event_stream
+        else (since if since is not None else 0)
+    )
     battle = _get_accessible_battle(db, battle_id=battle_id, reader=reader)
-    events = load_events(db, battle.id, since=since)
+    if wants_event_stream:
+        stream_session_factory = session_factory_from_session(db)
+        return StreamingResponse(
+            stream_battle_events(
+                request,
+                session_factory=stream_session_factory,
+                battle_id=battle.id,
+                cursor=cursor,
+                project_event=_public_event_payload,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    events = load_events(db, battle.id, since=cursor)
     return BattleEventsPublic(
         battle_id=battle.id,
         events=[_public_event(event) for event in events],
