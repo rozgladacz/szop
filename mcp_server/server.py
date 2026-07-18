@@ -28,6 +28,7 @@ TOOL_NAMES = (
     "lookup_rule",
     "search_rules",
     "explain_ability",
+    "validate_loadout",
     "get_battle_metadata",
     "get_battle_state",
     "get_battle_events",
@@ -42,6 +43,7 @@ _BEARER_RE = re.compile(r"\bbearer\s+[^\s,;]+", re.IGNORECASE)
 _ResultT = TypeVar("_ResultT")
 
 RosterId = Annotated[int, Field(strict=True, ge=1)]
+UnitId = Annotated[int, Field(strict=True, ge=1)]
 BattleId = Annotated[int, Field(strict=True, ge=1)]
 Since = Annotated[int, Field(strict=True, ge=0)]
 ExpectedSequence = Annotated[int, Field(strict=True, ge=0)]
@@ -54,6 +56,7 @@ NonEmptyName = Annotated[str, Field(min_length=1)]
 ProposalSummary = Annotated[str, Field(min_length=1, max_length=500)]
 RuleQuery = Annotated[str, Field(min_length=1, max_length=MAX_RULE_QUERY_LENGTH)]
 RuleLimit = Annotated[int, Field(strict=True, ge=1, le=MAX_RULE_RESULTS)]
+LoadoutCount = Annotated[int, Field(strict=True, ge=1, le=100)]
 AbilityQuery = Annotated[
     str,
     Field(min_length=1, max_length=MAX_ABILITY_QUERY_LENGTH),
@@ -113,9 +116,9 @@ def create_server(
     server = FastMCP(
         "SZOP",
         instructions=(
-            "Canonical exact and semantic rule lookup, ability lookup, battle "
-            "observation, and consent-gated action proposals backed by the "
-            "public SZOP HTTP API."
+            "Canonical exact and semantic rule lookup, ability and loadout "
+            "validation, battle observation, and consent-gated action proposals "
+            "backed by the public SZOP HTTP API."
         ),
     )
 
@@ -187,6 +190,21 @@ def create_server(
         return _run_safely(
             lambda: ensure_json_safe(http_client.explain_ability(query)),
             bearer_token=settings.bearer_token,
+        )
+
+    @server.tool(name="validate_loadout")
+    def validate_loadout(
+        unit_id: UnitId,
+        loadout: dict[str, Any],
+        count: LoadoutCount = 1,
+    ) -> dict[str, Any]:
+        """Validate and quote a unit loadout without persisting it."""
+        return _run_safely(
+            lambda: ensure_json_safe(
+                http_client.validate_loadout(unit_id, loadout, count=count)
+            ),
+            bearer_token=settings.bearer_token,
+            safe_error_label="POST loadout validation failed",
         )
 
     @server.tool(name="get_battle_metadata")

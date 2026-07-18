@@ -7,12 +7,17 @@ The script is a DB-read leaf diff validator over `normalize_roster_unit_loadout`
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import models
+from app import config
 from app.db import Base
+from app.services import loadout_validation as service
 
 import scripts.validate_loadout as vl
 
@@ -201,9 +206,60 @@ def test_diff_to_dict_round_trip():
 
     payload = json.loads(json.dumps(vl.diff_to_dict(diff)))
     assert payload["schema"] == "szop.validate_loadout/v1"
+    assert payload["version"] == 1
     assert payload["unit_id"] == uid
     assert payload["mode"]["clamped"] is True
     assert payload["has_issues"] is True
+
+
+def test_leaf_module_reexports_the_production_service_ssot():
+    assert vl.SectionDiff is service.SectionDiff
+    assert vl.LoadoutDiff is service.LoadoutDiff
+    assert vl.UnitNotFoundError is service.UnitNotFoundError
+    assert vl.diff_section is service.diff_section
+    assert vl.diff_passive is service.diff_passive
+    assert vl.validate_loadout is service.validate_loadout
+    assert vl.validate_loadout_by_id is service.validate_loadout_by_id
+    assert vl.diff_to_dict is service.diff_to_dict
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        config.RULES_BACKEND_PROCEDURAL,
+        config.RULES_BACKEND_YAML,
+        config.RULES_BACKEND_BOTH_ASSERT,
+    ],
+)
+def test_service_cost_output_has_backend_parity(monkeypatch, backend):
+    monkeypatch.setattr(config, "OPR_RULES_BACKEND", backend)
+    sm = _sessionmaker()
+    with sm() as session:
+        uid, ids = _seed_unit(session)
+        diff = service.validate_loadout_by_id(
+            session,
+            uid,
+            {
+                "mode": "bad",
+                "weapons": {str(ids["weapon"]): -2, "99999": 1},
+                "active": {str(ids["active"]): 1},
+                "passive": {"nieistniejaca": 1},
+            },
+            count=3,
+        )
+
+    payload = service.diff_to_dict(diff)
+    assert payload["mode"]["clamped"] is True
+    assert payload["sections"][0]["clamped"]
+    assert payload["sections"][0]["rejected"]
+    assert payload["passive"]["rejected"] == ["nieistniejaca"]
+    assert payload["cost"]["selected_total"] >= 0.0
+
+
+def test_service_has_no_dependency_on_leaf_script():
+    source = Path(service.__file__).read_text(encoding="utf-8")
+    assert "scripts.validate_loadout" not in source
+    assert "from scripts" not in source
 
 
 def test_format_diff_report_contains_sections():

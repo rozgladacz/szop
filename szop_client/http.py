@@ -38,7 +38,9 @@ if TYPE_CHECKING:
 RULE_LOOKUP_SCHEMA = "szop.lookup_rule/v1"
 ABILITY_EXPLANATION_SCHEMA = "szop.explain_ability/v1"
 RULES_SEARCH_SCHEMA = "szop.search_rules/v1"
+LOADOUT_VALIDATION_SCHEMA = "szop.validate_loadout/v1"
 REFERENCE_API_VERSION = 1
+LOADOUT_VALIDATION_VERSION = 1
 RULES_SEARCH_STRATEGY = "hybrid_weighted_rrf"
 RULE_SOURCE = "SZOP_Rozjemca.md"
 ABILITY_SOURCE = "app.data.abilities"
@@ -49,6 +51,7 @@ MAX_RULE_TEXT_LENGTH = 4000
 MAX_RULE_CHILDREN = 20
 MAX_ABILITY_QUERY_LENGTH = 100
 MAX_RULE_SEARCH_TEXT_LENGTH = 1200
+MAX_LOADOUT_COUNT = 100
 RAG_SEARCH_TIMEOUT = 30.0
 
 
@@ -308,6 +311,35 @@ class HttpClient:
             error_label=error_label,
         )
 
+    def validate_loadout(
+        self,
+        unit_id: int,
+        loadout: dict[str, Any],
+        count: int = 1,
+    ) -> dict[str, Any]:
+        """Validate and quote one global catalog unit without persisting it."""
+        if type(unit_id) is not int or unit_id < 1:
+            raise ValueError("unit_id must be an int >= 1")
+        if type(count) is not int or not 1 <= count <= MAX_LOADOUT_COUNT:
+            raise ValueError(
+                f"count must be an int between 1 and {MAX_LOADOUT_COUNT}"
+            )
+        canonical_loadout = _canonical_json_object(loadout, label="loadout")
+        error_label = "POST loadout validation"
+        payload = self._request_json(
+            "POST",
+            f"/units/{unit_id}/validate-loadout",
+            {},
+            json_body={"loadout": canonical_loadout, "count": count},
+            error_label=error_label,
+        )
+        return _loadout_validation_from_payload(
+            payload,
+            expected_unit_id=unit_id,
+            expected_count=count,
+            error_label=error_label,
+        )
+
     def explain_ability(self, query: str) -> dict[str, Any]:
         """Explain one canonical ability by slug or normalized display name."""
         normalized_query = _normalize_reference_query(
@@ -483,6 +515,37 @@ def _normalize_reference_query(query: str, *, max_length: int) -> str:
     return normalized
 
 
+def _is_strict_json_value(value: Any) -> bool:
+    if value is None or type(value) in {bool, int, str}:
+        return True
+    if type(value) is float:
+        return math.isfinite(value)
+    if isinstance(value, list):
+        return all(_is_strict_json_value(item) for item in value)
+    if isinstance(value, dict):
+        return all(
+            type(key) is str and _is_strict_json_value(item)
+            for key, item in value.items()
+        )
+    return False
+
+
+def _canonical_json_object(value: Any, *, label: str) -> dict[str, Any]:
+    try:
+        if type(value) is not dict or not _is_strict_json_value(value):
+            raise TypeError(label)
+        return json.loads(
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+            )
+        )
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+        raise ValueError(f"{label} must be a finite JSON object") from exc
+
+
 def _rule_lookup_from_payload(
     payload: Any,
     *,
@@ -583,6 +646,207 @@ def _rules_search_from_payload(
         "strategy": strategy,
         "count": count,
         "results": results,
+    }
+
+
+def _loadout_validation_from_payload(
+    payload: Any,
+    *,
+    expected_unit_id: int,
+    expected_count: int,
+    error_label: str,
+) -> dict[str, Any]:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        _require_exact_keys(
+            payload,
+            {
+                "schema",
+                "version",
+                "unit_id",
+                "unit_name",
+                "count",
+                "mode",
+                "sections",
+                "passive",
+                "cost",
+                "has_issues",
+            },
+        )
+        schema = _required_str(payload, "schema")
+        version = _required_int(payload, "version")
+        unit_id = _required_int(payload, "unit_id")
+        unit_name = _bounded_required_str(payload, "unit_name", max_length=120)
+        count = _required_int(payload, "count")
+        mode = _loadout_mode_from_payload(payload["mode"])
+        sections = _loadout_sections_from_payload(payload["sections"])
+        passive = _loadout_passive_from_payload(payload["passive"])
+        cost = _loadout_cost_from_payload(payload["cost"])
+        has_issues = payload["has_issues"]
+        expected_issues = bool(
+            mode["clamped"]
+            or passive["rejected"]
+            or any(section["rejected"] or section["clamped"] for section in sections)
+        )
+        if (
+            schema != LOADOUT_VALIDATION_SCHEMA
+            or version != LOADOUT_VALIDATION_VERSION
+            or unit_id != expected_unit_id
+            or count != expected_count
+            or not 1 <= count <= MAX_LOADOUT_COUNT
+            or type(has_issues) is not bool
+            or has_issues is not expected_issues
+        ):
+            raise TypeError("loadout validation envelope")
+    except (KeyError, TypeError, ValueError, RecursionError) as exc:
+        raise HttpClientError(error_message) from exc
+    return {
+        "schema": schema,
+        "version": version,
+        "unit_id": unit_id,
+        "unit_name": unit_name,
+        "count": count,
+        "mode": mode,
+        "sections": sections,
+        "passive": passive,
+        "cost": cost,
+        "has_issues": has_issues,
+    }
+
+
+def _loadout_mode_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("loadout mode")
+    _require_exact_keys(payload, {"raw", "normalized", "clamped"})
+    raw = payload["raw"]
+    normalized = _required_str(payload, "normalized")
+    clamped = payload["clamped"]
+    if (
+        not _is_strict_json_value(raw)
+        or normalized not in {"per_model", "total"}
+        or type(clamped) is not bool
+    ):
+        raise TypeError("loadout mode")
+    return {"raw": raw, "normalized": normalized, "clamped": clamped}
+
+
+def _loadout_sections_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, list) or len(payload) != 3:
+        raise TypeError("loadout sections")
+    sections = [
+        _loadout_section_from_payload(section, expected_name=expected_name)
+        for section, expected_name in zip(
+            payload,
+            ("weapons", "active", "aura"),
+            strict=True,
+        )
+    ]
+    return sections
+
+
+def _loadout_section_from_payload(
+    payload: Any,
+    *,
+    expected_name: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("loadout section")
+    _require_exact_keys(payload, {"section", "accepted", "rejected", "clamped"})
+    section = _required_str(payload, "section")
+    if section != expected_name:
+        raise TypeError("loadout section order")
+    return {
+        "section": section,
+        "accepted": _loadout_count_mapping(payload["accepted"]),
+        "rejected": _rejected_loadout_items(payload["rejected"]),
+        "clamped": _clamped_loadout_items(payload["clamped"]),
+    }
+
+
+def _loadout_count_mapping(payload: Any) -> dict[str, int]:
+    if not isinstance(payload, dict):
+        raise TypeError("loadout count mapping")
+    counts: dict[str, int] = {}
+    for key, value in payload.items():
+        if type(key) is not str or not key or type(value) is not int or value < 0:
+            raise TypeError("loadout count mapping")
+        counts[key] = value
+    return counts
+
+
+def _rejected_loadout_items(payload: Any) -> list[dict[str, str]]:
+    if not isinstance(payload, list):
+        raise TypeError("rejected loadout items")
+    items: list[dict[str, str]] = []
+    allowed_reasons = {"niedozwolone dla tej jednostki", "niepoprawne id"}
+    for item in payload:
+        if not isinstance(item, dict):
+            raise TypeError("rejected loadout item")
+        _require_exact_keys(item, {"id", "reason"})
+        item_id = _required_str(item, "id")
+        reason = _required_str(item, "reason")
+        if not item_id or reason not in allowed_reasons:
+            raise TypeError("rejected loadout item")
+        items.append({"id": item_id, "reason": reason})
+    return items
+
+
+def _clamped_loadout_items(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, list):
+        raise TypeError("clamped loadout items")
+    items: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            raise TypeError("clamped loadout item")
+        _require_exact_keys(item, {"id", "raw", "normalized"})
+        item_id = _required_str(item, "id")
+        raw = item["raw"]
+        normalized = _required_int(item, "normalized")
+        if not item_id or not _is_strict_json_value(raw) or normalized < 0:
+            raise TypeError("clamped loadout item")
+        items.append({"id": item_id, "raw": raw, "normalized": normalized})
+    return items
+
+
+def _loadout_passive_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("loadout passive")
+    _require_exact_keys(payload, {"accepted", "rejected"})
+    rejected = payload["rejected"]
+    if not isinstance(rejected, list) or any(
+        type(slug) is not str or not slug for slug in rejected
+    ):
+        raise TypeError("loadout passive")
+    return {
+        "accepted": _loadout_count_mapping(payload["accepted"]),
+        "rejected": list(rejected),
+    }
+
+
+def _loadout_cost_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("loadout cost")
+    _require_exact_keys(payload, {"selected_role", "selected_total", "components"})
+    selected_role = payload["selected_role"]
+    selected_total = _required_finite_float(payload, "selected_total")
+    components = payload["components"]
+    if (
+        selected_role not in {None, "wojownik", "strzelec"}
+        or selected_total < 0.0
+        or not isinstance(components, dict)
+    ):
+        raise TypeError("loadout cost")
+    component_names = {"active", "aura", "base", "passive", "weapon"}
+    _require_exact_keys(components, component_names)
+    return {
+        "selected_role": selected_role,
+        "selected_total": selected_total,
+        "components": {
+            name: _required_finite_float(components, name)
+            for name in sorted(component_names)
+        },
     }
 
 

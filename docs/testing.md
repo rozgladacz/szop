@@ -327,3 +327,32 @@ wymuszony offline, zgodny indeks 36/36): HttpClient cold **20,239 s**, warm
 Wszystkie trzy ścieżki miały identyczne top-5 `chunk_id`; trzy wpisy audytu nie
 zawierały query, bearera ani tekstu wyników. SHA-256 produkcyjnej DB i indeksu
 oraz count/size/mtime cache modelu pozostały bez zmian.
+
+## C3.1 — scoped read-only validate_loadout
+
+Targeted gate pokrywa serwis i kompatybilność leaf-CLI, trzy backendy kosztów,
+scope/auth/audit, stałe 422/404/500, ścisły JSON, statement count, klient oraz
+dziewiąty tool MCP bez lokalnego importu DB/costs/scripts:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_validate_loadout.py tests/test_loadout_validation_router.py tests/test_loadout_validation_smoke.py tests/test_clients_http.py tests/test_mcp_server.py tests/test_agent_token_security.py -x --tb=short -q
+```
+
+SQL regression liczy cały request, łącznie z `require_agent_scope`, audytem i
+stałymi eager-loadami katalogu: mały payload oraz legalny payload 3×100 wpisów
+muszą wykonać dokładnie **11 statements**. Rozmiar loadoutu nie może dodawać
+zapytań; `/quote` i `/rosters/{id}` nie są częścią tej ścieżki.
+
+Realny model-free smoke używa seeded in-memory SQLite i tego samego mieszanego
+payloadu z accepted+rejected+clamped. Porównuje 1:1:
+
+- direct `app.services.loadout_validation`;
+- scoped endpoint `POST /units/{unit_id}/validate-loadout`;
+- rzeczywisty `HttpClient.validate_loadout` przez transport TestClient;
+- MCP `validate_loadout` ze wstrzykniętym tym samym klientem.
+
+Po trzech requestach dozwolone są wyłącznie trzy standardowe wpisy audytu i
+aktualizacja `last_used_at`. Snapshot `units`, `unit_weapons`, `unit_abilities`,
+`rosters` i `roster_units` musi pozostać identyczny; audit nie może zawierać
+loadoutu, bearera, passive ani składowych kosztu. Produkcyjna `data/szop.db` nie
+jest używana ani modyfikowana.

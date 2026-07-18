@@ -93,6 +93,25 @@ metod nie zmieniło się. Trzy audyty były wolne od body query, tokena i tekstu
 wyników. Hash produkcyjnej DB/indeksu oraz metadane cache modelu nie zmieniły
 się, więc smoke nie wykonał downloadu, reindexu ani zapisu do produkcji.
 
+### C3.1 scoped validate_loadout — SQL gate
+
+**Data:** 2026-07-18
+**Bazowy HEAD:** `b7aae2b`
+**Środowisko:** seeded in-memory SQLite, realny `require_agent_scope`, endpoint
+FastAPI; proceduralny dispatcher kosztów.
+
+| Payload | Elementy sekcji | SQL statements |
+|---|---:|---:|
+| mały | 1 weapon | **11** |
+| duży legalny | 100 weapons + 100 active + 100 aura | **11** |
+
+Count obejmuje token lookup, agent relation, audit/update tokena, jeden root
+lookup `Unit` i stałe katalogowe `selectinload`. Brak N+1 zależnego od body.
+Seeded smoke direct/API/HttpClient/MCP zwrócił identyczny finite payload
+accepted+rejected+clamped i nie zmienił tabel katalogu ani rosterów. Metoda
+klienta używa zwykłego globalnego timeoutu; nie ma cold ML. `/quote` i
+`/rosters/{id}` nie zostały zmienione i nie dostały dodatkowych zapytań.
+
 ---
 
 ## Baseline YAML backend (Faza A5)

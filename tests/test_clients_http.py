@@ -140,6 +140,42 @@ def _rules_search_payload() -> dict:
     }
 
 
+def _loadout_validation_payload() -> dict:
+    return {
+        "schema": "szop.validate_loadout/v1",
+        "version": 1,
+        "unit_id": 7,
+        "unit_name": "Strzelcy",
+        "count": 3,
+        "mode": {"raw": "bad", "normalized": "per_model", "clamped": True},
+        "sections": [
+            {
+                "section": "weapons",
+                "accepted": {"3": 0},
+                "rejected": [
+                    {"id": "999", "reason": "niedozwolone dla tej jednostki"}
+                ],
+                "clamped": [{"id": "3", "raw": -2, "normalized": 0}],
+            },
+            {"section": "active", "accepted": {}, "rejected": [], "clamped": []},
+            {"section": "aura", "accepted": {}, "rejected": [], "clamped": []},
+        ],
+        "passive": {"accepted": {}, "rejected": ["unknown-passive"]},
+        "cost": {
+            "selected_role": "strzelec",
+            "selected_total": 12.5,
+            "components": {
+                "active": 0.0,
+                "aura": 0.0,
+                "base": 10.0,
+                "passive": 0.0,
+                "weapon": 2.5,
+            },
+        },
+        "has_issues": True,
+    }
+
+
 def test_lookup_rule_gets_encoded_query_and_returns_validated_contract() -> None:
     seen: list[HttpRequest] = []
 
@@ -248,6 +284,116 @@ def test_search_rules_timeout_does_not_change_other_client_methods() -> None:
     client.lookup_rule("osłona", limit=1)
 
     assert seen[0].timeout == 2.0
+
+
+def test_validate_loadout_posts_body_with_bearer_and_global_timeout() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_loadout_validation_payload())
+
+    loadout = {"mode": "bad", "weapons": {"3": -2, "999": 1}}
+    payload = HttpClient(
+        "https://szop.example/api/",
+        token="raw-token",
+        timeout=2.0,
+        transport=transport,
+    ).validate_loadout(7, loadout, count=3)
+
+    assert payload == _loadout_validation_payload()
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url == "https://szop.example/api/units/7/validate-loadout"
+    assert request.headers == {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": "Bearer raw-token",
+    }
+    assert json.loads(request.body.decode("utf-8")) == {
+        "loadout": loadout,
+        "count": 3,
+    }
+    assert request.timeout == 2.0
+
+
+@pytest.mark.parametrize(
+    ("unit_id", "loadout", "count"),
+    [
+        (0, {}, 1),
+        (True, {}, 1),
+        (1, [], 1),
+        (1, {1: "bad-key"}, 1),
+        (1, {"value": float("nan")}, 1),
+        (1, {"value": object()}, 1),
+        (1, {}, True),
+        (1, {}, 0),
+        (1, {}, 101),
+    ],
+)
+def test_validate_loadout_rejects_invalid_arguments_before_transport(
+    unit_id,
+    loadout,
+    count,
+) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    client = HttpClient("http://localhost", transport=transport)
+    with pytest.raises(ValueError):
+        client.validate_loadout(unit_id, loadout, count=count)
+
+
+def test_validate_loadout_rejects_cyclic_json_before_transport() -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    cyclic: dict[str, Any] = {}
+    cyclic["self"] = cyclic
+    with pytest.raises(ValueError, match="finite JSON object"):
+        HttpClient("http://localhost", transport=transport).validate_loadout(
+            1,
+            cyclic,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(schema="wrong"),
+        lambda payload: payload.update(version=True),
+        lambda payload: payload.update(unit_id=8),
+        lambda payload: payload.update(count=2),
+        lambda payload: payload.update(extra="forbidden"),
+        lambda payload: payload["mode"].update(normalized="invalid"),
+        lambda payload: payload["mode"].update(raw=float("nan")),
+        lambda payload: payload["sections"].reverse(),
+        lambda payload: payload["sections"][0]["accepted"].update({"3": True}),
+        lambda payload: payload["sections"][0]["rejected"][0].update(
+            reason="private reason"
+        ),
+        lambda payload: payload["cost"].update(selected_total=float("nan")),
+        lambda payload: payload["cost"]["components"].update(base="10"),
+        lambda payload: payload.update(has_issues=False),
+    ],
+)
+def test_validate_loadout_rejects_malformed_response(mutation) -> None:
+    payload = _loadout_validation_payload()
+    mutation(payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(
+        HttpClientError,
+        match="POST loadout validation returned malformed payload",
+    ):
+        HttpClient("http://localhost", transport=transport).validate_loadout(
+            7,
+            {},
+            count=3,
+        )
 
 
 @pytest.mark.parametrize(

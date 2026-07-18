@@ -7,7 +7,8 @@ Uruchom:
 
 Deliverable Strumienia C3 (`validate_loadout(payload)` — roadmap „Narzędzia MCP")
 w formie **skryptu-liścia** (ADR-0013), równolegle do `explain_ability.py` i
-`simulate_engagement.py`. Pełna forma MCP-tool/HTTP czeka na serwer C1/B4.
+`simulate_engagement.py`. Od C3.1 rdzeń żyje w `app.services.loadout_validation`,
+a skrypt importuje/re-eksportuje ten sam serwis co publiczne HTTP/HttpClient/MCP.
 
 Co robi: bierze id jednostki z bazy (kontekst LEGALNYCH broni/zdolności/passive)
 oraz RAW loadout payload (JSON z `--loadout`/`--loadout-file`) i pokazuje **diff**
@@ -34,7 +35,7 @@ import json
 import os
 import pathlib
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Sequence
 
 # UTF-8 stdout (nazwy jednostek/broni PL na Windows cp1250 — jak simulate_engagement.py).
@@ -51,210 +52,19 @@ if str(_repo_root) not in sys.path:
 
 from scripts.db_bootstrap import initialized_session  # noqa: E402
 
-from app.services.costs import calculate_roster_unit_quote  # noqa: E402
-from app.services.costs.primitives import (  # noqa: E402
-    ability_identifier,
-    normalize_name,
+from app.services.loadout_validation import (  # noqa: E402
+    LoadoutDiff,
+    SectionDiff,
+    UnitNotFoundError,
+    _coerce_int,
+    _enumerate_raw_section,
+    _id_is_parseable,
+    diff_passive,
+    diff_section,
+    diff_to_dict,
+    validate_loadout,
+    validate_loadout_by_id,
 )
-from app.services.costs.unit_helpers import (  # noqa: E402
-    normalize_roster_unit_loadout,
-)
-
-_SECTIONS = ("weapons", "active", "aura")
-
-
-class UnitNotFoundError(Exception):
-    """Jednostka o danym id nie istnieje w bazie."""
-
-
-# ---------------------------------------------------------------------------
-# Rdzeń diffu (czyste funkcje — testowalne bez DB)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class SectionDiff:
-    """Diff jednej sekcji id-owej (weapons/active/aura)."""
-
-    section: str
-    accepted: dict[str, int]  # znormalizowane id_str → count
-    rejected: list[tuple[str, str]] = field(default_factory=list)  # (id_str, powód)
-    clamped: list[tuple[str, Any, int]] = field(default_factory=list)  # (id_str, raw, norm)
-
-
-@dataclass(frozen=True)
-class LoadoutDiff:
-    """Pełny wynik walidacji: per-sekcja diff + mode + passive + koszt."""
-
-    unit_id: int
-    unit_name: str
-    count: int
-    raw_mode: Any
-    normalized_mode: str
-    mode_clamped: bool
-    sections: list[SectionDiff]
-    passive_accepted: dict[str, int]
-    passive_rejected: list[str]
-    selected_role: Any
-    selected_total: float
-    components: dict[str, float]
-
-    @property
-    def has_issues(self) -> bool:
-        if self.mode_clamped or self.passive_rejected:
-            return True
-        return any(d.rejected or d.clamped for d in self.sections)
-
-
-def _enumerate_raw_section(section: Any) -> list[tuple[str, Any]]:
-    """Wylicz surowe `(id_str, raw_value)` z sekcji loadoutu.
-
-    Mirror id-ekstrakcji `_normalize_loadout_section_ids` BEZ filtra dozwolonych
-    (normalize celowo POMIJA odrzucone id → tu musimy je zobaczyć, by je zaraportować).
-    Akceptuje dict `{id: count}` oraz listę dictów (`id`/`weapon_id`/`ability_id`/...).
-    """
-    if isinstance(section, dict):
-        items: list[tuple[Any, Any]] = list(section.items())
-    elif isinstance(section, list):
-        items = []
-        for entry in section:
-            if not isinstance(entry, dict):
-                continue
-            entry_id = (
-                entry.get("loadout_key")
-                or entry.get("key")
-                or entry.get("id")
-                or entry.get("weapon_id")
-                or entry.get("ability_id")
-            )
-            if entry_id is None:
-                continue
-            items.append((entry_id, entry.get("count") or entry.get("per_model") or 0))
-    else:
-        items = []
-
-    pairs: list[tuple[str, Any]] = []
-    for raw_id, raw_value in items:
-        id_str = str(raw_id).strip()
-        if not id_str:
-            continue
-        pairs.append((id_str, raw_value))
-    return pairs
-
-
-def _coerce_int(value: Any) -> int | None:
-    """Parsuj count tak jak normalize: int, potem int(float(...)), inaczej None."""
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        try:
-            return int(float(value))
-        except (TypeError, ValueError):
-            return None
-
-
-def _id_is_parseable(id_str: str) -> bool:
-    """Czy id przeszłoby parse `_normalize_loadout_section_ids` (base przed ':')."""
-    base = id_str.split(":", 1)[0]
-    return _coerce_int(base) is not None
-
-
-def diff_section(name: str, raw_section: Any, normalized_section: dict[str, int]) -> SectionDiff:
-    """Porównaj surową sekcję z jej znormalizowaną wersją (klucze = oryginalne id_str)."""
-    rejected: list[tuple[str, str]] = []
-    clamped: list[tuple[str, Any, int]] = []
-    for id_str, raw_value in _enumerate_raw_section(raw_section):
-        if id_str not in normalized_section:
-            reason = (
-                "niedozwolone dla tej jednostki"
-                if _id_is_parseable(id_str)
-                else "niepoprawne id"
-            )
-            rejected.append((id_str, reason))
-            continue
-        norm_value = normalized_section[id_str]
-        parsed = _coerce_int(raw_value)
-        if parsed is None or parsed != norm_value:
-            clamped.append((id_str, raw_value, norm_value))
-    return SectionDiff(
-        section=name,
-        accepted=dict(normalized_section),
-        rejected=rejected,
-        clamped=clamped,
-    )
-
-
-def _passive_kept(raw_slug: str, normalized_keys: set[str]) -> bool:
-    """Czy surowy slug passive przetrwał sanityzację (kanoniczny match z normalize)?
-
-    Reużywa tych samych helperów kanonikalizacji, których używa
-    `normalize_roster_unit_loadout` przy budowie `allowed_passive_lookup`
-    (`casefold` / `normalize_name` / `ability_identifier`), więc match jest spójny
-    z SSOT, nie replikuje logiki dozwolonych slugów.
-    """
-    candidates = {
-        raw_slug,
-        raw_slug.casefold(),
-        normalize_name(raw_slug),
-        ability_identifier(raw_slug),
-    }
-    return bool(candidates & normalized_keys)
-
-
-def diff_passive(raw_loadout: dict[str, Any], normalized_passive: dict[str, int]) -> list[str]:
-    """Surowe slugi passive (z dodatnią intencją), które NIE przetrwały sanityzacji."""
-    raw_passive = raw_loadout.get("passive")
-    if not isinstance(raw_passive, dict):
-        return []
-    normalized_keys = set(normalized_passive.keys())
-    rejected: list[str] = []
-    for slug, value in raw_passive.items():
-        slug_text = str(slug).strip()
-        if not slug_text:
-            continue
-        if (_coerce_int(value) or 0) <= 0:
-            continue  # 0/wyłączone — nie jest „odrzuceniem", to świadome off
-        if not _passive_kept(slug_text, normalized_keys):
-            rejected.append(slug_text)
-    return rejected
-
-
-def validate_loadout(unit, raw_loadout: dict[str, Any], count: int = 1) -> LoadoutDiff:
-    """Zbuduj `LoadoutDiff` dla jednostki ORM + surowego loadoutu.
-
-    Reuse SSOT: `normalize_roster_unit_loadout` (sanityzacja) + `calculate_roster_unit_quote`
-    (koszt liczony WEWNĘTRZNIE na znormalizowanym loadoucie — quote.py:116).
-    """
-    raw = raw_loadout if isinstance(raw_loadout, dict) else {}
-    normalized = normalize_roster_unit_loadout(unit, raw)
-
-    sections = [diff_section(name, raw.get(name), normalized.get(name, {})) for name in _SECTIONS]
-
-    raw_mode = raw.get("mode")
-    raw_mode_str = str(raw_mode).strip().lower() if raw_mode is not None else ""
-    normalized_mode = normalized["mode"]
-    # Clamp = klient podał mode, którego SSOT nie rozpoznał jako „total"/„per_model"
-    # i sprowadził do per_model (normalize: cokolwiek != "total" → "per_model").
-    mode_clamped = bool(raw_mode_str) and raw_mode_str not in ("total", "per_model")
-
-    passive_rejected = diff_passive(raw, normalized.get("passive", {}))
-
-    quote = calculate_roster_unit_quote(unit, raw, count)
-
-    return LoadoutDiff(
-        unit_id=int(getattr(unit, "id", 0) or 0),
-        unit_name=str(getattr(unit, "name", "?") or "?"),
-        count=count,
-        raw_mode=raw_mode,
-        normalized_mode=normalized_mode,
-        mode_clamped=mode_clamped,
-        sections=sections,
-        passive_accepted=dict(normalized.get("passive", {})),
-        passive_rejected=passive_rejected,
-        selected_role=quote.get("selected_role"),
-        selected_total=float(quote.get("selected_total") or 0.0),
-        components=dict(quote.get("components") or {}),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -279,18 +89,6 @@ def list_units(session) -> list[UnitInfo]:
         army = getattr(getattr(unit, "army", None), "name", "?") or "?"
         infos.append(UnitInfo(id=int(unit.id), name=str(unit.name or "?"), army=army))
     return infos
-
-
-def validate_loadout_by_id(
-    session, unit_id: int, raw_loadout: dict[str, Any], count: int = 1
-) -> LoadoutDiff:
-    """Wczytaj jednostkę po id (read-only) i zbuduj diff. Raises `UnitNotFoundError`."""
-    from app import models
-
-    unit = session.get(models.Unit, unit_id)
-    if unit is None:
-        raise UnitNotFoundError(f"Jednostka id={unit_id} nie istnieje")
-    return validate_loadout(unit, raw_loadout, count)
 
 
 # ---------------------------------------------------------------------------
@@ -362,42 +160,6 @@ def format_diff_report(diff: LoadoutDiff) -> str:
     return "\n".join(lines)
 
 
-def diff_to_dict(diff: LoadoutDiff) -> dict[str, Any]:
-    """Maszynowa serializacja (jsonl-kompatybilny rekord, schema `szop.validate_loadout/v1`)."""
-    return {
-        "schema": "szop.validate_loadout/v1",
-        "unit_id": diff.unit_id,
-        "unit_name": diff.unit_name,
-        "count": diff.count,
-        "mode": {
-            "raw": diff.raw_mode,
-            "normalized": diff.normalized_mode,
-            "clamped": diff.mode_clamped,
-        },
-        "sections": [
-            {
-                "section": s.section,
-                "accepted": s.accepted,
-                "rejected": [{"id": i, "reason": r} for i, r in s.rejected],
-                "clamped": [
-                    {"id": i, "raw": raw, "normalized": norm} for i, raw, norm in s.clamped
-                ],
-            }
-            for s in diff.sections
-        ],
-        "passive": {
-            "accepted": diff.passive_accepted,
-            "rejected": diff.passive_rejected,
-        },
-        "cost": {
-            "selected_role": diff.selected_role,
-            "selected_total": diff.selected_total,
-            "components": diff.components,
-        },
-        "has_issues": diff.has_issues,
-    }
-
-
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -461,7 +223,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 1
 
     if args.json:
-        print(json.dumps(diff_to_dict(diff), ensure_ascii=False))
+        print(json.dumps(diff_to_dict(diff), ensure_ascii=False, allow_nan=False))
     else:
         print(format_diff_report(diff))
     return 0

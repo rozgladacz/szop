@@ -61,6 +61,20 @@ Kluczowe zmienne:
 | `BACKUP_RETENTION_DAYS` | `14` | Retencja automatycznych backupów |
 | `TRUSTED_HOSTS` | `*` | Dozwolone hosty (Host header guard) |
 
+### Agent API i token MCP
+
+Proces MCP łączy się wyłącznie z publicznym HTTP przez `SZOP_API_URL`
+(domyślnie `http://127.0.0.1:8000`) i bearer `SZOP_API_TOKEN`. Token agentowy
+tworzy zalogowany owner przez `POST /agent_tokens`; surowa wartość jest zwracana
+tylko raz, a baza przechowuje wyłącznie hash. Nie zapisuj tokena w repo ani
+logach.
+
+Read-only walidacja loadoutu wymaga scope `loadout:validate` (albo wyłącznego
+wildcard `*`) i używa `POST /units/{unit_id}/validate-loadout`. Body loadoutu i
+wynik kosztowy nie trafiają do `AgentAuditLog`; audit zapisuje tylko bezpieczną
+trasę, metodę, status, scope i `unit_id`. Szczegóły: [ADR-0025](docs/adr/0025-agent-scoped-tokens.md)
+oraz [ADR-0029](docs/adr/0029-public-loadout-validation.md).
+
 ---
 
 ## Backup i przywracanie bazy

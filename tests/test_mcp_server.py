@@ -129,11 +129,11 @@ def test_config_uses_local_default_and_rejects_empty_url_without_secret() -> Non
     assert RAW_TOKEN not in str(exc_info.value)
 
 
-def test_server_registers_exactly_the_eight_public_api_tools() -> None:
+def test_server_registers_exactly_the_nine_public_api_tools() -> None:
     tools = asyncio.run(_list_tools(create_server(McpConfig("http://localhost"))))
 
     assert [tool.name for tool in tools.tools] == list(TOOL_NAMES)
-    assert len(tools.tools) == 8
+    assert len(tools.tools) == 9
 
 
 def test_server_registers_no_resources_templates_or_prompts() -> None:
@@ -203,6 +203,8 @@ def test_mcp_package_has_no_direct_app_or_database_imports() -> None:
     server_source = (package / "server.py").read_text(encoding="utf-8")
     assert "mcp_server.search" not in server_source
     assert "mcp_server.vector_store" not in server_source
+    assert "app.services.costs" not in server_source
+    assert "scripts.validate_loadout" not in server_source
 
 
 def test_simulate_engagement_posts_public_api_request_and_returns_result() -> None:
@@ -440,6 +442,115 @@ def test_search_rules_tool_redacts_query_token_and_paths_from_errors() -> None:
     assert "HTTP" not in observed or "503" in observed
     assert RAW_TOKEN not in observed
     assert private_query not in observed
+    assert "C:\\private" not in observed
+
+
+def test_validate_loadout_tool_delegates_once_to_public_client() -> None:
+    client = Mock(spec=HttpClient)
+    payload = {
+        "schema": "szop.validate_loadout/v1",
+        "version": 1,
+        "unit_id": 7,
+        "unit_name": "Strzelcy",
+        "count": 3,
+        "mode": {"raw": "bad", "normalized": "per_model", "clamped": True},
+        "sections": [
+            {
+                "section": "weapons",
+                "accepted": {"3": 0},
+                "rejected": [
+                    {"id": "999", "reason": "niedozwolone dla tej jednostki"}
+                ],
+                "clamped": [{"id": "3", "raw": -2, "normalized": 0}],
+            },
+            {"section": "active", "accepted": {}, "rejected": [], "clamped": []},
+            {"section": "aura", "accepted": {}, "rejected": [], "clamped": []},
+        ],
+        "passive": {"accepted": {}, "rejected": ["unknown-passive"]},
+        "cost": {
+            "selected_role": "strzelec",
+            "selected_total": 12.5,
+            "components": {
+                "active": 0.0,
+                "aura": 0.0,
+                "base": 10.0,
+                "passive": 0.0,
+                "weapon": 2.5,
+            },
+        },
+        "has_issues": True,
+    }
+    client.validate_loadout.return_value = payload
+
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            {
+                "unit_id": 7,
+                "loadout": {"mode": "bad", "weapons": {"3": -2, "999": 1}},
+                "count": 3,
+            },
+            tool_name="validate_loadout",
+        )
+    )
+
+    client.validate_loadout.assert_called_once_with(
+        7,
+        {"mode": "bad", "weapons": {"3": -2, "999": 1}},
+        count=3,
+    )
+    assert result.structuredContent == payload
+    json.dumps(result.structuredContent, ensure_ascii=False, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"unit_id": 0, "loadout": {}, "count": 1},
+        {"unit_id": True, "loadout": {}, "count": 1},
+        {"unit_id": 1, "loadout": [], "count": 1},
+        {"unit_id": 1, "loadout": {}, "count": True},
+        {"unit_id": 1, "loadout": {}, "count": 101},
+    ],
+)
+def test_validate_loadout_tool_rejects_invalid_input_before_client_call(
+    arguments,
+) -> None:
+    client = Mock(spec=HttpClient)
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name="validate_loadout",
+            raise_exceptions=False,
+        )
+    )
+    assert result.isError is True
+    client.validate_loadout.assert_not_called()
+
+
+def test_validate_loadout_tool_redacts_body_token_cost_and_paths_from_errors() -> None:
+    private_value = "private-loadout-value"
+    client = Mock(spec=HttpClient)
+    client.validate_loadout.side_effect = HttpClientError(
+        f"Authorization: Bearer {RAW_TOKEN}; {private_value}; "
+        "selected_total=99; C:\\private\\loadout.json",
+        status_code=500,
+    )
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost", RAW_TOKEN), client=client),
+            {"unit_id": 7, "loadout": {"private": private_value}, "count": 1},
+            tool_name="validate_loadout",
+            raise_exceptions=False,
+        )
+    )
+    observed = repr(result)
+    assert result.isError is True
+    assert "HTTP 500" in observed
+    assert RAW_TOKEN not in observed
+    assert private_value not in observed
+    assert "selected_total" not in observed
     assert "C:\\private" not in observed
 
 
