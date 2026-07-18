@@ -66,3 +66,13 @@ ze świadomą migracją.
   `frozen=True`, `extra="forbid"` w natywnym API; v1 jest w sunset.
 - **Dataclasses + ręczna walidacja.** Odrzucone — duplikujemy pracę
   Pydantic; mniej spójna semantyka błędów.
+
+## Nota implementacyjna — A1.1 (2026-07-18)
+
+Odłożona generacja JSON Schema została domknięta addytywnie. Jawne modele
+fizycznych dokumentów (`RulesetTablesDocument`, `RulesetAbilitiesDocument`,
+`AbilityCosts`) są odrębne od zagnieżdżonego agregatu runtime
+`RulesetManifest`. `scripts/generate_ruleset_schema.py` emituje deterministyczny
+draft 2020-12 do `docs/schemas/ruleset_v1.schema.json`; osobny
+`make schema-check` wykrywa brak albo drift bez zapisu. Loader, cache i hot path
+nie importują generatora ani artefaktu.

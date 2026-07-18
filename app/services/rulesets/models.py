@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, RootModel
 
 # Frozen-model konfiguracja: immutable + szybkie odczyty w hot path.
 _FrozenConfig = ConfigDict(frozen=True, extra="forbid", strict=False)
@@ -128,6 +128,17 @@ class RulesetTables(BaseModel):
     aura_order_formula: AuraOrderFormula | None = None
 
 
+class RulesetTablesDocument(RulesetTables):
+    """Fizyczny dokument `tables.yaml`: wersja oraz wszystkie tabele v1."""
+
+    model_config = ConfigDict(
+        **_FrozenConfig,
+        title="Ruleset v1 tables.yaml document",
+    )
+
+    version: int = Field(ge=1)
+
+
 AbilityType = Literal["passive", "active", "aura", "weapon"]
 
 
@@ -151,6 +162,18 @@ class RulesetAbility(BaseModel):
     value_type: Literal["number", "text"] | None = None
     value_choices: tuple[str, ...] | None = None
     rozkaz_tak: bool | None = None
+
+
+class RulesetAbilitiesDocument(BaseModel):
+    """Fizyczny dokument `abilities.yaml`: wersja oraz katalog zdolności v1."""
+
+    model_config = ConfigDict(
+        **_FrozenConfig,
+        title="Ruleset v1 abilities.yaml document",
+    )
+
+    version: int = Field(ge=1)
+    abilities: tuple[RulesetAbility, ...]
 
 
 class CostRecipeSpec(BaseModel):
@@ -210,7 +233,10 @@ class AbilityCosts(BaseModel):
     znacząca: dispatch w kolejności list-order).
     """
 
-    model_config = _FrozenConfig
+    model_config = ConfigDict(
+        **_FrozenConfig,
+        title="Ruleset v1 ability_costs.yaml document",
+    )
 
     version: int = Field(ge=1)
     passive_abilities: dict[str, CostRecipeSpec]
@@ -218,6 +244,17 @@ class AbilityCosts(BaseModel):
     fixed_by_desc: dict[str, float]
     handlers: tuple[HandlerSpec, ...]
     skip_in_default: tuple[str, ...] = Field(default_factory=tuple)
+
+
+class RulesetDocument(
+    RootModel[RulesetTablesDocument | RulesetAbilitiesDocument | AbilityCosts]
+):
+    """Dokładnie jeden fizyczny dokument rulesetu v1 używany przez tooling."""
+
+    model_config = ConfigDict(
+        frozen=True,
+        title="SZOP ruleset v1 document",
+    )
 
 
 class RulesetManifest(BaseModel):

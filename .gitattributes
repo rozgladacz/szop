@@ -10,6 +10,7 @@ scripts/docker-entrypoint.sh text eol=lf
 *.yml text
 *.yaml text
 *.json text
+docs/schemas/*.json text eol=lf
 *.txt text
 *.cfg text
 *.ini text

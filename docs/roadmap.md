@@ -43,7 +43,7 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 ### A1. Schema + słowniki ✅
 - [x] `app/rulesets/v1/` — katalog plików YAML
 - [x] `app/services/rulesets/models.py` — Pydantic v2 schema (`RulesetTables`, `RulesetAbility`, `RulesetManifest`, `TransportMultiplier`)
-- [ ] `make generate-schema` → `docs/schemas/ruleset_v1.schema.json` (deferred — VS Code YAML extension nice-to-have)
+- [x] `make generate-schema` → `docs/schemas/ruleset_v1.schema.json` — **DONE 2026-07-18 (A1.1):** deterministyczny draft 2020-12 dla trzech fizycznych dokumentów v1 + read-only `make schema-check`.
 - [x] `app/rulesets/v1/tables.yaml` — migracja 18 tabel z `app/services/costs/_engine.py`
 - [x] `app/rulesets/v1/abilities.yaml` — **87** definicji z `app/data/abilities.py` (nie 98 jak myślano w pre-A1 estymacie)
 - [x] `app/services/rulesets/loader.py` — `@lru_cache(maxsize=4)` na public entrypoincie + SHA256 discriminators dla dev reload

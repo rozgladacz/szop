@@ -11,9 +11,33 @@ Narzędzia CLI uruchamiane manualnie lub w CI. Nie są częścią runtime aplika
 
 | Cel `make` | Skrypt | Co robi |
 |---|---|---|
+| `make generate-schema` | `generate_ruleset_schema.py` | Regeneruje tracked JSON Schema trzech dokumentów rulesetu v1 tylko przy zmianie treści |
+| `make schema-check` | `generate_ruleset_schema.py --check` | Read-only gate: wykrywa brak albo drift artefaktu |
 | `make profile ROSTER=X` | `profile_quote.py` | cProfile `calculate_roster_unit_quote` per oddział |
 | `make profile ROSTER=X BACKEND=yaml` | `profile_quote.py --backend yaml` | jak wyżej, ale pod `OPR_RULES_BACKEND=yaml` |
 | *(A4.5 — planowane)* `make rules-check` | `rules_extract.py` + `rules_drift.py` + `rules_classify_geometry.py` + `rules_pdf_check.py` | Pełny pipeline drift DOCX↔YAML (sekwencyjnie, pierwszy non-zero exit przerwie) |
+
+---
+
+## `generate_ruleset_schema.py` — JSON Schema rulesetu v1 (A1.1)
+
+Buduje draft 2020-12 bezpośrednio z Pydantic document models i zapisuje stały,
+śledzony artefakt `docs/schemas/ruleset_v1.schema.json`. Root zawiera trzy
+warianty `oneOf`: fizyczny `tables.yaml`, `abilities.yaml` i
+`ability_costs.yaml`. Generator nie przyjmuje ścieżek wejścia/wyjścia; ścieżki
+są ustalone względem położenia skryptu, więc wynik nie zależy od CWD.
+
+```powershell
+python -X utf8 scripts/generate_ruleset_schema.py
+python -X utf8 scripts/generate_ruleset_schema.py --check
+```
+
+`build_schema()` jest pure, a serializacja ma sortowane klucze, UTF-8,
+dwuspacjowe wcięcia i dokładnie jeden końcowy LF. Tryb domyślny wykonuje
+atomowy replace tylko po zmianie bajtów. `--check` nie tworzy katalogów ani
+plików i zwraca non-zero dla missing/drift. Import modułu nie generuje
+artefaktu. Instrukcja mapowania wszystkich trzech YAML-i do schemy w VS Code:
+[docs/testing.md](../docs/testing.md#a11--json-schema-fizycznych-dokumentów-rulesetu).
 
 ---
 
@@ -637,5 +661,6 @@ Entry point dla Docker container — patrz `Dockerfile` + `DEPLOY.md`.
 5. **Stderr dla diagnostics, stdout dla output** — pipe-friendly.
 6. **Encoding gate** ([AGENTS.md REQUIRED #5](../AGENTS.md)): wszystkie
    `open(file, encoding='utf-8')` na plikach Python/YAML/MD.
-7. **Output do `build/`** (gitignored) jeśli skrypt generuje pliki —
-   nie commitujemy artefaktów.
+7. **Output do `build/`** (gitignored) jeśli skrypt generuje pliki — chyba że
+   kontrakt narzędzia jawnie definiuje tracked artefakt i drift gate, jak
+   `generate_ruleset_schema.py`.

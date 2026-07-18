@@ -163,6 +163,47 @@ Po świadomej edycji source files: `python scripts/rules_sources_check.py --upda
 
 Detale: [scripts/README.md](../scripts/README.md), [docs/adr/0006-pipeline-drift.md](adr/0006-pipeline-drift.md).
 
+## A1.1 — JSON Schema fizycznych dokumentów rulesetu
+
+Generator bez argumentów wejściowych zapisuje śledzony artefakt
+`docs/schemas/ruleset_v1.schema.json`. Schema obejmuje dokładnie jeden z trzech
+plików: `tables.yaml`, `abilities.yaml` albo `ability_costs.yaml`. Warianty
+`oneOf` są rozróżniane przez wymagane klucze top-level; fizyczne YAML-e nie
+dostają sztucznego pola discriminator.
+
+```bash
+make generate-schema   # write-if-changed, atomowy replace
+make schema-check      # read-only: exit != 0 dla missing/drift
+```
+
+Windows fallback, gdy `make` nie jest w PATH:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/generate_ruleset_schema.py
+.\.venv\Scripts\python.exe -X utf8 scripts/generate_ruleset_schema.py --check
+```
+
+To osobny gate A1; nie jest częścią `rules-check`/A4 ani runtime aplikacji.
+Po zmianie `app/services/rulesets/models.py` albo kształtu jednego z trzech
+YAML-i uruchom generację, a następnie check i test
+`tests/test_ruleset_schema.py`.
+
+Rozszerzenie VS Code [YAML by Red Hat](https://github.com/redhat-developer/vscode-yaml#associating-a-schema-to-a-glob-pattern-via-yamlschemas)
+przyjmuje schema po lewej i glob lub listę plików po prawej. Konfiguracja
+workspace `.vscode/settings.json` dla tego repo:
+
+```json
+{
+  "yaml.schemas": {
+    "./docs/schemas/ruleset_v1.schema.json": [
+      "app/rulesets/v1/tables.yaml",
+      "app/rulesets/v1/abilities.yaml",
+      "app/rulesets/v1/ability_costs.yaml"
+    ]
+  }
+}
+```
+
 ## C2.2 — offline BM25 retrieval
 
 Korpus, pojedyncze wyszukiwanie i stały benchmark nie przyjmują ścieżek od

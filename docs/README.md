@@ -23,6 +23,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 |---------|-----------|
 | [handoffs/](handoffs/) | Per-wątek pliki `HANDOFF_<slug>.md` + szablon i konwencje (README.md) |
 | [adr/](adr/) | Architecture Decision Records (immutable). Index w `adr/README.md`; status w `roadmap.md → "ADR index"`. |
+| [schemas/](schemas/) | Śledzone, deterministycznie generowane schematy dla narzędzi edytorowych i drift gate'ów |
 
 ## Najwyższy poziom
 

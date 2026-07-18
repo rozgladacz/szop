@@ -1,0 +1,628 @@
+{
+  "$defs": {
+    "AbilityCosts": {
+      "additionalProperties": false,
+      "description": "Cost DSL recipes z `ability_costs.yaml` (A2.3).\n\nKonsumowane przez `_yaml_quote()` (A2.4) i `handlers.py` (A2.4b).\n`passive_abilities` to słownik slug → receptura `scale_by_tou` użyta\nprzez `passive_cost_dsl`. `fixed_by_*` to słowniki na wzór gałęzi\n`slug == X` / `desc == X` w oracle. `handlers` to lista (kolejność\nznacząca: dispatch w kolejności list-order).",
+      "properties": {
+        "fixed_by_desc": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Fixed By Desc",
+          "type": "object"
+        },
+        "fixed_by_slug": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Fixed By Slug",
+          "type": "object"
+        },
+        "handlers": {
+          "items": {
+            "$ref": "#/$defs/HandlerSpec"
+          },
+          "title": "Handlers",
+          "type": "array"
+        },
+        "passive_abilities": {
+          "additionalProperties": {
+            "$ref": "#/$defs/CostRecipeSpec"
+          },
+          "title": "Passive Abilities",
+          "type": "object"
+        },
+        "skip_in_default": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skip In Default",
+          "type": "array"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "passive_abilities",
+        "fixed_by_slug",
+        "fixed_by_desc",
+        "handlers"
+      ],
+      "title": "Ruleset v1 ability_costs.yaml document",
+      "type": "object"
+    },
+    "AuraOrderFormula": {
+      "additionalProperties": false,
+      "description": "Formuła wyceny Aury / Rozkazu / Klątwy / Oznaczenia (SZOP_Zdolnosci).\n\nWprowadzona w faza-b-rules-resync 2026-06. Zastępuje stałe pola `aura`/\n`rozkaz` w `cost` per ability. Konsumowane przez `cost_functions.aura_cost`\ni `cost_functions.order_cost`. Patrz ADR-0048.",
+      "properties": {
+        "aura_range_bonus": {
+          "minimum": 0,
+          "title": "Aura Range Bonus",
+          "type": "integer"
+        },
+        "order_bonus": {
+          "minimum": 0,
+          "title": "Order Bonus",
+          "type": "integer"
+        },
+        "t_eff_clamp_max": {
+          "minimum": 1,
+          "title": "T Eff Clamp Max",
+          "type": "integer"
+        },
+        "t_eff_clamp_min": {
+          "minimum": 1,
+          "title": "T Eff Clamp Min",
+          "type": "integer"
+        },
+        "t_eff_factor": {
+          "exclusiveMinimum": 0,
+          "title": "T Eff Factor",
+          "type": "number"
+        }
+      },
+      "required": [
+        "t_eff_factor",
+        "t_eff_clamp_min",
+        "t_eff_clamp_max",
+        "aura_range_bonus",
+        "order_bonus"
+      ],
+      "title": "AuraOrderFormula",
+      "type": "object"
+    },
+    "BMvpConfig": {
+      "additionalProperties": false,
+      "description": "B0 Pareto MVP konstantne dla game engine (ADR-0008).\n\nSubsekcja `b_mvp` w `tables.yaml`. Konsumowane przez `app/services/engine/`,\nnie używane w Strumieniu A (koszty). Pole opcjonalne w `RulesetTables` —\nYAML bez sekcji `b_mvp` nadal parsuje (backward compat).",
+      "properties": {
+        "base_area_inches_sq_per_toughness": {
+          "exclusiveMinimum": 0,
+          "title": "Base Area Inches Sq Per Toughness",
+          "type": "number"
+        },
+        "move_inches": {
+          "minimum": 1,
+          "title": "Move Inches",
+          "type": "integer"
+        },
+        "pi_approx": {
+          "exclusiveMinimum": 0,
+          "title": "Pi Approx",
+          "type": "number"
+        }
+      },
+      "required": [
+        "move_inches",
+        "base_area_inches_sq_per_toughness",
+        "pi_approx"
+      ],
+      "title": "BMvpConfig",
+      "type": "object"
+    },
+    "CostRecipeSpec": {
+      "additionalProperties": false,
+      "description": "Atomowa receptura DSL — odczytywana z `ability_costs.yaml`.\n\nUżywany jednolicie przez loader (YAML → spec) i dispatcher (spec →\n`call_recipe`). `dispatcher.CostRecipe` to alias na tę klasę (zero\nkonwersji w runtime, A5 perf optimization).",
+      "properties": {
+        "args": {
+          "additionalProperties": true,
+          "title": "Args",
+          "type": "object"
+        },
+        "fn": {
+          "title": "Fn",
+          "type": "string"
+        }
+      },
+      "required": [
+        "fn"
+      ],
+      "title": "CostRecipeSpec",
+      "type": "object"
+    },
+    "HandlerMatch": {
+      "additionalProperties": false,
+      "description": "Match-pattern handlera z `ability_costs.yaml:handlers[i].match`.\n\nDokładnie jeden z trzech kluczy powinien być wypełniony — walidacja w\nloaderze (Pydantic nie wyraża dobrze `oneOf` w prostej formie).",
+      "properties": {
+        "prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefix"
+        },
+        "prefix_any": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefix Any"
+        },
+        "slug": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Slug"
+        }
+      },
+      "title": "HandlerMatch",
+      "type": "object"
+    },
+    "HandlerSpec": {
+      "additionalProperties": true,
+      "description": "Handler dispatch entry z `ability_costs.yaml:handlers[i]`.\n\n`fn_name` jest dispatchowane przez `handlers.py` (A2.4b) — NIE przez\n`dispatcher.py` registry (tamto registry to prymitywy DSL).\n\nDodatkowe pola (`open_bonus`, `inner_tou`, `range_12_multiplier`, ...) to\nstałe gry zachowane w YAML zamiast hard-kodować w handlerach. Pole `Extra`\npozostawione na rozszerzenia DSL bez schema-creep — strict=False pozwala\nna dodatkowe klucze, których nie wszystkie handlery używają.",
+      "properties": {
+        "fn_name": {
+          "title": "Fn Name",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "match": {
+          "$ref": "#/$defs/HandlerMatch"
+        }
+      },
+      "required": [
+        "id",
+        "match",
+        "fn_name"
+      ],
+      "title": "HandlerSpec",
+      "type": "object"
+    },
+    "LocationKind": {
+      "additionalProperties": true,
+      "description": "Pojedyncza lokalizacja oddziału/modelu (SZOP_Rozjemca pkt 26).\n\nWszystkie pola opcjonalne poza `description` — pozwala na rozszerzenia\nbez breaking change. Konsumowane przez `app/services/engine/state.py`\n(enum `Lokalizacja`). Patrz HANDOFF_faza-b-rules-resync.",
+      "properties": {
+        "can_activate": {
+          "default": false,
+          "title": "Can Activate",
+          "type": "boolean"
+        },
+        "can_return": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Can Return"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "on_field": {
+          "default": false,
+          "title": "On Field",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "title": "LocationKind",
+      "type": "object"
+    },
+    "RulesetAbilitiesDocument": {
+      "additionalProperties": false,
+      "description": "Fizyczny dokument `abilities.yaml`: wersja oraz katalog zdolności v1.",
+      "properties": {
+        "abilities": {
+          "items": {
+            "$ref": "#/$defs/RulesetAbility"
+          },
+          "title": "Abilities",
+          "type": "array"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "version",
+        "abilities"
+      ],
+      "title": "Ruleset v1 abilities.yaml document",
+      "type": "object"
+    },
+    "RulesetAbility": {
+      "additionalProperties": false,
+      "description": "Mirror `app.data.abilities.AbilityDefinition`.\n\nPola opcjonalne (`value_label`, `value_type`, `value_choices`) zachowują\nNone gdy abilities nie wymagają parametru (jak procedural).\n\n`rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X)/Klątwa(X)/\nOznaczenie(X). Tylko passive abilities mają to pole. None = nieznane/false.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "rozkaz_tak": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rozkaz Tak"
+        },
+        "slug": {
+          "title": "Slug",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "passive",
+            "active",
+            "aura",
+            "weapon"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "value_choices": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Choices"
+        },
+        "value_label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Label"
+        },
+        "value_type": {
+          "anyOf": [
+            {
+              "enum": [
+                "number",
+                "text"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Value Type"
+        }
+      },
+      "required": [
+        "slug",
+        "name",
+        "type",
+        "description"
+      ],
+      "title": "RulesetAbility",
+      "type": "object"
+    },
+    "RulesetTablesDocument": {
+      "additionalProperties": false,
+      "description": "Fizyczny dokument `tables.yaml`: wersja oraz wszystkie tabele v1.",
+      "properties": {
+        "ap_base": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Ap Base",
+          "type": "object"
+        },
+        "ap_lance": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Ap Lance",
+          "type": "object"
+        },
+        "artillery_range_bonus": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Artillery Range Bonus",
+          "type": "object"
+        },
+        "aura_order_formula": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuraOrderFormula"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "b_mvp": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BMvpConfig"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "base_cost_factor": {
+          "title": "Base Cost Factor",
+          "type": "number"
+        },
+        "blast_multiplier": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Blast Multiplier",
+          "type": "object"
+        },
+        "brutalny_ap_cost": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Brutalny Ap Cost",
+          "type": "object"
+        },
+        "cautious_hit_bonus": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Cautious Hit Bonus",
+          "type": "object"
+        },
+        "deadly_multiplier": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Deadly Multiplier",
+          "type": "object"
+        },
+        "defense_ability_modifiers": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object"
+          },
+          "title": "Defense Ability Modifiers",
+          "type": "object"
+        },
+        "defense_base_values": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Defense Base Values",
+          "type": "object"
+        },
+        "locations": {
+          "additionalProperties": {
+            "$ref": "#/$defs/LocationKind"
+          },
+          "title": "Locations",
+          "type": "object"
+        },
+        "morale_ability_multipliers": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Morale Ability Multipliers",
+          "type": "object"
+        },
+        "overcharge_multiplier": {
+          "title": "Overcharge Multiplier",
+          "type": "number"
+        },
+        "penetrating_multiplier": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Penetrating Multiplier",
+          "type": "object"
+        },
+        "range_table": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Range Table",
+          "type": "object"
+        },
+        "status_flags": {
+          "additionalProperties": {
+            "$ref": "#/$defs/StatusFlagSpec"
+          },
+          "title": "Status Flags",
+          "type": "object"
+        },
+        "toughness_special": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Toughness Special",
+          "type": "object"
+        },
+        "transport_multipliers": {
+          "items": {
+            "$ref": "#/$defs/TransportMultiplier"
+          },
+          "title": "Transport Multipliers",
+          "type": "array"
+        },
+        "unwieldy_range_penalty": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Unwieldy Range Penalty",
+          "type": "object"
+        },
+        "version": {
+          "minimum": 1,
+          "title": "Version",
+          "type": "integer"
+        },
+        "waagh_ap_modifier": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Waagh Ap Modifier",
+          "type": "object"
+        }
+      },
+      "required": [
+        "morale_ability_multipliers",
+        "defense_base_values",
+        "defense_ability_modifiers",
+        "toughness_special",
+        "range_table",
+        "artillery_range_bonus",
+        "unwieldy_range_penalty",
+        "cautious_hit_bonus",
+        "ap_base",
+        "ap_lance",
+        "penetrating_multiplier",
+        "waagh_ap_modifier",
+        "blast_multiplier",
+        "deadly_multiplier",
+        "brutalny_ap_cost",
+        "transport_multipliers",
+        "overcharge_multiplier",
+        "base_cost_factor",
+        "version"
+      ],
+      "title": "Ruleset v1 tables.yaml document",
+      "type": "object"
+    },
+    "StatusFlagSpec": {
+      "additionalProperties": true,
+      "description": "Stan oddziału po driftcie 2026-06 (SZOP_Rozjemca pkt 22).\n\nPola semantyczne — engine używa do reducerów/dispatcher decyzji\n(np. `mutex_with` dla pkt 22.b.iii+22.c.iv). Patrz ADR-0048.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "mutex_with": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Mutex With",
+          "type": "array"
+        },
+        "point": {
+          "title": "Point",
+          "type": "string"
+        }
+      },
+      "required": [
+        "point",
+        "description"
+      ],
+      "title": "StatusFlagSpec",
+      "type": "object"
+    },
+    "TransportMultiplier": {
+      "additionalProperties": false,
+      "description": "Jedna reguła z `TRANSPORT_MULTIPLIERS` w `_engine.py`.\n\n`traits` w oryginale jest setem; YAML nie ma setu, więc przechowujemy\nlistę i porównujemy semantycznie (kolejność nieistotna).",
+      "properties": {
+        "multiplier": {
+          "title": "Multiplier",
+          "type": "number"
+        },
+        "traits": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Traits",
+          "type": "array"
+        }
+      },
+      "required": [
+        "traits",
+        "multiplier"
+      ],
+      "title": "TransportMultiplier",
+      "type": "object"
+    }
+  },
+  "$id": "https://szop.local/schemas/ruleset_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Dokładnie jeden fizyczny dokument rulesetu v1 używany przez tooling.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/RulesetTablesDocument"
+    },
+    {
+      "$ref": "#/$defs/RulesetAbilitiesDocument"
+    },
+    {
+      "$ref": "#/$defs/AbilityCosts"
+    }
+  ],
+  "title": "SZOP ruleset v1 document"
+}

@@ -1,5 +1,6 @@
 
 .PHONY: dev test test-fast test-parity lint smoke check safe-edit profile \
+        generate-schema schema-check \
         rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check \
         rag-corpus rag-eval-check rag-bm25-eval rag-model-download reindex-rules rag-index-check \
         rag-hybrid-eval rag-retrieval-latency
@@ -53,6 +54,14 @@ ROSTER ?= 10
 BACKEND ?= procedural
 profile:
 	PYTHONPATH=. python scripts/profile_quote.py $(ROSTER) --backend $(BACKEND)
+
+# Strumień A, A1.1 — tracked JSON Schema dla trzech fizycznych dokumentów v1.
+# Osobny gate developerski; nie jest częścią rules-check/A4 ani runtime.
+generate-schema:
+	python scripts/generate_ruleset_schema.py
+
+schema-check:
+	python scripts/generate_ruleset_schema.py --check
 
 # ---------------------------------------------------------------------------
 # Strumień A, Faza A4 — pipeline drift detection (ADR-0006).
