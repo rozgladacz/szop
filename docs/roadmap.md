@@ -372,7 +372,15 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   dense **8/30 (0,267)** i hybrid **24/30 (0,800)**; hybrid vs BM25: brak
   naprawionych i pogorszonych przypadków. `make rag-hybrid-eval` wymaga zgodnego
   indeksu i wymusza offline. Brak zmian runtime MCP/HTTP.
-- [ ] Runtime wrappery dense/hybrid dla MCP/API (osobny etap; C2.4 ich nie publikuje)
+- [x] **C2.5 procesowy, leniwy lifecycle MiniLM DONE 2026-07-18 (ADR-0027):**
+  domyślne rebuild/dense/hybrid reuse'ują jeden offline embedder na proces;
+  concurrent first use tworzy model raz, a `encode` jest serializowane ze
+  względu na brak gwarancji thread-safety współdzielonego SentenceTransformer.
+  Download i dependency injection pozostają odseparowane, importy są lazy, a
+  teksty/wektory użytkownika nie są cache'owane. Stały JSON benchmark po
+  `check_index()` zmierzył warm p50 **2,610 s → 0,080 s (~32,5×)**; pełny hybrid
+  nadal **24/30** z identycznymi hitami per-case. Brak zmian runtime MCP/HTTP.
+- [ ] Runtime wrappery dense/hybrid dla MCP/API (osobny etap; C2.5 ich nie publikuje)
 
 ### C3. Narzędzia MCP (3 tyg)
 - [x] `lookup_rule(query)` — **leaf-CLI DONE 2026-06-29 + public API/HttpClient/MCP DONE 2026-07-16**: wspólny parser `app.services.rule_lookup` obsługuje hierarchiczną numerację kanonicznego `SZOP_Rozjemca.md` (`N.`→`a.`→`i.`, myślniki 4. poziomu doklejane do rodzica), dokładny resolver `pkt X` oraz tekstowe wyszukiwanie z normalizacją polskich znaków. Publiczny `GET /rules/lookup`, `HttpClient.lookup_rule()` i MCP mają schemę `szop.lookup_rule/v1`, limit 1–10, query do 200 znaków, stałą etykietę źródła bez ścieżki systemowej i nie przyjmują pliku od klienta. CLI zachowuje `--list`/`--search`/`--limit`/`--json`/`--rules-file`, ale publiczna ścieżka zawsze używa SSOT. **Pełny RAG semantyczny** (embeddingi nad DOCX, sqlite-vec) = C2, świadomie odłożony.
@@ -526,6 +534,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0024 | Consent-gated agent writes | ✓ |
 | 0025 | Rola agent + scoped tokens (schema + helper + endpointy) | ✓ |
 | 0026 | Weighted RRF dla offline hybrid retrieval | ✓ |
+| 0027 | Procesowy lifecycle fixed MiniLM | ✓ |
 | 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
 | 0032 | Headless match runner (orkiestrator pełnej gry dla botów) | ✓ |

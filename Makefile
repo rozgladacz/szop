@@ -2,7 +2,7 @@
 .PHONY: dev test test-fast test-parity lint smoke check safe-edit profile \
         rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check \
         rag-corpus rag-eval-check rag-bm25-eval rag-model-download reindex-rules rag-index-check \
-        rag-hybrid-eval
+        rag-hybrid-eval rag-retrieval-latency
 
 # Force UTF-8 for every Python invocation in this Makefile.  Windows console
 # defaults to cp1250 which crashes any script that prints arrows or Polish
@@ -123,3 +123,8 @@ rag-index-check:
 # uruchomieniem MiniLM; po bootstrapie model i benchmark są wymuszone offline.
 rag-hybrid-eval: rag-index-check
 	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 python -m mcp_server.evaluation --hybrid
+
+# C2.5 — jeden proces, sześć stałych hybrid queries i JSON-safe cold/warm gate.
+# CLI sam ponownie potwierdza kompatybilność indeksu przed rozpoczęciem timera.
+rag-retrieval-latency: rag-index-check
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 python -m mcp_server.retrieval_benchmark

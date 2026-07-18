@@ -8,11 +8,15 @@ import json
 import math
 import subprocess
 import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from types import SimpleNamespace
 
 import pytest
 
-from mcp_server import embeddings, indexer, vector_store
+from mcp_server import embeddings, indexer, search as rag_search, vector_store
 
 
 class FakeEmbedder:
@@ -212,10 +216,12 @@ def test_fixed_paths_reject_monkeypatched_escape(tmp_path, monkeypatch) -> None:
         embeddings._fixed_model_cache_dir()
 
 
-def test_importing_mcp_server_does_not_import_heavy_ml_stack() -> None:
+def test_importing_mcp_modules_does_not_import_heavy_ml_stack() -> None:
     script = """
 import sys
 import mcp_server.server
+import mcp_server.search
+import mcp_server.vector_store
 for prefix in ('sentence_transformers', 'torch', 'transformers'):
     assert not any(name == prefix or name.startswith(prefix + '.') for name in sys.modules)
 """
@@ -226,3 +232,176 @@ for prefix in ('sentence_transformers', 'torch', 'transformers'):
         text=True,
         encoding="utf-8",
     )
+
+
+def test_default_dense_and_hybrid_calls_reuse_one_embedder_without_ranking_drift(
+    isolated_index,
+    monkeypatch,
+) -> None:
+    injected = FakeEmbedder()
+    vector_store.rebuild_index(embedder=injected)
+    query = "dowolne pytanie"
+    expected_dense = vector_store.dense_search(query, 5, embedder=injected)
+    expected_hybrid = rag_search._fuse_ranked_results(
+        rag_search.search(query, rag_search.HYBRID_CANDIDATE_LIMIT),
+        expected_dense,
+        limit=5,
+        chunks=indexer.build_corpus(),
+    )
+    constructions = 0
+
+    class DefaultFakeEmbedder(FakeEmbedder):
+        def __init__(self) -> None:
+            nonlocal constructions
+            constructions += 1
+            super().__init__()
+
+    monkeypatch.setattr(embeddings, "_default_embedder", None)
+    monkeypatch.setattr(
+        embeddings,
+        "SentenceTransformerEmbedder",
+        DefaultFakeEmbedder,
+    )
+
+    assert vector_store.dense_search(query, 5) == expected_dense
+    assert vector_store.dense_search(query, 5) == expected_dense
+    assert rag_search.hybrid_search(query, 5) == expected_hybrid
+    assert rag_search.hybrid_search(query, 5) == expected_hybrid
+    assert constructions == 1
+
+
+def test_explicit_embedder_injection_bypasses_default_singleton(
+    isolated_index,
+    monkeypatch,
+) -> None:
+    def unexpected_default():
+        raise AssertionError("default singleton must not be used")
+
+    monkeypatch.setattr(vector_store, "get_default_embedder", unexpected_default)
+    embedder = FakeEmbedder()
+    vector_store.rebuild_index(embedder=embedder)
+    assert vector_store.dense_search("osłona", embedder=embedder)
+
+
+def test_concurrent_first_use_loads_model_once_and_serializes_encode(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    constructor_calls = 0
+    active_encodes = 0
+    max_active_encodes = 0
+    counter_lock = threading.Lock()
+    constructor_kwargs: dict[str, object] = {}
+
+    class FakeModel:
+        def get_embedding_dimension(self) -> int:
+            return embeddings.EMBEDDING_DIMENSION
+
+        def encode(self, texts, **kwargs):
+            nonlocal active_encodes, max_active_encodes
+            with counter_lock:
+                active_encodes += 1
+                max_active_encodes = max(max_active_encodes, active_encodes)
+            try:
+                time.sleep(0.01)
+                vector = (1.0,) + (0.0,) * (embeddings.EMBEDDING_DIMENSION - 1)
+                return tuple(vector for _ in texts)
+            finally:
+                with counter_lock:
+                    active_encodes -= 1
+
+    def construct_model(model_id, **kwargs):
+        nonlocal constructor_calls
+        with counter_lock:
+            constructor_calls += 1
+            constructor_kwargs.update(kwargs)
+        time.sleep(0.02)
+        assert model_id == embeddings.MODEL_ID
+        return FakeModel()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        SimpleNamespace(SentenceTransformer=construct_model),
+    )
+    monkeypatch.setattr(embeddings, "_fixed_model_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(embeddings, "_default_embedder", None)
+    barrier = threading.Barrier(6)
+
+    def embed_once(number: int):
+        barrier.wait()
+        return embeddings.get_default_embedder().embed((f"query {number}",))
+
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        results = list(executor.map(embed_once, range(6)))
+
+    assert len(results) == 6
+    assert constructor_calls == 1
+    assert max_active_encodes == 1
+    assert constructor_kwargs == {
+        "revision": embeddings.MODEL_REVISION,
+        "cache_folder": str(tmp_path),
+        "local_files_only": True,
+        "device": "cpu",
+        "trust_remote_code": False,
+        "token": False,
+        "backend": "torch",
+    }
+
+
+def test_failed_model_load_can_retry_without_poisoning_default_cache(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    attempts = 0
+
+    class FakeModel:
+        def get_embedding_dimension(self) -> int:
+            return embeddings.EMBEDDING_DIMENSION
+
+        def encode(self, texts, **kwargs):
+            vector = (1.0,) + (0.0,) * (embeddings.EMBEDDING_DIMENSION - 1)
+            return tuple(vector for _ in texts)
+
+    def construct_model(model_id, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("controlled first-load failure")
+        return FakeModel()
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        SimpleNamespace(SentenceTransformer=construct_model),
+    )
+    monkeypatch.setattr(embeddings, "_fixed_model_cache_dir", lambda: tmp_path)
+    monkeypatch.setattr(embeddings, "_default_embedder", None)
+    provider = embeddings.get_default_embedder()
+
+    with pytest.raises(embeddings.EmbeddingError, match="offline mode"):
+        provider.embed(("first",))
+    assert provider._model is None
+    assert provider.embed(("second",))
+    assert embeddings.get_default_embedder() is provider
+    assert attempts == 2
+
+
+def test_download_path_is_separate_from_offline_singleton(tmp_path, monkeypatch) -> None:
+    instances = []
+
+    class RecordingEmbedder(FakeEmbedder):
+        def __init__(self, *, allow_download: bool = False) -> None:
+            super().__init__()
+            self.allow_download = allow_download
+            instances.append(self)
+
+    monkeypatch.setattr(embeddings, "_default_embedder", None)
+    monkeypatch.setattr(embeddings, "SentenceTransformerEmbedder", RecordingEmbedder)
+    monkeypatch.setattr(embeddings, "_fixed_model_cache_dir", lambda: tmp_path)
+
+    offline = embeddings.get_default_embedder()
+    assert embeddings.download_model() == tmp_path
+    assert embeddings.get_default_embedder() is offline
+    assert [instance.allow_download for instance in instances] == [False, True]
+    assert instances[0] is not instances[1]

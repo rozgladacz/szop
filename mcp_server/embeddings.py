@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import math
 import sys
+import threading
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
@@ -37,7 +38,12 @@ class Embedder(Protocol):
 
 
 class SentenceTransformerEmbedder:
-    """Lazy CPU wrapper around the one allowlisted sentence-transformers model."""
+    """Lazy CPU wrapper around the one allowlisted sentence-transformers model.
+
+    Model construction is protected from concurrent first use. Inference is
+    serialized because SentenceTransformer does not document shared-instance
+    ``encode`` calls as thread-safe. No input text or output vector is cached.
+    """
 
     model_id = MODEL_ID
     model_revision = MODEL_REVISION
@@ -46,56 +52,76 @@ class SentenceTransformerEmbedder:
     def __init__(self, *, allow_download: bool = False) -> None:
         self._allow_download = allow_download
         self._model = None
+        self._model_load_lock = threading.Lock()
+        self._encode_lock = threading.Lock()
 
     def embed(self, texts: Sequence[str]) -> tuple[tuple[float, ...], ...]:
         selected = _validate_texts(texts)
         if not selected:
             return ()
         model = self._load_model()
-        raw = model.encode(
-            list(selected),
-            batch_size=EMBEDDING_BATCH_SIZE,
-            show_progress_bar=False,
-            convert_to_numpy=True,
-            convert_to_tensor=False,
-            normalize_embeddings=True,
-            device="cpu",
-        )
+        with self._encode_lock:
+            raw = model.encode(
+                list(selected),
+                batch_size=EMBEDDING_BATCH_SIZE,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+                convert_to_tensor=False,
+                normalize_embeddings=True,
+                device="cpu",
+            )
         return normalize_and_validate_embeddings(raw, expected_count=len(selected))
 
     def _load_model(self):
-        if self._model is not None:
-            return self._model
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError as exc:
-            raise EmbeddingError(
-                "optional RAG dependencies are missing; install requirements-rag.txt"
-            ) from exc
+        with self._model_load_lock:
+            if self._model is not None:
+                return self._model
+            try:
+                from sentence_transformers import SentenceTransformer
+            except ImportError as exc:
+                raise EmbeddingError(
+                    "optional RAG dependencies are missing; install requirements-rag.txt"
+                ) from exc
 
-        cache_dir = _fixed_model_cache_dir()
-        try:
-            model = SentenceTransformer(
-                MODEL_ID,
-                revision=MODEL_REVISION,
-                cache_folder=str(cache_dir),
-                local_files_only=not self._allow_download,
-                device="cpu",
-                trust_remote_code=False,
-                token=False,
-                backend="torch",
-            )
-        except Exception as exc:
-            mode = "download" if self._allow_download else "offline"
-            raise EmbeddingError(f"cannot load fixed MiniLM model in {mode} mode") from exc
+            cache_dir = _fixed_model_cache_dir()
+            try:
+                model = SentenceTransformer(
+                    MODEL_ID,
+                    revision=MODEL_REVISION,
+                    cache_folder=str(cache_dir),
+                    local_files_only=not self._allow_download,
+                    device="cpu",
+                    trust_remote_code=False,
+                    token=False,
+                    backend="torch",
+                )
+            except Exception as exc:
+                mode = "download" if self._allow_download else "offline"
+                raise EmbeddingError(
+                    f"cannot load fixed MiniLM model in {mode} mode"
+                ) from exc
 
-        actual_dimension = model.get_embedding_dimension()
-        if actual_dimension != EMBEDDING_DIMENSION:
-            raise EmbeddingError(
-                f"model dimension is {actual_dimension}; expected {EMBEDDING_DIMENSION}"
-            )
-        self._model = model
-        return model
+            actual_dimension = model.get_embedding_dimension()
+            if actual_dimension != EMBEDDING_DIMENSION:
+                raise EmbeddingError(
+                    f"model dimension is {actual_dimension}; "
+                    f"expected {EMBEDDING_DIMENSION}"
+                )
+            self._model = model
+            return model
+
+
+_default_embedder: SentenceTransformerEmbedder | None = None
+_default_embedder_lock = threading.Lock()
+
+
+def get_default_embedder() -> SentenceTransformerEmbedder:
+    """Return the one lazy offline embedder owned by this Python process."""
+    global _default_embedder
+    with _default_embedder_lock:
+        if _default_embedder is None:
+            _default_embedder = SentenceTransformerEmbedder()
+        return _default_embedder
 
 
 # === SECTION: Vector validation and fixed cache operations ===

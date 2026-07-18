@@ -25,7 +25,7 @@ from mcp_server.embeddings import (
     MODEL_REVISION,
     EmbeddingError,
     Embedder,
-    SentenceTransformerEmbedder,
+    get_default_embedder,
     normalize_and_validate_embeddings,
 )
 
@@ -81,7 +81,7 @@ class IndexStatus:
 def rebuild_index(*, embedder: Embedder | None = None) -> IndexStatus:
     """Build and atomically replace only the fixed project vector index."""
     chunks = indexer.build_corpus()
-    provider = embedder or SentenceTransformerEmbedder()
+    provider = embedder if embedder is not None else get_default_embedder()
     _validate_embedder_metadata(provider)
     raw_vectors = provider.embed(tuple(_embedding_text(chunk) for chunk in chunks))
     vectors = normalize_and_validate_embeddings(
@@ -136,7 +136,7 @@ def dense_search(
     if not status.compatible:
         raise StaleIndexError("vector index is missing or stale: " + "; ".join(status.issues))
 
-    provider = embedder or SentenceTransformerEmbedder()
+    provider = embedder if embedder is not None else get_default_embedder()
     _validate_embedder_metadata(provider)
     raw_query_vector = provider.embed((clean_query,))
     query_vector = normalize_and_validate_embeddings(

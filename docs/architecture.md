@@ -448,6 +448,28 @@ osobny gate hybrid 0,800. Kod nadal jest wyłącznie offline: brak importu i
 rejestracji w `mcp_server.server`, zmian HTTP/DB/szop_client oraz wpływu na hot
 path aplikacji.
 
+### Procesowy lifecycle MiniLM C2.5 (2026-07-18, ADR-0027)
+
+`mcp_server.embeddings.get_default_embedder()` jest leniwym, procesowym SSOT dla
+domyślnego fixed MiniLM. Fabryka ma lock chroniący concurrent first use, a sam
+adapter osobno chroni konstrukcję modelu i serializuje `encode`. Serializacja
+jest świadoma: biblioteka nie gwarantuje thread-safe inference na jednej
+instancji. Wyjątek ładowania nie zapisuje uszkodzonego stanu i może zostać
+ponowiony. Nie są cache'owane teksty ani wektory użytkownika.
+
+Domyślne `rebuild_index()` i `dense_search()` reuse'ują singleton; jawny
+`Embedder` nadal omija go całkowicie. `download_model()` zawsze tworzy osobny
+adapter dopuszczający sieć i nie zatruwa singletonu offline. Stałe modelu,
+rewizji, cache, CPU, `local_files_only=True` i `trust_remote_code=False` nie
+zmieniły się. Importy `mcp_server.server`, `search` i `vector_store` nadal nie
+ładują sentence-transformers/transformers/torch.
+
+`mcp_server.retrieval_benchmark` mierzy w jednym procesie sześć stałych hybrid
+queries po zgodnym `check_index()` i raportuje JSON-safe cold, warm p50/p95,
+total oraz rankingi. Warm p50 spadło z 2,610 s do 0,080 s (~32,5×), a pełny
+benchmark nadal daje hybrid 24/30 z identycznymi hitami per-case. Warstwa
+pozostaje offline; wrappery MCP/API są osobnym, otwartym etapem.
+
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 
 **Headless-first (ADR-0013):** silnik nie zależy od prezentacji; UI/replay to opcjonalni konsumenci publicznego API + strumienia eventów. `battle_replay.py` to **skrypt-liść** renderujący event-log bitwy na czytelny tekst.

@@ -253,3 +253,40 @@ deterministyczne rankingi. Targeted suite:
 ```powershell
 .\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_rag_corpus.py tests/test_rag_search.py tests/test_rag_vector_store.py tests/test_rag_hybrid.py tests/test_mcp_server.py -x --tb=short -q
 ```
+
+## C2.5 — procesowy lifecycle i warm-latency gate
+
+Model-free testy lifecycle nie potrzebują `build/models` ani produkcyjnego
+`build/rag_vectors.sqlite`. Pokrywają singleton default, równoległy first use,
+serializację `encode`, retry po błędzie, osobny download, dependency injection,
+lazy import i parity rankingu/scoringu dla deterministycznego fake. Targeted
+suite:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_rag_vector_store.py tests/test_rag_hybrid.py tests/test_rag_retrieval_benchmark.py tests/test_mcp_server.py -x --tb=short -q
+```
+
+Realny benchmark wymaga wcześniej pobranego fixed modelu i zgodnego indeksu.
+Uruchamia dokładnie sześć stałych hybrid queries w jednym procesie i wypisuje
+JSON-safe cold first-call, warm p50/p95, total, status indeksu oraz rankingi:
+
+```bash
+make rag-retrieval-latency
+```
+
+Dokładny Windows fallback, gdy `make` nie jest w PATH:
+
+```powershell
+$env:HF_HUB_OFFLINE='1'
+$env:TRANSFORMERS_OFFLINE='1'
+$env:HF_HUB_DISABLE_TELEMETRY='1'
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.vector_store check
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.retrieval_benchmark
+```
+
+Baseline przed C2.5: cold 18,516 s, warm p50 2,610 s, p95 3,577 s, total
+32,269 s. Po singletonie: cold 14,691 s, warm p50 0,080 s, p95 0,090 s, total
+15,107 s (~32,5× dla warm p50). Pełny gate dokładności pozostaje osobny:
+`make rag-hybrid-eval`; wynik C2.5 to BM25 24/30, dense 8/30, hybrid 24/30 i
+brak zmian hit/miss hybrid względem C2.4.

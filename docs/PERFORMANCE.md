@@ -42,6 +42,37 @@ Cały zapis rostera (`/update`) z odświeżeniem badge'y mieści się w **<400 m
 > (Chmiera) ~67 ms wynika z liczby pasywek dynamicznych (transport).
 > Przy regresji > 20% — uruchom `make profile` i porównaj sekcję cProfile.
 
+## Offline RAG — C2.5 process-local MiniLM
+
+**Data:** 2026-07-18
+**Bazowy HEAD:** `2e84212`
+**Środowisko:** Windows, Python 3.13.14, CPU, wymuszony offline, fixed MiniLM i
+zgodny indeks 36/36 (`sqlite-vec v0.1.9`).
+**Zestaw:** `eval-rules-001`–`006`, sześć kolejnych `hybrid_search` w jednym
+procesie po `check_index()`.
+
+| Wariant | Cold first (s) | Warm p50 (s) | Warm p95 (s) | Total (s) |
+|---|---:|---:|---:|---:|
+| C2.4: adapter/model per query | 18,516 | 2,610 | 3,577 | 32,269 |
+| C2.5: jeden process-local model | 14,691 | 0,080 | 0,090 | 15,107 |
+
+Warm p50 jest około **32,5× szybsze** (gate: co najmniej 2×). Wszystkie sześć
+rankingów top-5 `chunk_id` pozostało identycznych. Pełny benchmark 30 Q&A po
+zmianie: BM25 24/30 w 0,048 s; dense 8/30 w 16,031 s; hybrid 24/30 w 2,739 s;
+hybrid vs BM25 improved/degraded: none. C2.4 miał identyczne hit/miss per-case.
+
+Reprodukcja:
+
+```bash
+make rag-retrieval-latency
+make rag-hybrid-eval
+```
+
+Benchmark jest osobnym hot pathem offline. Zmiana generuje **0 dodatkowych DB
+queries** i nie wpływa na `/quote`, `/rosters/{id}` ani profil cost engine.
+Szczegóły lifecycle i polityki concurrency: ADR-0027; dokładny Windows fallback:
+`docs/testing.md`.
+
 ---
 
 ## Baseline YAML backend (Faza A5)
