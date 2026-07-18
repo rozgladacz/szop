@@ -176,6 +176,212 @@ def _loadout_validation_payload() -> dict:
     }
 
 
+def _score_list_payload() -> dict:
+    roster = lambda roster_id, name, points: {
+        "id": roster_id,
+        "name": name,
+        "army": "Army",
+        "points": float(points),
+        "composition": "1× Unit",
+    }
+    return {
+        "schema": "szop.score_list/v1",
+        "version": 1,
+        "target": roster(7, "Target", 100.0),
+        "parameters": {
+            "games_per_opponent": 3,
+            "bot": "priority",
+            "seed": 4,
+            "map_name": "lustrzana_a",
+            "opponent_roster_ids": [8, 9],
+        },
+        "results": [
+            {
+                "opponent": roster(8, "Cheaper", 50.0),
+                "n": 3,
+                "wins": 2,
+                "losses": 1,
+                "draws": 0,
+                "rounds": 12,
+                "win_rate": 2 / 3,
+                "loss_rate": 1 / 3,
+                "draw_rate": 0.0,
+                "avg_rounds": 4.0,
+            },
+            {
+                "opponent": roster(9, "Pricier", 150.0),
+                "n": 3,
+                "wins": 1,
+                "losses": 1,
+                "draws": 1,
+                "rounds": 9,
+                "win_rate": 1 / 3,
+                "loss_rate": 1 / 3,
+                "draw_rate": 1 / 3,
+                "avg_rounds": 3.0,
+            },
+        ],
+        "aggregate": {
+            "n_opponents": 2,
+            "n_games": 6,
+            "wins": 3,
+            "losses": 2,
+            "draws": 1,
+            "rounds": 21,
+            "win_rate": 0.5,
+            "loss_rate": 2 / 6,
+            "draw_rate": 1 / 6,
+            "avg_rounds": 3.5,
+        },
+        "cost_signals": {
+            "vs_cheaper": {
+                "n_opponents": 1,
+                "n_games": 3,
+                "wins": 2,
+                "losses": 1,
+                "draws": 0,
+                "rounds": 12,
+                "win_rate": 2 / 3,
+                "loss_rate": 1 / 3,
+                "draw_rate": 0.0,
+                "avg_rounds": 4.0,
+            },
+            "vs_pricier": {
+                "n_opponents": 1,
+                "n_games": 3,
+                "wins": 1,
+                "losses": 1,
+                "draws": 1,
+                "rounds": 9,
+                "win_rate": 1 / 3,
+                "loss_rate": 1 / 3,
+                "draw_rate": 1 / 3,
+                "avg_rounds": 3.0,
+            },
+        },
+    }
+
+
+def test_score_list_posts_once_with_bearer_local_timeout_and_strict_contract() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_score_list_payload())
+
+    payload = HttpClient(
+        "https://szop.example/api/",
+        token="raw-token",
+        timeout=2.0,
+        transport=transport,
+    ).score_list(
+        7,
+        games_per_opponent=3,
+        bot="PRIORITY",
+        seed=4,
+        map_name="LUSTRZANA_A",
+        opponent_roster_ids=[9, 8],
+    )
+
+    assert payload == _score_list_payload()
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url == "https://szop.example/api/rosters/7/score"
+    assert request.headers["Authorization"] == "Bearer raw-token"
+    assert request.timeout == 120.0
+    assert json.loads(request.body.decode("utf-8")) == {
+        "games_per_opponent": 3,
+        "bot": "priority",
+        "seed": 4,
+        "map_name": "lustrzana_a",
+        "opponent_roster_ids": [8, 9],
+    }
+
+
+def test_score_list_does_not_reduce_larger_client_timeout() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_score_list_payload())
+
+    HttpClient("http://localhost", timeout=180.0, transport=transport).score_list(
+        7,
+        games_per_opponent=3,
+        seed=4,
+        opponent_roster_ids=[8, 9],
+    )
+    assert seen[0].timeout == 180.0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"roster_id": True},
+        {"roster_id": 0},
+        {"roster_id": 7, "games_per_opponent": True},
+        {"roster_id": 7, "games_per_opponent": 11},
+        {"roster_id": 7, "bot": "minimax"},
+        {"roster_id": 7, "seed": True},
+        {"roster_id": 7, "seed": 2**31},
+        {"roster_id": 7, "map_name": "bad"},
+        {"roster_id": 7, "opponent_roster_ids": (8,)},
+        {"roster_id": 7, "opponent_roster_ids": [8, 8]},
+        {"roster_id": 7, "opponent_roster_ids": [7]},
+        {
+            "roster_id": 7,
+            "games_per_opponent": 10,
+            "opponent_roster_ids": [8, 9, 10, 11, 12, 13],
+        },
+    ],
+)
+def test_score_list_rejects_invalid_arguments_before_transport(kwargs) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    with pytest.raises(ValueError):
+        HttpClient("http://localhost", transport=transport).score_list(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(schema="wrong"),
+        lambda payload: payload.update(version=True),
+        lambda payload: payload["target"].update(id=70),
+        lambda payload: payload["target"].update(points=float("nan")),
+        lambda payload: payload["parameters"]["opponent_roster_ids"].reverse(),
+        lambda payload: payload["results"].reverse(),
+        lambda payload: payload["results"][0].update(wins=3),
+        lambda payload: payload["results"][0].update(win_rate=float("nan")),
+        lambda payload: payload["results"][0].update(win_rate=1.0000000000005),
+        lambda payload: payload["aggregate"].update(n_games=5),
+        lambda payload: payload["aggregate"].update(win_rate=0.9),
+        lambda payload: payload["aggregate"].update(loss_rate=-0.0000000000001),
+        lambda payload: payload["cost_signals"]["vs_cheaper"].update(wins=1),
+        lambda payload: payload.update(extra="forbidden"),
+    ],
+)
+def test_score_list_rejects_malformed_or_inconsistent_response(mutation) -> None:
+    payload = _score_list_payload()
+    mutation(payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(
+        HttpClientError,
+        match="POST roster score returned malformed payload",
+    ):
+        HttpClient("http://localhost", transport=transport).score_list(
+            7,
+            games_per_opponent=3,
+            seed=4,
+            opponent_roster_ids=[8, 9],
+        )
+
+
 def test_lookup_rule_gets_encoded_query_and_returns_validated_contract() -> None:
     seen: list[HttpRequest] = []
 

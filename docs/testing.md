@@ -356,3 +356,31 @@ aktualizacja `last_used_at`. Snapshot `units`, `unit_weapons`, `unit_abilities`,
 `rosters` i `roster_units` musi pozostać identyczny; audit nie może zawierać
 loadoutu, bearera, passive ani składowych kosztu. Produkcyjna `data/szop.db` nie
 jest używana ani modyfikowana.
+
+## C3.2 — owner-scoped read-only score_list
+
+Targeted gate pokrywa produkcyjny scoring SSOT i zgodność leaf-CLI, wspólną
+orkiestrację symulacji, owner scope/auth/audit, stałe 422/404/500, workload caps,
+ścisły JSON, SQL count, klient, dziesiąty tool MCP oraz realny smoke:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_score_list_smoke.py tests/test_score_list.py tests/test_roster_scoring_router.py tests/test_clients_http.py tests/test_mcp_server.py tests/test_battles_router.py tests/test_clients_local.py tests/test_simulate_engagement.py tests/test_engine_regression.py
+```
+
+SQL regression liczy cały request, łącznie z `require_agent_scope`, audytem i
+owner-scoped eager-loadami. Jawny subset: jeden przeciwnik przy 1 i 10 grach oraz
+trzech przeciwników przy 1 grze musi wykonać dokładnie **13 statements**;
+domyślne pole ma stałe **15** przez dwa bounded preflighty. Niezależne głębokie
+łańcuchy `Weapon.parent` dla 1 i 3 przeciwników nadal mają dokładnie 13. Liczba
+gier i dozwolona wielkość pola nie mogą dodawać zapytań. Osobne testy wymuszają limit
+10 przeciwników i 50 gier łącznie oraz stałe 422 bez truncation.
+
+Realny smoke używa seeded in-memory SQLite: owner ma target i dwóch przeciwników,
+a obcy owner osobny roster. Porównuje 1:1 direct
+`app.services.roster_scoring`, scoped endpoint
+`POST /rosters/{roster_id}/score`, rzeczywisty `HttpClient.score_list` przez
+transport TestClient i MCP `score_list` ze wstrzykniętym tym samym klientem.
+Foreign roster jest wykluczony z pola domyślnego i daje wspólne 404 po jawnym
+wskazaniu. Snapshot rosterów, roster units, bitew, eventów i katalogu pozostaje
+identyczny, łącznie z `AgentToken`; dozwolone są tylko standardowe body-blind
+audyty. Produkcyjna `data/szop.db` nie jest używana ani modyfikowana.

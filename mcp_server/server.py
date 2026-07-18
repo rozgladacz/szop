@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Annotated, Any, TypeVar
 
 from mcp.server.fastmcp import FastMCP
-from pydantic import Field
+from pydantic import Field, WithJsonSchema
 
 from mcp_server.config import McpConfig
 from szop_client import (
@@ -16,6 +16,13 @@ from szop_client import (
     MAX_ABILITY_QUERY_LENGTH,
     MAX_RULE_QUERY_LENGTH,
     MAX_RULE_RESULTS,
+    MAX_SCORE_GAMES_PER_OPPONENT,
+    MAX_SCORE_OPPONENTS,
+    MAX_SCORE_SEED,
+    MAX_SCORE_TOTAL_GAMES,
+    MIN_SCORE_SEED,
+    SCORE_LIST_BOTS,
+    SCORE_LIST_MAPS,
     battle_events_to_wire,
     battle_state_checkpoint_to_wire,
     ensure_json_safe,
@@ -29,6 +36,7 @@ TOOL_NAMES = (
     "search_rules",
     "explain_ability",
     "validate_loadout",
+    "score_list",
     "get_battle_metadata",
     "get_battle_state",
     "get_battle_events",
@@ -57,6 +65,53 @@ ProposalSummary = Annotated[str, Field(min_length=1, max_length=500)]
 RuleQuery = Annotated[str, Field(min_length=1, max_length=MAX_RULE_QUERY_LENGTH)]
 RuleLimit = Annotated[int, Field(strict=True, ge=1, le=MAX_RULE_RESULTS)]
 LoadoutCount = Annotated[int, Field(strict=True, ge=1, le=100)]
+ScoreRosterIdInput = Annotated[
+    Any,
+    WithJsonSchema({"type": "integer", "minimum": 1}),
+]
+ScoreGameCountInput = Annotated[
+    Any,
+    WithJsonSchema(
+        {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_SCORE_GAMES_PER_OPPONENT,
+        }
+    ),
+]
+ScoreBotInput = Annotated[
+    Any,
+    WithJsonSchema({"type": "string", "minLength": 1}),
+]
+ScoreSeedInput = Annotated[
+    Any,
+    WithJsonSchema(
+        {
+            "type": "integer",
+            "minimum": MIN_SCORE_SEED,
+            "maximum": MAX_SCORE_SEED,
+        }
+    ),
+]
+ScoreMapInput = Annotated[
+    Any,
+    WithJsonSchema({"type": "string", "minLength": 1}),
+]
+ScoreOpponentIdsInput = Annotated[
+    Any,
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1},
+                    "maxItems": MAX_SCORE_OPPONENTS,
+                },
+                {"type": "null"},
+            ]
+        }
+    ),
+]
 AbilityQuery = Annotated[
     str,
     Field(min_length=1, max_length=MAX_ABILITY_QUERY_LENGTH),
@@ -205,6 +260,75 @@ def create_server(
             ),
             bearer_token=settings.bearer_token,
             safe_error_label="POST loadout validation failed",
+        )
+
+    @server.tool(name="score_list")
+    def score_list(
+        roster_id: ScoreRosterIdInput,
+        games_per_opponent: ScoreGameCountInput = 3,
+        bot: ScoreBotInput = "priority",
+        seed: ScoreSeedInput = 0,
+        map_name: ScoreMapInput = "lustrzana_a",
+        opponent_roster_ids: ScoreOpponentIdsInput = None,
+    ) -> dict[str, Any]:
+        """Score one owned roster against an owned, explicitly bounded field."""
+        def operation() -> dict[str, Any]:
+            if (
+                type(roster_id) is not int
+                or roster_id < 1
+                or type(games_per_opponent) is not int
+                or not 1
+                <= games_per_opponent
+                <= MAX_SCORE_GAMES_PER_OPPONENT
+                or not isinstance(bot, str)
+                or not bot
+                or not isinstance(map_name, str)
+                or not map_name
+                or type(seed) is not int
+                or not MIN_SCORE_SEED <= seed <= MAX_SCORE_SEED
+            ):
+                raise ValueError("invalid score_list request")
+
+            normalized_bot = bot.lower()
+            normalized_map = map_name.lower()
+            if (
+                normalized_bot not in SCORE_LIST_BOTS
+                or normalized_map not in SCORE_LIST_MAPS
+            ):
+                raise ValueError("invalid score_list request")
+
+            normalized_opponents: list[int] | None = None
+            if opponent_roster_ids is not None:
+                if (
+                    type(opponent_roster_ids) is not list
+                    or len(opponent_roster_ids) > MAX_SCORE_OPPONENTS
+                    or any(
+                        type(item) is not int or item < 1
+                        for item in opponent_roster_ids
+                    )
+                    or len(set(opponent_roster_ids)) != len(opponent_roster_ids)
+                    or roster_id in opponent_roster_ids
+                    or games_per_opponent * len(opponent_roster_ids)
+                    > MAX_SCORE_TOTAL_GAMES
+                ):
+                    raise ValueError("invalid score_list request")
+                normalized_opponents = sorted(opponent_roster_ids)
+
+            return ensure_json_safe(
+                http_client.score_list(
+                    roster_id,
+                    games_per_opponent=games_per_opponent,
+                    bot=normalized_bot,
+                    seed=seed,
+                    map_name=normalized_map,
+                    opponent_roster_ids=normalized_opponents,
+                )
+            )
+
+        return _run_safely(
+            operation,
+            bearer_token=settings.bearer_token,
+            safe_error_label="POST roster score failed",
         )
 
     @server.tool(name="get_battle_metadata")

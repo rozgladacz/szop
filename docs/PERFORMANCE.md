@@ -112,6 +112,36 @@ accepted+rejected+clamped i nie zmienił tabel katalogu ani rosterów. Metoda
 klienta używa zwykłego globalnego timeoutu; nie ma cold ML. `/quote` i
 `/rosters/{id}` nie zostały zmienione i nie dostały dodatkowych zapytań.
 
+### C3.2 owner-scoped score_list — SQL/workload gate
+
+**Data:** 2026-07-18
+**Bazowy HEAD:** `d0db807`
+**Środowisko:** seeded in-memory SQLite, realny `require_agent_scope`, endpoint
+FastAPI; lekki bot `random`, mapa `lustrzana_a`.
+
+| Pole | Gry per przeciwnik | Łącznie gier | SQL statements |
+|---:|---:|---:|---:|
+| 1 przeciwnik | 1 | 1 | **13** |
+| 1 przeciwnik | 10 | 10 | **13** |
+| 3 przeciwników | 1 | 3 | **13** |
+| pole domyślne: 3 przeciwników | 1 | 3 | **15** |
+
+Pierwsze trzy wiersze używają jawnego subsetu. Count obejmuje lookup tokena,
+audit oraz stały zestaw owner-scoped eager-loadów rosterów; domyślne pole dodaje
+bounded lookup targetu i ID przeciwników z `LIMIT 11`. Rekursywny batch CTE
+przodków broni zachowuje 13 statements także dla 1 i 3 rosterów z niezależnymi,
+głębokimi łańcuchami `Weapon.parent`. Nie ma zapytań per gra ani N+1 od liczby
+rosterów, oddziałów, relacji lub głębokości dziedziczenia. CPU może rosnąć liniowo wyłącznie z jawnym
+workloadem ograniczonym do 10 przeciwników i 50 gier; pole ponad limit zwraca
+422 bez cichego obcięcia. `HttpClient.score_list` ma timeout 120 s ograniczony do
+tej metody.
+
+Seeded smoke direct/API/HttpClient/MCP zwrócił identyczny finite payload dla
+targetu i dwóch owned przeciwników, wykluczył foreign roster i zachował snapshot
+rosterów, roster units, tokena, bitew, eventów oraz katalogu. Jedynymi zapisami
+były body-blind audyty. `/quote`, `/rosters/{id}`
+i zachowanie `/battles/simulate` nie zostały zmienione.
+
 ---
 
 ## Baseline YAML backend (Faza A5)

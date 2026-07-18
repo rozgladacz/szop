@@ -12,9 +12,7 @@ from sqlalchemy.orm import Session
 from .. import models
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
-from ..services.agents import PLAYER_SEED_OFFSET, make_player, simulate_from_rosters
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
-from ..services.agents.registry import FAST, bot_kinds
 from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
 from ..services.battle_actions import (
     BattleActionForbidden,
@@ -42,6 +40,12 @@ from ..services.engine.phases import (
     setup_phase,
 )
 from ..services.engine.state_codec import battle_state_to_json
+from ..services.roster_simulation import (
+    BATTLE_SIMULATION_BOTS,
+    MAX_PUBLIC_SIMULATION_GAMES,
+    simulate_roster_pair,
+    simulation_players,
+)
 
 router = APIRouter(prefix="/battles", tags=["battles"])
 
@@ -49,8 +53,7 @@ BATTLE_CREATE_SCOPE = "battle:create"
 BATTLE_READ_SCOPE = "battle:read"
 BATTLE_ACT_SCOPE = "battle:act"
 BATTLE_SIMULATE_SCOPE = "battle:simulate"
-MAX_SIMULATION_GAMES = 50
-BATTLE_SIMULATION_BOTS = bot_kinds(FAST)
+MAX_SIMULATION_GAMES = MAX_PUBLIC_SIMULATION_GAMES
 
 
 @dataclass(frozen=True)
@@ -328,11 +331,7 @@ def _public_battle(
 
 
 def _simulation_players(bot: str, base_seed: int, game_index: int):
-    seed = base_seed + game_index
-    return [
-        make_player(bot, seed),
-        make_player(bot, seed + PLAYER_SEED_OFFSET),
-    ]
+    return simulation_players(bot, base_seed, game_index)
 
 
 @router.post("", response_model=BattlePublic, status_code=status.HTTP_201_CREATED)
@@ -401,68 +400,38 @@ def simulate_battle(
     roster_p1 = _get_owned_roster(
         db, roster_id=payload.p2_roster_id, owner_user_id=simulator.user_id
     )
+    bot = payload.bot.lower()
     try:
-        map_fixture = build_map(payload.map_name, payload.seed)
+        summary = simulate_roster_pair(
+            roster_p0,
+            roster_p1,
+            bot=bot,
+            games=payload.games,
+            seed=payload.seed,
+            map_name=payload.map_name,
+            allowed_bots=BATTLE_SIMULATION_BOTS,
+        )
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         ) from exc
-    bot = payload.bot.lower()
-    if bot not in BATTLE_SIMULATION_BOTS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Nieznany lub zbyt drogi bot {payload.bot!r}; dozwolone: "
-                f"{', '.join(BATTLE_SIMULATION_BOTS)}"
-            ),
-        )
 
-    rosters = [
-        roster_to_engine_roster(roster_p0, owner_player=0).units,
-        roster_to_engine_roster(roster_p1, owner_player=1).units,
-    ]
-    wins = [0, 0]
-    draws = 0
-    total_rounds = 0
-    for i in range(payload.games):
-        try:
-            players = _simulation_players(bot, payload.seed, i)
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=str(exc),
-            ) from exc
-        result = simulate_from_rosters(
-            rosters,
-            players,
-            seed=payload.seed + i,
-            terrain=map_fixture.terrain,
-            objectives=map_fixture.objectives,
-            initiative_player=i % 2,
-            deployment_zones=DEFAULT_DEPLOYMENT_ZONES,
-        )
-        if result.winner is None:
-            draws += 1
-        else:
-            wins[result.winner] += 1
-        total_rounds += result.rounds_played
-
-    n_games = payload.games
+    n_games = summary.n_games
     return BattleSimulationPublic(
         p1_roster_id=roster_p0.id,
         p2_roster_id=roster_p1.id,
         bot=bot,
         map_name=payload.map_name.lower(),
         n_games=n_games,
-        wins_p0=wins[0],
-        wins_p1=wins[1],
-        draws=draws,
-        total_rounds=total_rounds,
-        win_rate_p0=wins[0] / n_games,
-        win_rate_p1=wins[1] / n_games,
-        draw_rate=draws / n_games,
-        avg_rounds=total_rounds / n_games,
+        wins_p0=summary.wins_p0,
+        wins_p1=summary.wins_p1,
+        draws=summary.draws,
+        total_rounds=summary.total_rounds,
+        win_rate_p0=summary.win_rate_p0,
+        win_rate_p1=summary.win_rate_p1,
+        draw_rate=summary.draw_rate,
+        avg_rounds=summary.avg_rounds,
     )
 
 

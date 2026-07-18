@@ -7,6 +7,8 @@ SQLite and never touch `data/szop.db`.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -14,9 +16,11 @@ from sqlalchemy.pool import StaticPool
 
 from app import models
 from app.db import Base
+from app.services import roster_scoring as scoring_service
 from szop_client import SimulationSummary
 
 import scripts.score_list as sl
+import scripts.simulate_engagement as se
 
 
 def _sessionmaker():
@@ -140,6 +144,78 @@ def test_aggregate_score_sums_pairings_from_target_perspective():
     assert agg.draws == 1
     assert agg.win_rate == pytest.approx(0.5)
     assert agg.avg_rounds == pytest.approx(4.0)
+
+
+def test_leaf_cli_reexports_production_scoring_ssot():
+    assert sl.RosterInfo is scoring_service.RosterInfo
+    assert sl.OpponentResult is scoring_service.OpponentResult
+    assert sl.ScoreSummary is scoring_service.ScoreSummary
+    assert sl.RosterNotFoundError is se.RosterNotFoundError
+    assert sl.aggregate_score is scoring_service.aggregate_score
+    assert sl.score_list is scoring_service.score_list
+
+
+def test_public_projection_has_structural_cost_signals_and_empty_group_semantics():
+    target = sl.RosterInfo(1, "Target", "Army", 100.0, "2× T")
+    results = [
+        _result(2, wins_p0=3, wins_p1=0, draws=0, points=50.0),
+        _result(3, wins_p0=1, wins_p1=2, draws=0, points=200.0),
+    ]
+
+    payload = scoring_service.score_list_to_dict(
+        target,
+        results,
+        games_per_opponent=3,
+        bot="priority",
+        seed=4,
+        map_name="lustrzana_a",
+    )
+
+    assert payload["schema"] == "szop.score_list/v1"
+    assert payload["parameters"]["opponent_roster_ids"] == [2, 3]
+    assert payload["cost_signals"]["vs_cheaper"]["wins"] == 3
+    assert payload["cost_signals"]["vs_pricier"]["losses"] == 2
+
+    empty = scoring_service.score_list_to_dict(
+        target,
+        [],
+        games_per_opponent=3,
+        bot="priority",
+        seed=4,
+        map_name="lustrzana_a",
+    )
+    assert empty["aggregate"] == {
+        "n_opponents": 0,
+        "n_games": 0,
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+        "rounds": 0,
+        "win_rate": 0.0,
+        "loss_rate": 0.0,
+        "draw_rate": 0.0,
+        "avg_rounds": 0.0,
+    }
+    assert empty["cost_signals"]["vs_cheaper"] == empty["aggregate"]
+    assert empty["cost_signals"]["vs_pricier"] == empty["aggregate"]
+
+
+def test_app_never_imports_leaf_scripts_and_batch_loop_has_one_production_ssot():
+    repo = Path(__file__).resolve().parents[1]
+    app_source = "\n".join(
+        path.read_text(encoding="utf-8") for path in (repo / "app").rglob("*.py")
+    )
+    assert "from scripts" not in app_source
+    assert "import scripts" not in app_source
+
+    local_source = (repo / "szop_client" / "local.py").read_text(encoding="utf-8")
+    battles_source = (repo / "app" / "routers" / "battles.py").read_text(
+        encoding="utf-8"
+    )
+    assert "for game_index in range(n)" not in local_source
+    assert "for i in range(payload.games)" not in battles_source
+    assert "simulate_batch(" in local_source
+    assert "simulate_roster_pair(" in battles_source
 
 
 def test_format_score_report_renders_field_and_cost_signal():

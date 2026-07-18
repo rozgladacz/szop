@@ -39,8 +39,10 @@ RULE_LOOKUP_SCHEMA = "szop.lookup_rule/v1"
 ABILITY_EXPLANATION_SCHEMA = "szop.explain_ability/v1"
 RULES_SEARCH_SCHEMA = "szop.search_rules/v1"
 LOADOUT_VALIDATION_SCHEMA = "szop.validate_loadout/v1"
+SCORE_LIST_SCHEMA = "szop.score_list/v1"
 REFERENCE_API_VERSION = 1
 LOADOUT_VALIDATION_VERSION = 1
+SCORE_LIST_VERSION = 1
 RULES_SEARCH_STRATEGY = "hybrid_weighted_rrf"
 RULE_SOURCE = "SZOP_Rozjemca.md"
 ABILITY_SOURCE = "app.data.abilities"
@@ -53,6 +55,22 @@ MAX_ABILITY_QUERY_LENGTH = 100
 MAX_RULE_SEARCH_TEXT_LENGTH = 1200
 MAX_LOADOUT_COUNT = 100
 RAG_SEARCH_TIMEOUT = 30.0
+MAX_SCORE_GAMES_PER_OPPONENT = 10
+MAX_SCORE_OPPONENTS = 10
+MAX_SCORE_TOTAL_GAMES = 50
+MIN_SCORE_SEED = -(2**31)
+MAX_SCORE_SEED = 2**31 - 1
+SCORE_LIST_TIMEOUT = 120.0
+SCORE_LIST_BOTS = (
+    "priority",
+    "priority3",
+    "claude_v3",
+    "random",
+    "greedy",
+    "priority2",
+    "claude_v1",
+)
+SCORE_LIST_MAPS = frozenset({"standard_a", "lustrzana_a", "symetryczna_a"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -337,6 +355,78 @@ class HttpClient:
             payload,
             expected_unit_id=unit_id,
             expected_count=count,
+            error_label=error_label,
+        )
+
+    def score_list(
+        self,
+        roster_id: int,
+        *,
+        games_per_opponent: int = 3,
+        bot: str = "priority",
+        seed: int = 0,
+        map_name: str = "lustrzana_a",
+        opponent_roster_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Score one owned roster through one bounded public API request."""
+        if type(roster_id) is not int or roster_id < 1:
+            raise ValueError("roster_id must be an int >= 1")
+        if type(games_per_opponent) is not int or not (
+            1 <= games_per_opponent <= MAX_SCORE_GAMES_PER_OPPONENT
+        ):
+            raise ValueError(
+                "games_per_opponent must be an int between 1 and "
+                f"{MAX_SCORE_GAMES_PER_OPPONENT}"
+            )
+        if not isinstance(bot, str) or bot.lower() not in SCORE_LIST_BOTS:
+            raise ValueError("bot must be an allowed lightweight simulation bot")
+        normalized_bot = bot.lower()
+        if type(seed) is not int or not MIN_SCORE_SEED <= seed <= MAX_SCORE_SEED:
+            raise ValueError("seed must be a safe signed 32-bit int")
+        if not isinstance(map_name, str) or map_name.lower() not in SCORE_LIST_MAPS:
+            raise ValueError("map_name must be an allowed simulation map")
+        normalized_map = map_name.lower()
+        normalized_opponents: list[int] | None = None
+        if opponent_roster_ids is not None:
+            if type(opponent_roster_ids) is not list:
+                raise ValueError("opponent_roster_ids must be a list or None")
+            if (
+                len(opponent_roster_ids) > MAX_SCORE_OPPONENTS
+                or any(type(item) is not int or item < 1 for item in opponent_roster_ids)
+                or len(set(opponent_roster_ids)) != len(opponent_roster_ids)
+                or roster_id in opponent_roster_ids
+                or games_per_opponent * len(opponent_roster_ids)
+                > MAX_SCORE_TOTAL_GAMES
+            ):
+                raise ValueError("opponent_roster_ids define an invalid score workload")
+            normalized_opponents = sorted(opponent_roster_ids)
+
+        request_body: dict[str, Any] = {
+            "games_per_opponent": games_per_opponent,
+            "bot": normalized_bot,
+            "seed": seed,
+            "map_name": normalized_map,
+        }
+        if normalized_opponents is not None:
+            request_body["opponent_roster_ids"] = normalized_opponents
+
+        error_label = "POST roster score"
+        payload = self._request_json(
+            "POST",
+            f"/rosters/{roster_id}/score",
+            {},
+            json_body=request_body,
+            error_label=error_label,
+            timeout=max(self._timeout, SCORE_LIST_TIMEOUT),
+        )
+        return _score_list_from_payload(
+            payload,
+            expected_roster_id=roster_id,
+            expected_games_per_opponent=games_per_opponent,
+            expected_bot=normalized_bot,
+            expected_seed=seed,
+            expected_map_name=normalized_map,
+            expected_opponent_ids=normalized_opponents,
             error_label=error_label,
         )
 
@@ -714,6 +804,324 @@ def _loadout_validation_from_payload(
         "cost": cost,
         "has_issues": has_issues,
     }
+
+
+def _score_list_from_payload(
+    payload: Any,
+    *,
+    expected_roster_id: int,
+    expected_games_per_opponent: int,
+    expected_bot: str,
+    expected_seed: int,
+    expected_map_name: str,
+    expected_opponent_ids: list[int] | None,
+    error_label: str,
+) -> dict[str, Any]:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        _require_exact_keys(
+            payload,
+            {
+                "schema",
+                "version",
+                "target",
+                "parameters",
+                "results",
+                "aggregate",
+                "cost_signals",
+            },
+        )
+        schema = _required_str(payload, "schema")
+        version = _required_int(payload, "version")
+        target = _score_roster_info_from_payload(payload["target"])
+        parameters = _score_parameters_from_payload(payload["parameters"])
+        raw_results = payload["results"]
+        if (
+            schema != SCORE_LIST_SCHEMA
+            or version != SCORE_LIST_VERSION
+            or target["id"] != expected_roster_id
+            or parameters["games_per_opponent"] != expected_games_per_opponent
+            or parameters["bot"] != expected_bot
+            or parameters["seed"] != expected_seed
+            or parameters["map_name"] != expected_map_name
+            or not isinstance(raw_results, list)
+            or len(raw_results) > MAX_SCORE_OPPONENTS
+        ):
+            raise TypeError("score list envelope")
+        parameter_ids = parameters["opponent_roster_ids"]
+        if expected_opponent_ids is not None and parameter_ids != expected_opponent_ids:
+            raise TypeError("score list explicit opponent IDs")
+        results = [
+            _score_result_from_payload(
+                item,
+                expected_games=expected_games_per_opponent,
+            )
+            for item in raw_results
+        ]
+        result_ids = [result["opponent"]["id"] for result in results]
+        if (
+            result_ids != sorted(result_ids)
+            or len(set(result_ids)) != len(result_ids)
+            or expected_roster_id in result_ids
+            or parameter_ids != result_ids
+        ):
+            raise TypeError("score result ordering")
+
+        aggregate = _score_summary_from_payload(payload["aggregate"])
+        _assert_score_summary_matches(aggregate, results)
+
+        raw_signals = payload["cost_signals"]
+        if not isinstance(raw_signals, dict):
+            raise TypeError("score cost signals")
+        _require_exact_keys(raw_signals, {"vs_cheaper", "vs_pricier"})
+        cost_signals = {
+            "vs_cheaper": _score_summary_from_payload(raw_signals["vs_cheaper"]),
+            "vs_pricier": _score_summary_from_payload(raw_signals["vs_pricier"]),
+        }
+        _assert_score_summary_matches(
+            cost_signals["vs_cheaper"],
+            [
+                result
+                for result in results
+                if result["opponent"]["points"] < target["points"]
+            ],
+        )
+        _assert_score_summary_matches(
+            cost_signals["vs_pricier"],
+            [
+                result
+                for result in results
+                if result["opponent"]["points"] > target["points"]
+            ],
+        )
+    except (KeyError, TypeError, ValueError, RecursionError) as exc:
+        raise HttpClientError(error_message) from exc
+    return {
+        "schema": schema,
+        "version": version,
+        "target": target,
+        "parameters": parameters,
+        "results": results,
+        "aggregate": aggregate,
+        "cost_signals": cost_signals,
+    }
+
+
+def _score_roster_info_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("score roster")
+    _require_exact_keys(payload, {"id", "name", "army", "points", "composition"})
+    roster_id = _required_int(payload, "id")
+    name = _bounded_required_str(payload, "name", max_length=120)
+    army = _bounded_required_str(payload, "army", max_length=120)
+    points = _required_finite_float(payload, "points")
+    composition = _required_str(payload, "composition")
+    if (
+        roster_id < 1
+        or points < 0.0
+        or points > 1_000_000_000_000.0
+        or len(composition) > 4000
+    ):
+        raise TypeError("score roster")
+    return {
+        "id": roster_id,
+        "name": name,
+        "army": army,
+        "points": points,
+        "composition": composition,
+    }
+
+
+def _score_parameters_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("score parameters")
+    _require_exact_keys(
+        payload,
+        {
+            "games_per_opponent",
+            "bot",
+            "seed",
+            "map_name",
+            "opponent_roster_ids",
+        },
+    )
+    games = _required_int(payload, "games_per_opponent")
+    bot = _required_str(payload, "bot")
+    seed = _required_int(payload, "seed")
+    map_name = _required_str(payload, "map_name")
+    opponent_ids = payload["opponent_roster_ids"]
+    if (
+        not 1 <= games <= MAX_SCORE_GAMES_PER_OPPONENT
+        or bot not in SCORE_LIST_BOTS
+        or not MIN_SCORE_SEED <= seed <= MAX_SCORE_SEED
+        or map_name not in SCORE_LIST_MAPS
+        or not isinstance(opponent_ids, list)
+        or len(opponent_ids) > MAX_SCORE_OPPONENTS
+        or any(type(item) is not int or item < 1 for item in opponent_ids)
+        or opponent_ids != sorted(opponent_ids)
+        or len(set(opponent_ids)) != len(opponent_ids)
+        or games * len(opponent_ids) > MAX_SCORE_TOTAL_GAMES
+    ):
+        raise TypeError("score parameters")
+    return {
+        "games_per_opponent": games,
+        "bot": bot,
+        "seed": seed,
+        "map_name": map_name,
+        "opponent_roster_ids": list(opponent_ids),
+    }
+
+
+def _score_result_from_payload(
+    payload: Any,
+    *,
+    expected_games: int,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("score result")
+    _require_exact_keys(
+        payload,
+        {
+            "opponent",
+            "n",
+            "wins",
+            "losses",
+            "draws",
+            "rounds",
+            "win_rate",
+            "loss_rate",
+            "draw_rate",
+            "avg_rounds",
+        },
+    )
+    opponent = _score_roster_info_from_payload(payload["opponent"])
+    n_games = _required_int(payload, "n")
+    wins = _required_int(payload, "wins")
+    losses = _required_int(payload, "losses")
+    draws = _required_int(payload, "draws")
+    rounds = _required_int(payload, "rounds")
+    win_rate = _required_finite_float(payload, "win_rate")
+    loss_rate = _required_finite_float(payload, "loss_rate")
+    draw_rate = _required_finite_float(payload, "draw_rate")
+    avg_rounds = _required_finite_float(payload, "avg_rounds")
+    if (
+        n_games != expected_games
+        or min(wins, losses, draws, rounds) < 0
+        or wins + losses + draws != n_games
+        or rounds > n_games * 100
+        or not all(
+            0.0 <= rate <= 1.0
+            for rate in (win_rate, loss_rate, draw_rate)
+        )
+        or not _score_float_matches(win_rate, wins / n_games)
+        or not _score_float_matches(loss_rate, losses / n_games)
+        or not _score_float_matches(draw_rate, draws / n_games)
+        or not _score_float_matches(avg_rounds, rounds / n_games)
+    ):
+        raise TypeError("score result")
+    return {
+        "opponent": opponent,
+        "n": n_games,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "rounds": rounds,
+        "win_rate": win_rate,
+        "loss_rate": loss_rate,
+        "draw_rate": draw_rate,
+        "avg_rounds": avg_rounds,
+    }
+
+
+def _score_summary_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("score summary")
+    _require_exact_keys(
+        payload,
+        {
+            "n_opponents",
+            "n_games",
+            "wins",
+            "losses",
+            "draws",
+            "rounds",
+            "win_rate",
+            "loss_rate",
+            "draw_rate",
+            "avg_rounds",
+        },
+    )
+    n_opponents = _required_int(payload, "n_opponents")
+    n_games = _required_int(payload, "n_games")
+    wins = _required_int(payload, "wins")
+    losses = _required_int(payload, "losses")
+    draws = _required_int(payload, "draws")
+    rounds = _required_int(payload, "rounds")
+    win_rate = _required_finite_float(payload, "win_rate")
+    loss_rate = _required_finite_float(payload, "loss_rate")
+    draw_rate = _required_finite_float(payload, "draw_rate")
+    avg_rounds = _required_finite_float(payload, "avg_rounds")
+    divisor = n_games or 1
+    if (
+        not 0 <= n_opponents <= MAX_SCORE_OPPONENTS
+        or not 0 <= n_games <= MAX_SCORE_TOTAL_GAMES
+        or min(wins, losses, draws, rounds) < 0
+        or wins + losses + draws != n_games
+        or rounds > n_games * 100
+        or (n_games == 0 and (n_opponents != 0 or rounds != 0))
+        or not all(
+            0.0 <= rate <= 1.0
+            for rate in (win_rate, loss_rate, draw_rate)
+        )
+        or not _score_float_matches(win_rate, wins / divisor)
+        or not _score_float_matches(loss_rate, losses / divisor)
+        or not _score_float_matches(draw_rate, draws / divisor)
+        or not _score_float_matches(avg_rounds, rounds / divisor)
+    ):
+        raise TypeError("score summary")
+    return {
+        "n_opponents": n_opponents,
+        "n_games": n_games,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "rounds": rounds,
+        "win_rate": win_rate,
+        "loss_rate": loss_rate,
+        "draw_rate": draw_rate,
+        "avg_rounds": avg_rounds,
+    }
+
+
+def _assert_score_summary_matches(
+    summary: dict[str, Any],
+    results: list[dict[str, Any]],
+) -> None:
+    n_games = sum(result["n"] for result in results)
+    wins = sum(result["wins"] for result in results)
+    losses = sum(result["losses"] for result in results)
+    draws = sum(result["draws"] for result in results)
+    rounds = sum(result["rounds"] for result in results)
+    divisor = n_games or 1
+    if (
+        summary["n_opponents"] != len(results)
+        or summary["n_games"] != n_games
+        or summary["wins"] != wins
+        or summary["losses"] != losses
+        or summary["draws"] != draws
+        or summary["rounds"] != rounds
+        or not _score_float_matches(summary["win_rate"], wins / divisor)
+        or not _score_float_matches(summary["loss_rate"], losses / divisor)
+        or not _score_float_matches(summary["draw_rate"], draws / divisor)
+        or not _score_float_matches(summary["avg_rounds"], rounds / divisor)
+    ):
+        raise TypeError("score summary consistency")
+
+
+def _score_float_matches(actual: float, expected: float) -> bool:
+    return math.isclose(actual, expected, rel_tol=1e-12, abs_tol=1e-12)
 
 
 def _loadout_mode_from_payload(payload: Any) -> dict[str, Any]:

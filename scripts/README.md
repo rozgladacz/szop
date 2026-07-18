@@ -462,7 +462,8 @@ python scripts/exploit_hunt.py --bot priority --top 5 --out build/exploit.csv --
 ### `simulate_engagement.py` (C3)
 
 Head-to-head dwóch konkretnych rozpisek z bazy (`Roster.id`) przez
-`LocalClient.simulate_roster_ids` (GameClient seam) → win-rate A/B/remis,
+produkcyjny `app.services.roster_simulation` (wspólny seam używany też przez
+`LocalClient` i `POST /battles/simulate`) → win-rate A/B/remis,
 średnia liczba rund, koszt punktowy i skład. To leaf-CLI dla roadmap C3; pełny
 MCP-tool/HTTP wrapper czeka na C1/B4. Skrypt nie zapisuje wyników do DB (poza
 bootstrapem schematu przez `init_db()` przy starcie, jak aplikacja), używa
@@ -485,12 +486,15 @@ Ocena JEDNEJ rozpiski z bazy (`Roster.id`) przez **agregację symulacji** przeci
 POLU pozostałych rozpisek z DB: N gier przeciw każdemu przeciwnikowi (oceniana
 rozpiska zawsze jako owner 0) → per-przeciwnik win-rate + zagregowana „siła w
 polu" + sygnał koszt↔wynik (czy wygrywa ponad/poniżej swojego kosztu). Reuse
-pairingu z `simulate_engagement` (sam nad `LocalClient.simulate_roster_ids`), więc
+pairingu z produkcyjnego `app.services.roster_simulation`, więc
 ten sam bot po obu stronach, naprzemienna inicjatywa i spójna mapa/seed dla całego
-pola. To leaf-CLI dla roadmap C3 (decyzja usera 2026-06-26: agregacja symulacji,
-później interpretacja dedykowanego agenta); pełny MCP-tool/HTTP wrapper czeka na
-C1/B4. Skrypt nie zapisuje wyników (poza bootstrapem schematu `init_db()` jak
-aplikacja).
+pola. Produkcyjny `app.services.roster_scoring` jest SSOT agregacji, projekcji i
+sygnałów kosztowych, a leaf-CLI importuje/re-eksportuje serwis i zachowuje
+dotychczasowy raport oraz filtry. Owner-scoped wrapper jest dostępny jako
+`POST /rosters/{roster_id}/score` (`roster:score`),
+`HttpClient.score_list()` i dziesiąty tool MCP z limitem 10 przeciwników/50 gier.
+Interpretacja dedykowanego agenta pozostaje późniejszym etapem. Skrypt nie
+zapisuje wyników (poza bootstrapem schematu `init_db()` jak aplikacja).
 
 ```powershell
 python scripts/score_list.py --list
@@ -499,7 +503,8 @@ python scripts/score_list.py 10 --vs "11,14"      # ogranicz pole do wybranych i
 python scripts/score_list.py 10 --army "Gwardia"  # pole z jednej armii
 ```
 
-> **Uwaga:** wymaga ≥2 rozpisek w `data/szop.db` (oceniana + ≥1 przeciwnik). Testy
+> **Uwaga:** CLI wymaga ≥2 rozpisek w `data/szop.db` (oceniana + ≥1 przeciwnik),
+> natomiast publiczne API zwraca poprawny zerowy agregat dla pustego pola. Testy
 > używają seeded in-memory SQLite i pokrywają agregację, render, wybór pola
 > (self/`--vs`/`--army`), determinizm, parity z `simulate_engagement` oraz błędy
 > CLI (`tests/test_score_list.py`).

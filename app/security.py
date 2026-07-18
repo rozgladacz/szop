@@ -150,9 +150,18 @@ def _redacted_mapping(values: Mapping[str, Any]) -> dict[str, Any]:
     return redacted
 
 
-def _agent_audit_payload(request: Request, scope_names: tuple[str, ...]) -> str:
+def _agent_audit_payload(
+    request: Request,
+    scope_names: tuple[str, ...],
+    *,
+    include_query_params: bool = True,
+) -> str:
     path_params = getattr(request, "path_params", {}) or {}
-    query_params = getattr(request, "query_params", {}) or {}
+    query_params = (
+        (getattr(request, "query_params", {}) or {})
+        if include_query_params
+        else {}
+    )
     payload = {
         "method": getattr(request, "method", ""),
         "path_params": _redacted_mapping(dict(path_params)),
@@ -176,7 +185,12 @@ def _request_path(request: Request) -> str:
 
 
 def _authenticate_agent(
-    request: Request, db: Session, scope_names: tuple[str, ...]
+    request: Request,
+    db: Session,
+    scope_names: tuple[str, ...],
+    *,
+    audit_query_params: bool = True,
+    update_last_used_at: bool = True,
 ) -> AgentPrincipal:
     token_hash = hash_agent_token(_extract_bearer_token(request))
     token = db.execute(
@@ -200,13 +214,18 @@ def _authenticate_agent(
         token_id=token.id,
         scopes=scopes,
     )
-    token.last_used_at = now
+    if update_last_used_at:
+        token.last_used_at = now
     db.add(
         models.AgentAuditLog(
             user_id=token.owner_user_id,
             agent_user_id=token.agent_user_id,
             route=_request_path(request),
-            params_json=_agent_audit_payload(request, scope_names),
+            params_json=_agent_audit_payload(
+                request,
+                scope_names,
+                include_query_params=audit_query_params,
+            ),
         )
     )
     try:
@@ -218,13 +237,26 @@ def _authenticate_agent(
     return principal
 
 
-def require_agent_scope(scope_name: str):
+def require_agent_scope(
+    scope_name: str,
+    *,
+    audit_query_params: bool = True,
+    update_last_used_at: bool = True,
+):
     """FastAPI dependency factory for scoped bearer-token agent access."""
 
-    return require_agent_scopes(scope_name)
+    return require_agent_scopes(
+        scope_name,
+        audit_query_params=audit_query_params,
+        update_last_used_at=update_last_used_at,
+    )
 
 
-def require_agent_scopes(*scope_names: str):
+def require_agent_scopes(
+    *scope_names: str,
+    audit_query_params: bool = True,
+    update_last_used_at: bool = True,
+):
     """FastAPI dependency requiring every named scope on one bearer token."""
     required = tuple(scope_names)
     if not required:
@@ -233,6 +265,12 @@ def require_agent_scopes(*scope_names: str):
     def dependency(
         request: Request, db: Session = Depends(get_db)
     ) -> AgentPrincipal:
-        return _authenticate_agent(request, db, required)
+        return _authenticate_agent(
+            request,
+            db,
+            required,
+            audit_query_params=audit_query_params,
+            update_last_used_at=update_last_used_at,
+        )
 
     return dependency

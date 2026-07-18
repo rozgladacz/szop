@@ -8,11 +8,9 @@ Uruchom:
     python scripts/simulate_engagement.py 1 2 -n 20 --bot priority --seed 3 --map lustrzana_a
 
 Deliverable Strumienia C3 (`simulate_engagement(roster_a, roster_b, n)` — roadmap
-„Narzędzia MCP") w formie **skryptu-liścia** (ADR-0013), równolegle do
-`exploit_hunt.py`/`battle_replay.py`/`leaderboard.py`. Pełna forma MCP-tool/HTTP
-czeka na serwer C1/B4. Opiera się na `LocalClient.simulate_roster_ids` (B5
-DB-backed, `szop_client/local.py`) — zbudowanym **jawnie jako enabler C3** — więc
-ćwiczy seam `GameClient` end-to-end zamiast obchodzić go bezpośrednim runnerem.
+„Narzędzia MCP") zachowuje formę **skryptu-liścia** (ADR-0013). Pairing deleguje
+do wspólnego produkcyjnego `app.services.roster_simulation`, używanego też przez
+`LocalClient`, publiczny endpoint symulacji i scoring rosterów.
 
 Różni się od istniejących narzędzi:
 - `balance_simulate` gra rostery z fixtur YAML (engine-dict), nie z bazy;
@@ -21,7 +19,7 @@ Różni się od istniejących narzędzi:
 Tu: dwie istniejące rozpiski usera z DB, ten sam bot po obu stronach (porównanie
 ROZPISEK, nie botów), naprzemienna inicjatywa + rozłączne seedy graczy (jak D2).
 
-Skrypt-liść: zero zmian w rdzeniu silnika/agentów/szop_client; DB tylko do odczytu.
+Skrypt-liść nie zmienia mechaniki silnika ani nie zapisuje wyników; DB tylko do odczytu.
 Tryb `user_id=None` (narzędzie balansu) — bez scopingu własności (czyta każdą rozpiskę).
 """
 
@@ -32,7 +30,6 @@ import importlib.util
 import os
 import pathlib
 import sys
-from dataclasses import dataclass
 from typing import Sequence
 
 # UTF-8 stdout (nazwy rozpisek/armii PL na Windows cp1250 — jak exploit_hunt.py).
@@ -49,8 +46,17 @@ if str(_repo_root) not in sys.path:
 
 from scripts.db_bootstrap import initialized_session  # noqa: E402
 
-from app.services.agents import roster_points  # noqa: E402
-from szop_client.local import LocalClient, RosterNotFoundError  # noqa: E402
+from app.services.roster_scoring import (  # noqa: E402
+    RosterInfo,
+    list_rosters,
+    roster_info,
+)
+from app.services.roster_simulation import (  # noqa: E402
+    DEFAULT_SIMULATION_MAP,
+    simulate_roster_pair,
+    simulation_player_factory,
+)
+from szop_client.local import RosterNotFoundError  # noqa: E402
 from szop_client.protocol import SimulationSummary  # noqa: E402
 
 
@@ -83,52 +89,12 @@ DEPLOY_ZONES = (
     DeploymentZone(0.0, 0.0, BOARD_W, ZONE_DEPTH),
     DeploymentZone(0.0, BOARD_H - ZONE_DEPTH, BOARD_W, BOARD_H),
 )
-DEFAULT_MAP = "lustrzana_a"  # lustro y=24 → równe dla stref bottom/top (jak exploit_hunt)
+DEFAULT_MAP = DEFAULT_SIMULATION_MAP
 
 
 # ---------------------------------------------------------------------------
 # Info o rozpisce (do raportu + --list)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class RosterInfo:
-    """Lekki opis rozpiski do raportu (bez trzymania obiektu ORM po zamknięciu sesji)."""
-
-    id: int
-    name: str
-    army: str
-    points: float
-    composition: str
-
-
-def _composition_summary(roster) -> str:
-    parts = []
-    for ru in getattr(roster, "roster_units", []) or []:
-        unit = getattr(ru, "unit", None)
-        name = getattr(unit, "name", "?") or "?"
-        parts.append(f"{int(ru.count)}×{name}")
-    return ", ".join(parts)
-
-
-def roster_info(roster) -> RosterInfo:
-    """Buduje `RosterInfo` z obiektu ORM `Roster` (czyta relacje — sesja musi być otwarta)."""
-    army = getattr(getattr(roster, "army", None), "name", "?") or "?"
-    return RosterInfo(
-        id=int(roster.id),
-        name=getattr(roster, "name", "?") or "?",
-        army=army,
-        points=round(roster_points(roster), 2),
-        composition=_composition_summary(roster),
-    )
-
-
-def list_rosters(session) -> list[RosterInfo]:
-    """Wszystkie rozpiski w bazie jako `RosterInfo` (read-only), posortowane po id."""
-    from app import models
-
-    rosters = session.query(models.Roster).order_by(models.Roster.id).all()
-    return [roster_info(r) for r in rosters]
 
 
 # ---------------------------------------------------------------------------
@@ -146,13 +112,7 @@ def _player_factory(bot: str, base_seed: int):
     + naprzemienna inicjatywa usuwają bias).
     """
 
-    def factory(i: int):
-        return [
-            bsim.make_player(bot, base_seed + i),
-            bsim.make_player(bot, base_seed + i + bsim.PLAYER_SEED_OFFSET),
-        ]
-
-    return factory
+    return simulation_player_factory(bot, base_seed)
 
 
 def simulate_engagement(
@@ -185,17 +145,13 @@ def simulate_engagement(
     info_a = roster_info(roster_a)
     info_b = roster_info(roster_b)
 
-    map_fixture = bsim.build_map(map_name, seed)
-    client = LocalClient(session=session, user_id=None)  # tryb narzędzia balansu
-    summary = client.simulate_roster_ids(
-        roster_id_a,
-        roster_id_b,
-        _player_factory(bot, seed),
-        n=n,
+    summary = simulate_roster_pair(
+        roster_a,
+        roster_b,
+        bot=bot,
+        games=n,
         seed=seed,
-        terrain=map_fixture.terrain,
-        objectives=map_fixture.objectives,
-        deployment_zones=DEPLOY_ZONES,
+        map_name=map_name,
     )
     return summary, info_a, info_b
 

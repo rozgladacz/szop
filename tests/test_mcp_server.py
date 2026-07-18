@@ -129,11 +129,11 @@ def test_config_uses_local_default_and_rejects_empty_url_without_secret() -> Non
     assert RAW_TOKEN not in str(exc_info.value)
 
 
-def test_server_registers_exactly_the_nine_public_api_tools() -> None:
+def test_server_registers_exactly_the_ten_public_api_tools() -> None:
     tools = asyncio.run(_list_tools(create_server(McpConfig("http://localhost"))))
 
     assert [tool.name for tool in tools.tools] == list(TOOL_NAMES)
-    assert len(tools.tools) == 9
+    assert len(tools.tools) == 10
 
 
 def test_server_registers_no_resources_templates_or_prompts() -> None:
@@ -205,6 +205,171 @@ def test_mcp_package_has_no_direct_app_or_database_imports() -> None:
     assert "mcp_server.vector_store" not in server_source
     assert "app.services.costs" not in server_source
     assert "scripts.validate_loadout" not in server_source
+    assert "scripts.score_list" not in server_source
+
+
+def _score_list_payload() -> dict[str, Any]:
+    empty_summary = {
+        "n_opponents": 0,
+        "n_games": 0,
+        "wins": 0,
+        "losses": 0,
+        "draws": 0,
+        "rounds": 0,
+        "win_rate": 0.0,
+        "loss_rate": 0.0,
+        "draw_rate": 0.0,
+        "avg_rounds": 0.0,
+    }
+    return {
+        "schema": "szop.score_list/v1",
+        "version": 1,
+        "target": {
+            "id": 7,
+            "name": "Target",
+            "army": "Army",
+            "points": 100.0,
+            "composition": "1× Unit",
+        },
+        "parameters": {
+            "games_per_opponent": 1,
+            "bot": "priority",
+            "seed": 4,
+            "map_name": "lustrzana_a",
+            "opponent_roster_ids": [],
+        },
+        "results": [],
+        "aggregate": dict(empty_summary),
+        "cost_signals": {
+            "vs_cheaper": dict(empty_summary),
+            "vs_pricier": dict(empty_summary),
+        },
+    }
+
+
+def test_score_list_tool_delegates_once_to_public_client() -> None:
+    client = Mock(spec=HttpClient)
+    payload = _score_list_payload()
+    client.score_list.return_value = payload
+
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            {
+                "roster_id": 7,
+                "games_per_opponent": 1,
+                "bot": "PRIORITY",
+                "seed": 4,
+                "map_name": "LUSTRZANA_A",
+                "opponent_roster_ids": [],
+            },
+            tool_name="score_list",
+        )
+    )
+
+    client.score_list.assert_called_once_with(
+        7,
+        games_per_opponent=1,
+        bot="priority",
+        seed=4,
+        map_name="lustrzana_a",
+        opponent_roster_ids=[],
+    )
+    assert result.structuredContent == payload
+    json.dumps(result.structuredContent, ensure_ascii=False, allow_nan=False)
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"roster_id": True},
+        {"roster_id": 0},
+        {"roster_id": 7, "games_per_opponent": True},
+        {"roster_id": 7, "games_per_opponent": 11},
+        {"roster_id": 7, "bot": "minimax"},
+        {"roster_id": 7, "seed": 2**31},
+        {"roster_id": 7, "map_name": "bad"},
+        {"roster_id": 7, "opponent_roster_ids": [8, 8]},
+        {"roster_id": 7, "opponent_roster_ids": [7]},
+        {
+            "roster_id": 7,
+            "games_per_opponent": 10,
+            "opponent_roster_ids": [8, 9, 10, 11, 12, 13],
+        },
+    ],
+)
+def test_score_list_tool_rejects_invalid_input_before_client_call(arguments) -> None:
+    client = Mock(spec=HttpClient)
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name="score_list",
+            raise_exceptions=False,
+        )
+    )
+    assert result.isError is True
+    client.score_list.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "private_values"),
+    [
+        (
+            {
+                "roster_id": 7,
+                "opponent_roster_ids": list(range(880001, 880012)),
+            },
+            tuple(str(item) for item in range(880001, 880012)),
+        ),
+        ({"roster_id": -990099}, ("-990099",)),
+    ],
+)
+def test_score_list_tool_validation_never_echoes_private_ids(
+    arguments,
+    private_values,
+) -> None:
+    client = Mock(spec=HttpClient)
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name="score_list",
+            raise_exceptions=False,
+        )
+    )
+
+    observed = repr(result)
+    assert result.isError is True
+    assert "POST roster score failed" in observed
+    assert all(value not in observed for value in private_values)
+    client.score_list.assert_not_called()
+
+
+def test_score_list_tool_redacts_field_results_token_and_paths_from_errors() -> None:
+    private_name = "private-roster-name"
+    client = Mock(spec=HttpClient)
+    client.score_list.side_effect = HttpClientError(
+        f"Authorization: Bearer {RAW_TOKEN}; opponent=88; {private_name}; "
+        "wins=3; C:\\private\\score.json",
+        status_code=500,
+    )
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost", RAW_TOKEN), client=client),
+            {"roster_id": 7, "opponent_roster_ids": []},
+            tool_name="score_list",
+            raise_exceptions=False,
+        )
+    )
+    observed = repr(result)
+    assert result.isError is True
+    assert "HTTP 500" in observed
+    assert RAW_TOKEN not in observed
+    assert private_name not in observed
+    assert "opponent=88" not in observed
+    assert "wins=3" not in observed
+    assert "C:\\private" not in observed
 
 
 def test_simulate_engagement_posts_public_api_request_and_returns_result() -> None:

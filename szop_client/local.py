@@ -22,7 +22,6 @@ from dataclasses import dataclass, field
 from typing import Any, Sequence
 
 from app.services.agents.deployment import DeploymentZone
-from app.services.agents.match import simulate_from_rosters
 from app.services.agents.roster_adapter import roster_to_engine_roster
 from app.services.engine.actions import Action, DeploymentAction
 from app.services.engine.dice import DeterministicDice
@@ -30,20 +29,18 @@ from app.services.engine.events import BattleEvent
 from app.services.engine.phases import deployment_round, setup_phase
 from app.services.engine.resolver import apply_activation
 from app.services.engine.state import BattleState, Objective
+from app.services.roster_simulation import simulate_batch
 from szop_client.protocol import (
     ContinuationFn,
     PlayerFactory,
     SimulationSummary,
     Terrain,
 )
+from szop_client.types import RosterNotFoundError
 
 
 class UnknownBattleError(KeyError):
     """Podano `battle_id` nieobecny w rejestrze `LocalClient`."""
-
-
-class RosterNotFoundError(LookupError):
-    """`roster_id` nie istnieje w bazie (lub nie należy do `user_id`)."""
 
 
 @dataclass(slots=True)
@@ -147,34 +144,16 @@ class LocalClient:
         initiative_player: int = 0,
         deployment_zones: Sequence[DeploymentZone] | None = None,
     ) -> SimulationSummary:
-        if n <= 0:
-            raise ValueError(f"n musi być > 0, jest {n}")
-        wins = [0, 0]
-        draws = 0
-        total_rounds = 0
-        for i in range(n):
-            players = player_factory(i)
-            init = (i % 2) if alternate_initiative else initiative_player
-            result = simulate_from_rosters(
-                rosters,
-                players,
-                seed=seed + i,
-                terrain=terrain,
-                objectives=objectives,
-                initiative_player=init,
-                deployment_zones=deployment_zones,
-            )
-            if result.winner is None:
-                draws += 1
-            else:
-                wins[result.winner] += 1
-            total_rounds += result.rounds_played
-        return SimulationSummary(
-            n_games=n,
-            wins_p0=wins[0],
-            wins_p1=wins[1],
-            draws=draws,
-            total_rounds=total_rounds,
+        return simulate_batch(
+            rosters,
+            player_factory,
+            n=n,
+            seed=seed,
+            terrain=terrain,
+            objectives=objectives,
+            alternate_initiative=alternate_initiative,
+            initiative_player=initiative_player,
+            deployment_zones=deployment_zones,
         )
 
     # -- DB-backed (rozpiski ORM po id) -----------------------------------

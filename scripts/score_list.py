@@ -9,17 +9,11 @@ Uruchom:
     python scripts/score_list.py 1 --vs 2,5,8             # tylko wybrani przeciwnicy
     python scripts/score_list.py 1 --army "Testowa"       # pole z jednej armii
 
-Deliverable Strumienia C3 (`score_list(roster_id)` — roadmap „Narzędzia MCP") w
-formie **skryptu-liścia** (ADR-0013), zgodnie z decyzją usera 2026-06-26: pierwsza
-wersja ocenia rozpiskę przez AGREGACJĘ wyników symulacji bitwy (później wynik ma
-być interpretowany przez dedykowanego agenta — poza zakresem tego slice). Pełna
-forma MCP-tool/HTTP czeka na serwer C1/B4.
-
-Reuse SSOT przez sibling `scripts/simulate_engagement.py` (jeden pairing = jedna
-`SimulationSummary` z `LocalClient.simulate_roster_ids`, B5 DB-backed) — ten slice
-agreguje N takich pairingów (rozpiska oceniana zawsze jako `owner 0`) w jeden
-wynik. Czynnik bota znosi się (ten sam bot po obu stronach jak w `simulate_engagement`);
-różnica wyników = różnica rozpisek.
+Leaf-CLI (ADR-0013) zachowuje historyczny raport i filtry. Produkcyjny SSOT
+`app.services.roster_scoring` obsługuje również owner-scoped API, `HttpClient` i
+MCP; wspólny pairing deleguje do `app.services.roster_simulation`. Rozpiska
+oceniana jest zawsze jako gracz 0. Interpretacja wyniku przez dedykowanego agenta
+pozostaje poza zakresem.
 
 Różni się od istniejących narzędzi:
 - `simulate_engagement` ocenia JEDNĄ parę (A vs B), nie pole;
@@ -27,7 +21,7 @@ Różni się od istniejących narzędzi:
 - `balance_report`/`leaderboard` rankingują BOTY, nie rozpiski usera.
 Tu: jedna istniejąca rozpiska usera vs wszystkie pozostałe z DB → jej „siła" w polu.
 
-Skrypt-liść: zero zmian w rdzeniu silnika/agentów/szop_client; DB tylko do odczytu.
+Skrypt-liść nie zapisuje wyników ani nie zmienia mechaniki silnika; DB tylko do odczytu.
 Tryb `user_id=None` (narzędzie balansu) — bez scopingu własności.
 """
 
@@ -37,7 +31,6 @@ import argparse
 import os
 import pathlib
 import sys
-from dataclasses import dataclass
 from typing import Sequence
 
 # UTF-8 stdout (nazwy rozpisek/armii PL na Windows cp1250 — jak simulate_engagement.py).
@@ -54,150 +47,25 @@ if str(_repo_root) not in sys.path:
 
 from scripts.db_bootstrap import initialized_session  # noqa: E402
 
-# Reuse pairingu + opisu rozpiski z siblinga (SSOT — nie replikujemy mostu
-# ORM→engine ani budowy graczy/map). Import wywołuje setup modułu (bsim, stdout).
+# Zachowaj historyczne eksporty formatowania i pairingu dla call sites leaf-CLI.
 from scripts.simulate_engagement import (  # noqa: E402
     DEFAULT_MAP,
-    RosterInfo,
     _bar,
     _games_label,
     format_roster_list,
-    list_rosters,
-    roster_info,
     simulate_engagement,
 )
 
-from szop_client.local import RosterNotFoundError  # noqa: E402
-from szop_client.protocol import SimulationSummary  # noqa: E402
-
-
-# ---------------------------------------------------------------------------
-# Agregacja (czyste funkcje — testowalne bez DB)
-# ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class OpponentResult:
-    """Wynik oceny ocenianej rozpiski (owner 0) przeciw JEDNEMU przeciwnikowi."""
-
-    opponent: RosterInfo
-    summary: SimulationSummary
-
-    @property
-    def win_rate(self) -> float:
-        # Oceniana rozpiska gra zawsze jako owner 0 → jej wygrane = wins_p0.
-        return self.summary.win_rate_p0
-
-
-@dataclass(frozen=True)
-class ScoreSummary:
-    """Zagregowany wynik ocenianej rozpiski przeciw całemu polu."""
-
-    n_opponents: int
-    n_games_total: int
-    wins: int
-    losses: int
-    draws: int
-    total_rounds: int
-
-    @property
-    def win_rate(self) -> float:
-        return self.wins / self.n_games_total if self.n_games_total else 0.0
-
-    @property
-    def loss_rate(self) -> float:
-        return self.losses / self.n_games_total if self.n_games_total else 0.0
-
-    @property
-    def draw_rate(self) -> float:
-        return self.draws / self.n_games_total if self.n_games_total else 0.0
-
-    @property
-    def avg_rounds(self) -> float:
-        return self.total_rounds / self.n_games_total if self.n_games_total else 0.0
-
-
-def aggregate_score(results: Sequence[OpponentResult]) -> ScoreSummary:
-    """Sumuje pairingi w jeden wynik (oceniana rozpiska = owner 0 w każdym)."""
-    wins = sum(r.summary.wins_p0 for r in results)
-    losses = sum(r.summary.wins_p1 for r in results)
-    draws = sum(r.summary.draws for r in results)
-    games = sum(r.summary.n_games for r in results)
-    rounds = sum(r.summary.total_rounds for r in results)
-    return ScoreSummary(
-        n_opponents=len(results),
-        n_games_total=games,
-        wins=wins,
-        losses=losses,
-        draws=draws,
-        total_rounds=rounds,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Symulacja (ścieżka DB)
-# ---------------------------------------------------------------------------
-
-
-def _select_opponents(
-    session, roster_id: int, *, vs_ids: Sequence[int] | None, army: str | None
-) -> list[RosterInfo]:
-    """Pole przeciwników: wszystkie rozpiski poza ocenianą, opcjonalnie zawężone.
-
-    `vs_ids` — jawna lista id przeciwników (pomija pozostałe filtry poza self).
-    `army` — tylko rozpiski z armii o tej nazwie (case-insensitive).
-    """
-    field = [info for info in list_rosters(session) if info.id != roster_id]
-    if vs_ids is not None:
-        wanted = set(vs_ids)
-        field = [info for info in field if info.id in wanted]
-    elif army is not None:
-        needle = army.casefold()
-        field = [info for info in field if info.army.casefold() == needle]
-    return field
-
-
-def score_list(
-    session,
-    roster_id: int,
-    *,
-    bot: str = "priority",
-    n: int = 10,
-    seed: int = 0,
-    map_name: str = DEFAULT_MAP,
-    vs_ids: Sequence[int] | None = None,
-    army: str | None = None,
-) -> tuple[RosterInfo, list[OpponentResult]]:
-    """Ocenia rozpiskę `roster_id` przez N gier przeciw każdemu przeciwnikowi w polu.
-
-    Zwraca (info ocenianej rozpiski, lista `OpponentResult` posortowana po id
-    przeciwnika). Deleguje każdy pairing do `simulate_engagement` (SSOT — most
-    ORM→engine + agregacja pkt 5.f). Wszystkie pairingi używają tej samej mapy
-    (ten sam `seed`) → spójne, deterministyczne tło oceny.
-
-    Raises `RosterNotFoundError` gdy oceniana rozpiska nie istnieje.
-    """
-    from app import models
-
-    target = session.get(models.Roster, roster_id)
-    if target is None:
-        raise RosterNotFoundError(f"Roster id={roster_id} nie istnieje")
-    target_info = roster_info(target)
-
-    opponents = _select_opponents(session, roster_id, vs_ids=vs_ids, army=army)
-    results: list[OpponentResult] = []
-    for opp in opponents:
-        summary, _info_target, info_opp = simulate_engagement(
-            session,
-            roster_id,
-            opp.id,
-            bot=bot,
-            n=n,
-            seed=seed,
-            map_name=map_name,
-        )
-        results.append(OpponentResult(opponent=info_opp, summary=summary))
-    return target_info, results
+from app.services.roster_scoring import (  # noqa: E402
+    OpponentResult,
+    RosterInfo,
+    RosterNotFoundError,
+    ScoreSummary,
+    _select_opponents,
+    aggregate_score,
+    list_rosters,
+    score_list,
+)
 
 
 # ---------------------------------------------------------------------------

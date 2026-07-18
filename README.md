@@ -75,6 +75,14 @@ wynik kosztowy nie trafiają do `AgentAuditLog`; audit zapisuje tylko bezpieczn�
 trasę, metodę, status, scope i `unit_id`. Szczegóły: [ADR-0025](docs/adr/0025-agent-scoped-tokens.md)
 oraz [ADR-0029](docs/adr/0029-public-loadout-validation.md).
 
+Owner-scoped ocena rozpiski wymaga scope `roster:score` (albo wyłącznego wildcard
+`*`) i używa `POST /rosters/{roster_id}/score`. Token widzi wyłącznie rostery
+ownera; brak i cudzy identyfikator mają wspólne 404. Body, lista przeciwników,
+nazwy/składy, punkty, parametry symulacji i wyniki nie trafiają do
+`AgentAuditLog`. Publiczny workload jest ograniczony do 10 przeciwników i 50
+gier, bez cichego obcinania pola. Szczegóły:
+[ADR-0033](docs/adr/0033-owner-scoped-score-list.md).
+
 ---
 
 ## Backup i przywracanie bazy

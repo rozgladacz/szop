@@ -298,10 +298,10 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 ### C1. Infrastruktura (3 tyg)
 - [x] `mcp_server/{server.py, config.py}` — **minimalny stdio slice DONE
   2026-07-15 + battle observation DONE 2026-07-15 + consent proposal DONE
-  2026-07-16**: stabilny MCP
+  2026-07-18**: stabilny MCP
   Python SDK v1, konfiguracja `SZOP_API_URL` + redagowany `SZOP_API_TOKEN` oraz
-  siedem read-only tools (`simulate_engagement`, `lookup_rule`, `search_rules`,
-  `explain_ability`, metadata/state/events bitwy) oraz
+  dziewięć read-only tools (`simulate_engagement`, `lookup_rule`, `search_rules`,
+  `explain_ability`, `validate_loadout`, `score_list`, metadata/state/events bitwy) oraz
   `propose_battle_action`. Serwer jest wyłącznie klientem publicznego API
   przez `szop_client.HttpClient`; bez ORM/DB, bezpośredniego `take_action`,
   resources/prompts, lokalnego dostępu MCP do RAG i ogólnego executora. Publiczny
@@ -394,7 +394,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `explain_ability(slug)` — **leaf-CLI DONE 2026-06-24 + public API/HttpClient/MCP DONE 2026-07-16**: wspólna warstwa `app.services.ability_lookup` rozwiązuje slug/nazwę PL wyłącznie przez katalog SSOT `app.data.abilities`; publiczny `GET /abilities/explain`, `HttpClient.explain_ability()` i MCP zwracają `szop.explain_ability/v1`, nie dotykają DB i limitują query do 100 znaków. CLI zachowuje `--list`, `--type` i `--json`.
 - [x] `validate_loadout(payload)` — **leaf-CLI DONE 2026-06-26 + public API/HttpClient/MCP DONE 2026-07-18 (ADR-0029)**: produkcyjny SSOT `app.services.loadout_validation` zachowuje read-only diff raw→normalized (odrzucone id / sklampowane count i `mode` / nierozpoznane passive) i deleguje koszt do `calculate_roster_unit_quote` oraz sanityzację do `normalize_roster_unit_loadout`; CLI re-eksportuje serwis i zachowuje `--list`/JSON. Agent-only `POST /units/{unit_id}/validate-loadout` wymaga `loadout:validate`, body `{loadout, count 1–100}`, zwraca ścisłe `szop.validate_loadout/v1` i nie zapisuje loadoutu. `HttpClient` używa globalnego timeoutu, dziewiąty tool MCP deleguje raz. Seeded end-to-end smoke oraz SQL gate 11 statements dla małego i 300-elementowego payloadu przeszły bez zmian katalogu/rosterów i bez body/tokena/kosztu w audycie.
 - [x] `find_exploit_candidates(army_id)` — **leaf-CLI DONE 2026-06-29** (`scripts/find_exploit_candidates.py`): turniej istniejących rozpisek jednej armii z DB (round-robin, każda para przez `simulate_engagement`/`LocalClient.simulate_roster_ids`) → ranking kandydatów do ręcznej weryfikacji wg `win_rate/points` (`wr/100pkt`, jak `exploit_hunt`); `--list`/`--json`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Nie generuje rozpisek i nie zapisuje wyników. Wrapper MCP/HTTP gated C1/B4.
-- [x] `score_list(roster_id)` — **leaf-CLI DONE 2026-06-27** (`scripts/score_list.py`): ocena rozpiski przez agregację symulacji vs POLE pozostałych rozpisek z DB (per-przeciwnik win-rate + „siła w polu" + sygnał koszt↔wynik); reuse pairingu `simulate_engagement` (`LocalClient.simulate_roster_ids`); `--list`/`--vs`/`--army`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Później interpretacja dedykowanego agenta. Wrapper MCP/HTTP gated C1/B4.
+- [x] `score_list(roster_id)` — **leaf-CLI DONE 2026-06-27 + owner-scoped API/HttpClient/MCP DONE 2026-07-18 (ADR-0033)**: produkcyjny SSOT `app.services.roster_scoring` zachowuje agregację symulacji vs pole, bezpieczną projekcję, siłę w polu i strukturalne sygnały kosztowe; CLI re-eksportuje serwis i zachowuje `--list`/`--vs`/`--army`/`-n`/`--bot`/`--seed`/`--map`. Agent-only `POST /rosters/{roster_id}/score` wymaga `roster:score`, wybiera owner-scoped pole bez oracle i zwraca `szop.score_list/v1`. Workload ma limit 10 przeciwników, 10 gier per przeciwnik i 50 łącznie bez cichego truncation; puste pole daje zerowy agregat. `HttpClient` wykonuje jeden POST na lokalnym timeoutcie 120 s, a dziesiąty tool MCP deleguje raz. Seeded direct/API/client/MCP smoke i SQL gate 13 statements dla jawnego pola 1/10 gier oraz 1/3 przeciwników (15 dla bounded pola domyślnego) przeszły bez zapisów poza audytem. Interpretacja dedykowanego agenta i `find_exploit_candidates` pozostają osobno.
 - [x] `simulate_engagement(roster_a, roster_b, n)` — **leaf-CLI DONE 2026-06-24** (`scripts/simulate_engagement.py`): dwie konkretne rozpiski z DB po id, `LocalClient.simulate_roster_ids`, `--list`, koszt/skład/win-rate, testy seeded SQLite. HTTP sandbox wrapper DONE 2026-07-10 (`POST /battles/simulate` + `HttpClient.simulate_roster_ids`); **minimalny MCP wrapper DONE 2026-07-15** (`mcp_server.server`, stdio, wyłącznie publiczne API, zakres 1–50 gier).
 - [x] `get_battle_metadata/state/events` — **MCP wrappers DONE 2026-07-15**: dokładnie jedno publiczne wywołanie `HttpClient` per tool; scope `battle:read` egzekwuje backend, state używa spójnego checkpointu bez RNG, events zachowują `since`/kolejność/`last_sequence`; brak bezpośredniego toola wykonującego akcję.
 - [x] `propose_battle_action` — **MCP + public API DONE 2026-07-16
@@ -547,6 +547,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
 | 0032 | Headless match runner (orkiestrator pełnej gry dla botów) | ✓ |
+| 0033 | Owner-scoped score_list przez publiczne API | ✓ |
 | 0040 | Migration blob → per-model | — |
 | 0041 | Terrain shapes beyond circle/line | — |
 | 0042 | Facing: wprowadzane z Zwrot | — |

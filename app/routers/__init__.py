@@ -10,6 +10,7 @@ from . import (
     export_xlsx,
     loadout_validation,
     reference,
+    roster_scoring,
     rosters,
     users,
 )
@@ -26,6 +27,7 @@ __all__ = [
     "export_xlsx",
     "loadout_validation",
     "reference",
+    "roster_scoring",
     "rosters",
     "users",
 ]

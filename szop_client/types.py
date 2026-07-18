@@ -9,6 +9,10 @@ if TYPE_CHECKING:
     from app.services.engine.state import BattleState
 
 
+class RosterNotFoundError(LookupError):
+    """A roster ID is missing or outside the caller's ownership scope."""
+
+
 @dataclass(frozen=True, slots=True)
 class BattleStateCheckpoint:
     """One coherent public state snapshot returned by ``GET /state``."""

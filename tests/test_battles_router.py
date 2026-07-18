@@ -609,6 +609,21 @@ def test_simulate_battle_rejects_unknown_bot_and_map() -> None:
         )
     assert map_info.value.status_code == 400
 
+    with pytest.raises(HTTPException) as map_precedence_info:
+        battles.simulate_battle(
+            battles.BattleSimulate(
+                p1_roster_id=roster_a.id,
+                p2_roster_id=roster_b.id,
+                games=1,
+                bot="nieistniejacy",
+                map_name="nieistniejaca",
+            ),
+            db=session,
+            simulator=simulator,
+        )
+    assert map_precedence_info.value.status_code == 400
+    assert map_precedence_info.value.detail == map_info.value.detail
+
     with pytest.raises(HTTPException) as bot_info:
         battles.simulate_battle(
             battles.BattleSimulate(
