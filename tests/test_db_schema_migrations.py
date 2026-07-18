@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import MetaData, create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -242,3 +242,56 @@ def test_migrate_schema_adds_agent_proposal_result_column(monkeypatch):
         for column in inspect(engine).get_columns("agent_proposals")
     }
     assert columns["result_json"]["nullable"] is True
+
+
+def test_create_all_adds_battle_invites_to_legacy_schema_idempotently():
+    engine = _memory_engine()
+    legacy_metadata = MetaData()
+    for table in Base.metadata.tables.values():
+        if table.name != "battle_invites":
+            table.to_metadata(legacy_metadata)
+    legacy_metadata.create_all(engine)
+
+    existing_at = "2026-07-19 08:00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO users (
+                    username, password_hash, is_admin, role, created_at, updated_at
+                ) VALUES (
+                    :username, :password_hash, 0, :role, :created_at, :updated_at
+                )
+                """
+            ),
+            {
+                "username": "legacy-user",
+                "password_hash": "x",
+                "role": models.USER_ROLE_USER,
+                "created_at": existing_at,
+                "updated_at": existing_at,
+            },
+        )
+
+    assert "battle_invites" not in inspect(engine).get_table_names()
+    Base.metadata.create_all(engine)
+    assert "battle_invites" in inspect(engine).get_table_names()
+    Base.metadata.create_all(engine)
+
+    with engine.connect() as connection:
+        existing_user = connection.execute(
+            text(
+                "SELECT username, password_hash, role FROM users "
+                "WHERE username = 'legacy-user'"
+            )
+        ).mappings().one()
+        invite_count = connection.execute(
+            text("SELECT COUNT(*) FROM battle_invites")
+        ).scalar_one()
+
+    assert existing_user == {
+        "username": "legacy-user",
+        "password_hash": "x",
+        "role": models.USER_ROLE_USER,
+    }
+    assert invite_count == 0

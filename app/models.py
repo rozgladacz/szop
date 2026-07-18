@@ -6,9 +6,11 @@ from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -29,6 +31,16 @@ AGENT_PROPOSAL_STATUS_APPROVED = "approved"
 AGENT_PROPOSAL_STATUS_EXECUTED = "executed"
 AGENT_PROPOSAL_STATUS_REJECTED = "rejected"
 AGENT_PROPOSAL_STATUS_STALE = "stale"
+BATTLE_INVITE_STATUS_PENDING = "pending"
+BATTLE_INVITE_STATUS_ACCEPTED = "accepted"
+BATTLE_INVITE_STATUS_DECLINED = "declined"
+BATTLE_INVITE_STATUS_EXPIRED = "expired"
+BATTLE_INVITE_STATUSES = (
+    BATTLE_INVITE_STATUS_PENDING,
+    BATTLE_INVITE_STATUS_ACCEPTED,
+    BATTLE_INVITE_STATUS_DECLINED,
+    BATTLE_INVITE_STATUS_EXPIRED,
+)
 
 
 class TimestampMixin:
@@ -643,6 +655,83 @@ class Battle(TimestampMixin, Base):
     )
 
 
+class BattleInvite(TimestampMixin, Base):
+    """Trwałe zaproszenie do bitwy z pojedynczym wynikiem akceptacji."""
+
+    __tablename__ = "battle_invites"
+    __table_args__ = (
+        CheckConstraint(
+            f"status IN ({', '.join(repr(status) for status in BATTLE_INVITE_STATUSES)})",
+            name="ck_battle_invites_status_valid",
+        ),
+        CheckConstraint(
+            "to_user_id IS NULL OR from_user_id <> to_user_id",
+            name="ck_battle_invites_direct_not_self",
+        ),
+        CheckConstraint(
+            f"status != '{BATTLE_INVITE_STATUS_ACCEPTED}' OR "
+            "(accepted_by_user_id IS NOT NULL AND "
+            "accepted_roster_id IS NOT NULL AND battle_id IS NOT NULL)",
+            name="ck_battle_invites_accepted_result_complete",
+        ),
+        CheckConstraint(
+            f"status = '{BATTLE_INVITE_STATUS_ACCEPTED}' OR "
+            "(accepted_by_user_id IS NULL AND "
+            "accepted_roster_id IS NULL AND battle_id IS NULL)",
+            name="ck_battle_invites_nonaccepted_result_empty",
+        ),
+        UniqueConstraint("battle_id", name="uq_battle_invites_battle_id"),
+        Index(
+            "ix_battle_invites_to_status_expires_at",
+            "to_user_id",
+            "status",
+            "expires_at",
+        ),
+        Index(
+            "ix_battle_invites_from_status_created_at",
+            "from_user_id",
+            "status",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    from_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    to_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    roster_id: Mapped[int] = mapped_column(
+        ForeignKey("rosters.id"), nullable=False
+    )
+    scenario: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(20), default=BATTLE_INVITE_STATUS_PENDING, nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    accepted_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id"), nullable=True
+    )
+    accepted_roster_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("rosters.id"), nullable=True
+    )
+    battle_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("battles.id"), nullable=True
+    )
+
+    from_user: Mapped[User] = relationship(foreign_keys=[from_user_id])
+    to_user: Mapped[Optional[User]] = relationship(foreign_keys=[to_user_id])
+    roster: Mapped[Roster] = relationship(foreign_keys=[roster_id])
+    accepted_by_user: Mapped[Optional[User]] = relationship(
+        foreign_keys=[accepted_by_user_id]
+    )
+    accepted_roster: Mapped[Optional[Roster]] = relationship(
+        foreign_keys=[accepted_roster_id]
+    )
+    battle: Mapped[Optional[Battle]] = relationship(foreign_keys=[battle_id])
+
+
 class BattleEvent(Base):
     """Append-only event w bitwie (ADR-0010 / ADR-0046 — proof-of-completeness).
 
@@ -707,6 +796,7 @@ for cls in [
     RosterUnit,
     ArmySpell,
     Battle,
+    BattleInvite,
     AgentToken,
     AgentProposal,
 ]:

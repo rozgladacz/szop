@@ -120,6 +120,12 @@ Wspólna orkiestracja `app/services/battle_actions.py` obsługuje także approva
 consent-gated (ADR-0024), dzięki czemu obie ścieżki dzielą walidację,
 checkpoint/RNG i atomowy zapis zamiast duplikować logikę routerów.
 
+Schema `BattleInvite` (ADR-0055) nie przyznaje dostępu i nie wykonuje walidacji
+ownership. Przyszłe endpointy invite/accept muszą owner-scope'ować roster
+zapraszającego i acceptora, zachować no-oracle dla direct invite, a open invite
+wiązać z pierwszym skutecznym acceptorem w jednej transakcji/CAS. Ten slice nie
+dodaje routera, scope bearer ani audytu.
+
 ## Dokumentacja reguł gry — read-only
 
 Pliki w `app/static/docs/`:
@@ -279,8 +285,13 @@ while not is_battle_over(state):
 - **`battle_checkpoints`** (`BattleCheckpoint`, ADR-0053): pełny, wersjonowany
   `BattleState` + stan `DeterministicDice` przy `sequence_at`, z unikalnością
   `(battle_id, sequence_at)`. Addytywna tabela przez `create_all`, bez Alembic.
+- **`battle_invites`** (`BattleInvite`, ADR-0055): immutable input zaproszenia,
+  czterostanowy lifecycle oraz nullable result linkage
+  (`accepted_by_user_id`, `accepted_roster_id`, unikalne `battle_id`). Nazwane
+  CHECK-i wykluczają self direct invite, niepełny accepted i wynik w stanie
+  niezaakceptowanym. Addytywna tabela przez `create_all`, bez Alembic.
 
-`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0, *, limit=None)` (rekonstrukcja przez `json_to_event`; brak limitu zachowuje historyczne zachowanie) + `latest_event_sequence(session, battle_id)`. `POST /battles/{id}/actions` (ADR-0054) przekazuje ostatni widziany sequence do `save_events(..., expected_latest_sequence=N)`: helper rzuca `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. `save_checkpoint`/`load_latest_checkpoint` (ADR-0053) nie commitują i uznają checkpoint za bieżący wyłącznie przy `sequence_at == latest_event_sequence`; zapisują/odtwarzają wersjonowany `BattleState` i RNG bez `pickle`. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`), C1 helper `require_agent_scope(scope_name)` w `app/security.py` oraz owner-only endpointy tokenów `app/routers/agent_tokens.py`. B4 `POST /battles` zapisuje `Battle`, startowy event-log i checkpoint w jednej transakcji; participant-scoped `GET /battles/{id}/state` zwraca publiczny stan bez RNG. Odroczone: `BattleInvite` i endpointy spoza pojedynczej akcji (interrupts/replay).
+`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0, *, limit=None)` (rekonstrukcja przez `json_to_event`; brak limitu zachowuje historyczne zachowanie) + `latest_event_sequence(session, battle_id)`. `POST /battles/{id}/actions` (ADR-0054) przekazuje ostatni widziany sequence do `save_events(..., expected_latest_sequence=N)`: helper rzuca `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. `save_checkpoint`/`load_latest_checkpoint` (ADR-0053) nie commitują i uznają checkpoint za bieżący wyłącznie przy `sequence_at == latest_event_sequence`; zapisują/odtwarzają wersjonowany `BattleState` i RNG bez `pickle`. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`) oraz `BattleInvite` z lifecycle/result linkage (ADR-0055); C1 helper `require_agent_scope(scope_name)` w `app/security.py` i owner-only endpointy tokenów `app/routers/agent_tokens.py`. B4 `POST /battles` zapisuje `Battle`, startowy event-log i checkpoint w jednej transakcji; participant-scoped `GET /battles/{id}/state` zwraca publiczny stan bez RNG. Odroczone: endpointy invite/accept oraz endpointy spoza pojedynczej akcji (interrupts/replay).
 
 ### Status B3 (zamknięte 2026-05-30) + B3.9 hardening (zamknięte 2026-06-02)
 

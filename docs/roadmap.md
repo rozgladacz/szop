@@ -102,12 +102,12 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 
 ### B2. Modele danych (4 tyg)
 
-> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Trwały checkpoint DONE 2026-07-15 (ADR-0053):** wersjonowany, bezpieczny codec pełnego `BattleState` + JSON-safe stan `DeterministicDice`, tabela `BattleCheckpoint` i helpery spójne z końcem event-store. **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). **Auth/agent schema slice DONE 2026-06-26:** `User.role`, `AgentToken`, `AgentAuditLog`; **runtime helper tokenów DONE 2026-06-27:** `security.require_agent_scope(scope_name)` weryfikuje bearer token hash + scope i zapisuje `AgentAuditLog`. **Endpointy tokenów DONE 2026-06-28:** `POST/GET/DELETE /agent_tokens` tworzą/listują/cofają własne tokeny ownera; raw bearer token wraca tylko przy tworzeniu. `BattleInvite` pozostaje poza tym krokiem. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
+> **Event-store slice DONE 2026-06-10** (wątek `faza-b-2-event-store`, ADR-0050): `Battle` + `BattleEvent` (nowe tabele, addytywne via `create_all`) + `app/services/engine/persistence.py` (`save_events`/`load_events`) + replay-from-DB invariant (10 testów, pytest 1504). **Trwały checkpoint DONE 2026-07-15 (ADR-0053):** wersjonowany, bezpieczny codec pełnego `BattleState` + JSON-safe stan `DeterministicDice`, tabela `BattleCheckpoint` i helpery spójne z końcem event-store. **BattleInvite schema DONE 2026-07-19 (ADR-0055):** addytywna tabela, czterostanowy lifecycle i trwały result linkage dla przyszłej idempotentnej akceptacji. **Unit base geometry slice DONE 2026-06-26:** `Unit.base_size_mm` + `Unit.base_shape` z ręcznym `_migrate_schema` (brak Alembic). **Auth/agent schema slice DONE 2026-06-26:** `User.role`, `AgentToken`, `AgentAuditLog`; **runtime helper tokenów DONE 2026-06-27:** `security.require_agent_scope(scope_name)` weryfikuje bearer token hash + scope i zapisuje `AgentAuditLog`. **Endpointy tokenów DONE 2026-06-28:** `POST/GET/DELETE /agent_tokens` tworzą/listują/cofają własne tokeny ownera; raw bearer token wraca tylko przy tworzeniu. Projekt NIE używa Alembic — schema z `Base.metadata.create_all` + ręczny `_migrate_schema` (db.py).
 
 **ORM — persistence layer (`app/models.py`):**
 - [x] `User` — `role ∈ {user, agent, admin}` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`; `is_admin` zostaje źródłem uprawnień UI w tym slice)
 - [x] `Battle` — `(p1_user_id?, p2_user_id?, p1_roster_id?, p2_roster_id?, winner_user_id?, current_round, rng_seed, status)` — tabela `battles` (ADR-0050)
-- [ ] `BattleInvite` — `(from_user_id, to_user_id?, roster_id, scenario, status ∈ {pending/accepted/declined/expired}, expires_at)`
+- [x] `BattleInvite` — `(from_user_id, to_user_id?, roster_id, scenario, status ∈ {pending/accepted/declined/expired}, expires_at)` + nullable result linkage `(accepted_by_user_id, accepted_roster_id, battle_id UNIQUE)` — DONE 2026-07-19 (ADR-0055)
 - [x] `BattleEvent` — append-only: `(battle_id, sequence, event_type, payload_json, timestamp)` + `UniqueConstraint(battle_id, sequence)` — tabela `battle_events` (ADR-0050)
 - [x] `BattleCheckpoint` — `(battle_id, sequence_at, state_json, rng_json, timestamp)`; tylko checkpoint dokładnie na końcu event-logu jest bieżący (ADR-0053)
 - [x] `Unit` — `base_size_mm: int = 25`, `base_shape: str = "round"` (DONE 2026-06-26; addytywne ORM + `_migrate_schema`)
@@ -129,9 +129,9 @@ Strumienie równoległe. Aplikacja użyteczna w każdej fazie. Procedural engine
 - [x] `load_events(session, battle_id, since=0)` — odczyt z db + rekonstrukcja przez `json_to_event`
 - [x] `save_checkpoint()` / `load_latest_checkpoint()` — transakcyjnie neutralne, wersjonowany pełny state+RNG, brak stale fallback (ADR-0053)
 
-- [ ] ADR-0010: Event-sourced battle log ✓
-- [ ] ADR-0010b: Eventy + immutable state; ORM tylko persistence ✓ (scalone z 0010)
-- [ ] ADR-0014: Obrażenia per-oddział (zgodne z „Stan bitewny") ✓
+- [x] ADR-0010: Event-sourced battle log ✓
+- [x] ADR-0010b: Eventy + immutable state; ORM tylko persistence ✓ (scalone z 0010)
+- [x] ADR-0014: Obrażenia per-oddział (zgodne z „Stan bitewny") ✓
 
 ### B3. Rule Executor + dice — **DONE 2026-05-30** (sub-wątek `faza-b-3-executor`, 8 commitów)
 
@@ -569,6 +569,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0052 | Końcowy odstęp Manewru od innych oddziałów | ✓ |
 | 0053 | Wersjonowane checkpointy BattleState + RNG | ✓ |
 | 0054 | Atomowe pojedyncze akcje bitwy przez HTTP | ✓ |
+| 0055 | Trwały lifecycle zaproszenia do bitwy | ✓ |
 
 ---
 
