@@ -13,6 +13,9 @@ from mcp_server.config import McpConfig
 from szop_client import (
     HttpClient,
     HttpClientError,
+    MAX_EXPLOIT_GAMES_PER_PAIR,
+    MAX_EXPLOIT_ROSTERS,
+    MAX_EXPLOIT_TOTAL_GAMES,
     MAX_ABILITY_QUERY_LENGTH,
     MAX_RULE_QUERY_LENGTH,
     MAX_RULE_RESULTS,
@@ -20,6 +23,7 @@ from szop_client import (
     MAX_SCORE_OPPONENTS,
     MAX_SCORE_SEED,
     MAX_SCORE_TOTAL_GAMES,
+    MIN_EXPLOIT_ROSTERS,
     MIN_SCORE_SEED,
     SCORE_LIST_BOTS,
     SCORE_LIST_MAPS,
@@ -37,6 +41,7 @@ TOOL_NAMES = (
     "explain_ability",
     "validate_loadout",
     "score_list",
+    "find_exploit_candidates",
     "get_battle_metadata",
     "get_battle_state",
     "get_battle_events",
@@ -106,6 +111,36 @@ ScoreOpponentIdsInput = Annotated[
                     "type": "array",
                     "items": {"type": "integer", "minimum": 1},
                     "maxItems": MAX_SCORE_OPPONENTS,
+                },
+                {"type": "null"},
+            ]
+        }
+    ),
+]
+ExploitArmyIdInput = Annotated[
+    Any,
+    WithJsonSchema({"type": "integer", "minimum": 1}),
+]
+ExploitGameCountInput = Annotated[
+    Any,
+    WithJsonSchema(
+        {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": MAX_EXPLOIT_GAMES_PER_PAIR,
+        }
+    ),
+]
+ExploitRosterIdsInput = Annotated[
+    Any,
+    WithJsonSchema(
+        {
+            "anyOf": [
+                {
+                    "type": "array",
+                    "items": {"type": "integer", "minimum": 1},
+                    "minItems": MIN_EXPLOIT_ROSTERS,
+                    "maxItems": MAX_EXPLOIT_ROSTERS,
                 },
                 {"type": "null"},
             ]
@@ -329,6 +364,73 @@ def create_server(
             operation,
             bearer_token=settings.bearer_token,
             safe_error_label="POST roster score failed",
+        )
+
+    @server.tool(name="find_exploit_candidates")
+    def find_exploit_candidates(
+        army_id: ExploitArmyIdInput,
+        games_per_pair: ExploitGameCountInput = 2,
+        bot: ScoreBotInput = "priority",
+        seed: ScoreSeedInput = 0,
+        map_name: ScoreMapInput = "lustrzana_a",
+        roster_ids: ExploitRosterIdsInput = None,
+    ) -> dict[str, Any]:
+        """Rank a bounded field of existing owner rosters for manual review."""
+        def operation() -> dict[str, Any]:
+            if (
+                type(army_id) is not int
+                or not 1 <= army_id <= 2**63 - 1
+                or type(games_per_pair) is not int
+                or not 1 <= games_per_pair <= MAX_EXPLOIT_GAMES_PER_PAIR
+                or not isinstance(bot, str)
+                or not bot
+                or not isinstance(map_name, str)
+                or not map_name
+                or type(seed) is not int
+                or not MIN_SCORE_SEED <= seed <= MAX_SCORE_SEED
+            ):
+                raise ValueError("invalid exploit candidate request")
+
+            normalized_bot = bot.lower()
+            normalized_map = map_name.lower()
+            if (
+                normalized_bot not in SCORE_LIST_BOTS
+                or normalized_map not in SCORE_LIST_MAPS
+            ):
+                raise ValueError("invalid exploit candidate request")
+
+            normalized_rosters: list[int] | None = None
+            if roster_ids is not None:
+                if type(roster_ids) is not list:
+                    raise ValueError("invalid exploit candidate request")
+                pair_count = len(roster_ids) * (len(roster_ids) - 1) // 2
+                if (
+                    not MIN_EXPLOIT_ROSTERS <= len(roster_ids) <= MAX_EXPLOIT_ROSTERS
+                    or any(
+                        type(item) is not int or not 1 <= item <= 2**63 - 1
+                        for item in roster_ids
+                    )
+                    or len(set(roster_ids)) != len(roster_ids)
+                    or pair_count * games_per_pair > MAX_EXPLOIT_TOTAL_GAMES
+                ):
+                    raise ValueError("invalid exploit candidate request")
+                normalized_rosters = sorted(roster_ids)
+
+            return ensure_json_safe(
+                http_client.find_exploit_candidates(
+                    army_id,
+                    games_per_pair=games_per_pair,
+                    bot=normalized_bot,
+                    seed=seed,
+                    map_name=normalized_map,
+                    roster_ids=normalized_rosters,
+                )
+            )
+
+        return _run_safely(
+            operation,
+            bearer_token=settings.bearer_token,
+            safe_error_label="POST exploit candidate search failed",
         )
 
     @server.tool(name="get_battle_metadata")

@@ -129,11 +129,11 @@ def test_config_uses_local_default_and_rejects_empty_url_without_secret() -> Non
     assert RAW_TOKEN not in str(exc_info.value)
 
 
-def test_server_registers_exactly_the_ten_public_api_tools() -> None:
+def test_server_registers_exactly_the_eleven_public_api_tools() -> None:
     tools = asyncio.run(_list_tools(create_server(McpConfig("http://localhost"))))
 
     assert [tool.name for tool in tools.tools] == list(TOOL_NAMES)
-    assert len(tools.tools) == 10
+    assert len(tools.tools) == 11
 
 
 def test_server_registers_no_resources_templates_or_prompts() -> None:
@@ -206,6 +206,7 @@ def test_mcp_package_has_no_direct_app_or_database_imports() -> None:
     assert "app.services.costs" not in server_source
     assert "scripts.validate_loadout" not in server_source
     assert "scripts.score_list" not in server_source
+    assert "scripts.find_exploit_candidates" not in server_source
 
 
 def _score_list_payload() -> dict[str, Any]:
@@ -368,6 +369,218 @@ def test_score_list_tool_redacts_field_results_token_and_paths_from_errors() -> 
     assert RAW_TOKEN not in observed
     assert private_name not in observed
     assert "opponent=88" not in observed
+    assert "wins=3" not in observed
+    assert "C:\\private" not in observed
+
+
+def _exploit_candidates_payload() -> dict[str, Any]:
+    return {
+        "schema": "szop.find_exploit_candidates/v1",
+        "version": 1,
+        "army": {"id": 4, "name": "Army", "roster_count": 2},
+        "parameters": {
+            "games_per_pair": 1,
+            "bot": "priority",
+            "seed": 4,
+            "map_name": "lustrzana_a",
+            "roster_ids": [7, 8],
+        },
+        "candidates": [
+            {
+                "rank": 1,
+                "roster_id": 7,
+                "name": "Alpha",
+                "army": "Army",
+                "points": 100.0,
+                "composition": "1× Unit",
+                "games": 1,
+                "wins": 1,
+                "losses": 0,
+                "draws": 0,
+                "rounds": 4,
+                "win_rate": 1.0,
+                "loss_rate": 0.0,
+                "draw_rate": 0.0,
+                "avg_rounds": 4.0,
+                "exploit_score": 1.0,
+            },
+            {
+                "rank": 2,
+                "roster_id": 8,
+                "name": "Beta",
+                "army": "Army",
+                "points": 100.0,
+                "composition": "1× Unit",
+                "games": 1,
+                "wins": 0,
+                "losses": 1,
+                "draws": 0,
+                "rounds": 4,
+                "win_rate": 0.0,
+                "loss_rate": 1.0,
+                "draw_rate": 0.0,
+                "avg_rounds": 4.0,
+                "exploit_score": 0.0,
+            },
+        ],
+        "pairs": [
+            {
+                "roster_a_id": 7,
+                "roster_b_id": 8,
+                "wins_a": 1,
+                "wins_b": 0,
+                "draws": 0,
+                "games": 1,
+                "rounds": 4,
+                "win_rate_a": 1.0,
+                "win_rate_b": 0.0,
+                "avg_rounds": 4.0,
+            }
+        ],
+    }
+
+
+def test_find_exploit_candidates_tool_delegates_once_to_public_client() -> None:
+    client = Mock(spec=HttpClient)
+    payload = _exploit_candidates_payload()
+    client.find_exploit_candidates.return_value = payload
+
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            {
+                "army_id": 4,
+                "games_per_pair": 1,
+                "bot": "PRIORITY",
+                "seed": 4,
+                "map_name": "LUSTRZANA_A",
+                "roster_ids": [8, 7],
+            },
+            tool_name="find_exploit_candidates",
+        )
+    )
+
+    client.find_exploit_candidates.assert_called_once_with(
+        4,
+        games_per_pair=1,
+        bot="priority",
+        seed=4,
+        map_name="lustrzana_a",
+        roster_ids=[7, 8],
+    )
+    assert result.structuredContent == payload
+    json.dumps(result.structuredContent, ensure_ascii=False, allow_nan=False)
+
+
+def test_find_exploit_candidates_discovery_schema_is_explicit() -> None:
+    tools = asyncio.run(
+        _list_tools(create_server(McpConfig("http://localhost")))
+    ).tools
+    tool = next(item for item in tools if item.name == "find_exploit_candidates")
+    properties = tool.inputSchema["properties"]
+
+    assert set(properties) == {
+        "army_id",
+        "games_per_pair",
+        "bot",
+        "seed",
+        "map_name",
+        "roster_ids",
+    }
+    assert properties["army_id"]["minimum"] == 1
+    assert properties["games_per_pair"]["maximum"] == 3
+    roster_array = properties["roster_ids"]["anyOf"][0]
+    assert roster_array["minItems"] == 2
+    assert roster_array["maxItems"] == 7
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"army_id": True},
+        {"army_id": 0},
+        {"army_id": 2**63},
+        {"army_id": 4, "games_per_pair": True},
+        {"army_id": 4, "games_per_pair": 4},
+        {"army_id": 4, "bot": "minimax"},
+        {"army_id": 4, "seed": 2**31},
+        {"army_id": 4, "map_name": "bad"},
+        {"army_id": 4, "roster_ids": [7]},
+        {"army_id": 4, "roster_ids": [7, 7]},
+        {
+            "army_id": 4,
+            "games_per_pair": 3,
+            "roster_ids": [7, 8, 9, 10, 11, 12, 13],
+        },
+    ],
+)
+def test_find_exploit_candidates_tool_rejects_invalid_input_before_client_call(
+    arguments,
+) -> None:
+    client = Mock(spec=HttpClient)
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name="find_exploit_candidates",
+            raise_exceptions=False,
+        )
+    )
+    assert result.isError is True
+    client.find_exploit_candidates.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("arguments", "private_values"),
+    [
+        (
+            {"army_id": 4, "roster_ids": [880088, 880088]},
+            ("880088",),
+        ),
+        ({"army_id": -990099}, ("-990099",)),
+    ],
+)
+def test_find_exploit_candidates_validation_never_echoes_private_ids(
+    arguments,
+    private_values,
+) -> None:
+    client = Mock(spec=HttpClient)
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name="find_exploit_candidates",
+            raise_exceptions=False,
+        )
+    )
+
+    observed = repr(result)
+    assert result.isError is True
+    assert "POST exploit candidate search failed" in observed
+    assert all(value not in observed for value in private_values)
+    client.find_exploit_candidates.assert_not_called()
+
+
+def test_find_exploit_candidates_redacts_results_token_ids_and_paths_from_errors() -> None:
+    client = Mock(spec=HttpClient)
+    client.find_exploit_candidates.side_effect = HttpClientError(
+        f"Authorization: Bearer {RAW_TOKEN}; roster=880088; wins=3; "
+        "C:\\private\\exploit.json",
+        status_code=500,
+    )
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost", RAW_TOKEN), client=client),
+            {"army_id": 4, "roster_ids": [7, 8]},
+            tool_name="find_exploit_candidates",
+            raise_exceptions=False,
+        )
+    )
+    observed = repr(result)
+    assert result.isError is True
+    assert "HTTP 500" in observed
+    assert RAW_TOKEN not in observed
+    assert "880088" not in observed
     assert "wins=3" not in observed
     assert "C:\\private" not in observed
 

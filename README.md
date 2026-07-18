@@ -83,6 +83,16 @@ nazwy/składy, punkty, parametry symulacji i wyniki nie trafiają do
 gier, bez cichego obcinania pola. Szczegóły:
 [ADR-0033](docs/adr/0033-owner-scoped-score-list.md).
 
+Owner-scoped wyszukiwanie kandydatów exploitu wymaga scope
+`roster:exploit-search` (albo wyłącznego wildcard `*`) i używa
+`POST /armies/{army_id}/exploit-candidates`. Armia może być własna lub globalna,
+ale ranking obejmuje wyłącznie istniejące rostery ownera tokena z tej armii.
+Publiczny workload ma 2–7 rosterów, maksymalnie 21 par i 50 gier; pole domyślne
+ponad limit daje 422 bez cichego obcięcia. Body, roster IDs, nazwy/składy, punkty,
+parametry i wyniki nie trafiają do `AgentAuditLog`, a `AgentToken.last_used_at`
+nie jest aktualizowany. Szczegóły:
+[ADR-0034](docs/adr/0034-owner-scoped-exploit-candidates.md).
+
 ---
 
 ## Backup i przywracanie bazy

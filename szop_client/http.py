@@ -11,6 +11,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from itertools import combinations
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -40,9 +41,11 @@ ABILITY_EXPLANATION_SCHEMA = "szop.explain_ability/v1"
 RULES_SEARCH_SCHEMA = "szop.search_rules/v1"
 LOADOUT_VALIDATION_SCHEMA = "szop.validate_loadout/v1"
 SCORE_LIST_SCHEMA = "szop.score_list/v1"
+EXPLOIT_CANDIDATES_SCHEMA = "szop.find_exploit_candidates/v1"
 REFERENCE_API_VERSION = 1
 LOADOUT_VALIDATION_VERSION = 1
 SCORE_LIST_VERSION = 1
+EXPLOIT_CANDIDATES_VERSION = 1
 RULES_SEARCH_STRATEGY = "hybrid_weighted_rrf"
 RULE_SOURCE = "SZOP_Rozjemca.md"
 ABILITY_SOURCE = "app.data.abilities"
@@ -71,6 +74,11 @@ SCORE_LIST_BOTS = (
     "claude_v1",
 )
 SCORE_LIST_MAPS = frozenset({"standard_a", "lustrzana_a", "symetryczna_a"})
+MIN_EXPLOIT_ROSTERS = 2
+MAX_EXPLOIT_ROSTERS = 7
+MAX_EXPLOIT_GAMES_PER_PAIR = 3
+MAX_EXPLOIT_PAIRS = 21
+MAX_EXPLOIT_TOTAL_GAMES = 50
 
 
 @dataclass(frozen=True, slots=True)
@@ -427,6 +435,81 @@ class HttpClient:
             expected_seed=seed,
             expected_map_name=normalized_map,
             expected_opponent_ids=normalized_opponents,
+            error_label=error_label,
+        )
+
+    def find_exploit_candidates(
+        self,
+        army_id: int,
+        *,
+        games_per_pair: int = 2,
+        bot: str = "priority",
+        seed: int = 0,
+        map_name: str = "lustrzana_a",
+        roster_ids: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """Rank one bounded owner-scoped army field through one API request."""
+        if type(army_id) is not int or not 1 <= army_id <= 2**63 - 1:
+            raise ValueError("army_id must be a safe positive database int")
+        if type(games_per_pair) is not int or not (
+            1 <= games_per_pair <= MAX_EXPLOIT_GAMES_PER_PAIR
+        ):
+            raise ValueError(
+                "games_per_pair must be an int between 1 and "
+                f"{MAX_EXPLOIT_GAMES_PER_PAIR}"
+            )
+        if not isinstance(bot, str) or bot.lower() not in SCORE_LIST_BOTS:
+            raise ValueError("bot must be an allowed lightweight simulation bot")
+        normalized_bot = bot.lower()
+        if type(seed) is not int or not MIN_SCORE_SEED <= seed <= MAX_SCORE_SEED:
+            raise ValueError("seed must be a safe signed 32-bit int")
+        if not isinstance(map_name, str) or map_name.lower() not in SCORE_LIST_MAPS:
+            raise ValueError("map_name must be an allowed simulation map")
+        normalized_map = map_name.lower()
+        normalized_rosters: list[int] | None = None
+        if roster_ids is not None:
+            if type(roster_ids) is not list:
+                raise ValueError("roster_ids must be a list or None")
+            pair_count = len(roster_ids) * (len(roster_ids) - 1) // 2
+            if (
+                not MIN_EXPLOIT_ROSTERS <= len(roster_ids) <= MAX_EXPLOIT_ROSTERS
+                or any(
+                    type(item) is not int or not 1 <= item <= 2**63 - 1
+                    for item in roster_ids
+                )
+                or len(set(roster_ids)) != len(roster_ids)
+                or pair_count > MAX_EXPLOIT_PAIRS
+                or pair_count * games_per_pair > MAX_EXPLOIT_TOTAL_GAMES
+            ):
+                raise ValueError("roster_ids define an invalid exploit workload")
+            normalized_rosters = sorted(roster_ids)
+
+        request_body: dict[str, Any] = {
+            "games_per_pair": games_per_pair,
+            "bot": normalized_bot,
+            "seed": seed,
+            "map_name": normalized_map,
+        }
+        if normalized_rosters is not None:
+            request_body["roster_ids"] = normalized_rosters
+
+        error_label = "POST exploit candidate search"
+        payload = self._request_json(
+            "POST",
+            f"/armies/{army_id}/exploit-candidates",
+            {},
+            json_body=request_body,
+            error_label=error_label,
+            timeout=max(self._timeout, SCORE_LIST_TIMEOUT),
+        )
+        return _exploit_candidates_from_payload(
+            payload,
+            expected_army_id=army_id,
+            expected_games_per_pair=games_per_pair,
+            expected_bot=normalized_bot,
+            expected_seed=seed,
+            expected_map_name=normalized_map,
+            expected_roster_ids=normalized_rosters,
             error_label=error_label,
         )
 
@@ -907,6 +990,348 @@ def _score_list_from_payload(
         "aggregate": aggregate,
         "cost_signals": cost_signals,
     }
+
+
+def _exploit_candidates_from_payload(
+    payload: Any,
+    *,
+    expected_army_id: int,
+    expected_games_per_pair: int,
+    expected_bot: str,
+    expected_seed: int,
+    expected_map_name: str,
+    expected_roster_ids: list[int] | None,
+    error_label: str,
+) -> dict[str, Any]:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        _require_exact_keys(
+            payload,
+            {"schema", "version", "army", "parameters", "candidates", "pairs"},
+        )
+        schema = _required_str(payload, "schema")
+        version = _required_int(payload, "version")
+        army = _exploit_army_from_payload(payload["army"])
+        parameters = _exploit_parameters_from_payload(payload["parameters"])
+        roster_ids = parameters["roster_ids"]
+        if (
+            schema != EXPLOIT_CANDIDATES_SCHEMA
+            or version != EXPLOIT_CANDIDATES_VERSION
+            or army["id"] != expected_army_id
+            or army["roster_count"] != len(roster_ids)
+            or parameters["games_per_pair"] != expected_games_per_pair
+            or parameters["bot"] != expected_bot
+            or parameters["seed"] != expected_seed
+            or parameters["map_name"] != expected_map_name
+            or (expected_roster_ids is not None and roster_ids != expected_roster_ids)
+        ):
+            raise TypeError("exploit candidate envelope")
+
+        raw_candidates = payload["candidates"]
+        raw_pairs = payload["pairs"]
+        if (
+            not isinstance(raw_candidates, list)
+            or len(raw_candidates) != len(roster_ids)
+            or not isinstance(raw_pairs, list)
+        ):
+            raise TypeError("exploit candidate collections")
+        candidate_games = (len(roster_ids) - 1) * expected_games_per_pair
+        candidates = [
+            _exploit_candidate_from_payload(
+                item,
+                expected_rank=rank,
+                expected_games=candidate_games,
+                expected_army_name=army["name"],
+            )
+            for rank, item in enumerate(raw_candidates, start=1)
+        ]
+        candidate_ids = [candidate["roster_id"] for candidate in candidates]
+        if len(set(candidate_ids)) != len(candidate_ids) or set(candidate_ids) != set(
+            roster_ids
+        ):
+            raise TypeError("exploit candidate roster IDs")
+
+        expected_pair_ids = list(combinations(roster_ids, 2))
+        if (
+            len(expected_pair_ids) > MAX_EXPLOIT_PAIRS
+            or len(expected_pair_ids) * expected_games_per_pair
+            > MAX_EXPLOIT_TOTAL_GAMES
+            or len(raw_pairs) != len(expected_pair_ids)
+        ):
+            raise TypeError("exploit candidate workload")
+        pairs = [
+            _exploit_pair_from_payload(
+                item,
+                expected_ids=pair_ids,
+                expected_games=expected_games_per_pair,
+            )
+            for item, pair_ids in zip(raw_pairs, expected_pair_ids, strict=True)
+        ]
+        _assert_exploit_candidate_consistency(candidates, pairs)
+    except (KeyError, TypeError, ValueError, RecursionError) as exc:
+        raise HttpClientError(error_message) from exc
+    return {
+        "schema": schema,
+        "version": version,
+        "army": army,
+        "parameters": parameters,
+        "candidates": candidates,
+        "pairs": pairs,
+    }
+
+
+def _exploit_army_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("exploit army")
+    _require_exact_keys(payload, {"id", "name", "roster_count"})
+    army_id = _required_int(payload, "id")
+    name = _bounded_required_str(payload, "name", max_length=120)
+    roster_count = _required_int(payload, "roster_count")
+    if army_id < 1 or not MIN_EXPLOIT_ROSTERS <= roster_count <= MAX_EXPLOIT_ROSTERS:
+        raise TypeError("exploit army")
+    return {"id": army_id, "name": name, "roster_count": roster_count}
+
+
+def _exploit_parameters_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("exploit parameters")
+    _require_exact_keys(
+        payload,
+        {"games_per_pair", "bot", "seed", "map_name", "roster_ids"},
+    )
+    games = _required_int(payload, "games_per_pair")
+    bot = _required_str(payload, "bot")
+    seed = _required_int(payload, "seed")
+    map_name = _required_str(payload, "map_name")
+    roster_ids = payload["roster_ids"]
+    if (
+        not 1 <= games <= MAX_EXPLOIT_GAMES_PER_PAIR
+        or bot not in SCORE_LIST_BOTS
+        or not MIN_SCORE_SEED <= seed <= MAX_SCORE_SEED
+        or map_name not in SCORE_LIST_MAPS
+        or not isinstance(roster_ids, list)
+        or not MIN_EXPLOIT_ROSTERS <= len(roster_ids) <= MAX_EXPLOIT_ROSTERS
+        or any(
+            type(item) is not int or not 1 <= item <= 2**63 - 1
+            for item in roster_ids
+        )
+        or roster_ids != sorted(roster_ids)
+        or len(set(roster_ids)) != len(roster_ids)
+    ):
+        raise TypeError("exploit parameters")
+    pair_count = len(roster_ids) * (len(roster_ids) - 1) // 2
+    if pair_count > MAX_EXPLOIT_PAIRS or pair_count * games > MAX_EXPLOIT_TOTAL_GAMES:
+        raise TypeError("exploit parameters")
+    return {
+        "games_per_pair": games,
+        "bot": bot,
+        "seed": seed,
+        "map_name": map_name,
+        "roster_ids": list(roster_ids),
+    }
+
+
+def _exploit_candidate_from_payload(
+    payload: Any,
+    *,
+    expected_rank: int,
+    expected_games: int,
+    expected_army_name: str,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("exploit candidate")
+    _require_exact_keys(
+        payload,
+        {
+            "rank",
+            "roster_id",
+            "name",
+            "army",
+            "points",
+            "composition",
+            "games",
+            "wins",
+            "losses",
+            "draws",
+            "rounds",
+            "win_rate",
+            "loss_rate",
+            "draw_rate",
+            "avg_rounds",
+            "exploit_score",
+        },
+    )
+    rank = _required_int(payload, "rank")
+    roster_id = _required_int(payload, "roster_id")
+    name = _bounded_required_str(payload, "name", max_length=120)
+    army = _bounded_required_str(payload, "army", max_length=120)
+    points = _required_finite_float(payload, "points")
+    composition = _required_str(payload, "composition")
+    games = _required_int(payload, "games")
+    wins = _required_int(payload, "wins")
+    losses = _required_int(payload, "losses")
+    draws = _required_int(payload, "draws")
+    rounds = _required_int(payload, "rounds")
+    win_rate = _required_finite_float(payload, "win_rate")
+    loss_rate = _required_finite_float(payload, "loss_rate")
+    draw_rate = _required_finite_float(payload, "draw_rate")
+    avg_rounds = _required_finite_float(payload, "avg_rounds")
+    exploit_score = _required_finite_float(payload, "exploit_score")
+    expected_exploit = win_rate / points * 100.0 if points > 0.0 else 0.0
+    if (
+        rank != expected_rank
+        or roster_id < 1
+        or army != expected_army_name
+        or points < 0.0
+        or points > 1_000_000_000_000.0
+        or len(composition) > 4000
+        or games != expected_games
+        or min(wins, losses, draws, rounds) < 0
+        or wins + losses + draws != games
+        or rounds > games * 100
+        or not all(0.0 <= rate <= 1.0 for rate in (win_rate, loss_rate, draw_rate))
+        or not _score_float_matches(win_rate, wins / games)
+        or not _score_float_matches(loss_rate, losses / games)
+        or not _score_float_matches(draw_rate, draws / games)
+        or not _score_float_matches(avg_rounds, rounds / games)
+        or not _score_float_matches(exploit_score, expected_exploit)
+    ):
+        raise TypeError("exploit candidate")
+    return {
+        "rank": rank,
+        "roster_id": roster_id,
+        "name": name,
+        "army": army,
+        "points": points,
+        "composition": composition,
+        "games": games,
+        "wins": wins,
+        "losses": losses,
+        "draws": draws,
+        "rounds": rounds,
+        "win_rate": win_rate,
+        "loss_rate": loss_rate,
+        "draw_rate": draw_rate,
+        "avg_rounds": avg_rounds,
+        "exploit_score": exploit_score,
+    }
+
+
+def _exploit_pair_from_payload(
+    payload: Any,
+    *,
+    expected_ids: tuple[int, int],
+    expected_games: int,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("exploit pair")
+    _require_exact_keys(
+        payload,
+        {
+            "roster_a_id",
+            "roster_b_id",
+            "wins_a",
+            "wins_b",
+            "draws",
+            "games",
+            "rounds",
+            "win_rate_a",
+            "win_rate_b",
+            "avg_rounds",
+        },
+    )
+    roster_a_id = _required_int(payload, "roster_a_id")
+    roster_b_id = _required_int(payload, "roster_b_id")
+    wins_a = _required_int(payload, "wins_a")
+    wins_b = _required_int(payload, "wins_b")
+    draws = _required_int(payload, "draws")
+    games = _required_int(payload, "games")
+    rounds = _required_int(payload, "rounds")
+    win_rate_a = _required_finite_float(payload, "win_rate_a")
+    win_rate_b = _required_finite_float(payload, "win_rate_b")
+    avg_rounds = _required_finite_float(payload, "avg_rounds")
+    if (
+        (roster_a_id, roster_b_id) != expected_ids
+        or games != expected_games
+        or min(wins_a, wins_b, draws, rounds) < 0
+        or wins_a + wins_b + draws != games
+        or rounds > games * 100
+        or not 0.0 <= win_rate_a <= 1.0
+        or not 0.0 <= win_rate_b <= 1.0
+        or not _score_float_matches(win_rate_a, wins_a / games)
+        or not _score_float_matches(win_rate_b, wins_b / games)
+        or not _score_float_matches(avg_rounds, rounds / games)
+    ):
+        raise TypeError("exploit pair")
+    return {
+        "roster_a_id": roster_a_id,
+        "roster_b_id": roster_b_id,
+        "wins_a": wins_a,
+        "wins_b": wins_b,
+        "draws": draws,
+        "games": games,
+        "rounds": rounds,
+        "win_rate_a": win_rate_a,
+        "win_rate_b": win_rate_b,
+        "avg_rounds": avg_rounds,
+    }
+
+
+def _assert_exploit_candidate_consistency(
+    candidates: list[dict[str, Any]],
+    pairs: list[dict[str, Any]],
+) -> None:
+    totals = {
+        candidate["roster_id"]: {
+            "games": 0,
+            "wins": 0,
+            "losses": 0,
+            "draws": 0,
+            "rounds": 0,
+        }
+        for candidate in candidates
+    }
+    for pair in pairs:
+        left = totals[pair["roster_a_id"]]
+        right = totals[pair["roster_b_id"]]
+        left["games"] += pair["games"]
+        left["wins"] += pair["wins_a"]
+        left["losses"] += pair["wins_b"]
+        left["draws"] += pair["draws"]
+        left["rounds"] += pair["rounds"]
+        right["games"] += pair["games"]
+        right["wins"] += pair["wins_b"]
+        right["losses"] += pair["wins_a"]
+        right["draws"] += pair["draws"]
+        right["rounds"] += pair["rounds"]
+
+    for candidate in candidates:
+        total = totals[candidate["roster_id"]]
+        if any(candidate[key] != total[key] for key in total):
+            raise TypeError("exploit candidate aggregate")
+    expected_ranking = sorted(
+        candidates,
+        key=lambda candidate: (
+            (
+                candidate["wins"]
+                / candidate["games"]
+                / candidate["points"]
+                * 100.0
+                if candidate["points"] > 0.0
+                else 0.0
+            ),
+            candidate["wins"] / candidate["games"],
+            -candidate["points"],
+            -candidate["roster_id"],
+        ),
+        reverse=True,
+    )
+    if [candidate["roster_id"] for candidate in candidates] != [
+        candidate["roster_id"] for candidate in expected_ranking
+    ]:
+        raise TypeError("exploit candidate ranking")
 
 
 def _score_roster_info_from_payload(payload: Any) -> dict[str, Any]:

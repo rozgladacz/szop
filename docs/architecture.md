@@ -82,6 +82,12 @@ Owner-scoped `POST /rosters/{roster_id}/score` wymaga wyłącznie bearer scope
 brak i cudzy identyfikator zwracają to samo 404. Generyczny audit zachowuje
 wyłącznie bezpieczny path `roster_id`, bez body, pola, nazw, punktów, parametrów
 symulacji i wyników. Kontrakt opisuje [ADR-0033](adr/0033-owner-scoped-score-list.md).
+Owner-scoped `POST /armies/{army_id}/exploit-candidates` wymaga wyłącznie bearer
+scope `roster:exploit-search`. Armia jest widoczna, gdy należy do ownera albo
+jest globalna, ale pole zawsze zawiera wyłącznie rostery tego ownera z tej armii.
+Audit zachowuje tylko bezpieczny `army_id`; body, roster IDs, nazwy/składy,
+punkty, parametry i wyniki są pomijane. Kontrakt opisuje
+[ADR-0034](adr/0034-owner-scoped-exploit-candidates.md).
 Write slice B4 `POST /battles/{id}/actions` (ADR-0054) ma osobny scope
 `battle:act`. Przyjmuje obowiązkowy `expected_sequence` i jedną akcję w
 wersjonowanym formacie `szop.action/v1` (`ManeuverAction`, `DefendAction`,
@@ -316,13 +322,13 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 | `types.py` | lekkie frozen typy `SimulationSummary` oraz `BattleStateCheckpoint` (`battle_id`, `sequence_at`, schema/version, domenowy state; adnotacja state bez runtime importu silnika/ORM) |
 | `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` z `deployment_zones` D5), re-eksportuje `SimulationSummary` dla kompatybilności |
 | `local.py` | `LocalClient(session=None, user_id=None)` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); **ścieżka DB** `simulate_roster_ids`/`create_battle_from_roster_ids` (wczytuje `Roster` po id, adapter ORM→engine, ownership-scoped); `UnknownBattleError`/`RosterNotFoundError` |
-| `http.py` | `HttpClient(base_url, token)` — metadane/eventy/state/create/simulate, publiczne odczyty reguł/zdolności, scoped `search_rules`, `validate_loadout` i `score_list`, `take_action` oraz consent-only `propose_battle_action`; publiczny `get_state_checkpoint()` dekoduje jeden spójny GET state+sequence, `get_state()` deleguje, a bezpośredni zapis używa tej samej metody bez cache (ADR-0054/0024/0028/0029/0033) |
+| `http.py` | `HttpClient(base_url, token)` — metadane/eventy/state/create/simulate, publiczne odczyty reguł/zdolności, scoped `search_rules`, `validate_loadout`, `score_list` i `find_exploit_candidates`, `take_action` oraz consent-only `propose_battle_action`; publiczny `get_state_checkpoint()` dekoduje jeden spójny GET state+sequence, `get_state()` deleguje, a bezpośredni zapis używa tej samej metody bez cache (ADR-0054/0024/0028/0029/0033/0034) |
 | `wire.py` | publiczne lekkie projekcje checkpointu/eventów do stabilnego JSON; walidują `sequence > since`, ścisłą kolejność i odrzucają NaN/Infinity przez `allow_nan=False` |
 
 `szop_client.__init__` ładuje publiczne symbole leniwie, więc konsument
 HTTP-only nie uruchamia importów `LocalClient`, kosztów, ORM ani konfiguracji DB.
 
-**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, `lookup_rule`, `search_rules`, `explain_ability`, `validate_loadout`, `score_list`, pojedynczego `take_action` oraz `propose_battle_action`). `search_rules` używa jednego POST i lokalnego timeoutu co najmniej 30 s; `score_list` jednego POST i lokalnego timeoutu 120 s dla limitowanego workloadu do 50 gier; `validate_loadout` używa globalnego timeoutu. Bezpośrednia akcja ma optimistic precondition pobierane świeżym GET-em, bez cache; propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia i obejmuje automatyczny koniec rundy wskazany przez engine. **Odłożone:** HTTP continuation/multi-action callback, interrupts, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, parity `HttpClient.take_action(..., continuation=None)` z `LocalClient`, DB-path, URL/header/error handling i ścisłe dekodowanie state/event delta/propozycji/odczytów wiedzy.
+**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, `lookup_rule`, `search_rules`, `explain_ability`, `validate_loadout`, `score_list`, `find_exploit_candidates`, pojedynczego `take_action` oraz `propose_battle_action`). `search_rules` używa jednego POST i lokalnego timeoutu co najmniej 30 s; `score_list` oraz `find_exploit_candidates` używają po jednym POST i lokalnego timeoutu 120 s dla limitowanego workloadu do 50 gier; `validate_loadout` używa globalnego timeoutu. Bezpośrednia akcja ma optimistic precondition pobierane świeżym GET-em, bez cache; propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia i obejmuje automatyczny koniec rundy wskazany przez engine. **Odłożone:** HTTP continuation/multi-action callback, interrupts, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, parity `HttpClient.take_action(..., continuation=None)` z `LocalClient`, DB-path, URL/header/error handling i ścisłe dekodowanie state/event delta/propozycji/odczytów wiedzy.
 
 ## Publiczne odczyty reguł i zdolności (C3, 2026-07-16)
 
@@ -389,18 +395,44 @@ wykonuje jeden POST i ścisły decode na timeoutcie 120 s, a dziesiąty tool MCP
 deleguje do niego raz. `/quote`, `/rosters/{id}`, frontend i zachowanie
 `/battles/simulate` pozostają bez zmian.
 
-## Lokalny serwer MCP — `mcp_server/` (C1/C3, 2026-07-15/18, ADR-0021/0024/0029/0033)
+## Owner-scoped find_exploit_candidates (C3.3, 2026-07-18, ADR-0034)
+
+`app/services/exploit_candidates.py` jest produkcyjnym SSOT wyboru pola,
+agregacji obu stron, rankingu `win_rate/points*100` i stabilnej projekcji
+`szop.find_exploit_candidates/v1`. Leaf
+`scripts/find_exploit_candidates.py` importuje i re-eksportuje serwis oraz
+zachowuje dotychczasowe CLI i raport. Serwis reużywa `RosterInfo`, `roster_info`,
+owner-scoped batch eager-load wraz z rekursywnym `Weapon.parent` z C3.2 oraz
+`simulate_roster_pair`; app nie importuje warstwy `scripts`.
+
+Agent-only `POST /armies/{army_id}/exploit-candidates` wymaga
+`roster:exploit-search`. Armia może należeć do ownera lub być globalna zgodnie z
+istniejącą konwencją, ale pole zawsze filtruje `Roster.owner_id` i `army_id`.
+Missing/foreign/wrong-army mają wspólne 404. Pole ma 2–7 rosterów, do 21 par i
+50 gier, `games_per_pair` 1–3; default używa `ORDER BY id LIMIT 8`, a przekroczenie
+daje 422 bez truncation.
+
+Jawny subset wykonuje 14 statements dla 2/7 rosterów oraz 1/3 gier na parę;
+default wykonuje 15 z bounded preflightem. Głębokie łańcuchy `Weapon.parent` nie
+zmieniają countu. `HttpClient.find_exploit_candidates` wykonuje jeden POST,
+ściśle sprawdza pary, agregaty i ranking na timeoutcie 120 s, a jedenasty tool
+MCP deleguje raz. Snapshot seeded smoke potwierdza brak zmian rosterów, bitew,
+eventów, katalogu i `AgentToken`; jedynymi zapisami są body-blind audyty.
+
+## Lokalny serwer MCP — `mcp_server/` (C1/C3, 2026-07-15/18, ADR-0021/0024/0029/0033/0034)
 
 `mcp_server/server.py` uruchamia stabilną linię v1 MCP Python SDK przez stdio i
-publikuje dziewięć read-only tools (`simulate_engagement`, `lookup_rule`,
+publikuje dziesięć read-only tools (`simulate_engagement`, `lookup_rule`,
 `search_rules`, `explain_ability`, `validate_loadout`, `score_list`,
-`get_battle_metadata`, `get_battle_state`, `get_battle_events`) oraz jeden
+`find_exploit_candidates`, `get_battle_metadata`, `get_battle_state`,
+`get_battle_events`) oraz jeden
 consent-gated write request `propose_battle_action`. Każdy deleguje do
 odpowiadającej publicznej metody wstrzykniętego `HttpClient`; MCP nie ma
 alternatywnej ścieżki in-process, własnego transportu HTTP ani bezpośredniego
 dostępu do bazy. Metadata/state/events konsumują backendowe `battle:read`,
 hybrid search `rules:search`, walidacja loadoutu `loadout:validate`, scoring
-`roster:score`, a symulacja `battle:simulate`; propozycja wymaga `battle:read` +
+`roster:score`, exploit search `roster:exploit-search`, a symulacja
+`battle:simulate`; propozycja wymaga `battle:read` +
 `agent_proposals:create`, ale nie `battle:act`. Backend pozostaje SSOT
 walidacji tokenów/scope'ów.
 Stan pochodzi z jednego publicznego checkpointu state+`sequence_at` i nie
@@ -412,7 +444,8 @@ zawiera RNG. Eventy zachowują kolejność, filtr `since` i stabilny
 Token ma wyłączony `repr` i nie jest dołączany do komunikatów błędów/logów;
 trafia wyłącznie do nagłówka `Authorization` budowanego przez `HttpClient`.
 Granica błędów MCP redaguje też bearer/`Authorization`, zachowując status
-`HttpClientError`; dla `search_rules`, `validate_loadout` i `score_list` używa
+`HttpClientError`; dla `search_rules`, `validate_loadout`, `score_list` i
+`find_exploit_candidates` używa
 stałej etykiety bez body/query, pola, wyników, kosztu i ścieżek.
 Brak bezpośredniego write toola, resources/prompts i ogólnego executora;
 publiczne `HttpClient.take_action` nie jest tool-em MCP. Raw dense C2.3

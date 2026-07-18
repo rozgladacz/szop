@@ -142,6 +142,36 @@ rosterów, roster units, tokena, bitew, eventów oraz katalogu. Jedynymi zapisam
 były body-blind audyty. `/quote`, `/rosters/{id}`
 i zachowanie `/battles/simulate` nie zostały zmienione.
 
+### C3.3 owner-scoped find_exploit_candidates — SQL/workload gate
+
+**Data:** 2026-07-18
+**Bazowy HEAD:** `ef2f65f`
+**Środowisko:** seeded in-memory SQLite, realny `require_agent_scope`, endpoint
+FastAPI; lekki bot `random`, mapa `lustrzana_a`.
+
+| Pole | Gry na parę | Pary / gry | SQL statements |
+|---:|---:|---:|---:|
+| 2 rostery jawne | 1 | 1 / 1 | **14** |
+| 2 rostery jawne | 3 | 1 / 3 | **14** |
+| 7 rosterów jawnych | 2 | 21 / 42 | **14** |
+| 7 rosterów domyślnych | 2 | 21 / 42 | **15** |
+
+Count obejmuje lookup tokena, body-blind audit, owner/global visibility armii i
+jeden owner-scoped batch eager-load rosterów. Domyślne pole dodaje dokładnie
+jedno bounded zapytanie ID z `LIMIT 8`; ósmy roster daje 422 bez materializacji
+pełnego pola i bez truncation. Rekursywny batch CTE przodków broni zachowuje 14
+statements także dla 2 i 7 rosterów z niezależnymi, głębokimi łańcuchami
+`Weapon.parent`. Nie ma SQL per para ani gra. CPU rośnie wyłącznie z
+`C(n,2) * games_per_pair`, ograniczonym do 7 rosterów, 21 par i 50 gier.
+
+Seeded smoke direct/API/HttpClient/MCP zwrócił identyczny ranking i pary dla
+trzech własnych rosterów, wykluczył foreign roster i odrzucił foreign/wrong-army
+jawnym wspólnym 404. Snapshot armii, rosterów, roster units, tokena, bitew,
+eventów i katalogu pozostał identyczny; jedynymi zapisami były body-blind audyty.
+`HttpClient.find_exploit_candidates` ma timeout 120 s ograniczony do tej metody.
+`/quote`, `/rosters/{id}`, `/battles/simulate` i `/rosters/{id}/score` nie zostały
+zmienione.
+
 ---
 
 ## Baseline YAML backend (Faza A5)

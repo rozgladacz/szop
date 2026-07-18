@@ -19,8 +19,9 @@ kontrakt HTTP. Odczyt stanu wymaga także jednego spójnego checkpointu: stan i
    operacje domenowe deleguje do wstrzykniętego/publicznego
    `szop_client.HttpClient`; nie importuje ORM, modeli, `Session`, `app.db`,
    routerów ani własnego transportu HTTP.
-2. Powierzchnia MCP zawiera dokładnie siedem read-only tools:
+2. Powierzchnia MCP zawiera obecnie dokładnie dziesięć read-only tools:
    `simulate_engagement`, `lookup_rule`, `search_rules`, `explain_ability`,
+   `validate_loadout`, `score_list`, `find_exploit_candidates`,
    `get_battle_metadata`, `get_battle_state` i `get_battle_events`.
    Odczyty wiedzy korzystają z publicznych, wersjonowanych endpointów i nie
    czytają plików ani katalogu zdolności w procesie MCP. Addytywne
@@ -40,7 +41,9 @@ kontrakt HTTP. Odczyt stanu wymaga także jednego spójnego checkpointu: stan i
 5. MCP waliduje wyłącznie kształt własnych argumentów (`battle_id` jako ścisły
    int `>= 1`, `since` jako ścisły int `>= 0`). Scope’y i tokeny pozostają
    odpowiedzialnością backendu: odczyty bitwy wymagają `battle:read`, symulacja
-   `battle:simulate`, a hybrid rules search `rules:search`. Serwer nie
+   `battle:simulate`, hybrid rules search `rules:search`, walidacja
+   `loadout:validate`, scoring `roster:score`, a exploit search
+   `roster:exploit-search`. Serwer nie
    interpretuje scope’ów ani nie zastępuje backendowego scopingu.
 6. Błędy klienta zachowują znaczenie i status HTTP dla operatora, ale granica
    MCP redaguje bearer token oraz wartości nagłówka `Authorization`. Tokeny i

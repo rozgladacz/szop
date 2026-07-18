@@ -262,6 +262,95 @@ def _score_list_payload() -> dict:
     }
 
 
+def _exploit_candidates_payload() -> dict:
+    def candidate(
+        rank,
+        roster_id,
+        name,
+        points,
+        wins,
+        losses,
+        draws,
+        rounds,
+    ):
+        games = wins + losses + draws
+        win_rate = wins / games
+        return {
+            "rank": rank,
+            "roster_id": roster_id,
+            "name": name,
+            "army": "Army",
+            "points": float(points),
+            "composition": "1× Unit",
+            "games": games,
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "rounds": rounds,
+            "win_rate": win_rate,
+            "loss_rate": losses / games,
+            "draw_rate": draws / games,
+            "avg_rounds": rounds / games,
+            "exploit_score": win_rate / points * 100.0 if points else 0.0,
+        }
+
+    return {
+        "schema": "szop.find_exploit_candidates/v1",
+        "version": 1,
+        "army": {"id": 4, "name": "Army", "roster_count": 3},
+        "parameters": {
+            "games_per_pair": 2,
+            "bot": "priority",
+            "seed": 4,
+            "map_name": "lustrzana_a",
+            "roster_ids": [7, 8, 9],
+        },
+        "candidates": [
+            candidate(1, 7, "Alpha", 100.0, 2, 1, 1, 15),
+            candidate(2, 8, "Beta", 50.0, 1, 3, 0, 14),
+            candidate(3, 9, "Gamma", 200.0, 2, 1, 1, 13),
+        ],
+        "pairs": [
+            {
+                "roster_a_id": 7,
+                "roster_b_id": 8,
+                "wins_a": 2,
+                "wins_b": 0,
+                "draws": 0,
+                "games": 2,
+                "rounds": 8,
+                "win_rate_a": 1.0,
+                "win_rate_b": 0.0,
+                "avg_rounds": 4.0,
+            },
+            {
+                "roster_a_id": 7,
+                "roster_b_id": 9,
+                "wins_a": 0,
+                "wins_b": 1,
+                "draws": 1,
+                "games": 2,
+                "rounds": 7,
+                "win_rate_a": 0.0,
+                "win_rate_b": 0.5,
+                "avg_rounds": 3.5,
+            },
+            {
+                "roster_a_id": 8,
+                "roster_b_id": 9,
+                "wins_a": 1,
+                "wins_b": 1,
+                "draws": 0,
+                "games": 2,
+                "rounds": 6,
+                "win_rate_a": 0.5,
+                "win_rate_b": 0.5,
+                "avg_rounds": 3.0,
+            },
+        ],
+    }
+
+
 def test_score_list_posts_once_with_bearer_local_timeout_and_strict_contract() -> None:
     seen: list[HttpRequest] = []
 
@@ -379,6 +468,149 @@ def test_score_list_rejects_malformed_or_inconsistent_response(mutation) -> None
             games_per_opponent=3,
             seed=4,
             opponent_roster_ids=[8, 9],
+        )
+
+
+def test_find_exploit_candidates_posts_once_with_bearer_timeout_and_strict_contract() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_exploit_candidates_payload())
+
+    payload = HttpClient(
+        "https://szop.example/api/",
+        token="raw-token",
+        timeout=2.0,
+        transport=transport,
+    ).find_exploit_candidates(
+        4,
+        games_per_pair=2,
+        bot="PRIORITY",
+        seed=4,
+        map_name="LUSTRZANA_A",
+        roster_ids=[9, 7, 8],
+    )
+
+    assert payload == _exploit_candidates_payload()
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url == "https://szop.example/api/armies/4/exploit-candidates"
+    assert request.headers["Authorization"] == "Bearer raw-token"
+    assert request.timeout == 120.0
+    assert json.loads(request.body.decode("utf-8")) == {
+        "games_per_pair": 2,
+        "bot": "priority",
+        "seed": 4,
+        "map_name": "lustrzana_a",
+        "roster_ids": [7, 8, 9],
+    }
+
+
+def test_find_exploit_candidates_does_not_reduce_larger_client_timeout() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_exploit_candidates_payload())
+
+    HttpClient(
+        "http://localhost",
+        timeout=180.0,
+        transport=transport,
+    ).find_exploit_candidates(
+        4,
+        games_per_pair=2,
+        seed=4,
+        roster_ids=[7, 8, 9],
+    )
+    assert seen[0].timeout == 180.0
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"army_id": True},
+        {"army_id": 0},
+        {"army_id": 2**63},
+        {"army_id": 4, "games_per_pair": True},
+        {"army_id": 4, "games_per_pair": 4},
+        {"army_id": 4, "bot": "minimax"},
+        {"army_id": 4, "seed": True},
+        {"army_id": 4, "seed": 2**31},
+        {"army_id": 4, "map_name": "bad"},
+        {"army_id": 4, "roster_ids": (7, 8)},
+        {"army_id": 4, "roster_ids": []},
+        {"army_id": 4, "roster_ids": [7]},
+        {"army_id": 4, "roster_ids": [7, 7]},
+        {"army_id": 4, "roster_ids": [True, 8]},
+        {
+            "army_id": 4,
+            "games_per_pair": 3,
+            "roster_ids": [7, 8, 9, 10, 11, 12, 13],
+        },
+    ],
+)
+def test_find_exploit_candidates_rejects_invalid_arguments_before_transport(
+    kwargs,
+) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    with pytest.raises(ValueError):
+        HttpClient("http://localhost", transport=transport).find_exploit_candidates(
+            **kwargs
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(schema="wrong"),
+        lambda payload: payload.update(version=True),
+        lambda payload: payload["army"].update(id=40),
+        lambda payload: payload["army"].update(roster_count=2),
+        lambda payload: payload["parameters"]["roster_ids"].reverse(),
+        lambda payload: payload["candidates"].reverse(),
+        lambda payload: payload["candidates"][0].update(wins=3),
+        lambda payload: payload["candidates"][0].update(win_rate=float("nan")),
+        lambda payload: payload["candidates"][0].update(exploit_score=0.9),
+        lambda payload: (
+            payload["candidates"][1].update(exploit_score=0.5000000000005),
+            payload["candidates"].__setitem__(
+                slice(0, 2),
+                [payload["candidates"][1], payload["candidates"][0]],
+            ),
+            [item.update(rank=rank) for rank, item in enumerate(payload["candidates"], 1)],
+        ),
+        lambda payload: payload["pairs"].reverse(),
+        lambda payload: payload["pairs"][0].update(wins_a=1),
+        lambda payload: payload["pairs"][0].update(avg_rounds=float("nan")),
+        lambda payload: payload.update(extra="forbidden"),
+    ],
+)
+def test_find_exploit_candidates_rejects_malformed_or_inconsistent_response(
+    mutation,
+) -> None:
+    payload = _exploit_candidates_payload()
+    mutation(payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(
+        HttpClientError,
+        match="POST exploit candidate search returned malformed payload",
+    ):
+        HttpClient(
+            "http://localhost",
+            transport=transport,
+        ).find_exploit_candidates(
+            4,
+            games_per_pair=2,
+            seed=4,
+            roster_ids=[7, 8, 9],
         )
 
 

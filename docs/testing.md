@@ -384,3 +384,31 @@ Foreign roster jest wykluczony z pola domyślnego i daje wspólne 404 po jawnym
 wskazaniu. Snapshot rosterów, roster units, bitew, eventów i katalogu pozostaje
 identyczny, łącznie z `AgentToken`; dozwolone są tylko standardowe body-blind
 audyty. Produkcyjna `data/szop.db` nie jest używana ani modyfikowana.
+
+## C3.3 — owner-scoped read-only find_exploit_candidates
+
+Targeted gate pokrywa produkcyjny SSOT i zgodność leaf-CLI, ranking obu stron,
+pair seeds, zero-points, owner/global army visibility, stałe 422/404/500,
+workload O(n²), ścisły klient, jedenasty tool MCP, SQL count i realny smoke:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_exploit_candidates_smoke.py tests/test_find_exploit_candidates.py tests/test_exploit_candidates_router.py tests/test_clients_http.py tests/test_mcp_server.py tests/test_score_list_smoke.py tests/test_score_list.py tests/test_roster_scoring_router.py tests/test_battles_router.py tests/test_clients_local.py tests/test_simulate_engagement.py tests/test_engine_regression.py
+```
+
+Publiczne pole ma 2–7 rosterów, do 21 par i 50 gier; `games_per_pair` ma zakres
+1–3. Jawny subset dwóch rosterów przy 1/3 grach i siedmiu przy legalnych dwóch
+grach wykonuje dokładnie **14 statements**. Domyślne siedem rosterów wykonuje
+**15** przez owner-scoped `LIMIT 8`; ósmy roster daje stałe 422. Niezależne
+głębokie łańcuchy `Weapon.parent` dla 2 i 7 rosterów nadal mają 14. Count
+obejmuje realny `require_agent_scope`, body-blind audit, army visibility oraz
+jeden batch eager-load; nie ma SQL per para/gra.
+
+Realny smoke używa seeded in-memory SQLite: owner ma trzy rostery jednej armii,
+własny roster innej armii, a outsider roster w tej samej armii. Porównuje 1:1
+direct `app.services.exploit_candidates`, scoped endpoint
+`POST /armies/{army_id}/exploit-candidates`, rzeczywisty
+`HttpClient.find_exploit_candidates` przez transport TestClient i MCP
+`find_exploit_candidates`. Foreign i wrong-army jawne ID dają wspólne 404.
+Snapshot armii, rosterów, roster units, bitew, eventów, katalogu i `AgentToken`
+pozostaje identyczny; dozwolone są wyłącznie body-blind audyty. Produkcyjna
+`data/szop.db` nie jest używana ani modyfikowana.
