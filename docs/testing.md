@@ -212,3 +212,44 @@ pobraniu): download+probe 34,9 s; 3×384 embeddingów 11,622 s; rebuild 36/36
 4,053 s; offline reopen zgodny; dense top-5 2,391 s. Cache modelu zajmował
 479 729 205 B (Windows bez symlinków), a SQLite 1 769 472 B. Artefakty pozostają
 w `build/` i nie są commitowane.
+
+## C2.4 — offline dense+BM25 hybrid
+
+Po pobraniu modelu target najpierw sprawdza zgodność stałego indeksu, a następnie
+wymusza tryb offline dla wspólnego benchmarku BM25/dense/hybrid:
+
+```bash
+make rag-hybrid-eval
+```
+
+Dokładny Windows fallback, gdy `make` nie jest w PATH:
+
+```powershell
+$env:HF_HUB_OFFLINE='1'
+$env:TRANSFORMERS_OFFLINE='1'
+$env:HF_HUB_DISABLE_TELEMETRY='1'
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.vector_store check
+if ($LASTEXITCODE -ne 0) {
+    .\.venv\Scripts\python.exe -X utf8 -m mcp_server.vector_store rebuild
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    .\.venv\Scripts\python.exe -X utf8 -m mcp_server.vector_store check
+}
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.evaluation --hybrid
+```
+
+`--hybrid` używa jednego matchera `source+ref+anchor`, drukuje każdy z 30
+przypadków, agregaty i czasy trzech metod. Osobny gate hybrid wymaga recall@5
+>= 0,800. Finalny przebieg 2026-07-18: BM25 **24/30 (0,800; 0,041 s)**, dense
+**8/30 (0,267; 79,741 s)**, hybrid **24/30 (0,800; 69,476 s)**; brak przypadków
+naprawionych i pogorszonych przez hybrid względem BM25. Trzy fazy retrieval:
+149,258 s, cały proces: 152,5 s wall-clock. Pełna zadeklarowana siatka parametrów
+jest zapisana w ADR-0026.
+
+Zwykłe testy nie potrzebują `build/models` ani `build/rag_vectors.sqlite`:
+gałęzie oraz status indeksu są monkeypatchowane, a czysta fuzja dostaje
+deterministyczne rankingi. Targeted suite:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_rag_corpus.py tests/test_rag_search.py tests/test_rag_vector_store.py tests/test_rag_hybrid.py tests/test_mcp_server.py -x --tb=short -q
+```

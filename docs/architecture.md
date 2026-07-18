@@ -383,16 +383,16 @@ case-folding, usuwanie znaków diakrytycznych i podział po interpunkcji. Pole
 indeksowane obejmuje treść oraz jawnie ważone metadane chunku: stałą nazwę
 źródła, nagłówki i referencje. Remisy zachowują kolejność korpusu C2.1.
 Publiczne `search(query, limit)` waliduje query do 200 znaków i limit 1–10,
-zwraca ograniczony tekst oraz skończony JSON-safe score. CLI przyjmuje wyłącznie
-`--query` i `--limit`; nie przyjmuje ścieżki indeksu ani źródła.
+zwraca ograniczony tekst oraz skończony JSON-safe score. CLI domyślnie zachowuje
+BM25 i przyjmuje wyłącznie `--mode`, `--query` i `--limit`; nie przyjmuje ścieżki
+indeksu ani źródła.
 
 `mcp_server/evaluation.py --retrieval` uruchamia top-5 dla każdego z dokładnie
 30 niezmienionych rekordów i uznaje hit tylko wtedy, gdy zwrócony chunk spełnia
 jednocześnie istniejące `expected.source`, `expected.ref` i `expected.anchor`.
 Zmierzony baseline C2.2 to **24/30, recall@5 = 0,800**. Jest to wyłącznie
 leksykalny slice offline: bez ORM/DB/HTTP, bez podpięcia do runtime MCP i bez
-wpływu na hot path aplikacji. Dense+BM25 hybrid i pełny RAG pozostają osobnym,
-otwartym zakresem.
+wpływu na hot path aplikacji.
 
 ### Trwały dense store C2.3 (2026-07-17, ADR-0022/0023)
 
@@ -425,7 +425,28 @@ poprzedni indeks. `check_index()` wykrywa stale corpus/model bez ładowania
 MiniLM. `dense_search()` jest wyłącznie wewnętrznym API offline; pobiera
 wszystkie obecne 36 odległości z `vec0` i sortuje `(distance, chunk_id)`, dzięki
 czemu remisy są stabilne i nie zależą od kolejności zwróconej przez sqlite-vec.
-Nie ma połączenia z BM25, ewaluacją hybrid, HTTP ani discovery MCP.
+Warstwa pozostaje bez połączenia z HTTP i discovery MCP.
+
+### Deterministyczny hybrid i benchmark C2.4 (2026-07-18, ADR-0026)
+
+Publiczne wewnątrz pakietu `hybrid_search(query, limit)` zachowuje limity C2.2 i
+deleguje do istniejących `search()` oraz `vector_store.dense_search()`. Weighted
+RRF łączy pule top-5 ze stałymi `k=60`, wagą BM25 `2,0` i dense `1,0`; nie używa
+raw score obu metod. Deduplikacja jest po `chunk_id`, remisy zachowują kolejność
+korpusu C2.1, a źródło, nagłówki, referencje i tekst są pobierane z
+`indexer.build_corpus()`, nie z rekordów gałęzi. Wynik zawiera skończony score i
+diagnostyczny rank/wagę/wkład każdej gałęzi, bez ścieżek lokalnych.
+
+Parametry wybrano z jawnej siatki 8 wariantów (pula 5/10, `k` 20/60, waga BM25
+1/2 przy dense 1). Na niezmienionych 30 rekordach tylko top-5 z wagą 2:1 nie
+był gorszy od BM25; top-10 2:1 dawał 22/30, a equal-weight 21/30. Wspólny matcher
+`source+ref+anchor` zmierzył finalnie BM25 **24/30 (0,800)**, dense **8/30
+(0,267)** i hybrid **24/30 (0,800)**; brak przypadków naprawionych lub
+pogorszonych przez hybrid względem BM25. `--retrieval` pozostaje kompatybilnym
+benchmarkiem BM25, a `--hybrid` raportuje wszystkie metody, każdy case, czasy i
+osobny gate hybrid 0,800. Kod nadal jest wyłącznie offline: brak importu i
+rejestracji w `mcp_server.server`, zmian HTTP/DB/szop_client oraz wpływu na hot
+path aplikacji.
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 

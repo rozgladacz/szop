@@ -1,7 +1,8 @@
 
 .PHONY: dev test test-fast test-parity lint smoke check safe-edit profile \
         rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check \
-        rag-corpus rag-eval-check rag-bm25-eval rag-model-download reindex-rules rag-index-check
+        rag-corpus rag-eval-check rag-bm25-eval rag-model-download reindex-rules rag-index-check \
+        rag-hybrid-eval
 
 # Force UTF-8 for every Python invocation in this Makefile.  Windows console
 # defaults to cp1250 which crashes any script that prints arrows or Polish
@@ -117,3 +118,8 @@ reindex-rules:
 
 rag-index-check:
 	python -m mcp_server.vector_store check
+
+# C2.4 — docelowy benchmark trzech metod. Check jest obowiązkową bramką przed
+# uruchomieniem MiniLM; po bootstrapie model i benchmark są wymuszone offline.
+rag-hybrid-eval: rag-index-check
+	HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 python -m mcp_server.evaluation --hybrid

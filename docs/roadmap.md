@@ -363,9 +363,16 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   korpusu i udostępnia wewnętrzny JSON-safe dense top-k ze stabilnym tie-break.
   `make rag-model-download`, `make reindex-rules`, `make rag-index-check`;
   prawdziwy smoke CPU + offline reopen przeszedł. ADR-0022/0023 Accepted.
-- [ ] Rozszerzenie `mcp_server/search.py` do dense+BM25 hybrid
-- [ ] Docelowa ewaluacja dense+BM25 hybrid na kanonicznych 30 Q&A
-- [ ] Runtime wrappery dense/hybrid dla MCP/API (osobny etap; C2.3 ich nie publikuje)
+- [x] **C2.4 deterministic dense+BM25 hybrid + docelowa ewaluacja DONE
+  2026-07-18 (ADR-0026):** `hybrid_search(query, limit)` stosuje weighted RRF
+  nad top-5 obu istniejących gałęzi (`k=60`, BM25:dense `2:1`), deduplikuje po
+  `chunk_id`, pobiera metadane z korpusu C2.1 i zwraca JSON-safe diagnostykę
+  składowych. Parametry wybrano z jawnej siatki 8 wariantów bez zmian gold setu,
+  korpusu, chunkingu ani modelu. Wspólny matcher zmierzył BM25 **24/30 (0,800)**,
+  dense **8/30 (0,267)** i hybrid **24/30 (0,800)**; hybrid vs BM25: brak
+  naprawionych i pogorszonych przypadków. `make rag-hybrid-eval` wymaga zgodnego
+  indeksu i wymusza offline. Brak zmian runtime MCP/HTTP.
+- [ ] Runtime wrappery dense/hybrid dla MCP/API (osobny etap; C2.4 ich nie publikuje)
 
 ### C3. Narzędzia MCP (3 tyg)
 - [x] `lookup_rule(query)` — **leaf-CLI DONE 2026-06-29 + public API/HttpClient/MCP DONE 2026-07-16**: wspólny parser `app.services.rule_lookup` obsługuje hierarchiczną numerację kanonicznego `SZOP_Rozjemca.md` (`N.`→`a.`→`i.`, myślniki 4. poziomu doklejane do rodzica), dokładny resolver `pkt X` oraz tekstowe wyszukiwanie z normalizacją polskich znaków. Publiczny `GET /rules/lookup`, `HttpClient.lookup_rule()` i MCP mają schemę `szop.lookup_rule/v1`, limit 1–10, query do 200 znaków, stałą etykietę źródła bez ścieżki systemowej i nie przyjmują pliku od klienta. CLI zachowuje `--list`/`--search`/`--limit`/`--json`/`--rules-file`, ale publiczna ścieżka zawsze używa SSOT. **Pełny RAG semantyczny** (embeddingi nad DOCX, sqlite-vec) = C2, świadomie odłożony.
@@ -518,6 +525,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0023 | Embeddings: sentence-transformers offline | ✓ |
 | 0024 | Consent-gated agent writes | ✓ |
 | 0025 | Rola agent + scoped tokens (schema + helper + endpointy) | ✓ |
+| 0026 | Weighted RRF dla offline hybrid retrieval | ✓ |
 | 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
 | 0032 | Headless match runner (orkiestrator pełnej gry dla botów) | ✓ |

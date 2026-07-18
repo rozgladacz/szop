@@ -1,21 +1,25 @@
-"""Schema and corpus-coverage gate for the canonical C2.1 evaluation set."""
+"""Coverage and shared retrieval gates for the canonical C2.1 evaluation set."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
+import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Sequence
+from typing import Callable, Sequence
 
+from mcp_server import search as rag_search
+from mcp_server import vector_store
 from mcp_server.indexer import CANONICAL_SOURCES, CorpusChunk, build_corpus
-from mcp_server.search import search
 
 EVALUATION_PATH = Path(__file__).with_name("rag_evaluation.jsonl")
 EXPECTED_EVALUATION_COUNT = 30
 RETRIEVAL_LIMIT = 5
 MIN_RECALL_AT_5 = 0.70
+MIN_HYBRID_RECALL_AT_5 = 0.80
 _EVALUATION_ID_RE = re.compile(r"^eval-(?:rules|abilities)-[0-9]{3}$")
 _ALLOWED_SOURCES = {source.filename for source in CANONICAL_SOURCES}
 
@@ -59,6 +63,21 @@ class RetrievalReport:
     hits: int
     recall_at_5: float
     cases: tuple[RetrievalCaseResult, ...]
+    elapsed_seconds: float = 0.0
+
+
+@dataclass(frozen=True)
+class RetrievalBenchmarkReport:
+    total: int
+    bm25: RetrievalReport
+    dense: RetrievalReport
+    hybrid: RetrievalReport
+    hybrid_improved_case_ids: tuple[str, ...]
+    hybrid_degraded_case_ids: tuple[str, ...]
+
+    @property
+    def methods(self) -> tuple[RetrievalReport, ...]:
+        return (self.bm25, self.dense, self.hybrid)
 
 
 def parse_evaluation_jsonl(data: bytes) -> tuple[EvaluationCase, ...]:
@@ -132,16 +151,70 @@ def benchmark_retrieval(
     selected_cases = tuple(cases) if cases is not None else load_evaluation_cases()
     chunks = build_corpus()
     validate_evaluation(cases=selected_cases, chunks=chunks)
+    return _benchmark_method(rag_search.search, selected_cases, chunks)
+
+
+def benchmark_all_retrieval(
+    cases: Sequence[EvaluationCase] | None = None,
+) -> RetrievalBenchmarkReport:
+    """Benchmark BM25, dense, and hybrid with one exact gold matcher."""
+    selected_cases = tuple(cases) if cases is not None else load_evaluation_cases()
+    chunks = build_corpus()
+    validate_evaluation(cases=selected_cases, chunks=chunks)
+
+    status = vector_store.check_index()
+    if not status.compatible:
+        raise vector_store.StaleIndexError(
+            "vector index is missing or stale: " + "; ".join(status.issues)
+        )
+
+    bm25 = _benchmark_method(rag_search.search, selected_cases, chunks)
+    dense = _benchmark_method(vector_store.dense_search, selected_cases, chunks)
+    hybrid = _benchmark_method(rag_search.hybrid_search, selected_cases, chunks)
+    improved = tuple(
+        bm25_case.case_id
+        for bm25_case, hybrid_case in zip(bm25.cases, hybrid.cases, strict=True)
+        if not bm25_case.hit and hybrid_case.hit
+    )
+    degraded = tuple(
+        bm25_case.case_id
+        for bm25_case, hybrid_case in zip(bm25.cases, hybrid.cases, strict=True)
+        if bm25_case.hit and not hybrid_case.hit
+    )
+    return RetrievalBenchmarkReport(
+        total=len(selected_cases),
+        bm25=bm25,
+        dense=dense,
+        hybrid=hybrid,
+        hybrid_improved_case_ids=improved,
+        hybrid_degraded_case_ids=degraded,
+    )
+
+
+def _benchmark_method(
+    retrieve: Callable[[str, int], list[dict[str, object]]],
+    cases: Sequence[EvaluationCase],
+    chunks: Sequence[CorpusChunk],
+) -> RetrievalReport:
     chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+    started = time.perf_counter()
 
     case_results: list[RetrievalCaseResult] = []
-    for case in selected_cases:
+    for case in cases:
         matched_rank: int | None = None
         matched_chunk_id: str | None = None
-        for result in search(case.query, RETRIEVAL_LIMIT):
-            chunk = chunks_by_id[result["chunk_id"]]
+        for rank, result in enumerate(
+            retrieve(case.query, RETRIEVAL_LIMIT),
+            start=1,
+        ):
+            chunk_id = result.get("chunk_id")
+            if not isinstance(chunk_id, str) or chunk_id not in chunks_by_id:
+                raise EvaluationError(
+                    f"retrieval returned unknown chunk_id for {case.case_id}"
+                )
+            chunk = chunks_by_id[chunk_id]
             if _matches_expected(chunk, case.expected):
-                matched_rank = result["rank"]
+                matched_rank = rank
                 matched_chunk_id = chunk.chunk_id
                 break
         case_results.append(
@@ -155,11 +228,13 @@ def benchmark_retrieval(
 
     hits = sum(result.hit for result in case_results)
     total = len(case_results)
+    elapsed_seconds = time.perf_counter() - started
     return RetrievalReport(
         total=total,
         hits=hits,
         recall_at_5=hits / total,
         cases=tuple(case_results),
+        elapsed_seconds=elapsed_seconds,
     )
 
 
@@ -202,10 +277,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Validate the fixed 30-question evaluation set against the C2.1 corpus.",
     )
-    parser.add_argument(
+    retrieval_modes = parser.add_mutually_exclusive_group()
+    retrieval_modes.add_argument(
         "--retrieval",
         action="store_true",
         help="also run the fixed 30-question BM25 recall@5 benchmark",
+    )
+    retrieval_modes.add_argument(
+        "--hybrid",
+        action="store_true",
+        help="benchmark BM25, dense, and hybrid on the same 30 questions",
     )
     args = parser.parse_args(argv)
     report = validate_evaluation()
@@ -221,7 +302,51 @@ def main(argv: list[str] | None = None) -> int:
         )
         if retrieval.recall_at_5 < MIN_RECALL_AT_5:
             return 1
+    elif args.hybrid:
+        try:
+            benchmark = benchmark_all_retrieval()
+        except vector_store.VectorStoreError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+        for bm25_case, dense_case, hybrid_case in zip(
+            benchmark.bm25.cases,
+            benchmark.dense.cases,
+            benchmark.hybrid.cases,
+            strict=True,
+        ):
+            print(
+                f"{bm25_case.case_id}: "
+                f"bm25={_format_case_result(bm25_case)}; "
+                f"dense={_format_case_result(dense_case)}; "
+                f"hybrid={_format_case_result(hybrid_case)}"
+            )
+        for name, method in (
+            ("BM25", benchmark.bm25),
+            ("dense", benchmark.dense),
+            ("hybrid", benchmark.hybrid),
+        ):
+            print(
+                f"{name} retrieval: {method.hits}/{method.total} hits; "
+                f"recall@5={method.recall_at_5:.3f}; "
+                f"elapsed={method.elapsed_seconds:.3f}s"
+            )
+        print(
+            "Hybrid vs BM25 improved: "
+            + (", ".join(benchmark.hybrid_improved_case_ids) or "none")
+        )
+        print(
+            "Hybrid vs BM25 degraded: "
+            + (", ".join(benchmark.hybrid_degraded_case_ids) or "none")
+        )
+        if benchmark.hybrid.recall_at_5 < MIN_HYBRID_RECALL_AT_5:
+            return 1
     return 0
+
+
+def _format_case_result(result: RetrievalCaseResult) -> str:
+    if not result.hit:
+        return "miss"
+    return f"hit@{result.rank}/{result.chunk_id}"
 
 
 if __name__ == "__main__":
