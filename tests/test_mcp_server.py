@@ -129,10 +129,11 @@ def test_config_uses_local_default_and_rejects_empty_url_without_secret() -> Non
     assert RAW_TOKEN not in str(exc_info.value)
 
 
-def test_server_registers_exactly_the_seven_public_api_tools() -> None:
+def test_server_registers_exactly_the_eight_public_api_tools() -> None:
     tools = asyncio.run(_list_tools(create_server(McpConfig("http://localhost"))))
 
     assert [tool.name for tool in tools.tools] == list(TOOL_NAMES)
+    assert len(tools.tools) == 8
 
 
 def test_server_registers_no_resources_templates_or_prompts() -> None:
@@ -168,6 +169,26 @@ def test_mcp_import_does_not_load_orm_or_database_modules() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_mcp_import_does_not_load_local_rag_or_heavy_modules() -> None:
+    code = (
+        "import sys; import mcp_server.server; "
+        "forbidden = {'mcp_server.search', 'mcp_server.vector_store', 'torch', "
+        "'transformers', 'sentence_transformers', 'sqlite_vec'}; "
+        "loaded = sorted(forbidden.intersection(sys.modules)); "
+        "print(','.join(loaded)); raise SystemExit(1 if loaded else 0)"
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8", "-c", code],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
 def test_mcp_package_has_no_direct_app_or_database_imports() -> None:
     package = Path(__file__).resolve().parents[1] / "mcp_server"
     source = "\n".join(
@@ -178,6 +199,10 @@ def test_mcp_package_has_no_direct_app_or_database_imports() -> None:
     assert "import app" not in source
     assert "Session" not in source
     assert "sqlalchemy" not in source
+
+    server_source = (package / "server.py").read_text(encoding="utf-8")
+    assert "mcp_server.search" not in server_source
+    assert "mcp_server.vector_store" not in server_source
 
 
 def test_simulate_engagement_posts_public_api_request_and_returns_result() -> None:
@@ -311,6 +336,111 @@ def test_reference_tools_delegate_once_to_public_http_client() -> None:
     assert ability_result.structuredContent == client.explain_ability.return_value
     json.dumps(rule_result.structuredContent, ensure_ascii=False, allow_nan=False)
     json.dumps(ability_result.structuredContent, ensure_ascii=False, allow_nan=False)
+
+
+def test_search_rules_tool_delegates_once_and_distinguishes_semantic_search() -> None:
+    client = Mock(spec=HttpClient)
+    client.search_rules.return_value = {
+        "schema": "szop.search_rules/v1",
+        "version": 1,
+        "query": "Jak działa osłona?",
+        "strategy": "hybrid_weighted_rrf",
+        "count": 1,
+        "results": [
+            {
+                "rank": 1,
+                "chunk_id": "szop-rozjemca-0019",
+                "source": "SZOP_Rozjemca.md",
+                "headings": ["19. Osłona"],
+                "refs": ["19"],
+                "text": "Osłona zmienia test trafienia.",
+                "score": 0.048915917504,
+                "components": {
+                    "bm25": {
+                        "rank": 1,
+                        "weight": 2.0,
+                        "contribution": 0.032786885246,
+                    },
+                    "dense": {
+                        "rank": 2,
+                        "weight": 1.0,
+                        "contribution": 0.016129032258,
+                    },
+                },
+            }
+        ],
+    }
+    server = create_server(McpConfig("http://localhost"), client=client)
+
+    result = asyncio.run(
+        _call_tool(
+            server,
+            {"query": "Jak działa osłona?", "limit": 3},
+            tool_name="search_rules",
+        )
+    )
+    tools = asyncio.run(_list_tools(server)).tools
+    descriptions = {tool.name: tool.description or "" for tool in tools}
+
+    client.search_rules.assert_called_once_with("Jak działa osłona?", limit=3)
+    assert result.structuredContent == client.search_rules.return_value
+    json.dumps(result.structuredContent, ensure_ascii=False, allow_nan=False)
+    assert "semantic" in descriptions["search_rules"].lower()
+    assert "paraphrase" in descriptions["search_rules"].lower()
+    assert "exact" in descriptions["lookup_rule"].lower()
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"query": "", "limit": 1},
+        {"query": "x" * 201, "limit": 1},
+        {"query": "osłona", "limit": 0},
+        {"query": "osłona", "limit": True},
+    ],
+)
+def test_search_rules_tool_rejects_invalid_input_before_client_call(
+    arguments: dict[str, Any],
+) -> None:
+    client = Mock(spec=HttpClient)
+
+    result = asyncio.run(
+        _call_tool(
+            create_server(McpConfig("http://localhost"), client=client),
+            arguments,
+            tool_name="search_rules",
+            raise_exceptions=False,
+        )
+    )
+
+    assert result.isError is True
+    client.search_rules.assert_not_called()
+
+
+def test_search_rules_tool_redacts_query_token_and_paths_from_errors() -> None:
+    private_query = "sekretna parafraza użytkownika"
+    client = Mock(spec=HttpClient)
+    client.search_rules.side_effect = HttpClientError(
+        f"Authorization: Bearer {RAW_TOKEN}; {private_query}; C:\\private\\models",
+        status_code=503,
+    )
+    config = McpConfig("http://localhost", RAW_TOKEN)
+
+    result = asyncio.run(
+        _call_tool(
+            create_server(config, client=client),
+            {"query": private_query, "limit": 5},
+            tool_name="search_rules",
+            raise_exceptions=False,
+        )
+    )
+
+    observed = repr(result)
+    assert result.isError is True
+    assert "HTTP" not in observed or "503" in observed
+    assert RAW_TOKEN not in observed
+    assert private_query not in observed
+    assert "C:\\private" not in observed
 
 
 @pytest.mark.parametrize(

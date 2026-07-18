@@ -308,13 +308,13 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 | `types.py` | lekkie frozen typy `SimulationSummary` oraz `BattleStateCheckpoint` (`battle_id`, `sequence_at`, schema/version, domenowy state; adnotacja state bez runtime importu silnika/ORM) |
 | `protocol.py` | `GameClient(Protocol)` (`create_battle`/`get_state`/`take_action`/`get_events`/`simulate` z `deployment_zones` D5), re-eksportuje `SimulationSummary` dla kompatybilności |
 | `local.py` | `LocalClient(session=None, user_id=None)` in-process — single-step play (rejestr bitew w pamięci, `apply_activation`) + batch `simulate` (deleguje do `simulate_from_rosters`); **ścieżka DB** `simulate_roster_ids`/`create_battle_from_roster_ids` (wczytuje `Roster` po id, adapter ORM→engine, ownership-scoped); `UnknownBattleError`/`RosterNotFoundError` |
-| `http.py` | `HttpClient(base_url, token)` — metadane/eventy/state/create/simulate, publiczne odczyty reguł/zdolności, `take_action` oraz consent-only `propose_battle_action`; publiczny `get_state_checkpoint()` dekoduje jeden spójny GET state+sequence, `get_state()` deleguje, a bezpośredni zapis używa tej samej metody bez cache (ADR-0054/0024) |
+| `http.py` | `HttpClient(base_url, token)` — metadane/eventy/state/create/simulate, publiczne odczyty reguł/zdolności, scoped hybrid `search_rules`, `take_action` oraz consent-only `propose_battle_action`; publiczny `get_state_checkpoint()` dekoduje jeden spójny GET state+sequence, `get_state()` deleguje, a bezpośredni zapis używa tej samej metody bez cache (ADR-0054/0024/0028) |
 | `wire.py` | publiczne lekkie projekcje checkpointu/eventów do stabilnego JSON; walidują `sequence > since`, ścisłą kolejność i odrzucają NaN/Infinity przez `allow_nan=False` |
 
 `szop_client.__init__` ładuje publiczne symbole leniwie, więc konsument
 HTTP-only nie uruchamia importów `LocalClient`, kosztów, ORM ani konfiguracji DB.
 
-**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, `lookup_rule`, `explain_ability`, pojedynczego `take_action` oraz `propose_battle_action`). Bezpośrednia akcja ma optimistic precondition pobierane świeżym GET-em, bez cache; propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia i obejmuje automatyczny koniec rundy wskazany przez engine. **Odłożone:** HTTP continuation/multi-action callback, interrupts, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, parity `HttpClient.take_action(..., continuation=None)` z `LocalClient`, DB-path, URL/header/error handling i ścisłe dekodowanie state/event delta/propozycji/odczytów wiedzy.
+**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, `lookup_rule`, `search_rules`, `explain_ability`, pojedynczego `take_action` oraz `propose_battle_action`). `search_rules` używa jednego POST i lokalnego timeoutu co najmniej 30 s; globalny timeout pozostaje bez zmian. Bezpośrednia akcja ma optimistic precondition pobierane świeżym GET-em, bez cache; propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. Sekwencja eventów single-step kontynuuje monotonicznie od rozstawienia i obejmuje automatyczny koniec rundy wskazany przez engine. **Odłożone:** HTTP continuation/multi-action callback, interrupts, pakowanie `pip install -e`. Testy klienta (`tests/test_clients_local.py` + `tests/test_clients_http.py`): determinizm, parity z runnerem/D2/ścieżką engine-dict, parity `HttpClient.take_action(..., continuation=None)` z `LocalClient`, DB-path, URL/header/error handling i ścisłe dekodowanie state/event delta/propozycji/odczytów wiedzy.
 
 ## Publiczne odczyty reguł i zdolności (C3, 2026-07-16)
 
@@ -332,17 +332,22 @@ Oba kontrakty mają jawne schemy v1, identyfikują logiczne źródło bez ujawni
 Publiczne pliki reguł były już dostępne statycznie; endpointy nie wprowadzają
 nowego scope ani danych ownera.
 
+Addytywny C2.6 publikuje w tym samym routerze trzeci endpoint
+`POST /rules/search`. W odróżnieniu od dwóch lekkich odczytów wymaga agentowego
+`rules:search` i dotyka DB wyłącznie przez istniejący lookup tokena oraz zapis
+`AgentAuditLog`; sam retrieval nie czyta ORM ani `data/szop.db`.
+
 ## Lokalny serwer MCP — `mcp_server/` (C1/C3, 2026-07-15/16, ADR-0021/0024)
 
 `mcp_server/server.py` uruchamia stabilną linię v1 MCP Python SDK przez stdio i
-publikuje sześć read-only tools (`simulate_engagement`, `lookup_rule`,
-`explain_ability`, `get_battle_metadata`, `get_battle_state`,
+publikuje siedem read-only tools (`simulate_engagement`, `lookup_rule`,
+`search_rules`, `explain_ability`, `get_battle_metadata`, `get_battle_state`,
 `get_battle_events`) oraz jeden
 consent-gated write request `propose_battle_action`. Każdy deleguje do
 odpowiadającej publicznej metody wstrzykniętego `HttpClient`; MCP nie ma
 alternatywnej ścieżki in-process, własnego transportu HTTP ani bezpośredniego
-dostępu do bazy. Metadata/state/events konsumują backendowe `battle:read`, a
-symulacja `battle:simulate`; propozycja wymaga `battle:read` +
+dostępu do bazy. Metadata/state/events konsumują backendowe `battle:read`,
+hybrid search `rules:search`, a symulacja `battle:simulate`; propozycja wymaga `battle:read` +
 `agent_proposals:create`, ale nie `battle:act`. Backend pozostaje SSOT
 walidacji tokenów/scope'ów.
 Stan pochodzi z jednego publicznego checkpointu state+`sequence_at` i nie
@@ -354,10 +359,10 @@ zawiera RNG. Eventy zachowują kolejność, filtr `since` i stabilny
 Token ma wyłączony `repr` i nie jest dołączany do komunikatów błędów/logów;
 trafia wyłącznie do nagłówka `Authorization` budowanego przez `HttpClient`.
 Granica błędów MCP redaguje też bearer/`Authorization`, zachowując status
-`HttpClientError`. Brak bezpośredniego write toola, resources/prompts,
-semantycznego RAG i ogólnego executora; publiczne `HttpClient.take_action` nie
-jest tool-em MCP. Warstwa dense C2.3 opisana niżej pozostaje offline i nie jest
-importowana ani rejestrowana przez runtime MCP.
+`HttpClientError`; dla `search_rules` używa stałej etykiety bez query i ścieżek.
+Brak bezpośredniego write toola, resources/prompts i ogólnego executora;
+publiczne `HttpClient.take_action` nie jest tool-em MCP. Raw dense C2.3
+pozostaje offline i nie jest importowane ani rejestrowane przez runtime MCP.
 
 ### Deterministyczny korpus C2.1 (2026-07-17)
 
@@ -444,9 +449,9 @@ był gorszy od BM25; top-10 2:1 dawał 22/30, a equal-weight 21/30. Wspólny mat
 (0,267)** i hybrid **24/30 (0,800)**; brak przypadków naprawionych lub
 pogorszonych przez hybrid względem BM25. `--retrieval` pozostaje kompatybilnym
 benchmarkiem BM25, a `--hybrid` raportuje wszystkie metody, każdy case, czasy i
-osobny gate hybrid 0,800. Kod nadal jest wyłącznie offline: brak importu i
-rejestracji w `mcp_server.server`, zmian HTTP/DB/szop_client oraz wpływu na hot
-path aplikacji.
+osobny gate hybrid 0,800. W slice C2.4 kod pozostawał wyłącznie offline;
+transportowy wrapper C2.6 nie zmienia fuzji ani benchmarku i nadal nie wpływa
+na hot path aplikacji.
 
 ### Procesowy lifecycle MiniLM C2.5 (2026-07-18, ADR-0027)
 
@@ -467,8 +472,31 @@ zmieniły się. Importy `mcp_server.server`, `search` i `vector_store` nadal nie
 `mcp_server.retrieval_benchmark` mierzy w jednym procesie sześć stałych hybrid
 queries po zgodnym `check_index()` i raportuje JSON-safe cold, warm p50/p95,
 total oraz rankingi. Warm p50 spadło z 2,610 s do 0,080 s (~32,5×), a pełny
-benchmark nadal daje hybrid 24/30 z identycznymi hitami per-case. Warstwa
-pozostaje offline; wrappery MCP/API są osobnym, otwartym etapem.
+benchmark nadal daje hybrid 24/30 z identycznymi hitami per-case. Lifecycle
+pozostaje niezależny od transportu; runtime wrapper opisuje C2.6.
+
+### Scoped runtime hybrid search C2.6 (2026-07-18, ADR-0028)
+
+`POST /rules/search` przyjmuje wyłącznie body `query` (trim, 1–200) i ścisły
+`limit` 1–10. Endpoint nie ma fallbacku sesyjnego: istniejący
+`require_agent_scope("rules:search")` jest jedyną bramką. Generyczny audyt
+zapisuje route/metodę/status `authorized` oraz puste bezpieczne path/query
+params, ale nie odczytuje body; pytanie, bearer i tekst wyników nie są
+utrwalane.
+
+Endpoint wywołuje dokładnie raz istniejący `hybrid_search`. Kontrakt
+`szop.search_rules/v1` ma stałą strategię `hybrid_weighted_rrf`, count i wyniki
+z logicznym source, chunk ID, nagłówkami, referencjami, ograniczonym tekstem i
+skończoną diagnostyką RRF. Nie ma publicznego `mode`; dense 8/30 pozostaje
+diagnostyką offline. Brak optional dependencies, cache modelu albo zgodnego
+indeksu mapuje się na stałe 503. Request nie pobiera modelu i nie przebudowuje
+indeksu.
+
+`HttpClient.search_rules` wysyła jeden POST z bearerem, dekoduje ścisły kontrakt
+i tylko dla tej metody używa `max(timeout, 30 s)`. MCP `search_rules` wykonuje
+jedno wywołanie klienta i nie importuje `mcp_server.search`, vector store ani
+ciężkich modułów. Import aplikacji oraz serwera MCP pozostaje lekki; profil RAG
+jest wymagany dopiero do gotowego request path.
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 

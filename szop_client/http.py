@@ -8,6 +8,7 @@ optimistic precondition and consumes the returned state/event delta.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
@@ -36,14 +37,19 @@ if TYPE_CHECKING:
 
 RULE_LOOKUP_SCHEMA = "szop.lookup_rule/v1"
 ABILITY_EXPLANATION_SCHEMA = "szop.explain_ability/v1"
+RULES_SEARCH_SCHEMA = "szop.search_rules/v1"
 REFERENCE_API_VERSION = 1
+RULES_SEARCH_STRATEGY = "hybrid_weighted_rrf"
 RULE_SOURCE = "SZOP_Rozjemca.md"
 ABILITY_SOURCE = "app.data.abilities"
+RULE_SEARCH_SOURCES = frozenset({"SZOP_Rozjemca.md", "SZOP_Zdolnosci.md"})
 MAX_RULE_QUERY_LENGTH = 200
 MAX_RULE_RESULTS = 10
 MAX_RULE_TEXT_LENGTH = 4000
 MAX_RULE_CHILDREN = 20
 MAX_ABILITY_QUERY_LENGTH = 100
+MAX_RULE_SEARCH_TEXT_LENGTH = 1200
+RAG_SEARCH_TIMEOUT = 30.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -276,6 +282,32 @@ class HttpClient:
             error_label=error_label,
         )
 
+    def search_rules(self, query: str, *, limit: int = 5) -> dict[str, Any]:
+        """Search canonical rules semantically through the scoped hybrid API."""
+        normalized_query = _normalize_reference_query(
+            query,
+            max_length=MAX_RULE_QUERY_LENGTH,
+        )
+        if type(limit) is not int or not 1 <= limit <= MAX_RULE_RESULTS:
+            raise ValueError(
+                f"limit must be an int between 1 and {MAX_RULE_RESULTS}"
+            )
+        error_label = "POST rules search"
+        payload = self._request_json(
+            "POST",
+            "/rules/search",
+            {},
+            json_body={"query": normalized_query, "limit": limit},
+            error_label=error_label,
+            timeout=max(self._timeout, RAG_SEARCH_TIMEOUT),
+        )
+        return _rules_search_from_payload(
+            payload,
+            expected_query=normalized_query,
+            requested_limit=limit,
+            error_label=error_label,
+        )
+
     def explain_ability(self, query: str) -> dict[str, Any]:
         """Explain one canonical ability by slug or normalized display name."""
         normalized_query = _normalize_reference_query(
@@ -392,15 +424,24 @@ class HttpClient:
         *,
         json_body: dict[str, Any] | None,
         error_label: str,
+        timeout: float | None = None,
     ) -> Any:
-        body = None if json_body is None else json.dumps(json_body).encode("utf-8")
+        body = (
+            None
+            if json_body is None
+            else json.dumps(
+                json_body,
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        )
         response = self._transport(
             HttpRequest(
                 method=method,
                 url=self._url(path, query),
                 headers=self._headers(with_json_body=json_body is not None),
                 body=body,
-                timeout=self._timeout,
+                timeout=self._timeout if timeout is None else timeout,
             )
         )
         if not 200 <= response.status_code < 300:
@@ -489,6 +530,191 @@ def _rule_lookup_from_payload(
         "mode": mode,
         "matches": matches,
     }
+
+
+def _rules_search_from_payload(
+    payload: Any,
+    *,
+    expected_query: str,
+    requested_limit: int,
+    error_label: str,
+) -> dict[str, Any]:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        _require_exact_keys(
+            payload,
+            {"schema", "version", "query", "strategy", "count", "results"},
+        )
+        schema = _required_str(payload, "schema")
+        version = _required_int(payload, "version")
+        query = _bounded_required_str(
+            payload,
+            "query",
+            max_length=MAX_RULE_QUERY_LENGTH,
+        )
+        strategy = _required_str(payload, "strategy")
+        count = _required_int(payload, "count")
+        raw_results = payload["results"]
+        if (
+            schema != RULES_SEARCH_SCHEMA
+            or version != REFERENCE_API_VERSION
+            or query != expected_query
+            or strategy != RULES_SEARCH_STRATEGY
+            or count < 0
+            or count > requested_limit
+            or not isinstance(raw_results, list)
+            or len(raw_results) != count
+        ):
+            raise TypeError("rules search envelope")
+        results = [
+            _rules_search_result_from_payload(item, expected_rank=rank)
+            for rank, item in enumerate(raw_results, start=1)
+        ]
+        if len({result["chunk_id"] for result in results}) != count:
+            raise TypeError("rules search chunk IDs")
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
+    return {
+        "schema": schema,
+        "version": version,
+        "query": query,
+        "strategy": strategy,
+        "count": count,
+        "results": results,
+    }
+
+
+def _rules_search_result_from_payload(
+    payload: Any,
+    *,
+    expected_rank: int,
+) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("rules search result")
+    _require_exact_keys(
+        payload,
+        {
+            "rank",
+            "chunk_id",
+            "source",
+            "headings",
+            "refs",
+            "text",
+            "score",
+            "components",
+        },
+    )
+    rank = _required_int(payload, "rank")
+    source = _required_str(payload, "source")
+    if rank != expected_rank or source not in RULE_SEARCH_SOURCES:
+        raise TypeError("rules search rank or source")
+    components = _rules_search_components_from_payload(payload["components"])
+    score = _required_finite_float(payload, "score", positive=True)
+    contribution_sum = sum(
+        component["contribution"]
+        for component in components.values()
+        if component is not None
+    )
+    if not math.isclose(score, contribution_sum, rel_tol=0.0, abs_tol=2e-12):
+        raise TypeError("rules search score")
+    return {
+        "rank": rank,
+        "chunk_id": _bounded_required_str(payload, "chunk_id", max_length=128),
+        "source": source,
+        "headings": _bounded_string_list(
+            payload["headings"],
+            max_items=12,
+            max_length=300,
+        ),
+        "refs": _bounded_string_list(
+            payload["refs"],
+            max_items=64,
+            max_length=64,
+        ),
+        "text": _bounded_required_str(
+            payload,
+            "text",
+            max_length=MAX_RULE_SEARCH_TEXT_LENGTH,
+        ),
+        "score": score,
+        "components": components,
+    }
+
+
+def _rules_search_components_from_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        raise TypeError("rules search components")
+    _require_exact_keys(payload, {"bm25", "dense"})
+    bm25 = _rrf_component_from_payload(payload["bm25"], expected_weight=2.0)
+    dense = _rrf_component_from_payload(payload["dense"], expected_weight=1.0)
+    if bm25 is None and dense is None:
+        raise TypeError("rules search components")
+    return {"bm25": bm25, "dense": dense}
+
+
+def _rrf_component_from_payload(
+    payload: Any,
+    *,
+    expected_weight: float,
+) -> dict[str, int | float] | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise TypeError("RRF component")
+    _require_exact_keys(payload, {"rank", "weight", "contribution"})
+    rank = _required_int(payload, "rank")
+    weight = _required_finite_float(payload, "weight", positive=True)
+    contribution = _required_finite_float(
+        payload,
+        "contribution",
+        positive=True,
+    )
+    if not 1 <= rank <= 5 or weight != expected_weight:
+        raise TypeError("RRF component")
+    return {
+        "rank": rank,
+        "weight": weight,
+        "contribution": contribution,
+    }
+
+
+def _bounded_string_list(
+    value: Any,
+    *,
+    max_items: int,
+    max_length: int,
+) -> list[str]:
+    if (
+        not isinstance(value, list)
+        or len(value) > max_items
+        or any(
+            not isinstance(item, str) or not item or len(item) > max_length
+            for item in value
+        )
+    ):
+        raise TypeError("bounded string list")
+    return list(value)
+
+
+def _require_exact_keys(payload: dict[str, Any], expected: set[str]) -> None:
+    if set(payload) != expected:
+        raise TypeError("unexpected object keys")
+
+
+def _required_finite_float(
+    payload: dict[str, Any],
+    key: str,
+    *,
+    positive: bool = False,
+) -> float:
+    value = payload[key]
+    if type(value) is not float or not math.isfinite(value):
+        raise TypeError(key)
+    if positive and value <= 0.0:
+        raise TypeError(key)
+    return value
 
 
 def _rule_match_from_payload(item: Any, *, mode: str) -> dict[str, Any]:

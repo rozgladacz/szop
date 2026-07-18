@@ -300,11 +300,11 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   2026-07-15 + battle observation DONE 2026-07-15 + consent proposal DONE
   2026-07-16**: stabilny MCP
   Python SDK v1, konfiguracja `SZOP_API_URL` + redagowany `SZOP_API_TOKEN` oraz
-  sześć read-only tools (`simulate_engagement`, `lookup_rule`,
+  siedem read-only tools (`simulate_engagement`, `lookup_rule`, `search_rules`,
   `explain_ability`, metadata/state/events bitwy) oraz
   `propose_battle_action`. Serwer jest wyłącznie klientem publicznego API
   przez `szop_client.HttpClient`; bez ORM/DB, bezpośredniego `take_action`,
-  resources/prompts, RAG i ogólnego executora. Publiczny
+  resources/prompts, lokalnego dostępu MCP do RAG i ogólnego executora. Publiczny
   `BattleStateCheckpoint` gwarantuje state+`sequence_at` z jednego GET; eventy
   mają stabilną, JSON-safe projekcję.
 - [x] Endpointy tokenów — **DONE 2026-06-28**: `POST /agent_tokens`, `GET /agent_tokens`, `DELETE /agent_tokens/{id}`. JSON API dla zalogowanego ownera; tworzy dedykowanego `User.role="agent"` bez hasła użytkowego, zapisuje tylko `AgentToken.token_hash`, zwraca raw bearer token tylko raz, limituje ownera do 20 aktywnych tokenów, listuje/cofa wyłącznie tokeny ownera i audytuje create/revoke bez sekretów. Brak UI; konsumenci B4/MCP nadal osobny zakres.
@@ -380,10 +380,17 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   teksty/wektory użytkownika nie są cache'owane. Stały JSON benchmark po
   `check_index()` zmierzył warm p50 **2,610 s → 0,080 s (~32,5×)**; pełny hybrid
   nadal **24/30** z identycznymi hitami per-case. Brak zmian runtime MCP/HTTP.
-- [ ] Runtime wrappery dense/hybrid dla MCP/API (osobny etap; C2.5 ich nie publikuje)
+- [x] **C2.6 scoped runtime hybrid search DONE 2026-07-18 (ADR-0028):**
+  `POST /rules/search` z body-only query i scope `rules:search`, ścisły
+  `szop.search_rules/v1`, stałe 503 bez query/ścieżek, pojedyncza delegacja do
+  `hybrid_search`; `HttpClient.search_rules` ma lokalny timeout min. 30 s, a
+  ósmy tool MCP deleguje tylko do klienta i nie importuje lokalnego RAG. Raw
+  dense pozostaje internal. Model-free gate 264/264 oraz realny scoped
+  HttpClient/MCP smoke przeszły: cold 20,239 s, warm 0,093 s, identyczne top-5
+  względem direct hybrid, bez query/sekretów w audycie i bez zmian DB/build.
 
 ### C3. Narzędzia MCP (3 tyg)
-- [x] `lookup_rule(query)` — **leaf-CLI DONE 2026-06-29 + public API/HttpClient/MCP DONE 2026-07-16**: wspólny parser `app.services.rule_lookup` obsługuje hierarchiczną numerację kanonicznego `SZOP_Rozjemca.md` (`N.`→`a.`→`i.`, myślniki 4. poziomu doklejane do rodzica), dokładny resolver `pkt X` oraz tekstowe wyszukiwanie z normalizacją polskich znaków. Publiczny `GET /rules/lookup`, `HttpClient.lookup_rule()` i MCP mają schemę `szop.lookup_rule/v1`, limit 1–10, query do 200 znaków, stałą etykietę źródła bez ścieżki systemowej i nie przyjmują pliku od klienta. CLI zachowuje `--list`/`--search`/`--limit`/`--json`/`--rules-file`, ale publiczna ścieżka zawsze używa SSOT. **Pełny RAG semantyczny** (embeddingi nad DOCX, sqlite-vec) = C2, świadomie odłożony.
+- [x] `lookup_rule(query)` — **leaf-CLI DONE 2026-06-29 + public API/HttpClient/MCP DONE 2026-07-16**: wspólny parser `app.services.rule_lookup` obsługuje hierarchiczną numerację kanonicznego `SZOP_Rozjemca.md` (`N.`→`a.`→`i.`, myślniki 4. poziomu doklejane do rodzica), dokładny resolver `pkt X` oraz tekstowe wyszukiwanie z normalizacją polskich znaków. Publiczny `GET /rules/lookup`, `HttpClient.lookup_rule()` i MCP mają schemę `szop.lookup_rule/v1`, limit 1–10, query do 200 znaków, stałą etykietę źródła bez ścieżki systemowej i nie przyjmują pliku od klienta. CLI zachowuje `--list`/`--search`/`--limit`/`--json`/`--rules-file`, ale publiczna ścieżka zawsze używa SSOT. Semantyczne parafrazy obsługuje osobny `search_rules` C2.6; exact lookup pozostaje lekkie.
 - [x] `explain_ability(slug)` — **leaf-CLI DONE 2026-06-24 + public API/HttpClient/MCP DONE 2026-07-16**: wspólna warstwa `app.services.ability_lookup` rozwiązuje slug/nazwę PL wyłącznie przez katalog SSOT `app.data.abilities`; publiczny `GET /abilities/explain`, `HttpClient.explain_ability()` i MCP zwracają `szop.explain_ability/v1`, nie dotykają DB i limitują query do 100 znaków. CLI zachowuje `--list`, `--type` i `--json`.
 - [x] `validate_loadout(payload)` — **leaf-CLI DONE 2026-06-26** (`scripts/validate_loadout.py`): read-only diff validator raw→normalized (odrzucone id / sklampowane count i `mode` / nierozpoznane passive) + koszt przez `calculate_roster_unit_quote`; reuse `normalize_roster_unit_loadout` SSOT; `--list`, `--loadout`/`--loadout-file`, `--count`, `--json`, testy seeded SQLite. Wrapper MCP/HTTP pozostaje gated na C1/B4.
 - [x] `find_exploit_candidates(army_id)` — **leaf-CLI DONE 2026-06-29** (`scripts/find_exploit_candidates.py`): turniej istniejących rozpisek jednej armii z DB (round-robin, każda para przez `simulate_engagement`/`LocalClient.simulate_roster_ids`) → ranking kandydatów do ręcznej weryfikacji wg `win_rate/points` (`wr/100pkt`, jak `exploit_hunt`); `--list`/`--json`/`-n`/`--bot`/`--seed`/`--map`, testy seeded SQLite. Nie generuje rozpisek i nie zapisuje wyników. Wrapper MCP/HTTP gated C1/B4.
@@ -535,6 +542,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0025 | Rola agent + scoped tokens (schema + helper + endpointy) | ✓ |
 | 0026 | Weighted RRF dla offline hybrid retrieval | ✓ |
 | 0027 | Procesowy lifecycle fixed MiniLM | ✓ |
+| 0028 | Runtime hybrid rules search przez publiczne API | ✓ |
 | 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |
 | 0031 | Gracze heurystyczni D1: enumerator akcji + Random/Greedy | ✓ |
 | 0032 | Headless match runner (orkiestrator pełnej gry dla botów) | ✓ |

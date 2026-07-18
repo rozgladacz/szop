@@ -290,3 +290,40 @@ Baseline przed C2.5: cold 18,516 s, warm p50 2,610 s, p95 3,577 s, total
 15,107 s (~32,5× dla warm p50). Pełny gate dokładności pozostaje osobny:
 `make rag-hybrid-eval`; wynik C2.5 to BM25 24/30, dense 8/30, hybrid 24/30 i
 brak zmian hit/miss hybrid względem C2.4.
+
+## C2.6 — scoped runtime hybrid search
+
+Model-free suite patchuje wyłącznie granicę `hybrid_search`; nie potrzebuje
+optional dependencies, modelu ani indeksu. Pokrywa body/response, trim i limity,
+401/403/audyt bez body, stabilne 503, ścisły klient i timeout oraz ósmy tool MCP
+bez lokalnego importu RAG:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_rules_search_router.py tests/test_clients_http.py tests/test_mcp_server.py tests/test_reference_router.py tests/test_agent_token_security.py tests/test_rag_hybrid.py -x --tb=short -q
+```
+
+Rozszerzony gate wraz z `test_rag_vector_store.py` i
+`test_rag_retrieval_benchmark.py`: **264 passed**.
+
+Realny smoke wymaga profilu `requirements-rag.txt`, fixed model cache i zgodnego
+indeksu. Przed startem wymuś offline i uruchom `mcp_server.vector_store check`.
+Użyj kopii produkcyjnej `data/szop.db` albo transakcji z rollbackiem do
+tymczasowego tokena `rules:search`; nie zapisuj raw tokena w pliku ani logu.
+W jednym procesie wykonaj przez `HttpClient.search_rules` pierwszy cold i drugi
+warm POST, a następnie tool MCP ze wstrzykniętym klientem. Potwierdź:
+
+- schema `szop.search_rules/v1`, strategy i JSON `allow_nan=False`;
+- jeden audit na request z route/metodą/status i bez body query/bearera/tekstu;
+- top-k `chunk_id` identyczne z bezpośrednim `hybrid_search` dla tego samego
+  query/limitu;
+- warm latency oraz brak zmian w produkcyjnej DB i gitignored `build/`.
+
+Brak modelu, optional dependencies lub zgodnego indeksu jest poprawnym stanem
+readiness 503. Endpoint nigdy nie pobiera modelu i nie wykonuje reindexu.
+
+Realny smoke C2.6 z 2026-07-18 (Windows, Python 3.13.14, fresh process,
+wymuszony offline, zgodny indeks 36/36): HttpClient cold **20,239 s**, warm
+**0,093 s**, tool MCP **0,180 s**, późniejszy direct hybrid **0,105 s**.
+Wszystkie trzy ścieżki miały identyczne top-5 `chunk_id`; trzy wpisy audytu nie
+zawierały query, bearera ani tekstu wyników. SHA-256 produkcyjnej DB i indeksu
+oraz count/size/mtime cache modelu pozostały bez zmian.

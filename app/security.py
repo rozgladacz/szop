@@ -157,6 +157,7 @@ def _agent_audit_payload(request: Request, scope_names: tuple[str, ...]) -> str:
         "method": getattr(request, "method", ""),
         "path_params": _redacted_mapping(dict(path_params)),
         "query_params": _redacted_mapping(dict(query_params)),
+        "status": "authorized",
     }
     if len(scope_names) == 1:
         payload["scope"] = scope_names[0]

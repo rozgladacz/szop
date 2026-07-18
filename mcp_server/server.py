@@ -26,6 +26,7 @@ TOOL_NAME = "simulate_engagement"
 TOOL_NAMES = (
     TOOL_NAME,
     "lookup_rule",
+    "search_rules",
     "explain_ability",
     "get_battle_metadata",
     "get_battle_state",
@@ -69,17 +70,23 @@ def _run_safely(
     operation: Callable[[], _ResultT],
     *,
     bearer_token: str | None,
+    safe_error_label: str | None = None,
 ) -> _ResultT:
     """Preserve useful client errors while redacting authorization secrets."""
     try:
         return operation()
     except HttpClientError as exc:
+        message = str(exc)
+        if safe_error_label is not None:
+            message = safe_error_label
+            if exc.status_code is not None:
+                message += f" with HTTP {exc.status_code}"
         raise HttpClientError(
-            _redact_error_message(str(exc), bearer_token),
+            _redact_error_message(message, bearer_token),
             status_code=exc.status_code,
         ) from None
     except Exception as exc:
-        message = str(exc) or type(exc).__name__
+        message = safe_error_label or str(exc) or type(exc).__name__
         raise RuntimeError(_redact_error_message(message, bearer_token)) from None
 
 
@@ -106,8 +113,9 @@ def create_server(
     server = FastMCP(
         "SZOP",
         instructions=(
-            "Canonical rule and ability lookup, battle observation, and "
-            "consent-gated action proposals backed by the public SZOP HTTP API."
+            "Canonical exact and semantic rule lookup, ability lookup, battle "
+            "observation, and consent-gated action proposals backed by the "
+            "public SZOP HTTP API."
         ),
     )
 
@@ -151,12 +159,26 @@ def create_server(
         query: RuleQuery,
         limit: RuleLimit = 5,
     ) -> dict[str, Any]:
-        """Find canonical numbered rules by exact ``pkt X`` or folded text."""
+        """Find an exact ``pkt X`` or exact/folded canonical rule text."""
         return _run_safely(
             lambda: ensure_json_safe(
                 http_client.lookup_rule(query, limit=limit)
             ),
             bearer_token=settings.bearer_token,
+        )
+
+    @server.tool(name="search_rules")
+    def search_rules(
+        query: RuleQuery,
+        limit: RuleLimit = 5,
+    ) -> dict[str, Any]:
+        """Find semantic/paraphrased rules; use lookup_rule for exact text."""
+        return _run_safely(
+            lambda: ensure_json_safe(
+                http_client.search_rules(query, limit=limit)
+            ),
+            bearer_token=settings.bearer_token,
+            safe_error_label="POST rules search failed",
         )
 
     @server.tool(name="explain_ability")

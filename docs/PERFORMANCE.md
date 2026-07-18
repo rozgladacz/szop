@@ -73,6 +73,26 @@ queries** i nie wpływa na `/quote`, `/rosters/{id}` ani profil cost engine.
 Szczegóły lifecycle i polityki concurrency: ADR-0027; dokładny Windows fallback:
 `docs/testing.md`.
 
+### C2.6 runtime HTTP/HttpClient/MCP smoke
+
+**Data:** 2026-07-18
+**Bazowy HEAD:** `17c3388`
+**Środowisko:** ten sam fixed MiniLM/index 36/36, świeży proces, wymuszony
+offline, in-memory TestClient z realnym `require_agent_scope("rules:search")`.
+
+| Granica | Czas (s) | Uwagi |
+|---|---:|---|
+| HttpClient cold POST | 20,239 | model load + jeden `hybrid_search` |
+| HttpClient warm POST | 0,093 | ten sam process-local model |
+| MCP `search_rules` | 0,180 | jedno wywołanie tego samego HttpClient |
+| Direct hybrid | 0,105 | kontrola parity po requestach |
+
+Top-5 `chunk_id` było identyczne na wszystkich granicach. Timeout wyłącznie dla
+`HttpClient.search_rules` wynosi co najmniej 30 s; globalne 10 s pozostałych
+metod nie zmieniło się. Trzy audyty były wolne od body query, tokena i tekstu
+wyników. Hash produkcyjnej DB/indeksu oraz metadane cache modelu nie zmieniły
+się, więc smoke nie wykonał downloadu, reindexu ani zapisu do produkcji.
+
 ---
 
 ## Baseline YAML backend (Faza A5)

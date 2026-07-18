@@ -106,6 +106,10 @@ spójnie z ADR-0050. Zero migration churn dla istniejącej `data/szop.db`.
   agent = klient HTTP, jeden mechanizm uprawnień, jeden audit trail").
 - **MCP server (C1)** używa raw tokena jako bearer przez `szop_client` HTTP — nie
   łączy się z DB bezpośrednio.
+- **Runtime RAG (C2.6)** używa osobnego scope `rules:search` dla agent-only
+  `POST /rules/search`. Generyczny audit zapisuje route/metodę/status
+  `authorized` i bezpieczne path/query params, ale celowo nie czyta body, więc
+  treść query nie trafia do `AgentAuditLog`.
 - **Odroczone (poza tym ADR):** UI zarządzania tokenami; czasowe rate-limit
   requestów endpointu mintowania; redakcja sekretów z **body** requestu (gdy
   kiedyś trafi do `params_json`); CSRF/UX potwierdzeń jeśli włączymy CORS lub UI;

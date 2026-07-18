@@ -107,6 +107,39 @@ def _ability_explanation_payload() -> dict:
     }
 
 
+def _rules_search_payload() -> dict:
+    return {
+        "schema": "szop.search_rules/v1",
+        "version": 1,
+        "query": "Jak działa osłona?",
+        "strategy": "hybrid_weighted_rrf",
+        "count": 1,
+        "results": [
+            {
+                "rank": 1,
+                "chunk_id": "szop-rozjemca-0019",
+                "source": "SZOP_Rozjemca.md",
+                "headings": ["19. Osłona"],
+                "refs": ["19"],
+                "text": "Osłona zmienia test trafienia.",
+                "score": 0.048915917504,
+                "components": {
+                    "bm25": {
+                        "rank": 1,
+                        "weight": 2.0,
+                        "contribution": 0.032786885246,
+                    },
+                    "dense": {
+                        "rank": 2,
+                        "weight": 1.0,
+                        "contribution": 0.016129032258,
+                    },
+                },
+            }
+        ],
+    }
+
+
 def test_lookup_rule_gets_encoded_query_and_returns_validated_contract() -> None:
     seen: list[HttpRequest] = []
 
@@ -152,6 +185,71 @@ def test_explain_ability_gets_encoded_name_and_returns_validated_contract() -> N
     )
 
 
+def test_search_rules_posts_body_with_bearer_and_rag_safe_timeout() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_rules_search_payload())
+
+    payload = HttpClient(
+        "https://szop.example/api/",
+        token="raw-token",
+        timeout=2.0,
+        transport=transport,
+    ).search_rules("  Jak działa osłona?  ", limit=1)
+
+    assert payload == _rules_search_payload()
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url == "https://szop.example/api/rules/search"
+    assert request.headers == {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": "Bearer raw-token",
+    }
+    assert json.loads(request.body.decode("utf-8")) == {
+        "query": "Jak działa osłona?",
+        "limit": 1,
+    }
+    assert request.timeout == 30.0
+
+
+def test_search_rules_does_not_reduce_larger_client_timeout() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_rules_search_payload())
+
+    HttpClient(
+        "http://localhost",
+        timeout=45.0,
+        transport=transport,
+    ).search_rules("Jak działa osłona?", limit=1)
+
+    assert seen[0].timeout == 45.0
+
+
+def test_search_rules_timeout_does_not_change_other_client_methods() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _json_response(_rule_lookup_payload())
+
+    client = HttpClient(
+        "http://localhost",
+        timeout=2.0,
+        transport=transport,
+    )
+
+    client.lookup_rule("osłona", limit=1)
+
+    assert seen[0].timeout == 2.0
+
+
 @pytest.mark.parametrize(
     ("method_name", "args", "kwargs"),
     [
@@ -163,6 +261,12 @@ def test_explain_ability_gets_encoded_name_and_returns_validated_contract() -> N
         ("lookup_rule", ("osłona",), {"limit": 11}),
         ("explain_ability", ("",), {}),
         ("explain_ability", ("x" * 101,), {}),
+        ("search_rules", ("",), {}),
+        ("search_rules", ("   ",), {}),
+        ("search_rules", ("x" * 201,), {}),
+        ("search_rules", ("osłona",), {"limit": True}),
+        ("search_rules", ("osłona",), {"limit": 0}),
+        ("search_rules", ("osłona",), {"limit": 11}),
     ],
 )
 def test_reference_methods_reject_invalid_input_before_transport(
@@ -237,6 +341,69 @@ def test_explain_ability_rejects_malformed_payload(mutation) -> None:
         HttpClient("http://localhost", transport=transport).explain_ability(
             "Podwojny"
         )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        lambda payload: payload.update(schema="wrong"),
+        lambda payload: payload.update(version=True),
+        lambda payload: payload.update(query="different"),
+        lambda payload: payload.update(strategy="dense"),
+        lambda payload: payload.update(count=2),
+        lambda payload: payload.update(results="bad"),
+        lambda payload: payload.update(extra="forbidden"),
+        lambda payload: payload["results"][0].update(rank=True),
+        lambda payload: payload["results"][0].update(source=r"C:\secret\rules.md"),
+        lambda payload: payload["results"][0].update(text="x" * 1201),
+        lambda payload: payload["results"][0].update(score=float("nan")),
+        lambda payload: payload["results"][0].update(extra="forbidden"),
+        lambda payload: payload["results"][0]["components"]["bm25"].update(
+            weight=1.0
+        ),
+        lambda payload: payload["results"][0]["components"]["dense"].update(
+            contribution=float("inf")
+        ),
+    ],
+)
+def test_search_rules_rejects_malformed_payload(mutation) -> None:
+    payload = _rules_search_payload()
+    mutation(payload)
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(
+        HttpClientError,
+        match="POST rules search returned malformed payload",
+    ):
+        HttpClient("http://localhost", transport=transport).search_rules(
+            "Jak działa osłona?",
+            limit=1,
+        )
+
+
+def test_search_rules_preserves_http_error_status_without_response_detail() -> None:
+    private_query = "sekretna treść pytania"
+
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return HttpResponse(
+            status_code=503,
+            body=(
+                '{"detail":"C:\\\\private\\\\models: '
+                + private_query
+                + '"}'
+            ).encode("utf-8"),
+        )
+
+    with pytest.raises(HttpClientError) as exc_info:
+        HttpClient("http://localhost", transport=transport).search_rules(
+            private_query
+        )
+
+    assert exc_info.value.status_code == 503
+    assert private_query not in str(exc_info.value)
+    assert "C:\\private" not in str(exc_info.value)
 
 
 @pytest.mark.parametrize("method_name", ["lookup_rule", "explain_ability"])
