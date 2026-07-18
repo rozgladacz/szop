@@ -354,10 +354,10 @@ zawiera RNG. Eventy zachowują kolejność, filtr `since` i stabilny
 Token ma wyłączony `repr` i nie jest dołączany do komunikatów błędów/logów;
 trafia wyłącznie do nagłówka `Authorization` budowanego przez `HttpClient`.
 Granica błędów MCP redaguje też bearer/`Authorization`, zachowując status
-`HttpClientError`. Brak bezpośredniego write toola, resources/prompts, RAG,
-embeddingów, semantycznego RAG i ogólnego executora; publiczne
-`HttpClient.take_action` nie jest
-tool-em MCP.
+`HttpClientError`. Brak bezpośredniego write toola, resources/prompts,
+semantycznego RAG i ogólnego executora; publiczne `HttpClient.take_action` nie
+jest tool-em MCP. Warstwa dense C2.3 opisana niżej pozostaje offline i nie jest
+importowana ani rejestrowana przez runtime MCP.
 
 ### Deterministyczny korpus C2.1 (2026-07-17)
 
@@ -391,8 +391,41 @@ zwraca ograniczony tekst oraz skończony JSON-safe score. CLI przyjmuje wyłącz
 jednocześnie istniejące `expected.source`, `expected.ref` i `expected.anchor`.
 Zmierzony baseline C2.2 to **24/30, recall@5 = 0,800**. Jest to wyłącznie
 leksykalny slice offline: bez ORM/DB/HTTP, bez podpięcia do runtime MCP i bez
-wpływu na hot path aplikacji. MiniLM, `sqlite-vec`, dense+BM25 hybrid i pełny
-RAG pozostają osobnym, otwartym zakresem.
+wpływu na hot path aplikacji. Dense+BM25 hybrid i pełny RAG pozostają osobnym,
+otwartym zakresem.
+
+### Trwały dense store C2.3 (2026-07-17, ADR-0022/0023)
+
+`mcp_server/embeddings.py` jest małym, leniwym adapterem jednego modelu:
+`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2` w przypiętej
+rewizji `e8f8c211226b894fcb81acc59f3b34ba3efd5f42`. Wymiar 384, CPU, batch 16,
+normalizacja L2 oraz walidacja count/dimension/finite są częścią kontraktu.
+Import modułu nie importuje `sentence_transformers`, `transformers` ani
+`torch`; ciężki stos jest ładowany dopiero przy realnym embeddingu.
+
+Model może pobrać wyłącznie osobna komenda do stałego, gitignored
+`build/models`. Wszystkie zwykłe embeddingi, rebuild i query przekazują
+`local_files_only=True`, stały model ID, rewizję, backend `torch`, `device=cpu`
+i `trust_remote_code=False`. Publiczne API/CLI nie przyjmuje model ID, rewizji
+ani ścieżki cache.
+
+`mcp_server/vector_store.py` przechowuje indeks wyłącznie w
+`build/rag_vectors.sqlite`. Zwykła tabela `chunks` zachowuje stabilne `chunk_id`
+i JSON-safe metadane wyniku, `index_metadata` przechowuje wersję schematu,
+model/revision, wymiar, normalizację, wersję sqlite-vec, count i SHA-256 całego
+manifestu C2.1, a `rag_vectors` jest tabelą `vec0` z 384-wymiarowym float32 i
+cosine distance. Rozszerzenie jest ładowane tylko przez oficjalny binding
+`sqlite_vec.load()`; brak ścieżki rozszerzenia od użytkownika.
+
+Rebuild najpierw embeduje cały korpus, następnie buduje bazę tymczasową w tym
+samym `build/`, używa `synchronous=FULL`, zamyka i synchronizuje plik, waliduje
+integrity, wszystkie metadane/chunki oraz 36 wymiarowych i skończonych wektorów,
+a dopiero potem wykonuje `os.replace`. Błąd przed replace usuwa temp i zachowuje
+poprzedni indeks. `check_index()` wykrywa stale corpus/model bez ładowania
+MiniLM. `dense_search()` jest wyłącznie wewnętrznym API offline; pobiera
+wszystkie obecne 36 odległości z `vec0` i sortuje `(distance, chunk_id)`, dzięki
+czemu remisy są stabilne i nie zależą od kolejności zwróconej przez sqlite-vec.
+Nie ma połączenia z BM25, ewaluacją hybrid, HTTP ani discovery MCP.
 
 ## Prezentacja — `scripts/battle_replay.py` (Strumień B6, CLI replay slice 2026-06-15, ADR-0013)
 

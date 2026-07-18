@@ -1,0 +1,11 @@
+-r requirements-dev.txt
+
+# Strumien C, C2.3 -- opcjonalny stos dense retrieval.
+# Oficjalny indeks CPU zapobiega instalacji wariantow CUDA na Windows/Linux.
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+numpy>=2.0,<3.0
+sqlite-vec==0.1.9
+sentence-transformers==5.6.0
+torch==2.13.0+cpu; platform_system != "Darwin"
+torch==2.13.0; platform_system == "Darwin"

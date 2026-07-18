@@ -353,11 +353,19 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   mierzą niezmienione 30 rekordów wyłącznie po `source`/`ref`/`anchor`.
   Rzeczywisty baseline: **24/30, recall@5 = 0,800**. To nie jest pełny RAG ani
   runtime tool MCP; brak DB/ORM/HTTP i arbitralnych ścieżek.
-- [ ] Embeddingi `paraphrase-multilingual-MiniLM-L12-v2` i store w `sqlite-vec`
+- [x] **C2.3 trwały dense store DONE 2026-07-17:** opcjonalny profil
+  `requirements-rag.txt` instaluje sqlite-vec 0.1.9, sentence-transformers 5.6.0
+  i PyTorch CPU. `mcp_server/embeddings.py` ma jeden model MiniLM (384D,
+  przypięta rewizja, batch, L2, finite/dimension validation, leniwy import),
+  jawny download do `build/models` i tryb offline po pobraniu.
+  `mcp_server/vector_store.py` atomowo przebudowuje stały
+  `build/rag_vectors.sqlite`, waliduje 36 chunków/wektorów oraz metadata/hash
+  korpusu i udostępnia wewnętrzny JSON-safe dense top-k ze stabilnym tie-break.
+  `make rag-model-download`, `make reindex-rules`, `make rag-index-check`;
+  prawdziwy smoke CPU + offline reopen przeszedł. ADR-0022/0023 Accepted.
 - [ ] Rozszerzenie `mcp_server/search.py` do dense+BM25 hybrid
-- [ ] `make reindex-rules` — rebuild vector store
 - [ ] Docelowa ewaluacja dense+BM25 hybrid na kanonicznych 30 Q&A
-- [ ] ADR-0022: sqlite-vec; ADR-0023: sentence-transformers offline
+- [ ] Runtime wrappery dense/hybrid dla MCP/API (osobny etap; C2.3 ich nie publikuje)
 
 ### C3. Narzędzia MCP (3 tyg)
 - [x] `lookup_rule(query)` — **leaf-CLI DONE 2026-06-29 + public API/HttpClient/MCP DONE 2026-07-16**: wspólny parser `app.services.rule_lookup` obsługuje hierarchiczną numerację kanonicznego `SZOP_Rozjemca.md` (`N.`→`a.`→`i.`, myślniki 4. poziomu doklejane do rodzica), dokładny resolver `pkt X` oraz tekstowe wyszukiwanie z normalizacją polskich znaków. Publiczny `GET /rules/lookup`, `HttpClient.lookup_rule()` i MCP mają schemę `szop.lookup_rule/v1`, limit 1–10, query do 200 znaków, stałą etykietę źródła bez ścieżki systemowej i nie przyjmują pliku od klienta. CLI zachowuje `--list`/`--search`/`--limit`/`--json`/`--rules-file`, ale publiczna ścieżka zawsze używa SSOT. **Pełny RAG semantyczny** (embeddingi nad DOCX, sqlite-vec) = C2, świadomie odłożony.
@@ -506,8 +514,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0017 | Telemetria od dnia 1: analiza offline z event-logu | ✓ |
 | 0020 | MCP runtime: Python SDK | — |
 | 0021 | MCP jako klient publicznego API | ✓ |
-| 0022 | Vector store: sqlite-vec | — |
-| 0023 | Embeddings: sentence-transformers offline | — |
+| 0022 | Vector store: sqlite-vec | ✓ |
+| 0023 | Embeddings: sentence-transformers offline | ✓ |
 | 0024 | Consent-gated agent writes | ✓ |
 | 0025 | Rola agent + scoped tokens (schema + helper + endpointy) | ✓ |
 | 0030 | Wielu agentów: ranking botów (leaderboard) ✓ + osobne konta (odłożone do B2 auth) | ✓ |

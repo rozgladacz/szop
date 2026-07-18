@@ -1,7 +1,7 @@
 
 .PHONY: dev test test-fast test-parity lint smoke check safe-edit profile \
         rules-check rules-extract rules-extract-md rules-drift rules-classify rules-sources-check \
-        rag-corpus rag-eval-check rag-bm25-eval
+        rag-corpus rag-eval-check rag-bm25-eval rag-model-download reindex-rules rag-index-check
 
 # Force UTF-8 for every Python invocation in this Makefile.  Windows console
 # defaults to cp1250 which crashes any script that prints arrows or Polish
@@ -106,3 +106,14 @@ rag-eval-check: rag-corpus
 # embeddingów, vector store i runtime MCP discovery.
 rag-bm25-eval: rag-corpus
 	python -m mcp_server.evaluation --retrieval
+
+# C2.3 — opcjonalny dense retrieval. Model pobieramy jawnie tylko tym celem;
+# rebuild i check używają stałego cache build/models oraz stałej bazy w build/.
+rag-model-download:
+	python -m mcp_server.embeddings
+
+reindex-rules:
+	python -m mcp_server.vector_store rebuild
+
+rag-index-check:
+	python -m mcp_server.vector_store check

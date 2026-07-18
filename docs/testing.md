@@ -168,3 +168,47 @@ recall@5 = 0,800**. Targeted suite:
 ```bash
 python -X utf8 -m pytest tests/test_rag_corpus.py tests/test_rag_search.py -q
 ```
+
+## C2.3 — opcjonalny MiniLM + sqlite-vec
+
+Bazowe `requirements.txt` / `requirements-dev.txt` nie instalują ciężkiego stosu
+ML. Profil RAG jest jawnym supersetem developerskim i używa oficjalnego indeksu
+PyTorch CPU:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pip install -r requirements-rag.txt
+.\.venv\Scripts\python.exe -X utf8 -m pip check
+```
+
+Pobranie modelu jest jedyną komendą, która może korzystać z sieci. Model ma
+stałe ID/rewizję i trafia wyłącznie do gitignored `build/models`:
+
+```bash
+make rag-model-download
+make reindex-rules
+make rag-index-check
+```
+
+Windows fallback, gdy `make` nie jest w PATH:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.embeddings
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.vector_store rebuild
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.vector_store check
+.\.venv\Scripts\python.exe -X utf8 -m mcp_server.vector_store query --query "Jak działa osłona?" --limit 5
+```
+
+Rebuild i query po pobraniu używają `local_files_only=True`; mogą być dodatkowo
+sprawdzone z `HF_HUB_OFFLINE=1` i `TRANSFORMERS_OFFLINE=1`. Testy nie ładują
+prawdziwego modelu: wstrzykują deterministyczny fake embedder, ale tworzą i
+odpytują prawdziwą tabelę `vec0`. Targeted suite po instalacji profilu:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_rag_corpus.py tests/test_rag_search.py tests/test_rag_vector_store.py tests/test_mcp_server.py -x --tb=short -q
+```
+
+Realny smoke CPU 2026-07-17 (Windows, Python 3.13.14, wymuszony offline po
+pobraniu): download+probe 34,9 s; 3×384 embeddingów 11,622 s; rebuild 36/36
+4,053 s; offline reopen zgodny; dense top-5 2,391 s. Cache modelu zajmował
+479 729 205 B (Windows bez symlinków), a SQLite 1 769 472 B. Artefakty pozostają
+w `build/` i nie są commitowane.
