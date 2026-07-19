@@ -93,18 +93,36 @@ w invite zamiast tworzyć kolejną bitwę.
 Nie dodajemy eager relationships ani pojedynczych indeksów dla każdego FK bez
 potwierdzonego patternu zapytań.
 
+## Nota implementacyjna B4.1 — create endpoint (2026-07-19)
+
+Addytywny `POST /battles/invite` realizuje wyłącznie stan początkowy tego ADR.
+Sesja użytkownika działa jako własny `from_user_id`, a bearer wymaga osobnego
+scope `battle:invite` i mapuje się na ownera tokenu. Transakcyjnie neutralny
+`app/services/battle_invites.py` waliduje owner-scoped roster, canonical scenario
+z `MAP_BUILDERS` oraz opcjonalny direct target (bez self i kont agentów), po czym
+robi `flush()` jednego `pending` invite. Router wykonuje commit albo rollback,
+mapuje missing/foreign na wspólne no-oracle 404, unknown scenario na stałe 422,
+a race/`IntegrityError` na stałe 409.
+
+Create response nie publikuje result linkage ani relacji ORM. Każdy poprawny
+POST tworzy nowy rekord; B4.1 świadomie nie deklaruje idempotency ani
+deduplikacji, ponieważ schema nie ma odpowiedniego constraintu, klucza
+idempotency ani rate-limit infrastruktury. Accept/decline/expiry/discovery i
+tworzenie `Battle` pozostają poza tym dodatkiem i nie zmieniają zamrożonej
+decyzji lifecycle.
+
 ## Konsekwencje
 
-- B4 może dodać `POST /battles/invite` i
-  `POST /battles/invite/{id}/accept` bez kolejnej zmiany schematu.
+- B4.1 dodało `POST /battles/invite`; przyszłe
+  `POST /battles/invite/{id}/accept` nie wymaga kolejnej zmiany schematu.
 - Open invite ma trwałą tożsamość pierwszego skutecznego acceptora.
 - Baza blokuje częściowo zaakceptowane rekordy i wielokrotne powiązanie tej
-  samej bitwy, ale autoryzacja i własność pozostają odpowiedzialnością
-  przyszłego serwisu.
+  samej bitwy, ale autoryzacja i własność pozostają odpowiedzialnością warstwy
+  serwisów create/accept.
 - `decline`/`expiry` endpointy oraz discovery open invites nie należą do
   obecnego minimum B4, lecz schema ich nie blokuje.
-- Ten ADR nie implementuje endpointów, Pydantic schemas, serwisu akceptacji,
-  klienta HTTP/MCP ani UI; odpowiednie pozycje B4/B5 pozostają otwarte.
+- Pierwotny slice schematu nie implementował endpointów; nota B4.1 dodaje tylko
+  create. Serwis akceptacji, klient HTTP/MCP i UI pozostają otwarte.
 
 ## Alternatywy rozważone
 

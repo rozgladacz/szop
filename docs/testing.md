@@ -133,6 +133,26 @@ zapisów po simulate, no-oracle i odrzucenie HTTP continuation przed transportem
 .\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_parity.py tests/test_clients_local.py tests/test_clients_http.py tests/test_battles_router.py tests/test_engine_regression.py tests/test_engine_persistence.py tests/test_engine_checkpoints.py tests/test_engine_action_codec.py tests/test_engine_multi_action.py tests/test_battle_action_proposals.py
 ```
 
+## B4.1 — create direct/open battle invite
+
+`tests/test_battle_invites_router.py` używa osobnego seeded SQLite in-memory
+(`StaticPool`, wymuszone FK) i rzeczywistego `FastAPI TestClient`; produkcyjna
+`data/szop.db` nie jest otwierana. Gate obejmuje session/bearer/wildcard auth,
+scope `battle:invite`, body-blind audit, strict request/response, canonical
+scenario, owner/target no-oracle, pending/result-linkage invariants, brak
+idempotency, rollback po kontrolowanym `IntegrityError` oraz ponowne użycie po
+błędzie.
+
+Pomiar całego requestu create wynosi dokładnie **3 statements dla session/open**
+i **4 dla session/direct**. Osobno liczona ścieżka agent auth + standardowy audit
+wynosi **6 dla bearer/open** i **7 dla bearer/direct**. Różnica to wyłącznie
+opcjonalny lookup direct targetu; liczba roster units i historia invite'ów nie
+dodają zapytań. Targeted gate B4.1 wraz z wymaganymi regresjami:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_battle_invites_router.py tests/test_battle_invite_model.py tests/test_db_schema_migrations.py tests/test_battles_router.py tests/test_battle_event_stream.py tests/test_clients_parity.py tests/test_battle_action_proposals.py tests/test_agent_token_security.py
+```
+
 ## B6.1 — uwierzytelniony, wznawialny stream SSE eventów bitwy
 
 `tests/test_battle_event_stream.py` łączy realny `FastAPI TestClient` dla

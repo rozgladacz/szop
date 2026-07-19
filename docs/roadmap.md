@@ -240,8 +240,15 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   wersjonowana akcja, obowiązkowy `expected_sequence`, wznowienie state+RNG,
   `resolver.apply`, automatyczny round-end przez istniejące helpery i atomowy
   zapis eventów + dokładnie jednego checkpointu + metadanych; odpowiedź zwraca
-  nowy state i deltę eventów. Pozostałe endpointy nadal otwarte:
-  `POST /battles/invite`, `POST /battles/invite/{id}/accept`,
+  nowy state i deltę eventów. `POST /battles/invite` **DONE 2026-07-19
+  (B4.1, ADR-0055)**: session user albo agent scope `battle:invite` tworzy direct
+  lub open `BattleInvite(status=pending)` dla własnego rosteru. Strict body
+  przyjmuje `to_user_id?`, `roster_id`, canonical lowercase `scenario` oraz
+  `expires_in_hours` 1..168; odpowiedź zawiera wyłącznie immutable input,
+  status i timestampy, bez result linkage. Każdy legalny POST tworzy nowy
+  rekord — świadomie brak idempotency/deduplikacji bez constraintu i
+  rate-limit infrastruktury. Pozostałe endpointy nadal otwarte:
+  `POST /battles/invite/{id}/accept`,
   `POST /battles/{id}/interrupts`,
   `POST /battles/{id}/replay`.
 - [~] Auth: read-only battle endpoints mają participant scope
@@ -252,10 +259,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `battle:simulate`, mapuje agenta na `owner_user_id` i wymaga obu rosterów z
   `owner_id == owner`. `POST /battles/{id}/actions` ma scope `battle:act`,
   participant/no-oracle check oraz kontrolę strony `owner_player`; auth i zapis
-  przeszły osobny security-review. Invite'y i pozostałe write endpointy nadal
-  wymagają osobnego security-review.
+  przeszły osobny security-review. Create invite ma osobny least-privilege
+  scope `battle:invite`, owner-scoped roster, wspólne no-oracle 404 dla
+  missing/foreign roster oraz missing/self/agent target i body-blind standardowy
+  audit. Accept i pozostałe write endpointy nadal wymagają osobnego
+  security-review.
 - [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych,
-  event-logu, state i action w routerze gotowe. Bezpieczny wspólny codec
+  event-logu, state, action i create invite w routerze gotowe. Bezpieczny wspólny codec
   `app/services/engine/action_codec.py` (`szop.action/v1`, zamknięty union 5
   akcji) DONE 2026-07-15; przeniesienie modeli do wspólnego `schemas.py` nie jest
   potrzebne dla obecnego klienta.

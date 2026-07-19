@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from starlette.responses import StreamingResponse
 from .. import models
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
+from ..services import battle_invites as battle_invite_service
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
 from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
 from ..services.battle_event_stream import (
@@ -56,6 +58,7 @@ from ..services.roster_simulation import (
 router = APIRouter(prefix="/battles", tags=["battles"])
 
 BATTLE_CREATE_SCOPE = "battle:create"
+BATTLE_INVITE_SCOPE = "battle:invite"
 BATTLE_READ_SCOPE = "battle:read"
 BATTLE_ACT_SCOPE = "battle:act"
 BATTLE_SIMULATE_SCOPE = "battle:simulate"
@@ -65,6 +68,11 @@ _MAX_EVENT_CURSOR = (1 << 63) - 1
 
 @dataclass(frozen=True)
 class BattleCreator:
+    user_id: int
+
+
+@dataclass(frozen=True)
+class BattleInviter:
     user_id: int
 
 
@@ -88,6 +96,39 @@ class BattleCreate(BaseModel):
     p2_roster_id: int = Field(..., ge=1)
     rng_seed: int = 0
     initiative_player: int = Field(0, ge=0, le=1)
+
+
+class BattleInviteCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    to_user_id: int | None = Field(None, strict=True, ge=1)
+    roster_id: int = Field(..., strict=True, ge=1)
+    scenario: str = Field(
+        "lustrzana_a",
+        strict=True,
+        min_length=1,
+        max_length=100,
+    )
+    expires_in_hours: int = Field(24, strict=True, ge=1, le=168)
+
+    @field_validator("scenario", mode="before")
+    @classmethod
+    def canonicalize_scenario(cls, value: object) -> object:
+        return value.strip().lower() if isinstance(value, str) else value
+
+
+class BattleInvitePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: int = Field(..., strict=True, ge=1)
+    from_user_id: int = Field(..., strict=True, ge=1)
+    to_user_id: int | None = Field(None, strict=True, ge=1)
+    roster_id: int = Field(..., strict=True, ge=1)
+    scenario: str = Field(..., min_length=1, max_length=100)
+    status: Literal["pending"]
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
 
 
 class BattleSimulate(BaseModel):
@@ -223,6 +264,21 @@ def _battle_creator(
             db=db,
             current_user=current_user,
             agent_scope=BATTLE_CREATE_SCOPE,
+        )
+    )
+
+
+def _battle_inviter(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User | None = Depends(get_current_user(optional=True)),
+) -> BattleInviter:
+    return BattleInviter(
+        user_id=_authorized_owner_user_id(
+            request=request,
+            db=db,
+            current_user=current_user,
+            agent_scope=BATTLE_INVITE_SCOPE,
         )
     )
 
@@ -384,6 +440,20 @@ def _public_battle(
     )
 
 
+def _public_battle_invite(invite: models.BattleInvite) -> BattleInvitePublic:
+    return BattleInvitePublic(
+        id=invite.id,
+        from_user_id=invite.from_user_id,
+        to_user_id=invite.to_user_id,
+        roster_id=invite.roster_id,
+        scenario=invite.scenario,
+        status=invite.status,
+        expires_at=invite.expires_at,
+        created_at=invite.created_at,
+        updated_at=invite.updated_at,
+    )
+
+
 def _simulation_players(bot: str, base_seed: int, game_index: int):
     return simulation_players(bot, base_seed, game_index)
 
@@ -487,6 +557,48 @@ def simulate_battle(
         draw_rate=summary.draw_rate,
         avg_rounds=summary.avg_rounds,
     )
+
+
+@router.post(
+    "/invite",
+    response_model=BattleInvitePublic,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_battle_invite(
+    payload: BattleInviteCreate,
+    db: Session = Depends(get_db),
+    inviter: BattleInviter = Depends(_battle_inviter),
+) -> BattleInvitePublic:
+    try:
+        invite = battle_invite_service.create_battle_invite(
+            db,
+            from_user_id=inviter.user_id,
+            to_user_id=payload.to_user_id,
+            roster_id=payload.roster_id,
+            scenario=payload.scenario,
+            expires_in_hours=payload.expires_in_hours,
+        )
+        public = _public_battle_invite(invite)
+        db.commit()
+    except (
+        battle_invite_service.BattleInviteRosterNotFound,
+        battle_invite_service.BattleInviteTargetNotFound,
+    ) as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from exc
+    except battle_invite_service.BattleInviteScenarioInvalid as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Unknown battle invite scenario",
+        ) from exc
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Battle invite could not be created",
+        ) from exc
+    return public
 
 
 @router.post("/{battle_id}/actions", response_model=BattleActionPublic)
