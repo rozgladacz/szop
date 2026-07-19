@@ -13,6 +13,7 @@ _EXPORTS = {
     "BattleActionProposal": ("szop_client.types", "BattleActionProposal"),
     "BattleInviteMetadata": ("szop_client.types", "BattleInviteMetadata"),
     "BattleMetadata": ("szop_client.http", "BattleMetadata"),
+    "BattleReplayResult": ("szop_client.types", "BattleReplayResult"),
     "BattleStateCheckpoint": ("szop_client.types", "BattleStateCheckpoint"),
     "MAX_EXPLOIT_GAMES_PER_PAIR": (
         "szop_client.http",

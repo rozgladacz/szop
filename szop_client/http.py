@@ -30,6 +30,7 @@ from app.services.engine.state_codec import battle_state_from_json
 from szop_client.types import (
     BattleActionProposal,
     BattleInviteMetadata,
+    BattleReplayResult,
     BattleStateCheckpoint,
     SimulationSummary,
 )
@@ -345,6 +346,23 @@ class HttpClient:
     def get_state(self, battle_id: int) -> BattleState:
         """Return the participant-scoped current domain state of a battle."""
         return self.get_state_checkpoint(battle_id).state
+
+    def replay_battle(self, battle_id: int) -> BattleReplayResult:
+        """Reconstruct and decode one server-verified durable battle state."""
+        _validate_positive_id(battle_id, name="battle_id")
+        error_label = "POST battle replay"
+        payload = self._request_json(
+            "POST",
+            f"/battles/{battle_id}/replay",
+            {},
+            json_body=None,
+            error_label=error_label,
+        )
+        return _battle_replay_result_from_payload(
+            payload,
+            expected_battle_id=battle_id,
+            error_label=error_label,
+        )
 
     def lookup_rule(self, query: str, *, limit: int = 5) -> dict[str, Any]:
         """Look up canonical rule points through the public read-only API."""
@@ -2169,6 +2187,56 @@ def _action_result_from_payload(
     if tuple(event.sequence for event in events) != expected_sequences:
         raise HttpClientError(error_message)
     return state, events
+
+
+def _battle_replay_result_from_payload(
+    payload: Any,
+    *,
+    expected_battle_id: int,
+    error_label: str,
+) -> BattleReplayResult:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        _require_exact_keys(
+            payload,
+            {
+                "battle_id",
+                "base_sequence",
+                "replayed_through_sequence",
+                "event_count",
+                "verified_against_checkpoint",
+                "state",
+            },
+        )
+        battle_id = _required_int(payload, "battle_id")
+        if battle_id != expected_battle_id:
+            raise TypeError("battle_id")
+        state_payload = payload["state"]
+        if not isinstance(state_payload, dict):
+            raise TypeError("state")
+        _require_exact_keys(state_payload, {"schema", "version", "state"})
+        schema = _required_str(state_payload, "schema")
+        version = _required_int(state_payload, "version")
+        state = battle_state_from_json(state_payload)
+        if payload["verified_against_checkpoint"] is not True:
+            raise TypeError("verified_against_checkpoint")
+        return BattleReplayResult(
+            battle_id=battle_id,
+            base_sequence=_required_int(payload, "base_sequence"),
+            replayed_through_sequence=_required_int(
+                payload,
+                "replayed_through_sequence",
+            ),
+            event_count=_required_int(payload, "event_count"),
+            verified_against_checkpoint=True,
+            schema=schema,
+            version=version,
+            state=state,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
 
 
 def _battle_action_proposal_from_payload(

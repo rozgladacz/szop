@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from app.services.engine.state import BattleState
@@ -66,6 +66,43 @@ class BattleStateCheckpoint:
             raise ValueError("schema must be a non-empty string")
         if type(self.version) is not int or self.version < 1:
             raise ValueError("version must be an int >= 1")
+
+
+@dataclass(frozen=True, slots=True)
+class BattleReplayResult:
+    """Verified public state reconstructed from one battle's durable log."""
+
+    battle_id: int
+    base_sequence: int
+    replayed_through_sequence: int
+    event_count: int
+    verified_against_checkpoint: Literal[True]
+    schema: str
+    version: int
+    state: BattleState
+
+    def __post_init__(self) -> None:
+        if type(self.battle_id) is not int or self.battle_id < 1:
+            raise ValueError("battle_id must be an int >= 1")
+        for name in ("base_sequence", "replayed_through_sequence", "event_count"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 0:
+                raise ValueError(f"{name} must be an int >= 0")
+        if self.verified_against_checkpoint is not True:
+            raise ValueError("verified_against_checkpoint must be exactly True")
+        if not isinstance(self.schema, str) or not self.schema:
+            raise ValueError("schema must be a non-empty string")
+        if type(self.version) is not int or self.version < 1:
+            raise ValueError("version must be an int >= 1")
+        if self.replayed_through_sequence != self.base_sequence + self.event_count:
+            raise ValueError(
+                "replayed_through_sequence must equal base_sequence + event_count"
+            )
+
+        from app.services.engine.state import BattleState
+
+        if not isinstance(self.state, BattleState):
+            raise ValueError("state must be a BattleState")
 
 
 @dataclass(frozen=True, slots=True)
