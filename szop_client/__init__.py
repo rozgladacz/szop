@@ -11,6 +11,7 @@ from typing import Any
 
 _EXPORTS = {
     "BattleActionProposal": ("szop_client.types", "BattleActionProposal"),
+    "BattleInviteMetadata": ("szop_client.types", "BattleInviteMetadata"),
     "BattleMetadata": ("szop_client.http", "BattleMetadata"),
     "BattleStateCheckpoint": ("szop_client.types", "BattleStateCheckpoint"),
     "MAX_EXPLOIT_GAMES_PER_PAIR": (

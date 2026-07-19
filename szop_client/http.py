@@ -11,6 +11,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from itertools import combinations
 from typing import TYPE_CHECKING, Any, Callable
 from urllib.error import HTTPError, URLError
@@ -28,6 +29,7 @@ from app.services.engine.state import BattleState
 from app.services.engine.state_codec import battle_state_from_json
 from szop_client.types import (
     BattleActionProposal,
+    BattleInviteMetadata,
     BattleStateCheckpoint,
     SimulationSummary,
 )
@@ -170,6 +172,62 @@ class HttpClient:
                 "rng_seed": rng_seed,
                 "initiative_player": initiative_player,
             },
+            error_label=error_label,
+        )
+        return _metadata_from_payload(payload, error_label=error_label)
+
+    def create_battle_invite(
+        self,
+        *,
+        roster_id: int,
+        to_user_id: int | None = None,
+        scenario: str = "lustrzana_a",
+        expires_in_hours: int = 24,
+    ) -> BattleInviteMetadata:
+        """Create one direct or open pending invite with no follow-up request."""
+        _validate_positive_id(roster_id, name="roster_id")
+        if to_user_id is not None:
+            _validate_positive_id(to_user_id, name="to_user_id")
+        if not isinstance(scenario, str) or not scenario.strip():
+            raise ValueError("scenario must be a non-empty string")
+        if len(scenario) > 100:
+            raise ValueError("scenario must contain at most 100 characters")
+        if type(expires_in_hours) is not int or not 1 <= expires_in_hours <= 168:
+            raise ValueError("expires_in_hours must be an int between 1 and 168")
+
+        error_label = "POST create battle invite"
+        payload = self._request_json(
+            "POST",
+            "/battles/invite",
+            {},
+            json_body={
+                "to_user_id": to_user_id,
+                "roster_id": roster_id,
+                "scenario": scenario,
+                "expires_in_hours": expires_in_hours,
+            },
+            error_label=error_label,
+        )
+        return _battle_invite_metadata_from_payload(
+            payload,
+            error_label=error_label,
+        )
+
+    def accept_battle_invite(
+        self,
+        invite_id: int,
+        *,
+        roster_id: int,
+    ) -> BattleMetadata:
+        """Accept one invite and decode the returned existing battle contract."""
+        _validate_positive_id(invite_id, name="invite_id")
+        _validate_positive_id(roster_id, name="roster_id")
+        error_label = "POST accept battle invite"
+        payload = self._request_json(
+            "POST",
+            f"/battles/invite/{invite_id}/accept",
+            {},
+            json_body={"roster_id": roster_id},
             error_label=error_label,
         )
         return _metadata_from_payload(payload, error_label=error_label)
@@ -686,6 +744,12 @@ def _normalize_reference_query(query: str, *, max_length: int) -> str:
     if len(normalized) > max_length:
         raise ValueError(f"query must contain at most {max_length} characters")
     return normalized
+
+
+def _validate_positive_id(value: Any, *, name: str) -> int:
+    if type(value) is not int or value < 1:
+        raise ValueError(f"{name} must be an int >= 1")
+    return value
 
 
 def _is_strict_json_value(value: Any) -> bool:
@@ -1999,6 +2063,44 @@ def _metadata_from_payload(
         raise HttpClientError(error_message) from exc
 
 
+def _battle_invite_metadata_from_payload(
+    payload: Any,
+    *,
+    error_label: str,
+) -> BattleInviteMetadata:
+    error_message = f"{error_label} returned malformed payload"
+    if not isinstance(payload, dict):
+        raise HttpClientError(error_message)
+    try:
+        _require_exact_keys(
+            payload,
+            {
+                "id",
+                "from_user_id",
+                "to_user_id",
+                "roster_id",
+                "scenario",
+                "status",
+                "expires_at",
+                "created_at",
+                "updated_at",
+            },
+        )
+        return BattleInviteMetadata(
+            invite_id=_required_int(payload, "id"),
+            from_user_id=_required_int(payload, "from_user_id"),
+            to_user_id=_optional_int(payload, "to_user_id"),
+            roster_id=_required_int(payload, "roster_id"),
+            scenario=_required_str(payload, "scenario"),
+            status=_required_str(payload, "status"),
+            expires_at=_required_naive_datetime(payload, "expires_at"),
+            created_at=_required_naive_datetime(payload, "created_at"),
+            updated_at=_required_naive_datetime(payload, "updated_at"),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
+
+
 def _simulation_summary_from_payload(
     payload: Any,
     *,
@@ -2157,6 +2259,16 @@ def _required_str(payload: dict[str, Any], key: str) -> str:
     if not isinstance(value, str):
         raise TypeError(key)
     return value
+
+
+def _required_naive_datetime(payload: dict[str, Any], key: str) -> datetime:
+    value = payload[key]
+    if not isinstance(value, str):
+        raise TypeError(key)
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is not None:
+        raise TypeError(key)
+    return parsed
 
 
 def _event_from_public_payload(item: Any) -> BattleEvent:

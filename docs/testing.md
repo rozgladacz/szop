@@ -133,6 +133,24 @@ zapisów po simulate, no-oracle i odrzucenie HTTP continuation przed transportem
 .\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_parity.py tests/test_clients_local.py tests/test_clients_http.py tests/test_battles_router.py tests/test_engine_regression.py tests/test_engine_persistence.py tests/test_engine_checkpoints.py tests/test_engine_action_codec.py tests/test_engine_multi_action.py tests/test_battle_action_proposals.py
 ```
 
+## B5.2 — real-transport HttpClient battle invites
+
+`tests/test_clients_http_invites.py` łączy ścisłe testy wstrzykiwanego
+transportu z rzeczywistym FastAPI `TestClient`. Seeded SQLite in-memory z
+wymuszonym FK tworzy osobnych ownerów, ich rostery i osobne bearery dla scope
+`battle:invite`/`battle:accept`; produkcyjna `data/szop.db` nie jest otwierana.
+Flow obejmuje direct invite, 404 obcego acceptora i cudzego rosteru, 403 dla
+brakującego scope, pierwszy accept oraz idempotentny retry z tym samym
+`battle_id` i bez drugiej `Battle`/eventów/checkpointu. Następnie ten sam świat
+tworzy i akceptuje open invite innym ownerem oraz sprawdza terminalne 409 i
+body-blind `AgentAuditLog` bez bearera ani pól body. Unit matrix sprawdza jeden
+request, exact method/path/body/header/timeout, preflight, naive-UTC datetime,
+fail-closed JSON, zachowanie statusów 401/403/404/409/422 i lazy import.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_http.py tests/test_clients_http_invites.py tests/test_clients_parity.py tests/test_battle_invites_router.py tests/test_battle_invite_accept_router.py tests/test_agent_token_security.py
+```
+
 ## B4.1 — create direct/open battle invite
 
 `tests/test_battle_invites_router.py` używa osobnego seeded SQLite in-memory

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -11,6 +12,39 @@ if TYPE_CHECKING:
 
 class RosterNotFoundError(LookupError):
     """A roster ID is missing or outside the caller's ownership scope."""
+
+
+@dataclass(frozen=True, slots=True)
+class BattleInviteMetadata:
+    """Public metadata returned after creating a pending battle invite."""
+
+    invite_id: int
+    from_user_id: int
+    to_user_id: int | None
+    roster_id: int
+    scenario: str
+    status: str
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        for name in ("invite_id", "from_user_id", "roster_id"):
+            value = getattr(self, name)
+            if type(value) is not int or value < 1:
+                raise ValueError(f"{name} must be an int >= 1")
+        if self.to_user_id is not None and (
+            type(self.to_user_id) is not int or self.to_user_id < 1
+        ):
+            raise ValueError("to_user_id must be an int >= 1 or None")
+        if not isinstance(self.scenario, str) or not self.scenario.strip():
+            raise ValueError("scenario must be a non-empty string")
+        if self.status != "pending":
+            raise ValueError("new battle invite must be pending")
+        for name in ("expires_at", "created_at", "updated_at"):
+            value = getattr(self, name)
+            if not isinstance(value, datetime) or value.tzinfo is not None:
+                raise ValueError(f"{name} must be a naive UTC datetime")
 
 
 @dataclass(frozen=True, slots=True)
