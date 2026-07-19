@@ -111,18 +111,52 @@ idempotency ani rate-limit infrastruktury. Accept/decline/expiry/discovery i
 tworzenie `Battle` pozostają poza tym dodatkiem i nie zmieniają zamrożonej
 decyzji lifecycle.
 
+## Nota implementacyjna B4.2 — accept endpoint (2026-07-19)
+
+`POST /battles/invite/{invite_id}/accept` przyjmuje strict body zawierające
+wyłącznie `roster_id` acceptora. Session user działa jako własny principal,
+bearer wymaga osobnego scope `battle:accept` i mapuje się na ownera tokenu.
+Brak invite, autor, niewłaściwy direct target, sesyjne konto agent, brak/cudzy
+roster acceptora oraz przegrany acceptor open invite mają wspólne body-less 404.
+Terminalny lifecycle, zmiana rostera przy retry i uszkodzony wynik mają stałe
+409. Pending z `expires_at <= now` przechodzi warunkowo do `expired`, zachowuje
+puste linkage i jest commitowany przed odpowiedzią 409.
+
+Pierwszy sukces losuje `secrets.randbits(63)` po stronie serwera, wyznacza
+inicjatywę z najmłodszego bitu, buduje mapę zapisanego scenario i używa wspólnej
+transakcyjnie neutralnej granicy `app/services/battle_creation.py`. Ta granica
+jest teraz SSOT zarówno dla sandboxowego `POST /battles`, jak i accept: adaptuje
+oba rostery, wykonuje istniejące setup/deployment oraz stage'uje `Battle`,
+ciągły event-log i jeden bieżący checkpoint state+RNG.
+
+Po kompletnym provisional stage serwis wykonuje pojedynczy warunkowy `UPDATE`
+invite po PK, `pending`, niewygasłym czasie i target semantics, ustawiając
+jednocześnie `accepted_by_user_id`, `accepted_roster_id` i `battle_id`.
+Przegrany CAS zgłasza typed race; router rollbackuje całą transakcję (wraz z
+provisional Battle/eventami/checkpointem), po czym wykonuje bezpieczny reread.
+Ten sam acceptor i roster dostają 200 z istniejącą Battle, konkurent open 404,
+a inne wyniki 409. SQLite lock jest retry'owany wyłącznie dla komunikatów
+`database [table] is locked`, maksymalnie trzy próby; pozostałe
+`OperationalError` nie są maskowane. `IntegrityError` zawsze powoduje rollback
+i tylko kompletny idempotentny reread może zamienić go na 200.
+
+Bearer audit pozostaje standardowy i body-blind: route, method, scope oraz
+`invite_id` z path params; nie czyta rosteru, scenario, Authorization ani
+sekretów. Implementacja nie dodaje migracji, indeksu, discovery, decline,
+expiry workera, klienta HTTP/MCP/UI, interrupts ani replay.
+
 ## Konsekwencje
 
-- B4.1 dodało `POST /battles/invite`; przyszłe
-  `POST /battles/invite/{id}/accept` nie wymaga kolejnej zmiany schematu.
+- B4.1 dodało `POST /battles/invite`, a B4.2 wykorzystało istniejące linkage
+  bez zmiany schematu.
 - Open invite ma trwałą tożsamość pierwszego skutecznego acceptora.
 - Baza blokuje częściowo zaakceptowane rekordy i wielokrotne powiązanie tej
   samej bitwy, ale autoryzacja i własność pozostają odpowiedzialnością warstwy
   serwisów create/accept.
 - `decline`/`expiry` endpointy oraz discovery open invites nie należą do
   obecnego minimum B4, lecz schema ich nie blokuje.
-- Pierwotny slice schematu nie implementował endpointów; nota B4.1 dodaje tylko
-  create. Serwis akceptacji, klient HTTP/MCP i UI pozostają otwarte.
+- Pierwotny slice schematu nie implementował endpointów; noty B4.1/B4.2 dodają
+  create i accept. Klient HTTP/MCP i UI pozostają otwarte.
 
 ## Alternatywy rozważone
 

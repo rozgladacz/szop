@@ -153,6 +153,37 @@ dodają zapytań. Targeted gate B4.1 wraz z wymaganymi regresjami:
 .\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_battle_invites_router.py tests/test_battle_invite_model.py tests/test_db_schema_migrations.py tests/test_battles_router.py tests/test_battle_event_stream.py tests/test_clients_parity.py tests/test_battle_action_proposals.py tests/test_agent_token_security.py
 ```
 
+## B4.2 — atomowy direct/open battle invite accept
+
+`tests/test_battle_invite_accept_router.py` używa rzeczywistego FastAPI
+`TestClient` i wyłącznie testowych baz. Główna macierz działa na seeded SQLite
+in-memory z wymuszonym FK; concurrency gate tworzy osobną plikową SQLite w
+`tmp_path`, włącza WAL/busy timeout i uruchamia dwa równoległe requesty z
+osobnymi sesjami/połączeniami. Pokrycie obejmuje direct/open/admin, server seed,
+scenario terrain/objectives w checkpoint, ciągły event-log, pełne linkage,
+idempotentny retry, strict body, `battle:accept`/wildcard/401/403, body-blind
+audit, no-oracle, expiry commit, terminalne 409, uszkodzony source/scenario/
+linkage, rollback po kontrolowanym `IntegrityError` oraz ponowne użycie.
+
+Realny concurrency gate wymusza wspólny punkt startu przed CAS. Dwa requesty
+tego samego acceptora kończą z tym samym `battle_id`; dwaj konkurenci open mają
+dokładnie jeden 200 i jeden body-less 404. W obu przypadkach baza ma jedną
+`Battle`, jeden checkpoint, eventy wyłącznie tej bitwy i zero orphanów.
+
+SQL gate liczy pełny session request. Dla dwóch rosterów po 1 jednostce wykonuje
+**18 statements**, a dla dwóch rosterów po 12 jednostek — **40**; różnica 22 to
+oczekiwane INSERT-y 22 dodatkowych startowych eventów. Control-plane i eager
+loading mają w obu przypadkach dokładnie **13 SELECT-ów**, także po dodaniu 20
+historycznych invite'ów i dla 12 różnych jednostek z relacjami broni. Lookup i
+CAS invite zawsze zawierają `battle_invites.id`; nie ma skanu historii ani
+per-unit SELECT/N+1.
+
+Targeted gate B4.2 wraz z regresjami:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_battle_invite_accept_router.py tests/test_battle_invites_router.py tests/test_battle_invite_model.py tests/test_db_schema_migrations.py tests/test_battles_router.py tests/test_battle_event_stream.py tests/test_engine_persistence.py tests/test_engine_checkpoints.py tests/test_clients_parity.py tests/test_battle_action_proposals.py tests/test_agent_token_security.py
+```
+
 ## B6.1 — uwierzytelniony, wznawialny stream SSE eventów bitwy
 
 `tests/test_battle_event_stream.py` łączy realny `FastAPI TestClient` dla

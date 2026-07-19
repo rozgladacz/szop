@@ -247,8 +247,16 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `expires_in_hours` 1..168; odpowiedź zawiera wyłącznie immutable input,
   status i timestampy, bez result linkage. Każdy legalny POST tworzy nowy
   rekord — świadomie brak idempotency/deduplikacji bez constraintu i
-  rate-limit infrastruktury. Pozostałe endpointy nadal otwarte:
-  `POST /battles/invite/{id}/accept`,
+  rate-limit infrastruktury. `POST /battles/invite/{id}/accept` **DONE
+  2026-07-19 (B4.2, ADR-0055)**: strict body zawiera tylko roster acceptora,
+  direct/open stosują wspólne no-oracle, a bearer ma osobny scope
+  `battle:accept`. Pierwszy sukces losuje server-side seed, buduje scenario,
+  adaptuje oba rostery i przez wspólne `stage_battle_creation` zapisuje jedną
+  aktywną `Battle`, startowy event-log i checkpoint. Pełne invite linkage jest
+  ustawiane warunkowym CAS po PK/status/expiry/target w tej samej transakcji;
+  przegrany CAS rollbackuje cały provisional graph. Retry tego samego
+  acceptora/rostera zwraca istniejący `battle_id`, expiry jest trwale
+  commitowane przed stałym 409. Pozostałe endpointy nadal otwarte:
   `POST /battles/{id}/interrupts`,
   `POST /battles/{id}/replay`.
 - [~] Auth: read-only battle endpoints mają participant scope
@@ -262,10 +270,12 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   przeszły osobny security-review. Create invite ma osobny least-privilege
   scope `battle:invite`, owner-scoped roster, wspólne no-oracle 404 dla
   missing/foreign roster oraz missing/self/agent target i body-blind standardowy
-  audit. Accept i pozostałe write endpointy nadal wymagają osobnego
-  security-review.
+  audit. Accept ma osobny least-privilege `battle:accept`, mapowanie bearer →
+  owner, no-oracle dla invite/target/author/agent/roster/open-loser oraz ten sam
+  body-blind audit; B4.2 przeszło osobny security-review. Pozostałe write
+  endpointy nadal wymagają osobnego security-review.
 - [~] Pydantic schemas w `app/schemas.py` — lokalne response modele metadanych,
-  event-logu, state, action i create invite w routerze gotowe. Bezpieczny wspólny codec
+  event-logu, state, action oraz strict create/accept invite w routerze gotowe. Bezpieczny wspólny codec
   `app/services/engine/action_codec.py` (`szop.action/v1`, zamknięty union 5
   akcji) DONE 2026-07-15; przeniesienie modeli do wspólnego `schemas.py` nie jest
   potrzebne dla obecnego klienta.

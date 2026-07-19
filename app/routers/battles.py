@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
@@ -17,7 +17,8 @@ from ..db import get_db
 from ..security import get_current_user, require_agent_scope
 from ..services import battle_invites as battle_invite_service
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
-from ..services.agents.roster_adapter import AdaptResult, roster_to_engine_roster
+from ..services.agents.roster_adapter import AdaptResult
+from ..services.battle_creation import stage_battle_creation
 from ..services.battle_event_stream import (
     session_factory_from_session,
     stream_battle_events,
@@ -31,7 +32,6 @@ from ..services.battle_actions import (
     get_participant_battle,
     stage_battle_action,
 )
-from ..services.engine.dice import DeterministicDice
 from ..services.engine.events import BattleEvent as EngineBattleEvent
 from ..services.engine.events import event_to_json
 from ..services.engine.persistence import (
@@ -40,12 +40,6 @@ from ..services.engine.persistence import (
     latest_event_sequence,
     load_events,
     load_latest_checkpoint,
-    save_checkpoint,
-    save_events,
-)
-from ..services.engine.phases import (
-    deployment_round,
-    setup_phase,
 )
 from ..services.engine.state_codec import battle_state_to_json
 from ..services.roster_simulation import (
@@ -59,11 +53,14 @@ router = APIRouter(prefix="/battles", tags=["battles"])
 
 BATTLE_CREATE_SCOPE = "battle:create"
 BATTLE_INVITE_SCOPE = "battle:invite"
+BATTLE_ACCEPT_SCOPE = "battle:accept"
 BATTLE_READ_SCOPE = "battle:read"
 BATTLE_ACT_SCOPE = "battle:act"
 BATTLE_SIMULATE_SCOPE = "battle:simulate"
 MAX_SIMULATION_GAMES = MAX_PUBLIC_SIMULATION_GAMES
 _MAX_EVENT_CURSOR = (1 << 63) - 1
+_MAX_INVITE_ACCEPT_ATTEMPTS = 3
+_INVITE_ACCEPT_CONFLICT_DETAIL = "Battle invite could not be accepted"
 
 
 @dataclass(frozen=True)
@@ -74,6 +71,12 @@ class BattleCreator:
 @dataclass(frozen=True)
 class BattleInviter:
     user_id: int
+
+
+@dataclass(frozen=True)
+class BattleAcceptor:
+    user_id: int
+    session_user_is_agent: bool = False
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,12 @@ class BattleInvitePublic(BaseModel):
     expires_at: datetime
     created_at: datetime
     updated_at: datetime
+
+
+class BattleInviteAccept(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    roster_id: int = Field(..., strict=True, ge=1)
 
 
 class BattleSimulate(BaseModel):
@@ -280,6 +289,22 @@ def _battle_inviter(
             current_user=current_user,
             agent_scope=BATTLE_INVITE_SCOPE,
         )
+    )
+
+
+def _battle_acceptor(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: models.User | None = Depends(get_current_user(optional=True)),
+) -> BattleAcceptor:
+    if _has_authorization_header(request):
+        principal = require_agent_scope(BATTLE_ACCEPT_SCOPE)(request=request, db=db)
+        return BattleAcceptor(user_id=principal.owner_user_id)
+    if current_user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    return BattleAcceptor(
+        user_id=current_user.id,
+        session_user_is_agent=current_user.role == models.USER_ROLE_AGENT,
     )
 
 
@@ -454,6 +479,62 @@ def _public_battle_invite(invite: models.BattleInvite) -> BattleInvitePublic:
     )
 
 
+def _public_invite_acceptance(
+    db: Session,
+    result: battle_invite_service.BattleInviteAccepted,
+) -> BattlePublic:
+    adaptation_report = None
+    if result.created:
+        if result.adapted_p1 is None or result.adapted_p2 is None:
+            raise RuntimeError("new invite acceptance is missing adaptation results")
+        adaptation_report = BattleAdaptationPublic(
+            p1=_public_adaptation(result.adapted_p1),
+            p2=_public_adaptation(result.adapted_p2),
+        )
+    return _public_battle(
+        db,
+        result.battle,
+        adaptation_report=adaptation_report,
+    )
+
+
+def _is_sqlite_lock_error(db: Session, exc: OperationalError) -> bool:
+    bind = db.get_bind()
+    if bind.dialect.name != "sqlite":
+        return False
+    message = str(exc.orig).lower()
+    return (
+        "database is locked" in message
+        or "database table is locked" in message
+    )
+
+
+def _read_invite_acceptance_after_rollback(
+    db: Session,
+    *,
+    invite_id: int,
+    acceptor: BattleAcceptor,
+    roster_id: int,
+) -> battle_invite_service.BattleInviteAccepted | None:
+    try:
+        return battle_invite_service.read_battle_invite_acceptance(
+            db,
+            invite_id=invite_id,
+            acceptor_user_id=acceptor.user_id,
+            accepted_roster_id=roster_id,
+            session_acceptor_is_agent=acceptor.session_user_is_agent,
+        )
+    except battle_invite_service.BattleInviteAcceptPending:
+        return None
+    except battle_invite_service.BattleInviteAcceptNotFound as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from exc
+    except battle_invite_service.BattleInviteAcceptConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=_INVITE_ACCEPT_CONFLICT_DETAIL,
+        ) from exc
+
+
 def _simulation_players(bot: str, base_seed: int, game_index: int):
     return simulation_players(bot, base_seed, game_index)
 
@@ -470,44 +551,23 @@ def create_battle(
     roster_p1 = _get_owned_roster(
         db, roster_id=payload.p2_roster_id, owner_user_id=creator.user_id
     )
-    adapted_p0 = roster_to_engine_roster(roster_p0, owner_player=0)
-    adapted_p1 = roster_to_engine_roster(roster_p1, owner_player=1)
-    rosters = [adapted_p0.units, adapted_p1.units]
-    state = setup_phase(
-        rosters,
-        terrain=(),
-        objectives=(),
-        initiative_player=payload.initiative_player,
-    )
-    state, deploy_events = deployment_round(state, ())
-    battle = models.Battle(
+    staged = stage_battle_creation(
+        db,
         p1_user_id=creator.user_id,
         p2_user_id=creator.user_id,
-        p1_roster_id=roster_p0.id,
-        p2_roster_id=roster_p1.id,
-        current_round=state.round,
+        p1_roster=roster_p0,
+        p2_roster=roster_p1,
         rng_seed=payload.rng_seed,
-        status="active",
-    )
-    db.add(battle)
-    db.flush()
-    save_events(db, battle.id, deploy_events, expected_latest_sequence=0)
-    sequence_at = deploy_events[-1].sequence if deploy_events else 0
-    save_checkpoint(
-        db,
-        battle.id,
-        sequence_at,
-        state,
-        DeterministicDice(seed=payload.rng_seed),
+        initiative_player=payload.initiative_player,
     )
     db.commit()
-    db.refresh(battle)
+    db.refresh(staged.battle)
     return _public_battle(
         db,
-        battle,
+        staged.battle,
         adaptation_report=BattleAdaptationPublic(
-            p1=_public_adaptation(adapted_p0),
-            p2=_public_adaptation(adapted_p1),
+            p1=_public_adaptation(staged.adapted_p1),
+            p2=_public_adaptation(staged.adapted_p2),
         ),
     )
 
@@ -599,6 +659,95 @@ def create_battle_invite(
             detail="Battle invite could not be created",
         ) from exc
     return public
+
+
+@router.post("/invite/{invite_id}/accept", response_model=BattlePublic)
+def accept_battle_invite(
+    invite_id: int,
+    payload: BattleInviteAccept,
+    db: Session = Depends(get_db),
+    acceptor: BattleAcceptor = Depends(_battle_acceptor),
+) -> BattlePublic:
+    for attempt in range(_MAX_INVITE_ACCEPT_ATTEMPTS):
+        try:
+            result = battle_invite_service.stage_battle_invite_acceptance(
+                db,
+                invite_id=invite_id,
+                acceptor_user_id=acceptor.user_id,
+                accepted_roster_id=payload.roster_id,
+                session_acceptor_is_agent=acceptor.session_user_is_agent,
+            )
+            if isinstance(
+                result,
+                battle_invite_service.BattleInviteExpiredStaged,
+            ):
+                db.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=_INVITE_ACCEPT_CONFLICT_DETAIL,
+                )
+            db.commit()
+            db.refresh(result.battle)
+            return _public_invite_acceptance(db, result)
+        except battle_invite_service.BattleInviteAcceptNotFound as exc:
+            db.rollback()
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from exc
+        except battle_invite_service.BattleInviteAcceptConflict as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=_INVITE_ACCEPT_CONFLICT_DETAIL,
+            ) from exc
+        except battle_invite_service.BattleInviteAcceptRace:
+            db.rollback()
+            durable = _read_invite_acceptance_after_rollback(
+                db,
+                invite_id=invite_id,
+                acceptor=acceptor,
+                roster_id=payload.roster_id,
+            )
+            if durable is not None:
+                return _public_invite_acceptance(db, durable)
+            if attempt + 1 == _MAX_INVITE_ACCEPT_ATTEMPTS:
+                break
+            db.rollback()
+        except IntegrityError:
+            db.rollback()
+            durable = _read_invite_acceptance_after_rollback(
+                db,
+                invite_id=invite_id,
+                acceptor=acceptor,
+                roster_id=payload.roster_id,
+            )
+            if durable is not None:
+                return _public_invite_acceptance(db, durable)
+            break
+        except OperationalError as exc:
+            is_sqlite_lock = _is_sqlite_lock_error(db, exc)
+            db.rollback()
+            if not is_sqlite_lock:
+                raise
+            durable = _read_invite_acceptance_after_rollback(
+                db,
+                invite_id=invite_id,
+                acceptor=acceptor,
+                roster_id=payload.roster_id,
+            )
+            if durable is not None:
+                return _public_invite_acceptance(db, durable)
+            if attempt + 1 == _MAX_INVITE_ACCEPT_ATTEMPTS:
+                break
+            db.rollback()
+        except HTTPException:
+            raise
+        except Exception:
+            db.rollback()
+            raise
+
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail=_INVITE_ACCEPT_CONFLICT_DETAIL,
+    )
 
 
 @router.post("/{battle_id}/actions", response_model=BattleActionPublic)

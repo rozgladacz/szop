@@ -130,9 +130,25 @@ opcjonalny lookup direct targetu z wykluczeniem self/roli agent, canonical key z
 envelope bez result linkage oraz relacji. Missing/foreign roster i
 missing/self/agent target mają wspólne no-oracle 404; standardowy agent audit
 zapisuje route/method/scope bez body, rosteru, targetu i scenario. Każdy legalny
-POST tworzy nowy rekord — brak deduplikacji jest świadomy. Przyszły accept musi
-osobno owner-scope'ować roster acceptora, zachować no-oracle dla direct invite,
-a open invite wiązać z pierwszym skutecznym acceptorem w jednej transakcji/CAS.
+POST tworzy nowy rekord — brak deduplikacji jest świadomy.
+
+B4.2 rozszerza tę samą transakcyjnie neutralną granicę o typed accept outcomes,
+owner-scoped batch eager-load obu rosterów i CAS `pending -> accepted/expired`.
+`POST /battles/invite/{id}/accept` ma osobny bearer scope `battle:accept`;
+session konto agent, autor, niewłaściwy direct target, brak/cudzy roster oraz
+przegrany acceptor open invite są ukryte wspólnym 404. Pierwszy sukces buduje
+mapę scenario z server-side seedem i stage'uje wynik przez
+`app/services/battle_creation.py`, wspólne SSOT używane także przez
+`POST /battles`: adapter obu rosterów, setup/deployment, `Battle`, ciągły
+event-log i jeden checkpoint state+RNG. Dopiero kompletny provisional graph
+jest wiązany z invite jednym warunkowym UPDATE po PK/status/expiry/target.
+Router jest właścicielem commit/rollback; przegrany CAS usuwa provisional graph
+i reread zwraca idempotentne 200 wyłącznie temu samemu acceptorowi z tym samym
+rosterem. Pending wygasły jest commitowany jako `expired` przed stałym 409.
+SQLite lock retry jest wąski i ograniczony do trzech prób, a standardowy bearer
+audit pozostaje body-blind. Brak zmian istniejących hot pathów, schematu i
+indeksów; decline/discovery/expiry worker, HttpClient/MCP/UI, interrupts i replay
+pozostają poza B4.2.
 
 ## Dokumentacja reguł gry — read-only
 
@@ -299,7 +315,7 @@ while not is_battle_over(state):
   CHECK-i wykluczają self direct invite, niepełny accepted i wynik w stanie
   niezaakceptowanym. Addytywna tabela przez `create_all`, bez Alembic.
 
-`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0, *, limit=None)` (rekonstrukcja przez `json_to_event`; brak limitu zachowuje historyczne zachowanie) + `latest_event_sequence(session, battle_id)`. `POST /battles/{id}/actions` (ADR-0054) przekazuje ostatni widziany sequence do `save_events(..., expected_latest_sequence=N)`: helper rzuca `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. `save_checkpoint`/`load_latest_checkpoint` (ADR-0053) nie commitują i uznają checkpoint za bieżący wyłącznie przy `sequence_at == latest_event_sequence`; zapisują/odtwarzają wersjonowany `BattleState` i RNG bez `pickle`. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`) oraz `BattleInvite` z lifecycle/result linkage (ADR-0055); C1 helper `require_agent_scope(scope_name)` w `app/security.py` i owner-only endpointy tokenów `app/routers/agent_tokens.py`. B4 `POST /battles` zapisuje `Battle`, startowy event-log i checkpoint w jednej transakcji; participant-scoped `GET /battles/{id}/state` zwraca publiczny stan bez RNG; `POST /battles/invite` zapisuje tylko owner-scoped pending invite przez transakcyjnie neutralny service. Odroczone: accept invite oraz endpointy spoza pojedynczej akcji (interrupts/replay).
+`save_events(session, battle_id, events, *, flush=True, expected_latest_sequence=None)` (transakcyjnie neutralny) + `load_events(session, battle_id, since=0, *, limit=None)` (rekonstrukcja przez `json_to_event`; brak limitu zachowuje historyczne zachowanie) + `latest_event_sequence(session, battle_id)`. `POST /battles/{id}/actions` (ADR-0054) przekazuje ostatni widziany sequence do `save_events(..., expected_latest_sequence=N)`: helper rzuca `BattleEventSequenceConflict` jeśli log urósł i wymaga ciągłego ogona eventów od `N+1`; `UniqueConstraint` nadal broni przed wyścigiem między sprawdzeniem i INSERT-em. `save_checkpoint`/`load_latest_checkpoint` (ADR-0053) nie commitują i uznają checkpoint za bieżący wyłącznie przy `sequence_at == latest_event_sequence`; zapisują/odtwarzają wersjonowany `BattleState` i RNG bez `pickle`. **Inwariant GATE** (`test_engine_persistence.py`): `apply_events(initial, load_events(...)) == live_state` — replay z bazy bit-perfect (rozszerza ADR-0010/0046 o warstwę DB). Brak Alembic — tabele addytywne przez `create_all`; zmiany kolumn istniejących tabel idą przez ręczny `_migrate_schema`. B2 addytywne slice'y po ADR-0050: `Unit.base_size_mm/base_shape`, auth/agent schema (`User.role`, `AgentToken.token_hash/scope_json`, `AgentAuditLog`) oraz `BattleInvite` z lifecycle/result linkage (ADR-0055); C1 helper `require_agent_scope(scope_name)` w `app/security.py` i owner-only endpointy tokenów `app/routers/agent_tokens.py`. B4 `POST /battles` i pierwszy sukces invite accept współdzielą `stage_battle_creation`, zapisując `Battle`, startowy event-log i checkpoint bez commitowania w serwisie; participant-scoped `GET /battles/{id}/state` zwraca publiczny stan bez RNG; `POST /battles/invite` zapisuje owner-scoped pending invite, a `POST /battles/invite/{id}/accept` wiąże dokładnie jeden wynik przez CAS. Odroczone: endpointy spoza pojedynczej akcji (interrupts/replay) oraz pozostały lifecycle invite.
 
 ### Status B3 (zamknięte 2026-05-30) + B3.9 hardening (zamknięte 2026-06-02)
 
