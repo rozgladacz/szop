@@ -16,6 +16,7 @@ from .. import models
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
 from ..services import battle_invites as battle_invite_service
+from ..services import battle_replay as battle_replay_service
 from ..services.agents.maps import DEFAULT_DEPLOYMENT_ZONES, build_map
 from ..services.agents.roster_adapter import AdaptResult
 from ..services.battle_creation import stage_battle_creation
@@ -176,6 +177,22 @@ class BattleStateWirePublic(BaseModel):
     checkpoint_schema: str = Field(..., alias="schema")
     version: int = Field(..., ge=1)
     state: dict[str, Any]
+
+
+class BattleReplayPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    battle_id: int = Field(..., strict=True, ge=1)
+    base_sequence: int = Field(..., strict=True, ge=0)
+    replayed_through_sequence: int = Field(..., strict=True, ge=0)
+    event_count: int = Field(
+        ...,
+        strict=True,
+        ge=0,
+        le=battle_replay_service.MAX_REPLAY_EVENTS,
+    )
+    verified_against_checkpoint: Literal[True]
+    state: BattleStateWirePublic
 
 
 class BattleActionCreate(BaseModel):
@@ -879,4 +896,42 @@ def get_battle_state(
         battle_id=battle.id,
         sequence_at=checkpoint.sequence_at,
         state=serialized["state"],
+    )
+
+
+@router.post("/{battle_id}/replay", response_model=BattleReplayPublic)
+def replay_battle(
+    battle_id: int,
+    db: Session = Depends(get_db),
+    reader: BattleReader = Depends(_battle_reader),
+) -> BattleReplayPublic:
+    battle = _get_accessible_battle(db, battle_id=battle_id, reader=reader)
+    try:
+        replayed = battle_replay_service.replay_battle_state(
+            db,
+            battle_id=battle.id,
+        )
+    except battle_replay_service.BattleReplayLimitExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail="Battle replay exceeds event limit",
+        ) from exc
+    except battle_replay_service.BattleReplayConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Battle replay could not be verified",
+        ) from exc
+
+    serialized = battle_state_to_json(replayed.state)
+    return BattleReplayPublic(
+        battle_id=replayed.battle_id,
+        base_sequence=replayed.base_sequence,
+        replayed_through_sequence=replayed.replayed_through_sequence,
+        event_count=replayed.event_count,
+        verified_against_checkpoint=True,
+        state=BattleStateWirePublic(
+            checkpoint_schema=str(serialized["schema"]),
+            version=int(serialized["version"]),
+            state=serialized["state"],
+        ),
     )

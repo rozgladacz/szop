@@ -279,6 +279,31 @@ def load_latest_checkpoint(
     ).scalar_one_or_none()
     if row is None:
         return None
+    return _decode_checkpoint_row(row)
+
+
+def load_earliest_checkpoint(
+    session: "Session",
+    battle_id: int,
+) -> LoadedBattleCheckpoint | None:
+    """Load the earliest durable checkpoint for one battle."""
+    from sqlalchemy import select
+
+    from app.models import BattleCheckpoint as BattleCheckpointRow
+
+    row = session.execute(
+        select(BattleCheckpointRow)
+        .where(BattleCheckpointRow.battle_id == battle_id)
+        .order_by(BattleCheckpointRow.sequence_at)
+        .limit(1)
+    ).scalar_one_or_none()
+    if row is None:
+        return None
+    return _decode_checkpoint_row(row)
+
+
+def _decode_checkpoint_row(row) -> LoadedBattleCheckpoint:
+    """Decode one ORM checkpoint through the shared state and RNG codecs."""
     return LoadedBattleCheckpoint(
         battle_id=row.battle_id,
         sequence_at=row.sequence_at,

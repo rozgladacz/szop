@@ -257,8 +257,17 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   przegrany CAS rollbackuje cały provisional graph. Retry tego samego
   acceptora/rostera zwraca istniejący `battle_id`, expiry jest trwale
   commitowane przed stałym 409. Pozostałe endpointy nadal otwarte:
-  `POST /battles/{id}/interrupts`,
-  `POST /battles/{id}/replay`.
+  `POST /battles/{id}/interrupts`. `POST /battles/{id}/replay` **DONE
+  2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
+  bounded rekonstrukcję `BattleState` z najwcześniejszego trwałego checkpointu
+  i ciągłego ogona event-logu przez SSOT `apply_events`, po czym wynik jest
+  dokładnie porównywany ze stanem checkpointu na bieżącym końcu logu. Limit
+  10 000 eventów jest egzekwowany jednym odczytem `LIMIT 10_001` (413 po
+  przekroczeniu); brak checkpointu, luka, kontrolowany błąd codec/reducera lub
+  mismatch daje stałe 409. Serwis ma stałe 4 SELECT-y (earliest checkpoint,
+  max sequence, current checkpoint, bounded event batch), bez N+1 i zapisów
+  domenowych; odpowiedź zwraca wersjonowany wire state oraz metadane
+  weryfikacji, ale nie RNG — endpoint nie rekonstruuje ani nie weryfikuje RNG.
 - [~] Auth: read-only battle endpoints mają participant scope
   (`p1_user_id`/`p2_user_id`; cudza/nieistniejąca = 404) oraz agent bearer scope
   `battle:read` z audytem `AgentAuditLog`. `POST /battles` ma osobny agent scope
