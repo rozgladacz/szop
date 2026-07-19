@@ -256,8 +256,18 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   ustawiane warunkowym CAS po PK/status/expiry/target w tej samej transakcji;
   przegrany CAS rollbackuje cały provisional graph. Retry tego samego
   acceptora/rostera zwraca istniejący `battle_id`, expiry jest trwale
-  commitowane przed stałym 409. Pozostałe endpointy nadal otwarte:
-  `POST /battles/{id}/interrupts`. `POST /battles/{id}/replay` **DONE
+  commitowane przed stałym 409. **B4.4a design DONE 2026-07-19 (ADR-0056):**
+  zamrożono trwały, event-sourced protocol v2: wybór oddziału przed pierwszym
+  oknem, priorytet interruptów od inicjatywy, jawny pass/handoff, akcja dopiero
+  po zamknięciu `BEFORE_ACTION`, opcjonalne drugie okno oraz jawne
+  recovery/finalizacja ([`SZOP_Rozjemca.md` pkt 10, 11.b.i–vi i
+  12.a–c](../app/static/docs/SZOP_Rozjemca.md)). Legacy checkpoint v1 nie
+  dostaje wymyślonej inicjatywy; Strażnik stub i activation-scoped Oznaczenie
+  nie są publicznie gotowe ([`SZOP_Zdolnosci.md` pozycje 31 i
+  49](../app/static/docs/SZOP_Zdolnosci.md)). **Endpoint nadal OPEN — B4.4a
+  jest wyłącznie decyzją projektową, bez kodu.** Pozostały endpoint:
+  `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
+  `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
   bounded rekonstrukcję `BattleState` z najwcześniejszego trwałego checkpointu
   i ciągłego ogona event-logu przez SSOT `apply_events`, po czym wynik jest
@@ -604,6 +614,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0053 | Wersjonowane checkpointy BattleState + RNG | ✓ |
 | 0054 | Atomowe pojedyncze akcje bitwy przez HTTP | ✓ |
 | 0055 | Trwały lifecycle zaproszenia do bitwy | ✓ |
+| 0056 | Trwały protokół aktywacji i okien przerwań (B4.4a design) | ✓ |
 
 ---
 
