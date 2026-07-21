@@ -12,6 +12,7 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from app.services.engine.actions import (
+    ACTION_TYPE_BY_CLASS,
     Action,
     ChargeAction,
     DefendAction,
@@ -135,18 +136,18 @@ def _decode_special(payload: dict[str, Any]) -> SpecialAction:
 
 
 _ACTION_ENCODERS: dict[type, tuple[str, Encoder]] = {
-    ManeuverAction: ("maneuver", _encode_maneuver),
-    DefendAction: ("defend", _encode_defend),
-    ShootAction: ("shoot", _encode_shoot),
-    ChargeAction: ("charge", _encode_charge),
-    SpecialAction: ("special", _encode_special),
+    ManeuverAction: (ACTION_TYPE_BY_CLASS[ManeuverAction], _encode_maneuver),
+    DefendAction: (ACTION_TYPE_BY_CLASS[DefendAction], _encode_defend),
+    ShootAction: (ACTION_TYPE_BY_CLASS[ShootAction], _encode_shoot),
+    ChargeAction: (ACTION_TYPE_BY_CLASS[ChargeAction], _encode_charge),
+    SpecialAction: (ACTION_TYPE_BY_CLASS[SpecialAction], _encode_special),
 }
 _ACTION_DECODERS: dict[str, Decoder] = {
-    "maneuver": _decode_maneuver,
-    "defend": _decode_defend,
-    "shoot": _decode_shoot,
-    "charge": _decode_charge,
-    "special": _decode_special,
+    ACTION_TYPE_BY_CLASS[ManeuverAction]: _decode_maneuver,
+    ACTION_TYPE_BY_CLASS[DefendAction]: _decode_defend,
+    ACTION_TYPE_BY_CLASS[ShootAction]: _decode_shoot,
+    ACTION_TYPE_BY_CLASS[ChargeAction]: _decode_charge,
+    ACTION_TYPE_BY_CLASS[SpecialAction]: _decode_special,
 }
 
 

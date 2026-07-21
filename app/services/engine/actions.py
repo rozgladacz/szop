@@ -20,6 +20,7 @@ Akcja deployment (pkt 13):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Union
 
 from app.services.engine.combat import WeaponProfile
@@ -104,3 +105,18 @@ Action = Union[
     ChargeAction,
     SpecialAction,
 ]
+
+
+# Shared SSOT for the stable action discriminators used by the public action
+# codec and durable activation checkpoints.  The immutable mapping prevents a
+# runtime caller from changing the persisted vocabulary.
+ACTION_TYPE_BY_CLASS = MappingProxyType(
+    {
+        ManeuverAction: "maneuver",
+        DefendAction: "defend",
+        ShootAction: "shoot",
+        ChargeAction: "charge",
+        SpecialAction: "special",
+    }
+)
+ACTION_TYPE_DISCRIMINATORS = frozenset(ACTION_TYPE_BY_CLASS.values())

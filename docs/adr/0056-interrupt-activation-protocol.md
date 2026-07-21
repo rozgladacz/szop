@@ -135,9 +135,24 @@ passed_players: tuple[0 | 1, ...]  # bez duplikatów, w kolejności
 interrupt_count: 0..64
 ```
 
+Wersje są licznikami zaakceptowanych **operacji protokołu**, a nie liczby
+eventów. Po zaakceptowanym `start` `activation.version = 1`; każda późniejsza
+zaakceptowana operacja aktywacji zwiększa ją dokładnie o 1, nawet gdy atomowy
+batch zawiera kilka eventów. Wszystkie eventy jednej operacji będą niosły tę
+samą, końcową `activation_version`. `InterruptWindowOpened` ustawia
+`window.version = 1` dla każdego nowego okna, także `ordinal = 2`; każde
+zaakceptowane `interrupt` albo `pass` zwiększa ją dokładnie o 1, a eventy tej
+operacji współdzielą końcową `window_version`. Otwarcie okna nie dodaje osobnej
+inkrementacji `activation.version`: dla pierwszego okna mieści się w `start`, a
+dla drugiego w `continue`. Dlatego pierwszy request po każdym otwarciu używa
+`expected_window_version = 1`.
+
 `active_player` pozostaje właścicielem wyboru oddziału/akcji. Nie służy już do
 modelowania chwilowego priorytetu interruptów. `pending_interrupts` nie jest
-SSOT protokołu i zostaje usunięte w schema v2 po migracji call sites.
+SSOT protokołu. Runtime zachowuje je tymczasowo wyłącznie dla zgodności
+checkpointów v1; schema v2 nie serializuje tego pola i wymaga pustej wartości
+wewnętrznej. Usunięcie pola z runtime może nastąpić dopiero po migracji
+wszystkich call sites.
 
 Limit 64 zaakceptowanych interruptów na okno jest limitem bezpieczeństwa
 transportu, nie twierdzeniem o regułach gry. Po osiągnięciu limitu kolejne
@@ -536,15 +551,19 @@ nie może ich eksportować.
 
 Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 
-### A. Engine/state/event/codec activation-window foundation
+### A. Engine/state/event/codec activation-window foundation — IN PROGRESS
 
-- schema v2, frozen activation/window dataclasses, osobne `initiative_player`;
-- nowe eventy i reducery, pure transition core, brak route i publicznych
-  handlerów;
-- v1 decoder bez auto-upgrade;
-- testy wszystkich przejść, invalid phase/version, no-nested, dwa okna,
-  replay bit-perfect i restart z każdego punktu zatrzymania;
-- DoD: pełny pytest, golden/replay gate, call-site audit konstruktorów state.
+- **B4.4b.1 DONE 2026-07-21:** frozen `ActivationState` /
+  `InterruptWindowState` i enum faz, osobne nullable `initiative_player` w
+  runtime, konstrukcyjna walidacja osiągalnych snapshotów oraz jawny codec
+  `BattleState` v2. No-arg encoder nadal emituje dokładny v1; v2 jest wybierany
+  wyłącznie przez keyword `version=2`, nie zawiera `pending_interrupts` i nie
+  wymyśla inicjatywy dla v1. Golden obejmuje v1, IDLE i wszystkie trwałe fazy
+  v2. Żaden istniejący call site persistence/router/client nie został
+  przełączony.
+- **OPEN:** nowe eventy i reducery, pure transition core, no-nested oraz
+  replay/restart z każdego przejścia. Dopiero ten następny slice domknie część A
+  bez route i publicznych handlerów.
 
 ### B. Persistence/model + pass-only API state machine
 

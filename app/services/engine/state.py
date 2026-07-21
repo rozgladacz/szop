@@ -42,6 +42,15 @@ class Lokalizacja(str, Enum):
     ELIMINOWANY = "eliminowany"
 
 
+class ActivationPhase(str, Enum):
+    """Durable structural phase of an activation protocol v2 checkpoint."""
+
+    BEFORE_ACTION = "BEFORE_ACTION"
+    ACTION_READY = "ACTION_READY"
+    AWAITING_CONTINUATION = "AWAITING_CONTINUATION"
+    AWAITING_FINALIZATION = "AWAITING_FINALIZATION"
+
+
 class UnsupportedAbilityError(Exception):
     """Raised gdy roster ma zdolność wykluczoną w B MVP (per ADR-0008).
 
@@ -195,6 +204,150 @@ class Objective:
     controller: int | None = None
 
 
+def _require_strict_int(value: object, field_name: str) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{field_name} must be an integer")
+    return value
+
+
+def _require_player(value: object, field_name: str) -> int:
+    player = _require_strict_int(value, field_name)
+    if player not in (0, 1):
+        raise ValueError(f"{field_name} must be 0 or 1")
+    return player
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptWindowState:
+    """Durable, open interrupt window in activation protocol v2."""
+
+    ordinal: int
+    version: int
+    priority_player: int
+    passed_players: tuple[int, ...]
+    interrupt_count: int
+
+    def __post_init__(self) -> None:
+        ordinal = _require_strict_int(self.ordinal, "ordinal")
+        if ordinal not in (1, 2):
+            raise ValueError("ordinal must be 1 or 2")
+        version = _require_strict_int(self.version, "version")
+        if version < 1:
+            raise ValueError("window version must be >= 1")
+        priority = _require_player(self.priority_player, "priority_player")
+        if type(self.passed_players) is not tuple:
+            raise TypeError("passed_players must be a tuple")
+        passed: list[int] = []
+        for player in self.passed_players:
+            passed.append(_require_player(player, "passed_players item"))
+        if len(passed) != len(set(passed)):
+            raise ValueError("passed_players must not contain duplicates")
+        # A second pass closes the window atomically, so an open checkpoint can
+        # contain at most the first pass.
+        if len(passed) > 1:
+            raise ValueError("an open window can contain at most one pass")
+        if passed and priority == passed[0]:
+            raise ValueError("priority must move after the first pass")
+        interrupt_count = _require_strict_int(
+            self.interrupt_count,
+            "interrupt_count",
+        )
+        if not 0 <= interrupt_count <= 64:
+            raise ValueError("interrupt_count must be between 0 and 64")
+        if version != 1 + interrupt_count + len(passed):
+            raise ValueError(
+                "window version must equal open + accepted interrupts/passes"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationState:
+    """Durable activation head for activation protocol v2."""
+
+    activation_id: int
+    version: int
+    selected_unit_id: int
+    controlling_player: int
+    initiative_player: int
+    action_count: int
+    action_types: tuple[str, ...]
+    phase: ActivationPhase
+    window: InterruptWindowState | None
+
+    def __post_init__(self) -> None:
+        for field_name in ("activation_id", "version", "selected_unit_id"):
+            value = _require_strict_int(getattr(self, field_name), field_name)
+            if value < 1:
+                raise ValueError(f"{field_name} must be positive")
+        _require_player(self.controlling_player, "controlling_player")
+        initiative_player = _require_player(
+            self.initiative_player,
+            "initiative_player",
+        )
+        action_count = _require_strict_int(self.action_count, "action_count")
+        if not 0 <= action_count <= 2:
+            raise ValueError("action_count must be between 0 and 2")
+        if type(self.action_types) is not tuple or any(
+            type(action_type) is not str for action_type in self.action_types
+        ):
+            raise TypeError("action_types must be a tuple of strings")
+        if len(self.action_types) != action_count:
+            raise ValueError("action_count must match action_types length")
+        # Local import avoids the state -> actions -> state import cycle while
+        # still reusing the canonical public Action codec vocabulary.
+        from app.services.engine.actions import ACTION_TYPE_DISCRIMINATORS
+
+        if any(
+            action_type not in ACTION_TYPE_DISCRIMINATORS
+            for action_type in self.action_types
+        ):
+            raise ValueError("action_types contains an unknown Action discriminator")
+        if type(self.phase) is not ActivationPhase:
+            raise TypeError("phase must be an ActivationPhase")
+        if self.window is not None and type(self.window) is not InterruptWindowState:
+            raise TypeError("window must be an InterruptWindowState or None")
+
+        if self.phase is ActivationPhase.BEFORE_ACTION:
+            if self.window is None:
+                raise ValueError("BEFORE_ACTION requires an open window")
+            if self.window.ordinal != action_count + 1:
+                raise ValueError(
+                    "BEFORE_ACTION ordinal must follow the committed action count"
+                )
+            expected_passes = (
+                ()
+                if self.window.priority_player == initiative_player
+                else (initiative_player,)
+            )
+            if self.window.passed_players != expected_passes:
+                raise ValueError(
+                    "window priority/passes must start from activation initiative"
+                )
+            if self.window.ordinal == 1 and self.version != self.window.version:
+                raise ValueError(
+                    "first-window activation and window versions must match"
+                )
+            if (
+                self.window.ordinal == 2
+                and self.version < self.window.version + 4
+            ):
+                raise ValueError("second-window activation version is unreachable")
+            return
+
+        if self.window is not None:
+            raise ValueError("only BEFORE_ACTION can contain a window")
+        if self.phase is ActivationPhase.ACTION_READY:
+            minimum_version = 3 if action_count == 0 else 7
+            if action_count not in (0, 1) or self.version < minimum_version:
+                raise ValueError("ACTION_READY checkpoint is unreachable")
+        elif self.phase is ActivationPhase.AWAITING_CONTINUATION:
+            if action_count != 1 or self.version < 4:
+                raise ValueError("AWAITING_CONTINUATION checkpoint is unreachable")
+        elif self.phase is ActivationPhase.AWAITING_FINALIZATION:
+            if action_count != 2 or self.version < 8:
+                raise ValueError("AWAITING_FINALIZATION checkpoint is unreachable")
+
+
 @dataclass(frozen=True, slots=True)
 class BattleState:
     """Immutable snapshot stanu bitwy.
@@ -231,6 +384,23 @@ class BattleState:
     # `(source_unit_id, slug)` użytych w tej rundzie. Reset w round_end_phase +
     # RoundEnded reducer. faza-b-order-interrupts 2026-06-09.
     used_interrupts_this_round: tuple[tuple[int, str], ...] = ()
+    # ``None`` means a legacy v1 checkpoint has no durable initiative proof.
+    # It must never be inferred from ``active_player``.
+    initiative_player: int | None = None
+    activation: ActivationState | None = None
+
+    def __post_init__(self) -> None:
+        if self.initiative_player is not None:
+            _require_player(self.initiative_player, "initiative_player")
+        if self.activation is not None:
+            if type(self.activation) is not ActivationState:
+                raise TypeError("activation must be an ActivationState or None")
+            if self.initiative_player is None:
+                raise ValueError("activation requires a durable initiative_player")
+            if self.activation.initiative_player != self.initiative_player:
+                raise ValueError("activation initiative must match BattleState")
+            if self.activation.controlling_player != self.active_player:
+                raise ValueError("activation controller must match active_player")
 
 
 def compute_radius_inches(

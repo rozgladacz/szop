@@ -264,8 +264,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   12.a–c](../app/static/docs/SZOP_Rozjemca.md)). Legacy checkpoint v1 nie
   dostaje wymyślonej inicjatywy; Strażnik stub i activation-scoped Oznaczenie
   nie są publicznie gotowe ([`SZOP_Zdolnosci.md` pozycje 31 i
-  49](../app/static/docs/SZOP_Zdolnosci.md)). **Endpoint nadal OPEN — B4.4a
-  jest wyłącznie decyzją projektową, bez kodu.** Pozostały endpoint:
+  49](../app/static/docs/SZOP_Zdolnosci.md)). **B4.4b.1 state+codec DONE
+  2026-07-21:** `BattleState` ma nullable, niewymyślane
+  `initiative_player`/`activation`, frozen model aktywacji i okna odrzuca
+  nieosiągalne snapshoty, a ścisły codec zachowuje dokładny i domyślny v1 oraz
+  dodaje wyłącznie jawny v2 bez `pending_interrupts`. Persistence, routery i
+  klienci nadal zapisują/publikują v1. **Eventy, reducery, transition core i
+  endpoint nadal OPEN.** Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
