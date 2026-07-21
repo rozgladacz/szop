@@ -10,8 +10,34 @@ Koordynuj jeden aktywny etap naraz. Pełny protokół HANDOFF pozostaje wstrzyma
 ## Bramka czasu
 
 Najpierw ustal lokalny czas `Europe/Warsaw`. Od poniedziałku do piątku w
-przedziale `14:00:00 <= czas < 18:00:00` zakończ bez odczytywania roadmapy,
+przedziale `13:00:00 <= czas < 19:00:00` zakończ bez odczytywania roadmapy,
 uruchamiania zadań i publikowania statusu.
+
+## Bramka tygodniowego limitu
+
+Bramka dotyczy tworzenia, zastępowania i wznawiania zadań. Nie zatrzymuj zadania,
+które już pracuje. Bezpośrednio przed każdą operacją, która uruchomi workera,
+wykonaj:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\check_weekly_limit.py --threshold-percent 10
+```
+
+Helper odczytuje najświeższą lokalną telemetrię Codex dla okna `10080` minut,
+czyli 7 dni. Pole `remaining_percent` oznacza `100 - used_percent`.
+
+- Gdy `allow_start=true`, możesz wykonać zaplanowaną operację.
+- Gdy `remaining_percent < 10` albo `allow_start=false`, nie twórz, nie zastępuj
+  i nie wznawiaj zadania.
+- Brak pomiaru, niepoprawny pomiar lub pomiar starszy niż 12 godzin traktuj
+  bezpiecznie jak `allow_start=false`; nie estymuj limitu z tokenów kontekstu,
+  budżetu `/goal` ani czasu pracy.
+- Jeśli repozytorium nie ma `.venv`, użyj skonfigurowanego Pythona workspace z
+  obowiązkową flagą `-X utf8`.
+
+Powiadom raz przy wejściu w blokadę limitu lub przy braku wiarygodnego pomiaru,
+podając przyczynę i — jeśli jest dostępny — czas resetu. Nie duplikuj statusu,
+dopóki przyczyna się nie zmieni.
 
 ## 1. Sprawdź stan
 
@@ -46,7 +72,8 @@ Koordynator samodzielnie podejmuje odwracalną decyzję architektoniczną, gdy:
 - nie zmienia reguł gry, zakresu produktu, publicznego API ani modelu zagrożeń;
 - można ją obronić kodem, ADR-em, kompatybilnością i testem regresji.
 
-Wyślij decyzję do istniejącego zadania i wznów je. Nie pytaj użytkownika.
+Przed wznowieniem zastosuj bramkę tygodniowego limitu. Jeśli pozwala, wyślij
+decyzję do istniejącego zadania i wznów je. Nie pytaj użytkownika.
 Zamroź trwały format w ADR lub dokumentacji, jeśli luka dotyczyła kontraktu.
 
 ### Czerwone — wymagana decyzja użytkownika
@@ -69,8 +96,9 @@ Jeśli ukończonego lub zarchiwizowanego zadania nie można kontynuować:
 
 1. Sprawdź `git status`, HEAD, ostatni commit i raport zadania.
 2. Gdy zadanie nie zmieniło plików i nie utworzyło commitu, a żaden worker nie
-   realizuje tego etapu, utwórz jedno zadanie zastępcze z rozstrzygnięciem i
-   oznacz poprzednie jako zastąpione.
+   realizuje tego etapu, zastosuj bramkę tygodniowego limitu. Jeśli pozwala,
+   utwórz jedno zadanie zastępcze z rozstrzygnięciem i oznacz poprzednie jako
+   zastąpione.
 3. Gdy istnieją zmiany albo commit, nie twórz duplikatu. Wznów lub przygotuj
    bezpieczny etap integracyjny; przy niejednoznacznym właścicielu zmian zatrzymaj
    się.
@@ -86,7 +114,8 @@ Wybieraj dopiero, gdy nic nie pracuje i nie ma czerwonego pytania.
    model/codec, eventy/reducery, transition/service, transport/API, klient/UI.
 3. Zdefiniuj cel, zakres, ograniczenia, Layer Checklist, performance gate,
    Definition of Done oraz konkretne testy i artefakty.
-4. Utwórz jedno osobne zadanie w tym samym projekcie. Prompt ma wymagać:
+4. Zastosuj bramkę tygodniowego limitu. Jeśli pozwala, utwórz jedno osobne
+   zadanie w tym samym projekcie. Prompt ma wymagać:
    zachowania cudzych zmian, encoding gate, procedur z `AGENTS.md`, pełnej
    weryfikacji, call-site audit, osobnego commitu i zatrzymania po etapie.
 5. W promptach workerów używaj klasyfikacji zielone/żółte/czerwone. Nie nakazuj
@@ -99,6 +128,7 @@ Powiadom tylko o:
 - uruchomieniu lub zastąpieniu zadania;
 - nowym czerwonym pytaniu;
 - błędzie uniemożliwiającym wznowienie lub utworzenie zadania;
+- wejściu w blokadę tygodniowego limitu lub braku wiarygodnego pomiaru;
 - zakończeniu całej roadmapy albo braku kolejnego bezpiecznego etapu.
 
 Przy niezmienionym stanie zwróć cichy status. Nigdy nie twórz dwóch zadań dla
