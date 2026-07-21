@@ -1,0 +1,4 @@
+interface:
+  display_name: "Roadmap Coordinator"
+  short_description: "Autonomiczna koordynacja etapów roadmapy"
+  default_prompt: "Użyj $roadmap-coordinator, aby sprawdzić stan projektu i bezpiecznie uruchomić lub wznowić następny etap."
