@@ -569,10 +569,19 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   otwarciu okna 2, drugiej akcji i finalizacji/transferze. Istniejące outcome
   events pozostają jedynym SSOT ran, statusów, RNG, override'ów i limitów
   raz/rundę.
-- **OPEN:** pure transition/service core, producenci eventów, egzekwowanie
-  no-nested oraz live-vs-replay/restart z każdego produkcyjnego przejścia.
-  Dopiero osobny następny slice domknie część A bez route i publicznych
-  handlerów.
+- **B4.4b.3 DONE 2026-07-27:** mały pure control-plane core implementuje
+  `start_activation`, jawny `pass_interrupt_priority` oraz
+  `continue_activation` bez mechaniki, RNG i I/O. Każda operacja emituje
+  istniejące eventy B4.4b.2 i wyprowadza live state wyłącznie przez
+  `apply_events`; v1 bez trwałej inicjatywy failuje bez auto-upgrade. Gate
+  obejmuje atomowe batch'e, oba passy każdego okna, zachowanie accepted
+  interrupt count, replay equality, checkpoint-v2 restart parity oraz pełną
+  sekwencję do zamknięcia drugiego okna z ręcznie wstawionym
+  `ActivationActionCommitted`.
+- **OPEN:** accepted-interrupt core i handlery/outcome events, no-nested/limit
+  64, action bridge/producer `ActivationActionCommitted`, finalize/recovery,
+  transfer inicjatywy/active player oraz produkcyjny restart przez
+  persistence/API/client rollout. Te elementy pozostają osobnymi slice'ami.
 
 ### B. Persistence/model + pass-only API state machine
 

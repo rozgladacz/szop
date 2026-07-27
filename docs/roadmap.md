@@ -272,9 +272,14 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   klienci nadal zapisują/publikują v1. **B4.4b.2 eventy+reducery DONE
   2026-07-27:** 10 nowych payloadów v1 ma kompatybilny codec i komplet
   reducerów, a ręczne ogony eventów odtwarzają wszystkie checkpointy
-  aktywacji/okien v2 bez duplikowania outcome events. **Pure transition core,
-  no-nested, producenci, restart produkcyjnego flow oraz persistence/API/client
-  rollout nadal OPEN.** Pozostały endpoint:
+  aktywacji/okien v2 bez duplikowania outcome events. **B4.4b.3 pure
+  control-plane transitions DONE 2026-07-27:** `start_activation`, jawny
+  `pass_interrupt_priority` i `continue_activation` emitują istniejące eventy,
+  a live state pochodzi wyłącznie z reducerów; testy dowodzą fail-closed v1,
+  atomowości, replay equality i restart parity checkpointu v2. **Accepted
+  interrupt/handlery, no-nested/limit 64, action bridge, finalize/recovery,
+  produkcyjny restart oraz persistence/API/client rollout nadal OPEN.**
+  Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
