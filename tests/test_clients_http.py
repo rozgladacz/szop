@@ -9,12 +9,22 @@ import pytest
 from app.services.engine.action_codec import action_from_json, action_to_json
 from app.services.engine.actions import DefendAction
 from app.services.engine.events import (
+    ActivePlayerChanged,
+    ActivationActionCommitted,
+    ActivationContinuationChosen,
+    ActivationFinalized,
+    ActivationInterruptTriggered,
+    ActivationStarted,
     AbilityOverrideApplied,
     AbilityOverridesCleared,
     BattleEvent,
     EffectApplied,
     InitiativePassed,
+    InitiativeTransferred,
+    InterruptPriorityPassed,
     InterruptTriggered,
+    InterruptWindowClosed,
+    InterruptWindowOpened,
     MeleeBalanceReset,
     MeleeResolved,
     ModelKilled,
@@ -1953,16 +1963,26 @@ def test_all_current_battle_events_have_json_safe_public_projections() -> None:
         InitiativePassed(14, 0, 1),
         AbilityOverrideApplied(15, 1, "furia", True, 2),
         AbilityOverridesCleared(16, 1),
+        ActivationStarted(17, 17, 1, 1, 0, 0),
+        InterruptWindowOpened(18, 17, 1, 1, 1, 0),
+        ActivationInterruptTriggered(19, 17, 2, 1, 2, 0),
+        InterruptPriorityPassed(20, 17, 3, 1, 3, 0, 1),
+        InterruptWindowClosed(21, 17, 4, 1, 4),
+        ActivationActionCommitted(22, 17, 5, "defend"),
+        ActivationContinuationChosen(23, 17, 6, False),
+        ActivationFinalized(24, 17),
+        InitiativeTransferred(25, 17, 0, 1),
+        ActivePlayerChanged(26, 17, 0, 1),
     )
 
     assert {type(event) for event in events} == set(get_args(BattleEvent))
     projected, last_sequence = battle_events_to_wire(events, since=0)
 
-    assert [item["sequence"] for item in projected] == list(range(1, 17))
+    assert [item["sequence"] for item in projected] == list(range(1, 27))
     assert [item["type"] for item in projected] == [
         type(event).__name__ for event in events
     ]
-    assert last_sequence == 16
+    assert last_sequence == 26
     json.dumps(projected, allow_nan=False)
 
 

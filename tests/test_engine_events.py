@@ -14,9 +14,20 @@ import pytest
 
 from app.services.engine.events import (
     SCHEMA_VERSION,
+    ActivePlayerChanged,
+    ActivationActionCommitted,
+    ActivationContinuationChosen,
+    ActivationFinalized,
+    ActivationInterruptTriggered,
+    ActivationStarted,
     BattleEvent,
     EffectApplied,
     InterruptTriggered,
+    InterruptPriorityPassed,
+    InterruptWindowClosed,
+    InterruptWindowOpened,
+    InitiativePassed,
+    InitiativeTransferred,
     MeleeResolved,
     ModelKilled,
     MoraleTestPassed,
@@ -231,3 +242,186 @@ def test_payload_dict_with_nested_data_preserved():
     payload = event_to_json(e)
     restored = json_to_event(json.loads(json.dumps(payload)))
     assert restored.payload == {"x": "ap_2", "metadata": {"source_weapon": "rifle"}}
+
+
+PROTOCOL_EVENT_GOLDENS = (
+    (
+        ActivationStarted(101, 101, 1, 11, 0, 0),
+        {
+            "sequence": 101,
+            "activation_id": 101,
+            "activation_version": 1,
+            "selected_unit_id": 11,
+            "controlling_player": 0,
+            "initiative_player": 0,
+            "version": 1,
+            "event_type": "ActivationStarted",
+        },
+    ),
+    (
+        InterruptWindowOpened(102, 101, 1, 1, 1, 0),
+        {
+            "sequence": 102,
+            "activation_id": 101,
+            "activation_version": 1,
+            "window_ordinal": 1,
+            "window_version": 1,
+            "priority_player": 0,
+            "version": 1,
+            "event_type": "InterruptWindowOpened",
+        },
+    ),
+    (
+        ActivationInterruptTriggered(103, 101, 2, 1, 2, 0),
+        {
+            "sequence": 103,
+            "activation_id": 101,
+            "activation_version": 2,
+            "window_ordinal": 1,
+            "window_version": 2,
+            "priority_player": 0,
+            "version": 1,
+            "event_type": "ActivationInterruptTriggered",
+        },
+    ),
+    (
+        InterruptPriorityPassed(104, 101, 3, 1, 3, 0, 1),
+        {
+            "sequence": 104,
+            "activation_id": 101,
+            "activation_version": 3,
+            "window_ordinal": 1,
+            "window_version": 3,
+            "passed_player": 0,
+            "next_priority_player": 1,
+            "version": 1,
+            "event_type": "InterruptPriorityPassed",
+        },
+    ),
+    (
+        InterruptWindowClosed(106, 101, 4, 1, 4),
+        {
+            "sequence": 106,
+            "activation_id": 101,
+            "activation_version": 4,
+            "window_ordinal": 1,
+            "window_version": 4,
+            "version": 1,
+            "event_type": "InterruptWindowClosed",
+        },
+    ),
+    (
+        ActivationActionCommitted(107, 101, 5, "defend"),
+        {
+            "sequence": 107,
+            "activation_id": 101,
+            "activation_version": 5,
+            "action_type": "defend",
+            "version": 1,
+            "event_type": "ActivationActionCommitted",
+        },
+    ),
+    (
+        ActivationContinuationChosen(108, 101, 6, True),
+        {
+            "sequence": 108,
+            "activation_id": 101,
+            "activation_version": 6,
+            "continue_activation": True,
+            "version": 1,
+            "event_type": "ActivationContinuationChosen",
+        },
+    ),
+    (
+        ActivationFinalized(109, 101),
+        {
+            "sequence": 109,
+            "activation_id": 101,
+            "version": 1,
+            "event_type": "ActivationFinalized",
+        },
+    ),
+    (
+        InitiativeTransferred(110, 101, 0, 1),
+        {
+            "sequence": 110,
+            "activation_id": 101,
+            "previous_initiative_player": 0,
+            "new_initiative_player": 1,
+            "version": 1,
+            "event_type": "InitiativeTransferred",
+        },
+    ),
+    (
+        ActivePlayerChanged(111, 101, 0, 1),
+        {
+            "sequence": 111,
+            "activation_id": 101,
+            "previous_active_player": 0,
+            "new_active_player": 1,
+            "version": 1,
+            "event_type": "ActivePlayerChanged",
+        },
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("event", "golden"),
+    PROTOCOL_EVENT_GOLDENS,
+    ids=lambda value: type(value).__name__ if not isinstance(value, dict) else None,
+)
+def test_protocol_event_v1_golden_json_round_trip(event, golden):
+    assert event_to_json(event) == golden
+    restored = json_to_event(json.loads(json.dumps(golden)))
+    assert restored == event
+    assert type(restored) is type(event)
+
+
+def test_new_event_payloads_are_strict_without_changing_legacy_decoder():
+    new_payload = event_to_json(PROTOCOL_EVENT_GOLDENS[0][0])
+
+    with pytest.raises(ValueError, match="fields do not match"):
+        json_to_event(new_payload | {"unexpected": True})
+    with pytest.raises(ValueError, match="fields do not match"):
+        json_to_event({key: value for key, value in new_payload.items() if key != "version"})
+    with pytest.raises(ValueError, match="event version"):
+        json_to_event(new_payload | {"version": 2})
+
+    legacy_payload = {
+        "event_type": "InitiativePassed",
+        "sequence": 7,
+        "previous_active_player": 0,
+        "new_active_player": 1,
+        "version": 1,
+        "future_annotation": "ignored-as-before",
+    }
+    assert json_to_event(legacy_payload) == InitiativePassed(7, 0, 1)
+
+
+def test_legacy_initiative_passed_tag_and_payload_are_unchanged():
+    legacy = InitiativePassed(7, 0, 1)
+
+    assert event_to_json(legacy) == {
+        "sequence": 7,
+        "previous_active_player": 0,
+        "new_active_player": 1,
+        "version": 1,
+        "event_type": "InitiativePassed",
+    }
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda: ActivationStarted(10, 9, 1, 11, 0, 0),
+        lambda: InterruptWindowOpened(11, 10, 1, 1, 2, 0),
+        lambda: InterruptPriorityPassed(12, 10, 2, 1, 2, 0, 0),
+        lambda: ActivationActionCommitted(13, 10, 3, "invented"),
+        lambda: ActivationContinuationChosen(14, 10, 4, 1),
+        lambda: ActivationFinalized(15, 10, version=2),
+    ],
+)
+def test_protocol_events_reject_inconsistent_schema_values(factory):
+    with pytest.raises((TypeError, ValueError)):
+        factory()

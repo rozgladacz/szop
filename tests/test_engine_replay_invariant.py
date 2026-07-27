@@ -38,6 +38,20 @@ from app.services.engine.actions import (
 )
 from app.services.engine.combat import WeaponProfile
 from app.services.engine.dice import DeterministicDice
+from app.services.engine.events import (
+    ActivePlayerChanged,
+    ActivationActionCommitted,
+    ActivationContinuationChosen,
+    ActivationFinalized,
+    ActivationInterruptTriggered,
+    ActivationStarted,
+    AbilityOverrideApplied,
+    InitiativeTransferred,
+    InterruptPriorityPassed,
+    InterruptTriggered,
+    InterruptWindowClosed,
+    InterruptWindowOpened,
+)
 from app.services.engine.phases import (
     deployment_round,
     round_end_phase,
@@ -45,6 +59,7 @@ from app.services.engine.phases import (
 )
 from app.services.engine.resolver import apply
 from app.services.engine.state import (
+    ActivationPhase,
     BattleState,
     Position,
     UnitBlob,
@@ -556,6 +571,208 @@ def test_gate_full_multi_action_replay():
     # Round + score per RoundEnded reducer
     assert replayed.round == live.round
     assert replayed.score == live.score
+
+
+# ---------------------------------------------------------------------------
+# B4.4b.2 durable activation/window protocol replay
+# ---------------------------------------------------------------------------
+
+
+def _protocol_initial(*, blobs: tuple[UnitBlob, ...] = ()) -> BattleState:
+    return BattleState(
+        round=1,
+        active_player=0,
+        activations_remaining=(1, 1),
+        blobs=blobs,
+        terrain=(),
+        initiative_player=0,
+    )
+
+
+def test_manual_protocol_event_tail_replays_every_v2_checkpoint():
+    initial = _protocol_initial()
+    tail = []
+
+    tail.extend(
+        [
+            ActivationStarted(101, 101, 1, 11, 0, 0),
+            InterruptWindowOpened(102, 101, 1, 1, 1, 0),
+        ]
+    )
+    started = apply_events(initial, tail)
+    assert started.activation is not None
+    assert started.activation.phase is ActivationPhase.BEFORE_ACTION
+    assert started.activation.selected_unit_id == 11
+    assert started.activation.version == 1
+    assert started.activation.window is not None
+    assert started.activation.window.ordinal == 1
+    assert started.activation.window.version == 1
+
+    tail.append(ActivationInterruptTriggered(103, 101, 2, 1, 2, 0))
+    interrupted = apply_events(initial, tail)
+    assert interrupted.activation is not None
+    assert interrupted.activation.version == 2
+    assert interrupted.activation.window is not None
+    assert interrupted.activation.window.interrupt_count == 1
+    assert interrupted.activation.window.priority_player == 0
+    assert interrupted.activation.window.version == 2
+
+    tail.append(InterruptPriorityPassed(104, 101, 3, 1, 3, 0, 1))
+    handed_off = apply_events(initial, tail)
+    assert handed_off.activation is not None
+    assert handed_off.activation.version == 3
+    assert handed_off.activation.window is not None
+    assert handed_off.activation.window.priority_player == 1
+    assert handed_off.activation.window.passed_players == (0,)
+    assert handed_off.activation.window.version == 3
+
+    tail.extend(
+        [
+            InterruptPriorityPassed(105, 101, 4, 1, 4, 1, None),
+            InterruptWindowClosed(106, 101, 4, 1, 4),
+        ]
+    )
+    first_window_closed = apply_events(initial, tail)
+    assert first_window_closed.activation is not None
+    assert first_window_closed.activation.version == 4
+    assert first_window_closed.activation.phase is ActivationPhase.ACTION_READY
+    assert first_window_closed.activation.window is None
+
+    tail.append(ActivationActionCommitted(107, 101, 5, "defend"))
+    first_action = apply_events(initial, tail)
+    assert first_action.activation is not None
+    assert first_action.activation.version == 5
+    assert first_action.activation.action_count == 1
+    assert first_action.activation.action_types == ("defend",)
+    assert first_action.activation.phase is ActivationPhase.AWAITING_CONTINUATION
+
+    tail.extend(
+        [
+            ActivationContinuationChosen(108, 101, 6, True),
+            InterruptWindowOpened(109, 101, 6, 2, 1, 0),
+        ]
+    )
+    second_window = apply_events(initial, tail)
+    assert second_window.activation is not None
+    assert second_window.activation.version == 6
+    assert second_window.activation.phase is ActivationPhase.BEFORE_ACTION
+    assert second_window.activation.window is not None
+    assert second_window.activation.window.ordinal == 2
+    assert second_window.activation.window.version == 1
+    assert second_window.activation.window.priority_player == 0
+
+    tail.extend(
+        [
+            InterruptPriorityPassed(110, 101, 7, 2, 2, 0, 1),
+            InterruptPriorityPassed(111, 101, 8, 2, 3, 1, None),
+            InterruptWindowClosed(112, 101, 8, 2, 3),
+            ActivationActionCommitted(113, 101, 9, "maneuver"),
+        ]
+    )
+    second_action = apply_events(initial, tail)
+    assert second_action.activation is not None
+    assert second_action.activation.version == 9
+    assert second_action.activation.action_count == 2
+    assert second_action.activation.action_types == ("defend", "maneuver")
+    assert second_action.activation.phase is ActivationPhase.AWAITING_FINALIZATION
+
+    tail.extend(
+        [
+            ActivationFinalized(114, 101),
+            InitiativeTransferred(115, 101, 0, 1),
+            ActivePlayerChanged(116, 101, 0, 1),
+        ]
+    )
+    finalized = apply_events(initial, tail)
+    assert finalized.activation is None
+    assert finalized.initiative_player == 1
+    assert finalized.active_player == 1
+
+
+def test_protocol_interrupt_and_outcome_events_compose_without_duplicate_effects():
+    target = UnitBlob(
+        id=11,
+        owner_player=0,
+        position=Position(0, 0),
+        radius_inches=1,
+        models_alive=1,
+        toughness_per_model=3,
+    )
+    initial = _protocol_initial(blobs=(target,))
+    protocol_events = [
+        ActivationStarted(201, 201, 1, 11, 0, 0),
+        InterruptWindowOpened(202, 201, 1, 1, 1, 0),
+        ActivationInterruptTriggered(203, 201, 2, 1, 2, 0),
+    ]
+    outcome_events = [
+        InterruptTriggered(
+            204,
+            "before_action",
+            "rozkaz",
+            21,
+            11,
+            consumes_round_limit=True,
+        ),
+        AbilityOverrideApplied(205, 11, "nieustraszony", True, 21),
+    ]
+
+    protocol_only = apply_events(initial, protocol_events)
+    combined = apply_events(initial, protocol_events + outcome_events)
+
+    assert protocol_only.used_interrupts_this_round == ()
+    assert protocol_only.blobs[0].ability_overrides == ()
+    assert combined == apply_events(protocol_only, outcome_events)
+    assert combined.used_interrupts_this_round == ((21, "rozkaz"),)
+    assert combined.blobs[0].ability_overrides == (("nieustraszony", True),)
+    assert combined.activation is not None
+    assert combined.activation.window is not None
+    assert combined.activation.window.interrupt_count == 1
+
+
+def test_protocol_reducers_reject_mismatched_activation_or_window_identity():
+    started = apply_events(
+        _protocol_initial(),
+        [
+            ActivationStarted(301, 301, 1, 11, 0, 0),
+            InterruptWindowOpened(302, 301, 1, 1, 1, 0),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="active activation"):
+        apply_events(
+            started,
+            [ActivationActionCommitted(303, 999, 2, "defend")],
+        )
+    with pytest.raises(ValueError, match="interrupt window"):
+        apply_events(
+            started,
+            [ActivationInterruptTriggered(304, 301, 2, 2, 2, 0)],
+        )
+
+
+def test_terminal_protocol_reducers_change_only_their_declared_top_level_field():
+    active = apply_events(
+        _protocol_initial(),
+        [
+            ActivationStarted(401, 401, 1, 11, 0, 0),
+            InterruptWindowOpened(402, 401, 1, 1, 1, 0),
+        ],
+    )
+
+    finalized = apply_events(active, [ActivationFinalized(403, 401)])
+    assert finalized == replace(active, activation=None)
+
+    transferred = apply_events(
+        finalized,
+        [InitiativeTransferred(404, 401, 0, 1)],
+    )
+    assert transferred == replace(finalized, initiative_player=1)
+
+    changed = apply_events(
+        transferred,
+        [ActivePlayerChanged(405, 401, 0, 1)],
+    )
+    assert changed == replace(transferred, active_player=1)
 
 
 # ---------------------------------------------------------------------------

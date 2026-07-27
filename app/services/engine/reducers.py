@@ -23,11 +23,21 @@ from __future__ import annotations
 from dataclasses import replace
 
 from app.services.engine.events import (
+    ActivePlayerChanged,
+    ActivationActionCommitted,
+    ActivationContinuationChosen,
+    ActivationFinalized,
+    ActivationInterruptTriggered,
+    ActivationStarted,
     AbilityOverrideApplied,
     AbilityOverridesCleared,
     EffectApplied,
     InitiativePassed,
+    InitiativeTransferred,
+    InterruptPriorityPassed,
     InterruptTriggered,
+    InterruptWindowClosed,
+    InterruptWindowOpened,
     MeleeBalanceReset,
     MeleeResolved,
     ModelKilled,
@@ -41,7 +51,10 @@ from app.services.engine.events import (
     StatusRemoved,
 )
 from app.services.engine.state import (
+    ActivationPhase,
+    ActivationState,
     BattleState,
+    InterruptWindowState,
     Lokalizacja,
     Position,
     UnitBlob,
@@ -73,6 +86,244 @@ def _find_and_replace_blob(
 
 def _find_blob_or_none(state: BattleState, unit_id: int) -> UnitBlob | None:
     return next((b for b in state.blobs if b.id == unit_id), None)
+
+
+def _activation_for_event(
+    state: BattleState,
+    activation_id: int,
+) -> ActivationState:
+    activation = state.activation
+    if activation is None or activation.activation_id != activation_id:
+        raise ValueError("protocol event does not match the active activation")
+    return activation
+
+
+def _window_for_event(
+    state: BattleState,
+    activation_id: int,
+    window_ordinal: int,
+) -> tuple[ActivationState, InterruptWindowState]:
+    activation = _activation_for_event(state, activation_id)
+    window = activation.window
+    if window is None or window.ordinal != window_ordinal:
+        raise ValueError("protocol event does not match the open interrupt window")
+    return activation, window
+
+
+# ---------------------------------------------------------------------------
+# Activation/window protocol v1 — durable replay metadata (ADR-0056)
+# ---------------------------------------------------------------------------
+
+
+@register_reducer("ActivationStarted")
+def _reduce_activation_started(
+    state: BattleState,
+    event: ActivationStarted,
+) -> BattleState:
+    window = InterruptWindowState(
+        ordinal=1,
+        version=1,
+        priority_player=event.initiative_player,
+        passed_players=(),
+        interrupt_count=0,
+    )
+    activation = ActivationState(
+        activation_id=event.activation_id,
+        version=event.activation_version,
+        selected_unit_id=event.selected_unit_id,
+        controlling_player=event.controlling_player,
+        initiative_player=event.initiative_player,
+        action_count=0,
+        action_types=(),
+        phase=ActivationPhase.BEFORE_ACTION,
+        window=window,
+    )
+    return replace(state, activation=activation)
+
+
+@register_reducer("InterruptWindowOpened")
+def _reduce_interrupt_window_opened(
+    state: BattleState,
+    event: InterruptWindowOpened,
+) -> BattleState:
+    activation = _activation_for_event(state, event.activation_id)
+    window = InterruptWindowState(
+        ordinal=event.window_ordinal,
+        version=event.window_version,
+        priority_player=event.priority_player,
+        passed_players=(),
+        interrupt_count=0,
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            phase=ActivationPhase.BEFORE_ACTION,
+            window=window,
+        ),
+    )
+
+
+@register_reducer("ActivationInterruptTriggered")
+def _reduce_activation_interrupt_triggered(
+    state: BattleState,
+    event: ActivationInterruptTriggered,
+) -> BattleState:
+    activation, window = _window_for_event(
+        state,
+        event.activation_id,
+        event.window_ordinal,
+    )
+    updated_window = replace(
+        window,
+        version=event.window_version,
+        priority_player=event.priority_player,
+        interrupt_count=window.interrupt_count + 1,
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            window=updated_window,
+        ),
+    )
+
+
+@register_reducer("InterruptPriorityPassed")
+def _reduce_interrupt_priority_passed(
+    state: BattleState,
+    event: InterruptPriorityPassed,
+) -> BattleState:
+    activation, window = _window_for_event(
+        state,
+        event.activation_id,
+        event.window_ordinal,
+    )
+    if event.next_priority_player is None:
+        return replace(
+            state,
+            activation=replace(
+                activation,
+                version=event.activation_version,
+                phase=ActivationPhase.ACTION_READY,
+                window=None,
+            ),
+        )
+    updated_window = replace(
+        window,
+        version=event.window_version,
+        priority_player=event.next_priority_player,
+        passed_players=window.passed_players + (event.passed_player,),
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            window=updated_window,
+        ),
+    )
+
+
+@register_reducer("InterruptWindowClosed")
+def _reduce_interrupt_window_closed(
+    state: BattleState,
+    event: InterruptWindowClosed,
+) -> BattleState:
+    activation = _activation_for_event(state, event.activation_id)
+    if activation.window is not None and activation.window.ordinal != event.window_ordinal:
+        raise ValueError("protocol event does not match the open interrupt window")
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            phase=ActivationPhase.ACTION_READY,
+            window=None,
+        ),
+    )
+
+
+@register_reducer("ActivationActionCommitted")
+def _reduce_activation_action_committed(
+    state: BattleState,
+    event: ActivationActionCommitted,
+) -> BattleState:
+    activation = _activation_for_event(state, event.activation_id)
+    action_types = activation.action_types + (event.action_type,)
+    action_count = len(action_types)
+    phase = (
+        ActivationPhase.AWAITING_CONTINUATION
+        if action_count == 1
+        else ActivationPhase.AWAITING_FINALIZATION
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            action_count=action_count,
+            action_types=action_types,
+            phase=phase,
+            window=None,
+        ),
+    )
+
+
+@register_reducer("ActivationContinuationChosen")
+def _reduce_activation_continuation_chosen(
+    state: BattleState,
+    event: ActivationContinuationChosen,
+) -> BattleState:
+    activation = _activation_for_event(state, event.activation_id)
+    if not event.continue_activation:
+        return replace(
+            state,
+            activation=replace(activation, version=event.activation_version),
+        )
+    window = InterruptWindowState(
+        ordinal=2,
+        version=1,
+        priority_player=activation.initiative_player,
+        passed_players=(),
+        interrupt_count=0,
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            phase=ActivationPhase.BEFORE_ACTION,
+            window=window,
+        ),
+    )
+
+
+@register_reducer("ActivationFinalized")
+def _reduce_activation_finalized(
+    state: BattleState,
+    event: ActivationFinalized,
+) -> BattleState:
+    _activation_for_event(state, event.activation_id)
+    return replace(state, activation=None)
+
+
+@register_reducer("InitiativeTransferred")
+def _reduce_initiative_transferred(
+    state: BattleState,
+    event: InitiativeTransferred,
+) -> BattleState:
+    return replace(state, initiative_player=event.new_initiative_player)
+
+
+@register_reducer("ActivePlayerChanged")
+def _reduce_active_player_changed(
+    state: BattleState,
+    event: ActivePlayerChanged,
+) -> BattleState:
+    return replace(state, active_player=event.new_active_player)
 
 
 # ---------------------------------------------------------------------------

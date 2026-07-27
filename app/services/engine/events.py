@@ -1,4 +1,4 @@
-"""B3.0.3 — Battle events: 10 typów + serializer (ADR-0010 / ADR-0046).
+"""Battle events and their compatible JSON serializer.
 
 Każdy event to frozen dataclass z polami zgodnymi z `BattleEvent.payload_json`
 (przyszła ORM, B2). Wszystkie eventy mają:
@@ -25,7 +25,8 @@ Wszystkie 10 typów:
 - `AbilityOverrideApplied` (faza-b-order-interrupts 2026-06) — nadanie/odebranie pasywki X (Rozkaz/Klątwa/Oznaczenie, pkt 12)
 - `AbilityOverridesCleared` (faza-b-order-interrupts 2026-06) — wygaśnięcie override'ów na końcu aktywacji (pkt 11.b.vi)
 
-(Lista historycznie „10 typów"; aktualnie 16 — `ObjectiveControlChanged`/`InitiativePassed` z CR-fix B3.9.f + 2 powyższe.)
+(Lista historycznie „10 typów"; B4.4b.2 rozszerza rejestr do 26 bez zmiany
+tagów ani payloadów 16 istniejących eventów.)
 """
 
 from __future__ import annotations
@@ -343,6 +344,227 @@ class AbilityOverridesCleared:
     version: int = SCHEMA_VERSION
 
 
+def _require_protocol_int(value: object, field_name: str, *, positive: bool = True) -> int:
+    if type(value) is not int:
+        raise TypeError(f"{field_name} must be an integer")
+    if positive and value < 1:
+        raise ValueError(f"{field_name} must be positive")
+    return value
+
+
+def _require_protocol_player(value: object, field_name: str) -> int:
+    player = _require_protocol_int(value, field_name, positive=False)
+    if player not in (0, 1):
+        raise ValueError(f"{field_name} must be 0 or 1")
+    return player
+
+
+def _validate_protocol_header(event: object, *, activation_exists: bool) -> None:
+    _require_protocol_int(getattr(event, "sequence"), "sequence")
+    _require_protocol_int(getattr(event, "activation_id"), "activation_id")
+    if activation_exists:
+        _require_protocol_int(
+            getattr(event, "activation_version"),
+            "activation_version",
+        )
+    if type(getattr(event, "version")) is not int or getattr(event, "version") != 1:
+        raise ValueError("protocol event version must be 1")
+
+
+def _validate_window_header(event: object) -> None:
+    ordinal = _require_protocol_int(getattr(event, "window_ordinal"), "window_ordinal")
+    if ordinal not in (1, 2):
+        raise ValueError("window_ordinal must be 1 or 2")
+    _require_protocol_int(getattr(event, "window_version"), "window_version")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationStarted:
+    """Accepted start of a durable activation and its initial protocol head."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    selected_unit_id: int
+    controlling_player: int
+    initiative_player: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=True)
+        if self.activation_id != self.sequence:
+            raise ValueError("ActivationStarted.activation_id must equal sequence")
+        if self.activation_version != 1:
+            raise ValueError("ActivationStarted.activation_version must be 1")
+        _require_protocol_int(self.selected_unit_id, "selected_unit_id")
+        _require_protocol_player(self.controlling_player, "controlling_player")
+        _require_protocol_player(self.initiative_player, "initiative_player")
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptWindowOpened:
+    """Accepted opening of one of the two durable BEFORE_ACTION windows."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    window_ordinal: int
+    window_version: int
+    priority_player: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=True)
+        _validate_window_header(self)
+        if self.window_version != 1:
+            raise ValueError("InterruptWindowOpened.window_version must be 1")
+        _require_protocol_player(self.priority_player, "priority_player")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationInterruptTriggered:
+    """Accepted protocol transition for one fully resolved interrupt."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    window_ordinal: int
+    window_version: int
+    priority_player: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=True)
+        _validate_window_header(self)
+        _require_protocol_player(self.priority_player, "priority_player")
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptPriorityPassed:
+    """Accepted pass; ``next_priority_player=None`` denotes the closing pass."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    window_ordinal: int
+    window_version: int
+    passed_player: int
+    next_priority_player: int | None
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=True)
+        _validate_window_header(self)
+        passed_player = _require_protocol_player(self.passed_player, "passed_player")
+        if self.next_priority_player is not None:
+            next_player = _require_protocol_player(
+                self.next_priority_player,
+                "next_priority_player",
+            )
+            if next_player == passed_player:
+                raise ValueError("next_priority_player must differ from passed_player")
+
+
+@dataclass(frozen=True, slots=True)
+class InterruptWindowClosed:
+    """Accepted closure of a durable BEFORE_ACTION window."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    window_ordinal: int
+    window_version: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=True)
+        _validate_window_header(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationActionCommitted:
+    """One mechanically resolved action committed to the activation history."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    action_type: str
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=True)
+        from app.services.engine.actions import ACTION_TYPE_DISCRIMINATORS
+
+        if (
+            type(self.action_type) is not str
+            or self.action_type not in ACTION_TYPE_DISCRIMINATORS
+        ):
+            raise ValueError("action_type must be a canonical Action discriminator")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationContinuationChosen:
+    """Controlling player's explicit choice after the first committed action."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    continue_activation: bool
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=True)
+        if type(self.continue_activation) is not bool:
+            raise TypeError("continue_activation must be a boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationFinalized:
+    """Terminal protocol event; applying it removes the durable activation."""
+
+    sequence: int
+    activation_id: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=False)
+
+
+@dataclass(frozen=True, slots=True)
+class InitiativeTransferred:
+    """Transfer only the top-level durable initiative owner."""
+
+    sequence: int
+    activation_id: int
+    previous_initiative_player: int
+    new_initiative_player: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=False)
+        _require_protocol_player(
+            self.previous_initiative_player,
+            "previous_initiative_player",
+        )
+        _require_protocol_player(self.new_initiative_player, "new_initiative_player")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivePlayerChanged:
+    """Change only the top-level player allowed to select the next activation."""
+
+    sequence: int
+    activation_id: int
+    previous_active_player: int
+    new_active_player: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_protocol_header(self, activation_exists=False)
+        _require_protocol_player(self.previous_active_player, "previous_active_player")
+        _require_protocol_player(self.new_active_player, "new_active_player")
+
+
 # Union polimorficzny dla type hints. `BattleEvent` jest aliasem.
 BattleEvent = Union[
     MoveExecuted,
@@ -361,7 +583,30 @@ BattleEvent = Union[
     InitiativePassed,
     AbilityOverrideApplied,
     AbilityOverridesCleared,
+    ActivationStarted,
+    InterruptWindowOpened,
+    ActivationInterruptTriggered,
+    InterruptPriorityPassed,
+    InterruptWindowClosed,
+    ActivationActionCommitted,
+    ActivationContinuationChosen,
+    ActivationFinalized,
+    InitiativeTransferred,
+    ActivePlayerChanged,
 ]
+
+_PROTOCOL_EVENT_TYPES = (
+    ActivationStarted,
+    InterruptWindowOpened,
+    ActivationInterruptTriggered,
+    InterruptPriorityPassed,
+    InterruptWindowClosed,
+    ActivationActionCommitted,
+    ActivationContinuationChosen,
+    ActivationFinalized,
+    InitiativeTransferred,
+    ActivePlayerChanged,
+)
 
 _EVENT_REGISTRY: dict[str, type] = {
     cls.__name__: cls
@@ -382,6 +627,7 @@ _EVENT_REGISTRY: dict[str, type] = {
         InitiativePassed,
         AbilityOverrideApplied,
         AbilityOverridesCleared,
+        *_PROTOCOL_EVENT_TYPES,
     )
 }
 
@@ -415,9 +661,14 @@ def json_to_event(data: dict[str, Any]) -> BattleEvent:
         raise ValueError(
             f"Unknown event type: {event_type!r}; known: {list(_EVENT_REGISTRY)}"
         )
-    # Filtruj klucze do tych, które ma dataclass — `event_type` to discriminator,
-    # nie field. Tuple fields wymagają konwersji z list (JSON nie ma tuple).
     known_fields = {f.name for f in fields(cls)}
+    if cls in _PROTOCOL_EVENT_TYPES:
+        if set(data) != known_fields | {"event_type"}:
+            raise ValueError(f"{event_type} payload fields do not match schema")
+        if type(data.get("version")) is not int or data["version"] != SCHEMA_VERSION:
+            raise ValueError(f"Unsupported {event_type} event version")
+    # Legacy event payloads retain their historical forward-compatible behavior:
+    # unknown keys are ignored and omitted fields may use dataclass defaults.
     payload = {k: v for k, v in data.items() if k in known_fields}
     # Convert lists → tuples for fields typed as tuple (sequence/rolls etc.)
     for f in fields(cls):

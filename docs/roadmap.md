@@ -269,8 +269,12 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `initiative_player`/`activation`, frozen model aktywacji i okna odrzuca
   nieosiągalne snapshoty, a ścisły codec zachowuje dokładny i domyślny v1 oraz
   dodaje wyłącznie jawny v2 bez `pending_interrupts`. Persistence, routery i
-  klienci nadal zapisują/publikują v1. **Eventy, reducery, transition core i
-  endpoint nadal OPEN.** Pozostały endpoint:
+  klienci nadal zapisują/publikują v1. **B4.4b.2 eventy+reducery DONE
+  2026-07-27:** 10 nowych payloadów v1 ma kompatybilny codec i komplet
+  reducerów, a ręczne ogony eventów odtwarzają wszystkie checkpointy
+  aktywacji/okien v2 bez duplikowania outcome events. **Pure transition core,
+  no-nested, producenci, restart produkcyjnego flow oraz persistence/API/client
+  rollout nadal OPEN.** Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,

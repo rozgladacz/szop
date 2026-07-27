@@ -561,9 +561,18 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   wymyśla inicjatywy dla v1. Golden obejmuje v1, IDLE i wszystkie trwałe fazy
   v2. Żaden istniejący call site persistence/router/client nie został
   przełączony.
-- **OPEN:** nowe eventy i reducery, pure transition core, no-nested oraz
-  replay/restart z każdego przejścia. Dopiero ten następny slice domknie część A
-  bez route i publicznych handlerów.
+- **B4.4b.2 DONE 2026-07-27:** dziesięć nowych frozen+slots eventów protokołu
+  ma ścisły payload v1, kompatybilną rejestrację obok historycznych tagów oraz
+  produkcyjny reducer. `ActivationActionCommitted.action_type` reużywa
+  kanoniczny discriminator Action. Ręcznie zbudowany tail odtwarza checkpointy
+  v2 po starcie, accepted interrupt, obu passach/zamknięciu, pierwszej akcji,
+  otwarciu okna 2, drugiej akcji i finalizacji/transferze. Istniejące outcome
+  events pozostają jedynym SSOT ran, statusów, RNG, override'ów i limitów
+  raz/rundę.
+- **OPEN:** pure transition/service core, producenci eventów, egzekwowanie
+  no-nested oraz live-vs-replay/restart z każdego produkcyjnego przejścia.
+  Dopiero osobny następny slice domknie część A bez route i publicznych
+  handlerów.
 
 ### B. Persistence/model + pass-only API state machine
 
