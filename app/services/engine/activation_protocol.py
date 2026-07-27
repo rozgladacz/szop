@@ -1,23 +1,30 @@
 """Pure control-plane transitions for durable activation protocol v2.
 
-This module owns only the non-mechanical start/pass/continue operations from
-ADR-0056.  It performs no I/O or RNG work.  Every live state returned here is
-derived by replaying the emitted events through ``apply_events``.
+This module owns the non-mechanical start/pass/continue operations plus the
+accepted-interrupt boundary from ADR-0056.  It performs no I/O or RNG work.
+Every live state returned here is derived by replaying emitted events through
+``apply_events``.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any, Protocol, get_args
 
 from app.services.engine.events import (
     ActivationContinuationChosen,
+    ActivationInterruptTriggered,
     ActivationStarted,
     BattleEvent,
+    InterruptTriggered,
     InterruptPriorityPassed,
     InterruptWindowClosed,
     InterruptWindowOpened,
+    SCHEMA_VERSION,
     StatusRemoved,
+    _PROTOCOL_EVENT_TYPES,
 )
 from app.services.engine.state import (
     ActivationPhase,
@@ -26,6 +33,7 @@ from app.services.engine.state import (
     Lokalizacja,
     UnitBlob,
     apply_events,
+    effective_passives,
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
@@ -43,6 +51,8 @@ class ActivationProtocolErrorReason(str, Enum):
     STALE_ACTIVATION = "stale_activation"
     STALE_WINDOW = "stale_window"
     ILLEGAL_CONTINUE = "illegal_continue"
+    ILLEGAL_INTERRUPT = "illegal_interrupt"
+    INTERRUPT_LIMIT_REACHED = "interrupt_limit_reached"
 
 
 class ActivationProtocolError(ValueError):
@@ -60,6 +70,25 @@ class ActivationTransitionResult:
     state: BattleState
     events: tuple[BattleEvent, ...]
     next_sequence: int
+
+
+class ActivationInterruptOutcomeExecutor(Protocol):
+    """Injected leaf that resolves one verified interrupt into outcome events."""
+
+    def __call__(
+        self,
+        *,
+        state: BattleState,
+        source: UnitBlob,
+        ability_slug: str,
+        payload: Mapping[str, Any],
+        sequence: int,
+    ) -> tuple[BattleState, tuple[BattleEvent, ...]]: ...
+
+
+_BATTLE_EVENT_TYPES = get_args(BattleEvent)
+_MAX_ACCEPTED_INTERRUPTS_PER_WINDOW = 64
+_MAX_INTERRUPT_OUTCOME_EVENTS = 64
 
 
 def _reject(reason: ActivationProtocolErrorReason) -> None:
@@ -143,6 +172,103 @@ def _result(
     )
 
 
+def _interrupt_source(
+    state: BattleState,
+    *,
+    caller_player: int,
+    source_unit_id: int,
+    ability_slug: str,
+) -> UnitBlob:
+    if (
+        type(source_unit_id) is not int
+        or source_unit_id < 1
+        or type(ability_slug) is not str
+        or not ability_slug
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    source = next((blob for blob in state.blobs if blob.id == source_unit_id), None)
+    if (
+        source is None
+        or type(source.owner_player) is not int
+        or source.owner_player != caller_player
+        or source.models_alive <= 0
+        or source.location is not Lokalizacja.FRONT
+        or ability_slug not in effective_passives(source)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    return source
+
+
+def _validated_interrupt_outcomes(
+    protocol_state: BattleState,
+    *,
+    source: UnitBlob,
+    ability_slug: str,
+    payload: Mapping[str, Any],
+    sequence: int,
+    outcome_executor: ActivationInterruptOutcomeExecutor,
+) -> tuple[tuple[BattleEvent, ...], BattleState]:
+    try:
+        result = outcome_executor(
+            state=protocol_state,
+            source=source,
+            ability_slug=ability_slug,
+            payload=payload,
+            sequence=sequence,
+        )
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+        ) from exc
+
+    if type(result) is not tuple or len(result) != 2:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    outcome_state, outcome_events = result
+    if (
+        type(outcome_state) is not BattleState
+        or type(outcome_events) is not tuple
+        or not 1 <= len(outcome_events) <= _MAX_INTERRUPT_OUTCOME_EVENTS
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+
+    interrupt_markers: list[InterruptTriggered] = []
+    for offset, event in enumerate(outcome_events):
+        if (
+            type(event) not in _BATTLE_EVENT_TYPES
+            or type(event) in _PROTOCOL_EVENT_TYPES
+            or type(getattr(event, "sequence", None)) is not int
+            or event.sequence != sequence + offset
+            or type(getattr(event, "version", None)) is not int
+            or event.version != SCHEMA_VERSION
+        ):
+            _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+        if type(event) is InterruptTriggered:
+            interrupt_markers.append(event)
+
+    if len(interrupt_markers) != 1:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    marker = interrupt_markers[0]
+    if (
+        type(marker.interrupt_point) is not str
+        or marker.interrupt_point != "before_action"
+        or type(marker.source_unit_id) is not int
+        or marker.source_unit_id != source.id
+        or type(marker.slug) is not str
+        or marker.slug != ability_slug
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+
+    try:
+        replay_state = apply_events(protocol_state, outcome_events)
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+        ) from exc
+    if outcome_state != replay_state:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    return outcome_events, replay_state
+
+
 def start_activation(
     state: BattleState,
     *,
@@ -186,6 +312,78 @@ def start_activation(
         )
     )
     return _result(state, tuple(events), sequence=sequence)
+
+
+def trigger_activation_interrupt(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    expected_window_version: int,
+    source_unit_id: int,
+    ability_slug: str,
+    payload: Mapping[str, Any],
+    sequence: int,
+    outcome_executor: ActivationInterruptOutcomeExecutor,
+) -> ActivationTransitionResult:
+    """Atomically accept one interrupt and its bounded mechanical outcomes."""
+
+    _require_protocol_v2(state)
+    activation = _require_activation(
+        state,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+    )
+    window = activation.window
+    if activation.phase is not ActivationPhase.BEFORE_ACTION or window is None:
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    if (
+        type(expected_window_version) is not int
+        or expected_window_version < 1
+        or window.version != expected_window_version
+    ):
+        _reject(ActivationProtocolErrorReason.STALE_WINDOW)
+    _require_caller(caller_player, window.priority_player)
+    if window.interrupt_count >= _MAX_ACCEPTED_INTERRUPTS_PER_WINDOW:
+        _reject(ActivationProtocolErrorReason.INTERRUPT_LIMIT_REACHED)
+    if (
+        not isinstance(payload, Mapping)
+        or type(sequence) is not int
+        or sequence < 1
+        or not callable(outcome_executor)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    source = _interrupt_source(
+        state,
+        caller_player=caller_player,
+        source_unit_id=source_unit_id,
+        ability_slug=ability_slug,
+    )
+
+    protocol_event = ActivationInterruptTriggered(
+        sequence=sequence,
+        activation_id=activation.activation_id,
+        activation_version=activation.version + 1,
+        window_ordinal=window.ordinal,
+        window_version=window.version + 1,
+        priority_player=window.priority_player,
+    )
+    protocol_state = apply_events(state, (protocol_event,))
+    outcome_events, replay_state = _validated_interrupt_outcomes(
+        protocol_state,
+        source=source,
+        ability_slug=ability_slug,
+        payload=payload,
+        sequence=sequence + 1,
+        outcome_executor=outcome_executor,
+    )
+    events = (protocol_event, *outcome_events)
+    return ActivationTransitionResult(
+        state=replay_state,
+        events=events,
+        next_sequence=sequence + len(events),
+    )
 
 
 def pass_interrupt_priority(
@@ -285,10 +483,12 @@ def continue_activation(
 
 
 __all__ = [
+    "ActivationInterruptOutcomeExecutor",
     "ActivationProtocolError",
     "ActivationProtocolErrorReason",
     "ActivationTransitionResult",
     "continue_activation",
     "pass_interrupt_priority",
     "start_activation",
+    "trigger_activation_interrupt",
 ]

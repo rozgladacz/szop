@@ -578,8 +578,21 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   interrupt count, replay equality, checkpoint-v2 restart parity oraz pełną
   sekwencję do zamknięcia drugiego okna z ręcznie wstawionym
   `ActivationActionCommitted`.
-- **OPEN:** accepted-interrupt core i handlery/outcome events, no-nested/limit
-  64, action bridge/producer `ActivationActionCommitted`, finalize/recovery,
+- **B4.4b.4 DONE 2026-07-27:** pure `trigger_activation_interrupt` przyjmuje
+  jawne guardy i wstrzyknięty leaf outcome executor. Source musi być żywy, na
+  Froncie, należeć do bieżącego priority i posiadać slug w
+  `effective_passives`; registry nie jest dowodem eligibility. Core emituje
+  dokładnie jeden `ActivationInterruptTriggered`, po nim najwyżej 64 istniejące
+  outcome events z ciągłą sekwencją i dokładnie jednym kanonicznym
+  `InterruptTriggered`. Eventy protokołu w outcome są zakazane; nie ma
+  mutable/reentrancy guarda. Stan executora musi być równy replayowi outcome
+  events, a zwracany stan pochodzi wyłącznie z reducerów całego batcha.
+  Accepted interrupt zachowuje priority i wcześniejsze passy, zwiększa wersje
+  i `interrupt_count` dokładnie raz oraz failuje przed executorem przy limicie
+  64 accepted interruptów w oknie. Codec-v2 restart daje identyczne payloady,
+  state i `next_sequence`.
+- **OPEN:** source-correct built-in handler adapters i publiczna allowlista,
+  action bridge/producer `ActivationActionCommitted`, finalize/recovery,
   transfer inicjatywy/active player oraz produkcyjny restart przez
   persistence/API/client rollout. Te elementy pozostają osobnymi slice'ami.
 

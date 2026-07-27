@@ -276,9 +276,17 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   control-plane transitions DONE 2026-07-27:** `start_activation`, jawny
   `pass_interrupt_priority` i `continue_activation` emitują istniejące eventy,
   a live state pochodzi wyłącznie z reducerów; testy dowodzą fail-closed v1,
-  atomowości, replay equality i restart parity checkpointu v2. **Accepted
-  interrupt/handlery, no-nested/limit 64, action bridge, finalize/recovery,
-  produkcyjny restart oraz persistence/API/client rollout nadal OPEN.**
+  atomowości, replay equality i restart parity checkpointu v2. **B4.4b.4
+  accepted-interrupt core DONE 2026-07-27:** `trigger_activation_interrupt`
+  waliduje jawne guardy, priority i source przez `effective_passives`, składa
+  dokładnie jeden `ActivationInterruptTriggered` z ograniczonym batchem
+  istniejących outcome events oraz fail-closed sprawdza ciągłą sekwencję,
+  dokładnie jeden kanoniczny `InterruptTriggered`, no-nested, event version i
+  live/replay parity. Priorytet i wcześniejsze passy pozostają bez zmian,
+  wersje/licznik rosną raz, a limit 64 accepted interruptów działa przed
+  executorem. **Built-in handler adapters/publiczna allowlista, action bridge,
+  finalize/recovery, produkcyjny restart oraz persistence/API/client rollout
+  nadal OPEN.**
   Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE
