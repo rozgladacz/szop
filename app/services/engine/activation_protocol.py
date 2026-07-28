@@ -19,11 +19,14 @@ from app.services.engine.actions import (
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
+    ActivePlayerChanged,
     ActivationActionCommitted,
     ActivationContinuationChosen,
+    ActivationFinalized,
     ActivationInterruptTriggered,
     ActivationStarted,
     BattleEvent,
+    InitiativeTransferred,
     InterruptTriggered,
     InterruptPriorityPassed,
     InterruptWindowClosed,
@@ -32,7 +35,7 @@ from app.services.engine.events import (
     StatusRemoved,
     _PROTOCOL_EVENT_TYPES,
 )
-from app.services.engine.phases import _apply_single_action
+from app.services.engine.phases import _apply_single_action, _finalize_activation
 from app.services.engine.resolver import _validate_action
 from app.services.engine.state import (
     ActivationPhase,
@@ -61,6 +64,7 @@ class ActivationProtocolErrorReason(str, Enum):
     ILLEGAL_CONTINUE = "illegal_continue"
     ILLEGAL_ACTION = "illegal_action"
     ILLEGAL_INTERRUPT = "illegal_interrupt"
+    ILLEGAL_RECOVERY = "illegal_recovery"
     INTERRUPT_LIMIT_REACHED = "interrupt_limit_reached"
 
 
@@ -118,9 +122,23 @@ class ActivationInterruptOutcomeExecutor(Protocol):
     ) -> tuple[BattleState, tuple[BattleEvent, ...]]: ...
 
 
+class _ActivationRecoveryOutcomeExecutor(Protocol):
+    """Injected leaf resolving only the explicit recovery choice."""
+
+    def __call__(
+        self,
+        *,
+        state: BattleState,
+        actor_id: int,
+        recovery_uses: tuple[object, ...],
+        sequence: int,
+    ) -> tuple[BattleState, tuple[BattleEvent, ...], int]: ...
+
+
 _BATTLE_EVENT_TYPES = get_args(BattleEvent)
 _MAX_ACCEPTED_INTERRUPTS_PER_WINDOW = 64
 _MAX_INTERRUPT_OUTCOME_EVENTS = 64
+_MAX_FINALIZATION_OUTCOME_EVENTS = 64
 
 
 def _reject(reason: ActivationProtocolErrorReason) -> None:
@@ -366,6 +384,90 @@ def _validated_action_outcomes(
     if outcome_state != replay_state:
         _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
     return replay_state, outcome_events, next_sequence
+
+
+def _execute_empty_recovery_outcomes(
+    *,
+    state: BattleState,
+    actor_id: int,
+    recovery_uses: tuple[object, ...],
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    """Resolve the only supported recovery choice as an exact no-op."""
+
+    if recovery_uses:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_RECOVERY)
+    return state, (), sequence
+
+
+def _validated_terminal_outcome_result(
+    state: BattleState,
+    *,
+    result: object,
+    sequence: int,
+    require_empty: bool,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    if type(result) is not tuple or len(result) != 3:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_RECOVERY)
+    outcome_state, outcome_events, next_sequence = result
+    if (
+        type(outcome_state) is not BattleState
+        or type(outcome_events) is not tuple
+        or len(outcome_events) > _MAX_FINALIZATION_OUTCOME_EVENTS
+        or type(next_sequence) is not int
+        or next_sequence != sequence + len(outcome_events)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_RECOVERY)
+
+    for offset, event in enumerate(outcome_events):
+        if (
+            type(event) not in _BATTLE_EVENT_TYPES
+            or type(event) in _PROTOCOL_EVENT_TYPES
+            or type(getattr(event, "sequence", None)) is not int
+            or event.sequence != sequence + offset
+            or type(getattr(event, "version", None)) is not int
+            or event.version != SCHEMA_VERSION
+        ):
+            _reject(ActivationProtocolErrorReason.ILLEGAL_RECOVERY)
+
+    try:
+        replay_state = apply_events(state, outcome_events)
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_RECOVERY
+        ) from exc
+    if outcome_state != replay_state:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_RECOVERY)
+    if require_empty and outcome_events:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_RECOVERY)
+    return replay_state, outcome_events, next_sequence
+
+
+def _validated_recovery_outcomes(
+    state: BattleState,
+    *,
+    actor_id: int,
+    recovery_uses: tuple[object, ...],
+    sequence: int,
+    outcome_executor: _ActivationRecoveryOutcomeExecutor,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    try:
+        result = outcome_executor(
+            state=state,
+            actor_id=actor_id,
+            recovery_uses=recovery_uses,
+            sequence=sequence,
+        )
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_RECOVERY
+        ) from exc
+    return _validated_terminal_outcome_result(
+        state,
+        result=result,
+        sequence=sequence,
+        require_empty=True,
+    )
 
 
 def start_activation(
@@ -654,6 +756,127 @@ def commit_activation_action(
     )
 
 
+def finalize_activation(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    recovery_uses: tuple[object, ...],
+    sequence: int,
+    recovery_outcome_executor: _ActivationRecoveryOutcomeExecutor = (
+        _execute_empty_recovery_outcomes
+    ),
+) -> ActivationTransitionResult:
+    """Finalize one v2 activation after one or two committed actions.
+
+    Recovery remains an explicit player decision.  Until source-correct
+    recovery handlers exist, only the exact empty tuple is accepted.
+    """
+
+    initiative_player = _require_protocol_v2(state)
+    activation = _require_activation(
+        state,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+    )
+    legal_phase = (
+        activation.phase is ActivationPhase.AWAITING_CONTINUATION
+        and activation.action_count == 1
+    ) or (
+        activation.phase is ActivationPhase.AWAITING_FINALIZATION
+        and activation.action_count == 2
+    )
+    if (
+        not legal_phase
+        or initiative_player != activation.initiative_player
+        or state.active_player != activation.controlling_player
+    ):
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    _require_caller(caller_player, activation.controlling_player)
+    if (
+        type(recovery_uses) is not tuple
+        or recovery_uses
+        or type(sequence) is not int
+        or sequence < 1
+        or not callable(recovery_outcome_executor)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_RECOVERY)
+
+    events: list[BattleEvent] = []
+    protocol_state = state
+    next_sequence = sequence
+    if activation.phase is ActivationPhase.AWAITING_CONTINUATION:
+        continuation_event = ActivationContinuationChosen(
+            sequence=next_sequence,
+            activation_id=activation.activation_id,
+            activation_version=activation.version + 1,
+            continue_activation=False,
+        )
+        events.append(continuation_event)
+        protocol_state = apply_events(protocol_state, (continuation_event,))
+        next_sequence += 1
+
+    recovery_state, recovery_events, next_sequence = _validated_recovery_outcomes(
+        protocol_state,
+        actor_id=activation.selected_unit_id,
+        recovery_uses=recovery_uses,
+        sequence=next_sequence,
+        outcome_executor=recovery_outcome_executor,
+    )
+    events.extend(recovery_events)
+
+    try:
+        finalization_result = _finalize_activation(
+            recovery_state,
+            activation.selected_unit_id,
+            next_sequence,
+        )
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_RECOVERY
+        ) from exc
+    _, finalization_events, next_sequence = _validated_terminal_outcome_result(
+        recovery_state,
+        result=finalization_result,
+        sequence=next_sequence,
+        require_empty=False,
+    )
+    events.extend(finalization_events)
+
+    terminal_events: tuple[BattleEvent, ...] = (
+        ActivationFinalized(
+            sequence=next_sequence,
+            activation_id=activation.activation_id,
+        ),
+        InitiativeTransferred(
+            sequence=next_sequence + 1,
+            activation_id=activation.activation_id,
+            previous_initiative_player=activation.initiative_player,
+            new_initiative_player=1 - activation.initiative_player,
+        ),
+        ActivePlayerChanged(
+            sequence=next_sequence + 2,
+            activation_id=activation.activation_id,
+            previous_active_player=activation.controlling_player,
+            new_active_player=1 - activation.controlling_player,
+        ),
+    )
+    events.extend(terminal_events)
+    result_events = tuple(events)
+    try:
+        replay_state = apply_events(state, result_events)
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_RECOVERY
+        ) from exc
+    return ActivationTransitionResult(
+        state=replay_state,
+        events=result_events,
+        next_sequence=sequence + len(result_events),
+    )
+
+
 __all__ = [
     "ActivationActionOutcomeExecutor",
     "ActivationActionTransitionResult",
@@ -663,6 +886,7 @@ __all__ = [
     "ActivationTransitionResult",
     "commit_activation_action",
     "continue_activation",
+    "finalize_activation",
     "pass_interrupt_priority",
     "start_activation",
     "trigger_activation_interrupt",

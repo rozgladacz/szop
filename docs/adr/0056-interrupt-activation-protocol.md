@@ -605,9 +605,23 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   checkpointu. Pierwsza/druga akcja kończy odpowiednio w
   `AWAITING_CONTINUATION`/`AWAITING_FINALIZATION`, bez finalizacji, transferu
   inicjatywy, statusu Aktywowany i czyszczenia override'ów.
+- **B4.4b.6 DONE 2026-07-28:** pure `finalize_activation` akceptuje wyłącznie
+  bieżącą aktywację v2 w `AWAITING_CONTINUATION` po jednej akcji albo
+  `AWAITING_FINALIZATION` po dwóch, zgodne guardy i controlling playera.
+  Pierwszy wariant emituje najpierw
+  `ActivationContinuationChosen(continue_activation=False)`. Recovery pozostaje
+  jawną decyzją gracza ([pkt 21.a][R21]); bez source-correct handlerów jedynym
+  legalnym wyborem jest dokładnie pusta krotka, a każdy inny wybór failuje przed
+  leafem. Wąski recovery outcome seam musi być dokładnym no-opem; core następnie
+  reużywa `_finalize_activation` jako SSOT statusu Aktywowany, safety resetu i
+  `AbilityOverridesCleared`, po czym emituje
+  `ActivationFinalized`, `InitiativeTransferred` ze snapshotu inicjatywy oraz
+  `ActivePlayerChanged`. Batch jest ciągły, nie dopuszcza zagnieżdżonych eventów
+  protokołu, wymaga live/replay parity i kończy z `activation=None`. Codec-v2
+  restart oraz pełny tail jednej i dwóch akcji odtwarzają identyczny stan.
 - **OPEN:** source-correct built-in handler adapters i publiczna allowlista,
-  finalize/recovery, transfer inicjatywy/active player oraz produkcyjny restart
-  przez persistence/API/client rollout. Te elementy pozostają osobnymi
+  niepuste recovery handlery oraz produkcyjny restart przez
+  persistence/model/API/auth/client rollout. Te elementy pozostają osobnymi
   slice'ami.
 
 ### B. Persistence/model + pass-only API state machine

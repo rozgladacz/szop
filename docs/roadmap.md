@@ -291,10 +291,16 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   RNG. Trwałe `activation.action_types` jest SSOT limitu dwóch akcji oraz
   ograniczeń powtórnego Ostrzału/Szarży
   ([pkt 11.b.iv, 14.c.v i 14.d.vi](../app/static/docs/SZOP_Rozjemca.md)); most
-  nie finalizuje aktywacji ani nie zmienia gracza. **Built-in handler
-  adapters/publiczna allowlista,
-  finalize/recovery, produkcyjny restart oraz persistence/API/client rollout
-  nadal OPEN.**
+  nie finalizuje aktywacji ani nie zmienia gracza. **B4.4b.6 finalization core
+  DONE 2026-07-28:** `finalize_activation` obsługuje wyłącznie jawnie puste
+  recovery po jednej albo dwóch akcjach, reużywa `_finalize_activation` dla
+  statusu Aktywowany, safety resetu i wygaśnięcia override'ów, a następnie
+  emituje `ActivationFinalized`, `InitiativeTransferred` i
+  `ActivePlayerChanged`. Batch jest ciągły, fail-closed i replayowalny;
+  inicjatywa przechodzi ze snapshotu aktywacji, a protokół wraca do `IDLE`.
+  **Built-in handler adapters/publiczna allowlista, niepuste source-correct
+  recovery handlery, produkcyjny restart oraz persistence/model/API/auth/client
+  rollout nadal OPEN.**
   Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE

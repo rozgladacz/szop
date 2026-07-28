@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass, replace
 
@@ -17,23 +18,30 @@ from app.services.engine.activation_protocol import (
     ActivationProtocolErrorReason,
     commit_activation_action,
     continue_activation,
+    finalize_activation,
     pass_interrupt_priority,
     start_activation,
     trigger_activation_interrupt,
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
+    ActivePlayerChanged,
     AbilityOverrideApplied,
+    AbilityOverridesCleared,
     ActivationActionCommitted,
     ActivationContinuationChosen,
+    ActivationFinalized,
     ActivationInterruptTriggered,
     ActivationStarted,
     EffectApplied,
+    InitiativeTransferred,
     InterruptTriggered,
     InterruptPriorityPassed,
     InterruptWindowClosed,
     InterruptWindowOpened,
+    MeleeBalanceReset,
     MoveExecuted,
+    StatusAdded,
     StatusRemoved,
     event_to_json,
 )
@@ -253,6 +261,37 @@ def _commit(
         ),
         action=action,
         dice=dice,
+        sequence=sequence,
+        **kwargs,
+    )
+
+
+def _finalize(
+    state: BattleState,
+    *,
+    sequence: int,
+    caller_player: int = 0,
+    activation_id: int | None = None,
+    expected_activation_version: int | None = None,
+    recovery_uses: tuple[object, ...] = (),
+    outcome_executor=None,
+):
+    activation = state.activation
+    kwargs = {}
+    if outcome_executor is not None:
+        kwargs["recovery_outcome_executor"] = outcome_executor
+    return finalize_activation(
+        state,
+        caller_player=caller_player,
+        activation_id=(
+            activation.activation_id if activation_id is None else activation_id
+        ),
+        expected_activation_version=(
+            activation.version
+            if expected_activation_version is None
+            else expected_activation_version
+        ),
+        recovery_uses=recovery_uses,
         sequence=sequence,
         **kwargs,
     )
@@ -1778,3 +1817,489 @@ def test_action_bridge_rng_and_restart_checkpoint_parity_across_two_actions() ->
     assert restarted_second.state == live_second.state
     assert restarted_second.dice.to_checkpoint() == live_second.dice.to_checkpoint()
     assert live_second.state.activation.phase is ActivationPhase.AWAITING_FINALIZATION
+
+
+def _state_with_terminal_effects() -> BattleState:
+    state = _action_idle_state(actor_overrides=(("ordered", True),))
+    actor, target = state.blobs
+    return replace(
+        state,
+        blobs=(
+            replace(actor, damage_balance=2),
+            replace(target, ability_overrides=(("cursed", True),)),
+        ),
+    )
+
+
+def _first_action_awaiting_finalization(*, sequence: int = 1200):
+    ready = _ready_for_action(
+        state=_state_with_terminal_effects(),
+        sequence=sequence,
+    )
+    committed = _commit(
+        ready.state,
+        DefendAction(11),
+        DeterministicDice(67),
+        sequence=ready.next_sequence,
+    )
+    return ready, committed
+
+
+def _second_action_awaiting_finalization(*, sequence: int = 1300):
+    ready, first = _first_action_awaiting_finalization(sequence=sequence)
+    second_ready = _ready_for_second_action(first)
+    second = _commit(
+        second_ready.state,
+        ManeuverAction(11, Position(1, 0)),
+        first.dice,
+        sequence=second_ready.next_sequence,
+    )
+    return ready, first, second_ready, second
+
+
+def _assert_terminal_state(result, input_state: BattleState) -> None:
+    assert result.state.activation is None
+    actor = next(blob for blob in result.state.blobs if blob.id == 11)
+    assert STATUS_AKTYWOWANY in actor.status_flags
+    assert actor.damage_balance == 0
+    assert all(not blob.ability_overrides for blob in result.state.blobs)
+    assert result.state.initiative_player == 1
+    assert result.state.active_player == 1
+    assert [event.sequence for event in result.events] == list(
+        range(result.events[0].sequence, result.next_sequence)
+    )
+    assert result.state == apply_events(input_state, result.events)
+
+
+def test_finalize_after_first_action_orders_empty_recovery_and_terminal_events() -> None:
+    _, committed = _first_action_awaiting_finalization(sequence=1200)
+
+    result = _finalize(
+        committed.state,
+        sequence=committed.next_sequence,
+        recovery_uses=(),
+    )
+
+    assert isinstance(result.events[0], ActivationContinuationChosen)
+    assert result.events[0].continue_activation is False
+    assert [type(event) for event in result.events[1:-3]] == [
+        StatusAdded,
+        MeleeBalanceReset,
+        AbilityOverridesCleared,
+        AbilityOverridesCleared,
+    ]
+    assert [type(event) for event in result.events[-3:]] == [
+        ActivationFinalized,
+        InitiativeTransferred,
+        ActivePlayerChanged,
+    ]
+    _assert_terminal_state(result, committed.state)
+
+
+def test_finalize_after_second_action_omits_continuation_and_orders_terminal_events() -> None:
+    _, _, _, committed = _second_action_awaiting_finalization(sequence=1300)
+
+    result = _finalize(
+        committed.state,
+        sequence=committed.next_sequence,
+        recovery_uses=(),
+    )
+
+    assert not any(
+        isinstance(event, ActivationContinuationChosen) for event in result.events
+    )
+    assert [type(event) for event in result.events[:-3]] == [
+        StatusAdded,
+        MeleeBalanceReset,
+        AbilityOverridesCleared,
+        AbilityOverridesCleared,
+    ]
+    assert [type(event) for event in result.events[-3:]] == [
+        ActivationFinalized,
+        InitiativeTransferred,
+        ActivePlayerChanged,
+    ]
+    _assert_terminal_state(result, committed.state)
+
+
+def test_finalize_transfers_from_durable_initiative_snapshot() -> None:
+    initial = replace(_action_idle_state(), initiative_player=1)
+    started = start_activation(initial, selected_unit_id=11, sequence=1350)
+    first_pass = pass_interrupt_priority(
+        started.state,
+        caller_player=1,
+        activation_id=started.state.activation.activation_id,
+        expected_activation_version=started.state.activation.version,
+        expected_window_version=started.state.activation.window.version,
+        sequence=started.next_sequence,
+    )
+    ready = pass_interrupt_priority(
+        first_pass.state,
+        caller_player=0,
+        activation_id=first_pass.state.activation.activation_id,
+        expected_activation_version=first_pass.state.activation.version,
+        expected_window_version=first_pass.state.activation.window.version,
+        sequence=first_pass.next_sequence,
+    )
+    committed = _commit(
+        ready.state,
+        DefendAction(11),
+        DeterministicDice(69),
+        sequence=ready.next_sequence,
+    )
+
+    result = _finalize(committed.state, sequence=committed.next_sequence)
+
+    initiative_event = result.events[-2]
+    active_event = result.events[-1]
+    assert initiative_event == InitiativeTransferred(
+        sequence=initiative_event.sequence,
+        activation_id=started.state.activation.activation_id,
+        previous_initiative_player=1,
+        new_initiative_player=0,
+    )
+    assert active_event == ActivePlayerChanged(
+        sequence=active_event.sequence,
+        activation_id=started.state.activation.activation_id,
+        previous_active_player=0,
+        new_active_player=1,
+    )
+    assert result.state.initiative_player == 0
+    assert result.state.active_player == 1
+    assert result.state == apply_events(committed.state, result.events)
+
+
+@pytest.mark.parametrize("two_actions", [False, True])
+def test_finalize_v2_checkpoint_restart_parity_for_both_legal_phases(
+    two_actions: bool,
+) -> None:
+    if two_actions:
+        _, _, _, committed = _second_action_awaiting_finalization(sequence=1400)
+    else:
+        _, committed = _first_action_awaiting_finalization(sequence=1400)
+
+    live = _finalize(committed.state, sequence=committed.next_sequence)
+    restarted = _finalize(
+        _restart(committed.state),
+        sequence=committed.next_sequence,
+    )
+
+    assert [event_to_json(event) for event in restarted.events] == [
+        event_to_json(event) for event in live.events
+    ]
+    assert restarted.state == live.state
+    assert restarted.next_sequence == live.next_sequence
+
+
+@pytest.mark.parametrize("two_actions", [False, True])
+def test_complete_v2_event_tail_replays_through_finalization(
+    two_actions: bool,
+) -> None:
+    initial = _state_with_terminal_effects()
+    started = start_activation(initial, selected_unit_id=11, sequence=1500)
+    first_pass = pass_interrupt_priority(
+        started.state,
+        caller_player=0,
+        activation_id=started.state.activation.activation_id,
+        expected_activation_version=started.state.activation.version,
+        expected_window_version=started.state.activation.window.version,
+        sequence=started.next_sequence,
+    )
+    first_ready = pass_interrupt_priority(
+        first_pass.state,
+        caller_player=1,
+        activation_id=first_pass.state.activation.activation_id,
+        expected_activation_version=first_pass.state.activation.version,
+        expected_window_version=first_pass.state.activation.window.version,
+        sequence=first_pass.next_sequence,
+    )
+    first = _commit(
+        first_ready.state,
+        DefendAction(11),
+        DeterministicDice(71),
+        sequence=first_ready.next_sequence,
+    )
+    transitions = [started, first_pass, first_ready, first]
+    committed = first
+
+    if two_actions:
+        continued = continue_activation(
+            first.state,
+            caller_player=0,
+            activation_id=first.state.activation.activation_id,
+            expected_activation_version=first.state.activation.version,
+            sequence=first.next_sequence,
+        )
+        second_first_pass = pass_interrupt_priority(
+            continued.state,
+            caller_player=0,
+            activation_id=continued.state.activation.activation_id,
+            expected_activation_version=continued.state.activation.version,
+            expected_window_version=continued.state.activation.window.version,
+            sequence=continued.next_sequence,
+        )
+        second_ready = pass_interrupt_priority(
+            second_first_pass.state,
+            caller_player=1,
+            activation_id=second_first_pass.state.activation.activation_id,
+            expected_activation_version=second_first_pass.state.activation.version,
+            expected_window_version=second_first_pass.state.activation.window.version,
+            sequence=second_first_pass.next_sequence,
+        )
+        committed = _commit(
+            second_ready.state,
+            ManeuverAction(11, Position(1, 0)),
+            first.dice,
+            sequence=second_ready.next_sequence,
+        )
+        transitions.extend(
+            [continued, second_first_pass, second_ready, committed]
+        )
+
+    finalized = _finalize(
+        committed.state,
+        sequence=committed.next_sequence,
+    )
+    transitions.append(finalized)
+    complete_tail = tuple(
+        event for transition in transitions for event in transition.events
+    )
+
+    assert finalized.state == apply_events(initial, complete_tail)
+    assert finalized.state.activation is None
+
+
+def test_finalize_rejects_protocol_guards_phase_and_malformed_action_count() -> None:
+    _, committed = _first_action_awaiting_finalization(sequence=1600)
+    state = committed.state
+    cases = (
+        (
+            _idle_state(initiative_player=None),
+            ActivationProtocolErrorReason.PROTOCOL_UPGRADE_REQUIRED,
+            lambda legacy: finalize_activation(
+                legacy,
+                caller_player=0,
+                activation_id=1,
+                expected_activation_version=1,
+                recovery_uses=(),
+                sequence=1,
+            ),
+        ),
+        (
+            _idle_state(),
+            ActivationProtocolErrorReason.INVALID_PHASE,
+            lambda idle: finalize_activation(
+                idle,
+                caller_player=0,
+                activation_id=1,
+                expected_activation_version=1,
+                recovery_uses=(),
+                sequence=1,
+            ),
+        ),
+        (
+            state,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+            lambda current: _finalize(
+                current,
+                sequence=committed.next_sequence,
+                activation_id=current.activation.activation_id + 1,
+            ),
+        ),
+        (
+            state,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+            lambda current: _finalize(
+                current,
+                sequence=committed.next_sequence,
+                expected_activation_version=current.activation.version - 1,
+            ),
+        ),
+        (
+            state,
+            ActivationProtocolErrorReason.INVALID_CALLER,
+            lambda current: _finalize(
+                current,
+                sequence=committed.next_sequence,
+                caller_player=1,
+            ),
+        ),
+        (
+            start_activation(
+                _action_idle_state(),
+                selected_unit_id=11,
+                sequence=1650,
+            ).state,
+            ActivationProtocolErrorReason.INVALID_PHASE,
+            lambda current: _finalize(current, sequence=1652),
+        ),
+    )
+    for checked_state, reason, operation in cases:
+        _assert_rejected(
+            checked_state,
+            reason,
+            lambda checked_state=checked_state, operation=operation: operation(
+                checked_state
+            ),
+        )
+
+    malformed_activation = copy.copy(state.activation)
+    object.__setattr__(malformed_activation, "action_count", 2)
+    malformed_state = replace(state, activation=malformed_activation)
+    _assert_rejected(
+        malformed_state,
+        ActivationProtocolErrorReason.INVALID_PHASE,
+        lambda: _finalize(
+            malformed_state,
+            sequence=committed.next_sequence,
+        ),
+    )
+
+
+@pytest.mark.parametrize("recovery_uses", [(object(),), ["not", "a", "tuple"]])
+def test_finalize_rejects_nonempty_or_malformed_recovery_before_executor(
+    recovery_uses,
+) -> None:
+    _, committed = _first_action_awaiting_finalization(sequence=1700)
+    calls = 0
+
+    def executor(**kwargs):
+        nonlocal calls
+        calls += 1
+        return kwargs["state"], (), kwargs["sequence"]
+
+    _assert_rejected(
+        committed.state,
+        ActivationProtocolErrorReason.ILLEGAL_RECOVERY,
+        lambda: _finalize(
+            committed.state,
+            sequence=committed.next_sequence,
+            recovery_uses=recovery_uses,
+            outcome_executor=executor,
+        ),
+    )
+    assert calls == 0
+
+
+@pytest.mark.parametrize("sequence", [0, -1, True, "1700"])
+def test_finalize_rejects_malformed_sequence_before_executor(sequence) -> None:
+    _, committed = _first_action_awaiting_finalization(sequence=1750)
+    calls = 0
+
+    def executor(**kwargs):
+        nonlocal calls
+        calls += 1
+        return kwargs["state"], (), kwargs["sequence"]
+
+    _assert_rejected(
+        committed.state,
+        ActivationProtocolErrorReason.ILLEGAL_RECOVERY,
+        lambda: _finalize(
+            committed.state,
+            sequence=sequence,
+            outcome_executor=executor,
+        ),
+    )
+    assert calls == 0
+
+
+@pytest.mark.parametrize("actor_state", ["dead", "missing"])
+def test_finalize_handles_dead_or_missing_actor_and_idempotent_empty_overrides(
+    actor_state: str,
+) -> None:
+    ready = _ready_for_action(sequence=1800)
+    committed = _commit(
+        ready.state,
+        DefendAction(11),
+        DeterministicDice(73),
+        sequence=ready.next_sequence,
+    )
+    if actor_state == "dead":
+        actor, *others = committed.state.blobs
+        blobs = (
+            replace(
+                actor,
+                models_alive=0,
+                location=Lokalizacja.WYCOFANY,
+                status_flags=(),
+            ),
+            *others,
+        )
+    else:
+        blobs = tuple(blob for blob in committed.state.blobs if blob.id != 11)
+    terminal_input = replace(committed.state, blobs=tuple(blobs))
+
+    result = _finalize(terminal_input, sequence=committed.next_sequence)
+
+    assert result.state.activation is None
+    assert result.state.initiative_player == 1
+    assert result.state.active_player == 1
+    assert [type(event) for event in result.events[-3:]] == [
+        ActivationFinalized,
+        InitiativeTransferred,
+        ActivePlayerChanged,
+    ]
+    assert not any(
+        isinstance(event, AbilityOverridesCleared) for event in result.events
+    )
+    assert result.state == apply_events(terminal_input, result.events)
+
+
+@pytest.mark.parametrize(
+    "violation",
+    [
+        "sequence",
+        "nested",
+        "unsupported",
+        "unexpected-outcome",
+        "live-replay",
+        "exception",
+    ],
+)
+def test_finalize_rejects_faulty_outcome_seam_atomically(violation: str) -> None:
+    _, committed = _first_action_awaiting_finalization(sequence=1900)
+    original = committed.state
+
+    def invalid_executor(*, state, actor_id, recovery_uses, sequence):
+        if violation == "exception":
+            raise RuntimeError("boom")
+        if violation == "nested":
+            events = (
+                ActivationFinalized(
+                    sequence=sequence,
+                    activation_id=state.activation.activation_id,
+                ),
+            )
+            return state, events, sequence + 1
+        if violation == "unsupported":
+            events = (_UnsupportedOutcomeEvent(sequence),)
+            return state, events, sequence + 1
+        if violation == "unexpected-outcome":
+            events = (
+                EffectApplied(
+                    sequence=sequence,
+                    slug="unsupported_recovery",
+                    target_unit_id=actor_id,
+                ),
+            )
+            return apply_events(state, events), events, sequence + 1
+        if violation == "sequence":
+            events = (
+                EffectApplied(
+                    sequence=sequence + 1,
+                    slug="bad_finalization",
+                    target_unit_id=actor_id,
+                ),
+            )
+            return state, events, sequence + 1
+        return replace(state, active_player=1), (), sequence
+
+    _assert_rejected(
+        original,
+        ActivationProtocolErrorReason.ILLEGAL_RECOVERY,
+        lambda: _finalize(
+            original,
+            sequence=committed.next_sequence,
+            outcome_executor=invalid_executor,
+        ),
+    )
