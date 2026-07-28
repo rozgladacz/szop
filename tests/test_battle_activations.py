@@ -33,6 +33,12 @@ from app.services.battle_activations import (
     BattleActivationFinalizeUnavailable,
     BattleActivationFinalizeUpgradeRequired,
     BattleActivationFinalizeWriteConflict,
+    BattleActivationInterruptInvalid,
+    BattleActivationInterruptNotFound,
+    BattleActivationInterruptSequenceConflict,
+    BattleActivationInterruptUnavailable,
+    BattleActivationInterruptUpgradeRequired,
+    BattleActivationInterruptWriteConflict,
     BattleActivationPassInvalid,
     BattleActivationPassNotFound,
     BattleActivationPassSequenceConflict,
@@ -49,6 +55,7 @@ from app.services.battle_activations import (
     stage_battle_activation_action,
     stage_battle_activation_continue,
     stage_battle_activation_finalize,
+    stage_battle_activation_interrupt,
     stage_battle_activation_pass,
     stage_battle_activation_start,
 )
@@ -67,10 +74,13 @@ from app.services.engine.events import (
     ActivationActionCommitted,
     ActivationContinuationChosen,
     ActivationFinalized,
+    ActivationInterruptTriggered,
     ActivationStarted,
     ActivePlayerChanged,
+    AbilityOverrideApplied,
     AbilityOverridesCleared,
     InitiativeTransferred,
+    InterruptTriggered,
     InterruptPriorityPassed,
     InterruptWindowClosed,
     InterruptWindowOpened,
@@ -93,6 +103,7 @@ from app.services.engine.state import (
     Position,
     UnitBlob,
     apply_events,
+    effective_passives,
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
@@ -148,15 +159,18 @@ def _unit(
     models_alive: int = 1,
     location: Lokalizacja = Lokalizacja.FRONT,
     status_flags: tuple[str, ...] = (),
+    passives: tuple[str, ...] = (),
+    position: Position | None = None,
 ) -> UnitBlob:
     return UnitBlob(
         id=unit_id,
         owner_player=owner_player,
-        position=Position(float(unit_id), 0),
+        position=position or Position(float(unit_id), 0),
         radius_inches=1,
         models_alive=models_alive,
         toughness_per_model=3,
         status_flags=status_flags,
+        passives=passives,
         location=location,
     )
 
@@ -3699,6 +3713,1105 @@ def test_finalize_success_is_one_batch_one_checkpoint_and_five_selects(
                     expected_sequence=checkpoint.sequence_at,
                     recovery_uses=(),
                     **_action_guards(checkpoint.state),
+                )
+                select_counts.append(
+                    sum(
+                        statement.lstrip().upper().startswith("SELECT")
+                        for statement in statements
+                    )
+                )
+                session.rollback()
+    finally:
+        event.remove(
+            activation_world.engine,
+            "before_cursor_execute",
+            capture_statement,
+        )
+
+    assert select_counts == [5, 5]
+    assert save_event_calls == 2
+    assert save_checkpoint_calls == 2
+    assert all(type(sequence) is int for sequence in guarded_heads)
+
+
+def _rozkaz_window_state(
+    *,
+    priority_player: int = 0,
+    source_id: int | None = None,
+    source_owner: int | None = None,
+    source_models_alive: int = 1,
+    source_location: Lokalizacja = Lokalizacja.FRONT,
+    source_passives: tuple[str, ...] = ("rozkaz",),
+    target_id: int | None = None,
+    target_owner: int | None = None,
+    target_models_alive: int = 1,
+    target_location: Lokalizacja = Lokalizacja.FRONT,
+    target_passives: tuple[str, ...] = (),
+    target_position: Position = Position(5.0, 0.0),
+    extra_units_per_player: int = 0,
+) -> tuple[BattleState, int, int]:
+    actual_source_id = source_id or (12 if priority_player == 0 else 22)
+    actual_target_id = target_id or (11 if priority_player == 0 else 21)
+    actual_source_owner = (
+        priority_player if source_owner is None else source_owner
+    )
+    actual_target_owner = (
+        priority_player if target_owner is None else target_owner
+    )
+    state = _idle_state(
+        initiative_player=priority_player,
+        extra_units_per_player=extra_units_per_player,
+    )
+    units = {blob.id: blob for blob in state.blobs}
+    units[actual_source_id] = _unit(
+        actual_source_id,
+        actual_source_owner,
+        models_alive=source_models_alive,
+        location=source_location,
+        passives=source_passives,
+        position=Position(0.0, 0.0),
+    )
+    units[actual_target_id] = _unit(
+        actual_target_id,
+        actual_target_owner,
+        models_alive=target_models_alive,
+        location=target_location,
+        passives=target_passives,
+        position=target_position,
+    )
+    return (
+        replace(state, blobs=tuple(units.values())),
+        actual_source_id,
+        actual_target_id,
+    )
+
+
+def _interrupt_guards(state: BattleState) -> dict[str, int]:
+    activation = state.activation
+    assert activation is not None
+    assert activation.window is not None
+    return {
+        "activation_id": activation.activation_id,
+        "expected_activation_version": activation.version,
+        "expected_window_version": activation.window.version,
+    }
+
+
+def _rozkaz_payload(
+    target_id: int,
+    *,
+    ability: str = "niewrazliwy",
+    granted: bool = True,
+) -> dict[str, object]:
+    return {
+        "target_id": target_id,
+        "ability": ability,
+        "granted": granted,
+    }
+
+
+@pytest.mark.parametrize(
+    ("priority_player", "same_owner"),
+    [(0, False), (1, False), (1, True)],
+    ids=["p1-priority", "p2-priority", "same-owner-p2-priority"],
+)
+def test_interrupt_success_uses_durable_priority_for_both_owners_and_same_owner(
+    activation_world: ActivationWorld,
+    priority_player: int,
+    same_owner: bool,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state(
+        priority_player=priority_player
+    )
+    p2_id = activation_world.p1_id if same_owner else activation_world.p2_id
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+        p2_id=p2_id,
+    )
+    caller_user_id = (
+        activation_world.p1_id
+        if same_owner or priority_player == 0
+        else activation_world.p2_id
+    )
+
+    with activation_world.sessions() as session:
+        before = load_latest_checkpoint(session, battle_id)
+        assert before is not None
+        before_rng = before.dice.to_checkpoint()
+        staged = stage_battle_activation_interrupt(
+            session,
+            battle_id=battle_id,
+            caller_user_id=caller_user_id,
+            expected_sequence=started.new_sequence,
+            source_unit_id=source_id,
+            ability_slug="rozkaz",
+            payload=_rozkaz_payload(target_id),
+            **_interrupt_guards(started.state),
+        )
+        session.commit()
+
+    activation = staged.state.activation
+    assert activation is not None
+    assert activation.window is not None
+    assert activation.version == 2
+    assert activation.window.version == 2
+    assert activation.window.priority_player == priority_player
+    assert activation.window.passed_players == ()
+    assert activation.window.interrupt_count == 1
+    assert staged.dice.to_checkpoint() == before_rng
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == staged.state
+        assert checkpoint.dice.to_checkpoint() == before_rng
+        assert tuple(
+            load_events(restarted, battle_id, since=started.new_sequence)
+        ) == staged.events
+
+
+@pytest.mark.parametrize(
+    ("ability", "granted", "target_passives"),
+    [
+        ("niewrazliwy", True, ()),
+        ("nieustraszony", False, ("nieustraszony",)),
+    ],
+    ids=["grant-canonical-plus", "remove-canonical-minus"],
+)
+def test_interrupt_persists_exact_protocol_marker_canonical_marker_and_outcome(
+    activation_world: ActivationWorld,
+    ability: str,
+    granted: bool,
+    target_passives: tuple[str, ...],
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state(
+        target_passives=target_passives
+    )
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+
+    with activation_world.sessions() as session:
+        staged = stage_battle_activation_interrupt(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=started.new_sequence,
+            source_unit_id=source_id,
+            ability_slug="rozkaz",
+            payload=_rozkaz_payload(
+                target_id,
+                ability=ability,
+                granted=granted,
+            ),
+            **_interrupt_guards(started.state),
+        )
+        session.commit()
+
+    assert [type(item) for item in staged.events] == [
+        ActivationInterruptTriggered,
+        InterruptTriggered,
+        AbilityOverrideApplied,
+    ]
+    assert [item.sequence for item in staged.events] == list(
+        range(started.new_sequence + 1, staged.new_sequence + 1)
+    )
+    marker = staged.events[1]
+    outcome = staged.events[2]
+    assert marker.interrupt_point == "before_action"
+    assert marker.slug == "rozkaz"
+    assert marker.source_unit_id == source_id
+    assert marker.target_unit_id == target_id
+    assert marker.payload == {"ability": ability, "granted": granted}
+    assert marker.consumes_round_limit is True
+    assert outcome.target_id == target_id
+    assert outcome.ability == ability
+    assert outcome.granted is granted
+    assert outcome.source_id == source_id
+    assert staged.state == apply_events(started.state, staged.events)
+    target = next(blob for blob in staged.state.blobs if blob.id == target_id)
+    assert (ability in effective_passives(target)) is granted
+    assert staged.state.used_interrupts_this_round == ((source_id, "rozkaz"),)
+
+
+def test_interrupt_missing_and_foreign_battles_share_no_oracle_error(
+    activation_world: ActivationWorld,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    foreign_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, foreign_id)
+    failures = []
+
+    for battle_id in (foreign_id, foreign_id + 999):
+        with activation_world.sessions() as session:
+            with pytest.raises(BattleActivationInterruptNotFound) as exc_info:
+                stage_battle_activation_interrupt(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.outsider_id,
+                    expected_sequence=started.new_sequence,
+                    source_unit_id=source_id,
+                    ability_slug="rozkaz",
+                    payload=_rozkaz_payload(target_id),
+                    **_interrupt_guards(started.state),
+                )
+            failures.append((type(exc_info.value), str(exc_info.value)))
+
+    assert failures[0] == failures[1]
+    assert _stream_snapshot(activation_world, foreign_id) == before
+
+
+@pytest.mark.parametrize(
+    (
+        "caller_side",
+        "source_owner",
+        "source_models_alive",
+        "source_location",
+        "source_passives",
+        "reason",
+    ),
+    [
+        (
+            1,
+            1,
+            1,
+            Lokalizacja.FRONT,
+            ("rozkaz",),
+            ActivationProtocolErrorReason.INVALID_CALLER,
+        ),
+        (
+            0,
+            1,
+            1,
+            Lokalizacja.FRONT,
+            ("rozkaz",),
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ),
+        (
+            0,
+            0,
+            0,
+            Lokalizacja.FRONT,
+            ("rozkaz",),
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ),
+        (
+            0,
+            0,
+            1,
+            Lokalizacja.ZAPLECZE,
+            ("rozkaz",),
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ),
+        (
+            0,
+            0,
+            1,
+            Lokalizacja.FRONT,
+            (),
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ),
+    ],
+    ids=[
+        "wrong-priority",
+        "wrong-source-owner",
+        "dead-source",
+        "off-field-source",
+        "source-without-ability",
+    ],
+)
+def test_interrupt_rejects_wrong_priority_or_illegal_source_atomically(
+    activation_world: ActivationWorld,
+    caller_side: int,
+    source_owner: int,
+    source_models_alive: int,
+    source_location: Lokalizacja,
+    source_passives: tuple[str, ...],
+    reason: ActivationProtocolErrorReason,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state(
+        source_owner=source_owner,
+        source_models_alive=source_models_alive,
+        source_location=source_location,
+        source_passives=source_passives,
+    )
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=(
+                    activation_world.p1_id
+                    if caller_side == 0
+                    else activation_world.p2_id
+                ),
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="rozkaz",
+                payload=_rozkaz_payload(target_id),
+                **_interrupt_guards(started.state),
+            )
+
+    assert exc_info.value.reason is reason
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+@pytest.mark.parametrize(
+    (
+        "target_owner",
+        "target_models_alive",
+        "target_location",
+        "target_position",
+    ),
+    [
+        (1, 1, Lokalizacja.FRONT, Position(5.0, 0.0)),
+        (0, 0, Lokalizacja.FRONT, Position(5.0, 0.0)),
+        (0, 1, Lokalizacja.ZAPLECZE, Position(5.0, 0.0)),
+        (0, 1, Lokalizacja.FRONT, Position(20.0, 0.0)),
+    ],
+    ids=["enemy", "dead", "off-field", "out-of-range"],
+)
+def test_interrupt_rejects_illegal_target_atomically(
+    activation_world: ActivationWorld,
+    target_owner: int,
+    target_models_alive: int,
+    target_location: Lokalizacja,
+    target_position: Position,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state(
+        target_id=13,
+        target_owner=target_owner,
+        target_models_alive=target_models_alive,
+        target_location=target_location,
+        target_position=target_position,
+    )
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="rozkaz",
+                payload=_rozkaz_payload(target_id),
+                **_interrupt_guards(started.state),
+            )
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"target_id": True, "ability": "niewrazliwy", "granted": True},
+        {"target_id": "11", "ability": "niewrazliwy", "granted": True},
+        {"target_id": 11, "ability": 1, "granted": True},
+        {"target_id": 11, "ability": "", "granted": True},
+        {"target_id": 11, "ability": "niewrazliwy", "granted": 1},
+        {"target_id": 11, "ability": "niewrazliwy", "granted": "true"},
+        {
+            "target_id": 11,
+            "ability": "niewrazliwy",
+            "granted": True,
+            "extra": "transport",
+        },
+        {
+            "target_id": 11,
+            "ability": "niewrazliwy",
+            "granted": True,
+            "sequence": 999,
+        },
+        {"target_id": 11, "ability": "niewrazliwy", "granted": False},
+        {"target_id": 11, "ability": "nieustraszony", "granted": True},
+        {"target_id": 11, "ability": "wolny", "granted": False},
+        {"target_id": 999, "ability": "niewrazliwy", "granted": True},
+    ],
+)
+def test_interrupt_rejects_malformed_coercive_extra_and_direction_payloads(
+    activation_world: ActivationWorld,
+    payload: object,
+) -> None:
+    initial, source_id, _ = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="rozkaz",
+                payload=payload,
+                **_interrupt_guards(started.state),
+            )
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"target_id": True, "ability": "niewrazliwy", "granted": True},
+        {
+            "target_id": 11,
+            "ability": "niewrazliwy",
+            "granted": True,
+            "extra": "transport",
+        },
+        {
+            "target_id": 11,
+            "ability": "niewrazliwy",
+            "granted": True,
+            "sequence": 999,
+        },
+        {"target_id": 11, "ability": "niewrazliwy", "granted": False},
+        {"target_id": 11, "ability": "wolny", "granted": False},
+    ],
+)
+def test_interrupt_payload_shape_and_direction_fail_before_database_io(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+) -> None:
+    initial, source_id, _ = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+
+    def forbidden_lookup(*args, **kwargs):
+        raise AssertionError("invalid payload reached persistence")
+
+    monkeypatch.setattr(
+        activation_service,
+        "_get_participant_battle",
+        forbidden_lookup,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="rozkaz",
+                payload=payload,
+                **_interrupt_guards(started.state),
+            )
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("expected_sequence", True, None),
+        (
+            "activation_id",
+            True,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "expected_activation_version",
+            False,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "expected_window_version",
+            True,
+            ActivationProtocolErrorReason.STALE_WINDOW,
+        ),
+        (
+            "source_unit_id",
+            False,
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ),
+        (
+            "ability_slug",
+            50,
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ),
+        (
+            "payload",
+            [],
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ),
+    ],
+)
+def test_interrupt_strict_top_level_guards_reject_bool_and_coercion_before_io(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+    reason: ActivationProtocolErrorReason | None,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    kwargs = {
+        "battle_id": battle_id,
+        "caller_user_id": activation_world.p1_id,
+        "expected_sequence": started.new_sequence,
+        "source_unit_id": source_id,
+        "ability_slug": "rozkaz",
+        "payload": _rozkaz_payload(target_id),
+        **_interrupt_guards(started.state),
+    }
+    kwargs[field] = value
+
+    def forbidden_lookup(*args, **kwargs):
+        raise AssertionError("invalid top-level input reached persistence")
+
+    monkeypatch.setattr(
+        activation_service,
+        "_get_participant_battle",
+        forbidden_lookup,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(session, **kwargs)
+
+    assert exc_info.value.reason is reason
+
+
+@pytest.mark.parametrize("slug", ["klatwa", "oznaczenie", "straznik"])
+def test_interrupt_rejects_registered_but_not_ready_slugs_without_writes(
+    activation_world: ActivationWorld,
+    slug: str,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state(
+        source_passives=(slug,)
+    )
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug=slug,
+                payload=_rozkaz_payload(target_id),
+                **_interrupt_guards(started.state),
+            )
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_interrupt_rejects_second_rozkaz_in_round_without_partial_delta(
+    activation_world: ActivationWorld,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    with activation_world.sessions() as session:
+        first = stage_battle_activation_interrupt(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=started.new_sequence,
+            source_unit_id=source_id,
+            ability_slug="rozkaz",
+            payload=_rozkaz_payload(target_id),
+            **_interrupt_guards(started.state),
+        )
+        session.commit()
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=first.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="rozkaz",
+                payload=_rozkaz_payload(target_id),
+                **_interrupt_guards(first.state),
+            )
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+@pytest.mark.parametrize(
+    ("guard", "error_type", "reason"),
+    [
+        (
+            {"expected_sequence": 999},
+            BattleActivationInterruptSequenceConflict,
+            None,
+        ),
+        (
+            {"activation_id": 999},
+            BattleActivationInterruptInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            {"expected_activation_version": 999},
+            BattleActivationInterruptInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            {"expected_window_version": 999},
+            BattleActivationInterruptInvalid,
+            ActivationProtocolErrorReason.STALE_WINDOW,
+        ),
+    ],
+)
+def test_interrupt_rejects_stale_head_activation_and_window_guards(
+    activation_world: ActivationWorld,
+    guard: dict[str, int],
+    error_type: type[Exception],
+    reason: ActivationProtocolErrorReason | None,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, battle_id)
+    kwargs = {
+        "battle_id": battle_id,
+        "caller_user_id": activation_world.p1_id,
+        "expected_sequence": started.new_sequence,
+        "source_unit_id": source_id,
+        "ability_slug": "rozkaz",
+        "payload": _rozkaz_payload(target_id),
+        **_interrupt_guards(started.state),
+    }
+    kwargs.update(guard)
+
+    with activation_world.sessions() as session:
+        with pytest.raises(error_type) as exc_info:
+            stage_battle_activation_interrupt(session, **kwargs)
+
+    if reason is not None:
+        assert exc_info.value.reason is reason
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_interrupt_v1_and_missing_stale_or_mismatched_checkpoints_are_unavailable(
+    activation_world: ActivationWorld,
+) -> None:
+    v1_id = _persist_battle(
+        activation_world,
+        state=_idle_state(initiative_player=None),
+        protocol_version=1,
+        checkpoint_version=1,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptUpgradeRequired):
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=v1_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=0,
+                activation_id=1,
+                expected_activation_version=1,
+                expected_window_version=1,
+                source_unit_id=11,
+                ability_slug="rozkaz",
+                payload=_rozkaz_payload(11),
+            )
+
+    missing_id = _persist_battle(activation_world, with_checkpoint=False)
+    stale_id = _persist_battle(activation_world)
+    mismatch_id = _persist_battle(
+        activation_world,
+        state=_idle_state(initiative_player=None),
+        protocol_version=2,
+        checkpoint_version=1,
+    )
+    with activation_world.sessions() as session:
+        save_events(
+            session,
+            stale_id,
+            [
+                MoveExecuted(
+                    sequence=1,
+                    unit_id=11,
+                    from_pos=(11.0, 0.0),
+                    to_pos=(12.0, 0.0),
+                )
+            ],
+            expected_latest_sequence=0,
+        )
+        session.commit()
+
+    for battle_id, actual_sequence in (
+        (missing_id, 0),
+        (stale_id, 1),
+        (mismatch_id, 0),
+    ):
+        with activation_world.sessions() as session:
+            with pytest.raises(BattleActivationInterruptUnavailable) as exc_info:
+                stage_battle_activation_interrupt(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.p1_id,
+                    expected_sequence=0,
+                    activation_id=1,
+                    expected_activation_version=1,
+                    expected_window_version=1,
+                    source_unit_id=11,
+                    ability_slug="rozkaz",
+                    payload=_rozkaz_payload(11),
+                )
+        assert exc_info.value.actual_sequence == actual_sequence
+
+
+def test_interrupt_caller_rollback_removes_whole_staged_delta_and_checkpoint(
+    activation_world: ActivationWorld,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as session:
+        stage_battle_activation_interrupt(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=started.new_sequence,
+            source_unit_id=source_id,
+            ability_slug="rozkaz",
+            payload=_rozkaz_payload(target_id),
+            **_interrupt_guards(started.state),
+        )
+        session.rollback()
+
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+@pytest.mark.parametrize("failure", ["checkpoint-conflict", "integrity-error"])
+def test_interrupt_write_conflict_rolls_back_events_and_checkpoint(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before = _stream_snapshot(activation_world, battle_id)
+    real_save_checkpoint = activation_service.save_checkpoint
+
+    def fail_after_checkpoint(*args, **kwargs):
+        real_save_checkpoint(*args, **kwargs)
+        if failure == "integrity-error":
+            raise IntegrityError(
+                "checkpoint race",
+                {},
+                Exception("unique"),
+            )
+        raise BattleCheckpointSequenceConflict(
+            args[1],
+            sequence_at=args[2],
+            latest_sequence=args[2] - 1,
+        )
+
+    monkeypatch.setattr(
+        activation_service,
+        "save_checkpoint",
+        fail_after_checkpoint,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptWriteConflict):
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="rozkaz",
+                payload=_rozkaz_payload(target_id),
+                **_interrupt_guards(started.state),
+            )
+        session.rollback()
+
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_interrupt_concurrent_head_change_reports_sequence_conflict_only(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    real_save_events = activation_service.save_events
+    raced = False
+
+    def race_before_guard(db, persisted_battle_id, events, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            with activation_world.sessions() as competitor:
+                real_save_events(
+                    competitor,
+                    battle_id,
+                    [
+                        MoveExecuted(
+                            sequence=started.new_sequence + 1,
+                            unit_id=11,
+                            from_pos=(5.0, 0.0),
+                            to_pos=(6.0, 0.0),
+                        )
+                    ],
+                    expected_latest_sequence=started.new_sequence,
+                )
+                competitor.commit()
+        return real_save_events(db, persisted_battle_id, events, **kwargs)
+
+    monkeypatch.setattr(activation_service, "save_events", race_before_guard)
+    with activation_world.sessions() as session:
+        with pytest.raises(
+            BattleActivationInterruptSequenceConflict
+        ) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="rozkaz",
+                payload=_rozkaz_payload(target_id),
+                **_interrupt_guards(started.state),
+            )
+        session.rollback()
+
+    assert exc_info.value.actual_sequence == started.new_sequence + 1
+    with activation_world.sessions() as session:
+        tail = load_events(
+            session,
+            battle_id,
+            since=started.new_sequence,
+        )
+        assert len(tail) == 1
+        assert type(tail[0]) is MoveExecuted
+        assert session.scalar(
+            select(func.count())
+            .select_from(models.BattleCheckpoint)
+            .where(models.BattleCheckpoint.battle_id == battle_id)
+        ) == 2
+
+
+def test_interrupt_restart_replay_then_pass_action_finalize_clears_override(
+    activation_world: ActivationWorld,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    with activation_world.sessions() as session:
+        before = load_latest_checkpoint(session, battle_id)
+        assert before is not None
+        rng_before = before.dice.to_checkpoint()
+        interrupted = stage_battle_activation_interrupt(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=started.new_sequence,
+            source_unit_id=source_id,
+            ability_slug="rozkaz",
+            payload=_rozkaz_payload(target_id),
+            **_interrupt_guards(started.state),
+        )
+        session.commit()
+
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == interrupted.state
+        assert checkpoint.dice.to_checkpoint() == rng_before
+        first_pass = stage_battle_activation_pass(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=checkpoint.sequence_at,
+            **_pass_guards(checkpoint.state),
+        )
+        session.commit()
+
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        second_pass = stage_battle_activation_pass(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p2_id,
+            expected_sequence=checkpoint.sequence_at,
+            **_pass_guards(checkpoint.state),
+        )
+        session.commit()
+
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        committed = stage_battle_activation_action(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=checkpoint.sequence_at,
+            action_payload=action_to_json(DefendAction(11)),
+            **_action_guards(checkpoint.state),
+        )
+        session.commit()
+
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        finalized = stage_battle_activation_finalize(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=checkpoint.sequence_at,
+            recovery_uses=(),
+            **_action_guards(checkpoint.state),
+        )
+        session.commit()
+
+    target = next(blob for blob in finalized.state.blobs if blob.id == target_id)
+    assert target.ability_overrides == ()
+    assert any(type(item) is AbilityOverridesCleared for item in finalized.events)
+    assert finalized.state.activation is None
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == finalized.state
+        assert checkpoint.dice.to_checkpoint() == rng_before
+        all_events = tuple(load_events(restarted, battle_id))
+    assert finalized.state == apply_events(initial, all_events)
+    assert (
+        started.new_sequence
+        < interrupted.new_sequence
+        < first_pass.new_sequence
+        < second_pass.new_sequence
+        < committed.new_sequence
+        < finalized.new_sequence
+    )
+
+
+def test_interrupt_success_is_one_batch_one_checkpoint_and_five_selects(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    small_state, small_source, small_target = _rozkaz_window_state()
+    large_state, large_source, large_target = _rozkaz_window_state(
+        extra_units_per_player=30
+    )
+    small_id, small_started = _persist_started_battle(
+        activation_world,
+        state=small_state,
+    )
+    large_id, large_started = _persist_started_battle(
+        activation_world,
+        state=large_state,
+        extra_units_per_player=30,
+    )
+    statements: list[str] = []
+    save_event_calls = 0
+    save_checkpoint_calls = 0
+    guarded_heads: list[int | None] = []
+    real_save_events = activation_service.save_events
+    real_save_checkpoint = activation_service.save_checkpoint
+
+    def count_save_events(*args, **kwargs):
+        nonlocal save_event_calls
+        save_event_calls += 1
+        guarded_heads.append(kwargs.get("expected_latest_sequence"))
+        return real_save_events(*args, **kwargs)
+
+    def count_save_checkpoint(*args, **kwargs):
+        nonlocal save_checkpoint_calls
+        save_checkpoint_calls += 1
+        return real_save_checkpoint(*args, **kwargs)
+
+    def capture_statement(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        statements.append(statement)
+
+    monkeypatch.setattr(activation_service, "save_events", count_save_events)
+    monkeypatch.setattr(
+        activation_service,
+        "save_checkpoint",
+        count_save_checkpoint,
+    )
+    select_counts = []
+    event.listen(
+        activation_world.engine,
+        "before_cursor_execute",
+        capture_statement,
+    )
+    try:
+        for battle_id, started, source_id, target_id in (
+            (small_id, small_started, small_source, small_target),
+            (large_id, large_started, large_source, large_target),
+        ):
+            statements.clear()
+            with activation_world.sessions() as session:
+                stage_battle_activation_interrupt(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.p1_id,
+                    expected_sequence=started.new_sequence,
+                    source_unit_id=source_id,
+                    ability_slug="rozkaz",
+                    payload=_rozkaz_payload(target_id),
+                    **_interrupt_guards(started.state),
                 )
                 select_counts.append(
                     sum(

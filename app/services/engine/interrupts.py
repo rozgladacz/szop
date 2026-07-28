@@ -251,6 +251,64 @@ class InvalidInterruptError(ValueError):
 _ROZKAZ_PAYLOAD_FIELDS = frozenset({"target_id", "ability", "granted"})
 
 
+def _validated_rozkaz_payload(
+    payload: Mapping[str, Any],
+) -> tuple[int, str, bool]:
+    try:
+        payload_fields = frozenset(payload)
+    except Exception as exc:
+        raise InvalidInterruptError("rozkaz: malformed payload") from exc
+    if payload_fields != _ROZKAZ_PAYLOAD_FIELDS:
+        raise InvalidInterruptError(
+            "rozkaz: payload requires exactly target_id, ability and granted"
+        )
+    target_id = payload["target_id"]
+    ability = payload["ability"]
+    granted = payload["granted"]
+    if (
+        type(target_id) is not int
+        or target_id < 1
+        or type(ability) is not str
+        or not ability
+        or type(granted) is not bool
+    ):
+        raise InvalidInterruptError("rozkaz: payload types are invalid")
+
+    required_granted = _rozkaz_capable_directions().get(ability)
+    if required_granted is None:
+        raise InvalidInterruptError(
+            f"rozkaz: ability {ability!r} lacks canonical rozkaz tags"
+        )
+    if granted is not required_granted:
+        raise InvalidInterruptError(
+            f"rozkaz: granted does not match rozkaz_kierunek for {ability!r}"
+        )
+    return target_id, ability, granted
+
+
+def validate_ready_activation_interrupt_request(
+    *,
+    ability_slug: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate and copy the source-independent public-ready request shape."""
+
+    if (
+        type(ability_slug) is not str
+        or ability_slug not in READY_INTERRUPT_HANDLERS
+    ):
+        raise InvalidInterruptError(f"interrupt {ability_slug!r} is not ready")
+    if not isinstance(payload, Mapping):
+        raise InvalidInterruptError("ready interrupt payload is malformed")
+    try:
+        dispatch_payload = dict(payload)
+    except Exception as exc:
+        raise InvalidInterruptError("ready interrupt payload is malformed") from exc
+    if ability_slug == "rozkaz":
+        _validated_rozkaz_payload(dispatch_payload)
+    return dispatch_payload
+
+
 @lru_cache(maxsize=4)
 def _rozkaz_capable_slugs(ruleset_version: str = "v1") -> frozenset[str]:
     """Zbiór slugów pasywek z `rozkaz_tak: true` (dozwolone jako X). lru_cache —
@@ -431,37 +489,9 @@ def _apply_rozkaz(
     payload: Mapping[str, Any],
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Strict source-correct Rozkaz(X) outcome from canonical ruleset metadata."""
-    try:
-        payload_fields = frozenset(payload)
-    except Exception as exc:
-        raise InvalidInterruptError("rozkaz: malformed payload") from exc
-    if payload_fields != _ROZKAZ_PAYLOAD_FIELDS:
-        raise InvalidInterruptError(
-            "rozkaz: payload requires exactly target_id, ability and granted"
-        )
-    target_id = payload["target_id"]
-    ability = payload["ability"]
-    granted = payload["granted"]
-    if (
-        type(target_id) is not int
-        or target_id < 1
-        or type(ability) is not str
-        or not ability
-        or type(granted) is not bool
-        or type(context.sequence) is not int
-        or context.sequence < 0
-    ):
-        raise InvalidInterruptError("rozkaz: payload types are invalid")
-
-    required_granted = _rozkaz_capable_directions().get(ability)
-    if required_granted is None:
-        raise InvalidInterruptError(
-            f"rozkaz: ability {ability!r} lacks canonical rozkaz tags"
-        )
-    if granted is not required_granted:
-        raise InvalidInterruptError(
-            f"rozkaz: granted does not match rozkaz_kierunek for {ability!r}"
-        )
+    target_id, ability, granted = _validated_rozkaz_payload(payload)
+    if type(context.sequence) is not int or context.sequence < 0:
+        raise InvalidInterruptError("rozkaz: context sequence is invalid")
 
     source, target = _order_like_participants(
         context,
@@ -524,22 +554,16 @@ def execute_ready_activation_interrupt_outcomes(
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Built-in leaf for public-ready durable activation interrupts."""
     if (
-        type(ability_slug) is not str
-        or ability_slug not in READY_INTERRUPT_HANDLERS
-    ):
-        raise InvalidInterruptError(f"interrupt {ability_slug!r} is not ready")
-    if (
         type(state) is not BattleState
         or type(source) is not UnitBlob
-        or not isinstance(payload, Mapping)
         or type(sequence) is not int
         or sequence < 1
     ):
         raise InvalidInterruptError("ready interrupt adapter input is malformed")
-    try:
-        dispatch_payload = dict(payload)
-    except Exception as exc:
-        raise InvalidInterruptError("ready interrupt payload is malformed") from exc
+    dispatch_payload = validate_ready_activation_interrupt_request(
+        ability_slug=ability_slug,
+        payload=payload,
+    )
 
     activation = state.activation
     if (
@@ -592,4 +616,5 @@ __all__ = [
     "get_eligible_interrupts",
     "register_interrupt_handler",
     "trigger_interrupt",
+    "validate_ready_activation_interrupt_request",
 ]

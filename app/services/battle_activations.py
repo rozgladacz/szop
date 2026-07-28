@@ -21,9 +21,15 @@ from .engine.activation_protocol import (
     finalize_activation,
     pass_interrupt_priority,
     start_activation,
+    trigger_activation_interrupt,
 )
 from .engine.dice import DeterministicDice
 from .engine.events import BattleEvent
+from .engine.interrupts import (
+    InvalidInterruptError,
+    execute_ready_activation_interrupt_outcomes,
+    validate_ready_activation_interrupt_request,
+)
 from .engine.persistence import (
     BattleCheckpointSequenceConflict,
     BattleEventSequenceConflict,
@@ -140,6 +146,58 @@ class BattleActivationPassInvalid(BattleActivationPassError):
 
 
 class BattleActivationPassWriteConflict(BattleActivationPassError):
+    """A guarded event/checkpoint write lost a concurrent race."""
+
+
+class BattleActivationInterruptError(RuntimeError):
+    """Base error for the durable activation-interrupt service boundary."""
+
+
+class BattleActivationInterruptNotFound(BattleActivationInterruptError):
+    """The battle is missing or outside the participant scope."""
+
+
+class BattleActivationInterruptUpgradeRequired(BattleActivationInterruptError):
+    """The battle uses the legacy activation protocol."""
+
+
+class BattleActivationInterruptUnavailable(BattleActivationInterruptError):
+    """The battle has no coherent resumable v2 checkpoint at its current head."""
+
+    def __init__(self, *, actual_sequence: int | None = None) -> None:
+        self.actual_sequence = actual_sequence
+        super().__init__("Current v2 battle checkpoint is unavailable")
+
+
+class BattleActivationInterruptSequenceConflict(BattleActivationInterruptError):
+    """The caller's optimistic sequence no longer matches the durable head."""
+
+    def __init__(
+        self,
+        *,
+        expected_sequence: int,
+        actual_sequence: int,
+    ) -> None:
+        self.expected_sequence = expected_sequence
+        self.actual_sequence = actual_sequence
+        super().__init__("Battle event sequence conflict")
+
+
+class BattleActivationInterruptInvalid(BattleActivationInterruptError):
+    """The input or current domain state cannot accept this interrupt."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        reason: ActivationProtocolErrorReason | None = None,
+    ) -> None:
+        self.detail = detail
+        self.reason = reason
+        super().__init__(detail)
+
+
+class BattleActivationInterruptWriteConflict(BattleActivationInterruptError):
     """A guarded event/checkpoint write lost a concurrent race."""
 
 
@@ -326,6 +384,18 @@ class StagedBattleActivationStart:
 @dataclass(frozen=True, slots=True)
 class StagedBattleActivationPass:
     """One staged v2 priority pass and its resumable durable result."""
+
+    battle_id: int
+    previous_sequence: int
+    new_sequence: int
+    state: BattleState
+    events: tuple[BattleEvent, ...]
+    dice: DeterministicDice
+
+
+@dataclass(frozen=True, slots=True)
+class StagedBattleActivationInterrupt:
+    """One accepted v2 activation interrupt and its durable exact delta."""
 
     battle_id: int
     previous_sequence: int
@@ -621,6 +691,181 @@ def stage_battle_activation_pass(
         raise BattleActivationPassWriteConflict from exc
 
     return StagedBattleActivationPass(
+        battle_id=battle.id,
+        previous_sequence=checkpoint.sequence_at,
+        new_sequence=new_sequence,
+        state=transition.state,
+        events=transition.events,
+        dice=checkpoint.dice,
+    )
+
+
+def stage_battle_activation_interrupt(
+    db: Session,
+    *,
+    battle_id: int,
+    caller_user_id: int,
+    expected_sequence: int,
+    activation_id: int,
+    expected_activation_version: int,
+    expected_window_version: int,
+    source_unit_id: int,
+    ability_slug: str,
+    payload: Mapping[str, Any],
+) -> StagedBattleActivationInterrupt:
+    """Stage one public-ready v2 interrupt without ending a transaction."""
+
+    try:
+        _validate_identity(
+            battle_id=battle_id,
+            caller_user_id=caller_user_id,
+        )
+    except BattleActivationStartNotFound as exc:
+        raise BattleActivationInterruptNotFound from exc
+    if type(expected_sequence) is not int or expected_sequence < 0:
+        raise BattleActivationInterruptInvalid("Invalid expected sequence")
+    if (
+        type(activation_id) is not int
+        or activation_id < 1
+        or type(expected_activation_version) is not int
+        or expected_activation_version < 1
+    ):
+        raise BattleActivationInterruptInvalid(
+            "Invalid activation guard",
+            reason=ActivationProtocolErrorReason.STALE_ACTIVATION,
+        )
+    if (
+        type(expected_window_version) is not int
+        or expected_window_version < 1
+    ):
+        raise BattleActivationInterruptInvalid(
+            "Invalid window guard",
+            reason=ActivationProtocolErrorReason.STALE_WINDOW,
+        )
+    if (
+        type(source_unit_id) is not int
+        or source_unit_id < 1
+        or type(ability_slug) is not str
+        or not ability_slug
+        or not isinstance(payload, Mapping)
+    ):
+        raise BattleActivationInterruptInvalid(
+            "Invalid interrupt request",
+            reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        )
+    try:
+        canonical_payload = validate_ready_activation_interrupt_request(
+            ability_slug=ability_slug,
+            payload=payload,
+        )
+    except InvalidInterruptError as exc:
+        raise BattleActivationInterruptInvalid(
+            "Invalid interrupt request",
+            reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        ) from exc
+
+    try:
+        battle = _get_participant_battle(
+            db,
+            battle_id=battle_id,
+            caller_user_id=caller_user_id,
+        )
+    except BattleActivationStartNotFound as exc:
+        raise BattleActivationInterruptNotFound from exc
+    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+        raise BattleActivationInterruptUpgradeRequired
+    if battle.status != "active":
+        raise BattleActivationInterruptInvalid(
+            "Battle is not active",
+            reason=ActivationProtocolErrorReason.INVALID_PHASE,
+        )
+
+    try:
+        checkpoint = load_latest_checkpoint(db, battle.id)
+    except (TypeError, ValueError) as exc:
+        raise BattleActivationInterruptUnavailable from exc
+    if checkpoint is None:
+        raise BattleActivationInterruptUnavailable(
+            actual_sequence=latest_event_sequence(db, battle.id)
+        )
+    if expected_sequence != checkpoint.sequence_at:
+        raise BattleActivationInterruptSequenceConflict(
+            expected_sequence=expected_sequence,
+            actual_sequence=checkpoint.sequence_at,
+        )
+    if (
+        type(checkpoint.state.initiative_player) is not int
+        or checkpoint.state.initiative_player not in (0, 1)
+    ):
+        raise BattleActivationInterruptUnavailable(
+            actual_sequence=checkpoint.sequence_at
+        )
+
+    activation = checkpoint.state.activation
+    priority_player = (
+        activation.window.priority_player
+        if activation is not None and activation.window is not None
+        else 0
+    )
+    try:
+        caller_player = _caller_player(
+            battle,
+            caller_user_id=caller_user_id,
+            controlled_player=priority_player,
+        )
+    except BattleActivationStartInvalid as exc:
+        raise BattleActivationInterruptUnavailable(
+            actual_sequence=checkpoint.sequence_at
+        ) from exc
+
+    try:
+        transition = trigger_activation_interrupt(
+            checkpoint.state,
+            caller_player=caller_player,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+            expected_window_version=expected_window_version,
+            source_unit_id=source_unit_id,
+            ability_slug=ability_slug,
+            payload=canonical_payload,
+            sequence=checkpoint.sequence_at + 1,
+            outcome_executor=execute_ready_activation_interrupt_outcomes,
+        )
+    except ActivationProtocolError as exc:
+        if exc.reason is ActivationProtocolErrorReason.PROTOCOL_UPGRADE_REQUIRED:
+            raise BattleActivationInterruptUnavailable(
+                actual_sequence=checkpoint.sequence_at
+            ) from exc
+        raise BattleActivationInterruptInvalid(
+            "Activation interrupt is not legal",
+            reason=exc.reason,
+        ) from exc
+
+    new_sequence = transition.next_sequence - 1
+    try:
+        save_events(
+            db,
+            battle.id,
+            transition.events,
+            expected_latest_sequence=checkpoint.sequence_at,
+        )
+        save_checkpoint(
+            db,
+            battle.id,
+            new_sequence,
+            transition.state,
+            checkpoint.dice,
+            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+        )
+    except BattleEventSequenceConflict as exc:
+        raise BattleActivationInterruptSequenceConflict(
+            expected_sequence=exc.expected_latest_sequence,
+            actual_sequence=exc.actual_latest_sequence,
+        ) from exc
+    except (BattleCheckpointSequenceConflict, IntegrityError) as exc:
+        raise BattleActivationInterruptWriteConflict from exc
+
+    return StagedBattleActivationInterrupt(
         battle_id=battle.id,
         previous_sequence=checkpoint.sequence_at,
         new_sequence=new_sequence,
@@ -1131,6 +1376,13 @@ __all__ = [
     "BattleActivationFinalizeUnavailable",
     "BattleActivationFinalizeUpgradeRequired",
     "BattleActivationFinalizeWriteConflict",
+    "BattleActivationInterruptError",
+    "BattleActivationInterruptInvalid",
+    "BattleActivationInterruptNotFound",
+    "BattleActivationInterruptSequenceConflict",
+    "BattleActivationInterruptUnavailable",
+    "BattleActivationInterruptUpgradeRequired",
+    "BattleActivationInterruptWriteConflict",
     "BattleActivationPassError",
     "BattleActivationPassInvalid",
     "BattleActivationPassNotFound",
@@ -1149,11 +1401,13 @@ __all__ = [
     "StagedBattleActivationAction",
     "StagedBattleActivationContinue",
     "StagedBattleActivationFinalize",
+    "StagedBattleActivationInterrupt",
     "StagedBattleActivationPass",
     "StagedBattleActivationStart",
     "stage_battle_activation_action",
     "stage_battle_activation_continue",
     "stage_battle_activation_finalize",
+    "stage_battle_activation_interrupt",
     "stage_battle_activation_pass",
     "stage_battle_activation_start",
 ]

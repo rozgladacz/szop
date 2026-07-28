@@ -387,6 +387,23 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   auth/no-oracle, stale/coherence, race/rollback, same-owner/two-owner oraz
   stałe 5 SELECT-ów bez N+1 są pokryte testami. Nie dodano produkcyjnego call
   site, transportu, publicznych schema/scope'ów, envelope ani klienta.
+  **B4.4c.7 durable activation interrupt service DONE 2026-07-28:**
+  `stage_battle_activation_interrupt` z participant-scoped trwałego headu v2
+  przyjmuje dokładnie jeden public-ready Rozkaz bieżącego `priority_player`.
+  Source-independent preflight reużywa allowlistę i strict payload SSOT przed
+  pierwszym I/O, a pure `trigger_activation_interrupt` wraz z
+  `execute_ready_activation_interrupt_outcomes` pozostają jedynymi właścicielami
+  semantyki source/target/range/kierunku/raz-na-rundę zgodnie z
+  [pozycją 50](../app/static/docs/SZOP_Zdolnosci.md) oraz
+  [pkt 11.b.i i 12.a–c](../app/static/docs/SZOP_Rozjemca.md).
+  Dokładny delta `ActivationInterruptTriggered` + `InterruptTriggered` +
+  outcome trafia przez jeden guarded event batch do jednego checkpointu v2 z
+  bitowo niezmienionym RNG; priority i pass counters nie dryfują. Restart/replay,
+  dalsze pass/action/finalize i czyszczenie override'u są pokryte wraz z v1,
+  no-oracle, strict/stale/coherence/race/rollback, same-owner/two-owner oraz
+  odrzuceniem Klątwy/Oznaczenia/Strażnika bez zapisu. Sukces pozostaje na stałych
+  5 SELECT-ach bez N+1. Nie dodano produkcyjnego call site, transportu,
+  publicznych schema/scope'ów, envelope ani klienta.
   **Niepuste source-correct recovery handlery oraz produkcyjny
   transport/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:

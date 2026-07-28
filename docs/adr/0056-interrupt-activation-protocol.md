@@ -706,6 +706,22 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   status/phase/action-count, auth/no-oracle, stale/coherence, race/rollback,
   same-owner/two-owner i stałe 5 SELECT-ów bez N+1 są pokryte. Nie dodano
   produkcyjnego call site, niepustych recovery handlerów ani transportu.
+- **B4.4c.7 DONE 2026-07-28:** `stage_battle_activation_interrupt` przyjmuje z
+  jednego participant-scoped headu v2 dokładnie jeden public-ready Rozkaz
+  bieżącego `window.priority_player`, także w same-owner sandbox. Wspólny
+  preflight `interrupts.py` reużywa allowlistę i strict Rozkaz payload SSOT,
+  odrzucając coercion, extra/client `sequence`, niekanoniczny kierunek oraz
+  nie-ready slug przed pierwszym I/O. Serwis deleguje source/target/range,
+  kierunek i raz/rundę do `trigger_activation_interrupt` +
+  `execute_ready_activation_interrupt_outcomes`, zgodnie z [pozycją 50][Z50],
+  [pkt 11.b.i–vi][R11] i [pkt 12.a–c][R12]. Dokładny delta
+  `ActivationInterruptTriggered`, kanonicznego `InterruptTriggered` i outcome
+  jest jednym guarded batchem; jeden checkpoint v2 zachowuje RNG bit-identycznie,
+  priority/passy nie dryfują, a wersje/licznik zmieniają się tylko przez pure
+  core. Restart/replay, dalsze pass/action/finalize i wygaśnięcie override'u,
+  v1/no-oracle/stale/race/rollback oraz stałe 5 SELECT-ów bez N+1 są pokryte.
+  Nie dodano produkcyjnego call site, transportu, publicznych schema/scope'ów,
+  envelope ani klienta; Klątwa/Oznaczenie/Strażnik pozostają nie-ready.
 - **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
   transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
 
@@ -728,12 +744,14 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 - **B4.4c.6 DONE:** transactionally-neutral service dla finalizacji po jednej
   albo dwóch akcjach z dokładnie pustym recovery, pure terminal delta,
   niezmiennym RNG, restart/replay, next-start, auth/race/rollback i SQL ceiling;
+- **B4.4c.7 DONE:** transactionally-neutral service dla public-ready Rozkazu,
+  strict preflight przed I/O, pure accepted-interrupt + built-in outcome SSOT,
+  exact delta/checkpoint/RNG, restart/finalize, auth/race/rollback i SQL ceiling;
 - **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
 - scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
   persistence; `POST /actions` z kompatybilnymi guardami;
-- `POST /interrupts` początkowo publicznie obsługuje tylko `pass`; opcjonalny
-  następny mini-slice w tym etapie włącza wyłącznie source-correct Rozkaz, a
-  Klątwę dopiero po osobnym validatorze;
+- `POST /interrupts` może publicznie obsłużyć `pass` oraz trwały source-correct
+  Rozkaz; Klątwa wymaga osobnego validatora i pozostaje poza allowlistą;
 - DoD: real DB restart/race dwóch sesji, SQL-count ceiling, v1 fail-closed,
   same-owner i two-owner auth matrix, security review.
 
