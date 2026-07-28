@@ -651,6 +651,18 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   oraz two-owner matrix są pokryte; sukces ma stałe 5 SELECT-ów bez N+1.
   Publiczny transport, schema, scope'y i pozostałe przejścia nie weszły w ten
   slice.
+- **B4.4c.3 DONE 2026-07-28:** `stage_battle_activation_pass` z jednego
+  participant-scoped headu v2 wykonuje dokładnie jeden jawny pass bieżącego
+  `priority_player`. Strict input, status, sequence, checkpoint state+RNG oraz
+  activation/window guardy są sprawdzane przed pure `pass_interrupt_priority`;
+  same-owner mapuje stronę z trwałego priorytetu, a two-owner z ownerów bitwy.
+  Dokładny event delta handoffu albo close jest zapisywany ciągłym guarded
+  batchem wraz z jednym checkpointem v2 i bitowo niezmienionym RNG. Pierwszy
+  pass i drugi osobny pass zachowują restart/replay parity zgodnie z
+  [pkt 10][R10] i [pkt 12.a–c][R12]; v1, stale/race/rollback/no-oracle oraz
+  guard/phase failures są atomowe, a sukces ma stałe 5 SELECT-ów bez N+1.
+  Transport, publiczne schema/scope'y, accepted interrupt i pozostałe przejścia
+  nie weszły w ten slice.
 - **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
   transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
 
@@ -661,6 +673,9 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 - **B4.4c.2 DONE:** transactionally-neutral participant/no-oracle service dla
   startu v2, optimistic head, atomic event batch + checkpoint v2, restart/RNG,
   race/rollback i SQL ceiling;
+- **B4.4c.3 DONE:** transactionally-neutral service dla jednego jawnego passu
+  priority ownera, pure handoff/close, guarded event delta + jeden checkpoint
+  v2, restart/RNG, same-owner/two-owner, race/rollback i SQL ceiling;
 - **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
 - scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
   persistence; `POST /actions` z kompatybilnymi guardami;

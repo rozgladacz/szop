@@ -5,12 +5,19 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, event, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app import models
 from app.db import Base
 from app.services import battle_activations as activation_service
 from app.services.battle_activations import (
+    BattleActivationPassInvalid,
+    BattleActivationPassNotFound,
+    BattleActivationPassSequenceConflict,
+    BattleActivationPassUnavailable,
+    BattleActivationPassUpgradeRequired,
+    BattleActivationPassWriteConflict,
     BattleActivationStartForbidden,
     BattleActivationStartInvalid,
     BattleActivationStartNotFound,
@@ -18,15 +25,19 @@ from app.services.battle_activations import (
     BattleActivationStartUnavailable,
     BattleActivationStartUpgradeRequired,
     BattleActivationStartWriteConflict,
+    stage_battle_activation_pass,
     stage_battle_activation_start,
 )
 from app.services.engine.activation_protocol import (
     ActivationProtocolErrorReason,
+    pass_interrupt_priority,
     start_activation,
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     ActivationStarted,
+    InterruptPriorityPassed,
+    InterruptWindowClosed,
     InterruptWindowOpened,
     MoveExecuted,
     StatusRemoved,
@@ -209,6 +220,52 @@ def _stream_snapshot(
             )
         )
         return event_sequences, checkpoint_sequences
+
+
+def _persist_started_battle(
+    world: ActivationWorld,
+    *,
+    state: BattleState | None = None,
+    p1_id: int | None = None,
+    p2_id: int | None = None,
+    extra_units_per_player: int = 0,
+) -> tuple[int, object]:
+    initial = state or _idle_state(
+        extra_units_per_player=extra_units_per_player
+    )
+    battle_id = _persist_battle(
+        world,
+        state=initial,
+        p1_id=p1_id,
+        p2_id=p2_id,
+    )
+    participant_ids = (
+        world.p1_id if p1_id is None else p1_id,
+        world.p2_id if p2_id is None else p2_id,
+    )
+    caller_user_id = participant_ids[initial.active_player]
+    selected_unit_id = 11 if initial.active_player == 0 else 21
+    with world.sessions() as session:
+        staged = stage_battle_activation_start(
+            session,
+            battle_id=battle_id,
+            caller_user_id=caller_user_id,
+            selected_unit_id=selected_unit_id,
+            expected_sequence=0,
+        )
+        session.commit()
+    return battle_id, staged
+
+
+def _pass_guards(state: BattleState) -> dict[str, int]:
+    activation = state.activation
+    assert activation is not None
+    assert activation.window is not None
+    return {
+        "activation_id": activation.activation_id,
+        "expected_activation_version": activation.version,
+        "expected_window_version": activation.window.version,
+    }
 
 
 def test_stage_start_persists_exact_batch_checkpoint_and_restart_safe_rng(
@@ -712,6 +769,667 @@ def test_success_query_shape_is_five_selects_without_n_plus_one(
                     caller_user_id=activation_world.p1_id,
                     selected_unit_id=11,
                     expected_sequence=0,
+                )
+                select_counts.append(
+                    sum(
+                        statement.lstrip().upper().startswith("SELECT")
+                        for statement in statements
+                    )
+                )
+                session.rollback()
+    finally:
+        event.remove(
+            activation_world.engine,
+            "before_cursor_execute",
+            capture_statement,
+        )
+
+    assert select_counts == [5, 5]
+    assert save_event_calls == 2
+    assert save_checkpoint_calls == 2
+
+
+def test_stage_pass_persists_both_explicit_passes_across_restarts_with_raw_rng(
+    activation_world: ActivationWorld,
+) -> None:
+    initial = _idle_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+
+    with activation_world.sessions() as first_session:
+        before_first = load_latest_checkpoint(first_session, battle_id)
+        assert before_first is not None
+        first_rng_json = first_session.scalar(
+            select(models.BattleCheckpoint.rng_json).where(
+                models.BattleCheckpoint.battle_id == battle_id,
+                models.BattleCheckpoint.sequence_at == started.new_sequence,
+            )
+        )
+        expected_first = pass_interrupt_priority(
+            before_first.state,
+            caller_player=0,
+            sequence=before_first.sequence_at + 1,
+            **_pass_guards(before_first.state),
+        )
+
+        first_pass = stage_battle_activation_pass(
+            first_session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=before_first.sequence_at,
+            **_pass_guards(before_first.state),
+        )
+
+        assert first_pass.events == expected_first.events
+        assert [type(item) for item in first_pass.events] == [
+            InterruptPriorityPassed
+        ]
+        assert first_pass.previous_sequence == started.new_sequence
+        assert first_pass.new_sequence == started.new_sequence + 1
+        assert first_pass.state == apply_events(
+            before_first.state,
+            first_pass.events,
+        )
+        assert first_pass.state.activation is not None
+        assert first_pass.state.activation.window is not None
+        assert first_pass.state.activation.window.priority_player == 1
+        assert first_pass.state.activation.window.passed_players == (0,)
+        assert (
+            first_pass.dice.to_checkpoint()
+            == before_first.dice.to_checkpoint()
+        )
+        with activation_world.sessions() as uncommitted_reader:
+            unseen = load_latest_checkpoint(uncommitted_reader, battle_id)
+            assert unseen is not None
+            assert unseen.sequence_at == started.new_sequence
+            assert load_events(
+                uncommitted_reader,
+                battle_id,
+                since=started.new_sequence,
+            ) == []
+        first_session.commit()
+
+    with activation_world.sessions() as second_session:
+        before_second = load_latest_checkpoint(second_session, battle_id)
+        assert before_second is not None
+        assert before_second.state == first_pass.state
+        expected_second = pass_interrupt_priority(
+            before_second.state,
+            caller_player=1,
+            sequence=before_second.sequence_at + 1,
+            **_pass_guards(before_second.state),
+        )
+
+        second_pass = stage_battle_activation_pass(
+            second_session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p2_id,
+            expected_sequence=before_second.sequence_at,
+            **_pass_guards(before_second.state),
+        )
+
+        assert second_pass.events == expected_second.events
+        assert [type(item) for item in second_pass.events] == [
+            InterruptPriorityPassed,
+            InterruptWindowClosed,
+        ]
+        assert second_pass.previous_sequence == first_pass.new_sequence
+        assert second_pass.new_sequence == first_pass.new_sequence + 2
+        assert second_pass.state == apply_events(
+            before_second.state,
+            second_pass.events,
+        )
+        assert second_pass.state.activation is not None
+        assert second_pass.state.activation.phase is ActivationPhase.ACTION_READY
+        assert second_pass.state.activation.window is None
+        assert (
+            second_pass.dice.to_checkpoint()
+            == before_second.dice.to_checkpoint()
+        )
+        second_session.commit()
+
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.sequence_at == second_pass.new_sequence
+        assert checkpoint.state == second_pass.state
+        pass_events = tuple(
+            load_events(
+                restarted,
+                battle_id,
+                since=started.new_sequence,
+            )
+        )
+        assert pass_events == (*first_pass.events, *second_pass.events)
+        assert checkpoint.state == apply_events(started.state, pass_events)
+        rng_rows = tuple(
+            restarted.scalars(
+                select(models.BattleCheckpoint.rng_json)
+                .where(models.BattleCheckpoint.battle_id == battle_id)
+                .order_by(models.BattleCheckpoint.sequence_at)
+            )
+        )
+        assert rng_rows
+        assert set(rng_rows) == {first_rng_json}
+        assert _stream_snapshot(activation_world, battle_id) == (
+            (1, 2, 3, 4, 5),
+            (0, 2, 3, 5),
+        )
+
+
+def test_pass_two_owner_requires_the_current_priority_owner_each_time(
+    activation_world: ActivationWorld,
+) -> None:
+    battle_id, started = _persist_started_battle(activation_world)
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as wrong_first:
+        with pytest.raises(BattleActivationPassInvalid) as exc_info:
+            stage_battle_activation_pass(
+                wrong_first,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p2_id,
+                expected_sequence=started.new_sequence,
+                **_pass_guards(started.state),
+            )
+    assert exc_info.value.reason is ActivationProtocolErrorReason.INVALID_CALLER
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+    with activation_world.sessions() as first_session:
+        first_pass = stage_battle_activation_pass(
+            first_session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=started.new_sequence,
+            **_pass_guards(started.state),
+        )
+        first_session.commit()
+    after_first = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as repeated:
+        with pytest.raises(BattleActivationPassInvalid) as exc_info:
+            stage_battle_activation_pass(
+                repeated,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=first_pass.new_sequence,
+                **_pass_guards(first_pass.state),
+            )
+    assert exc_info.value.reason is ActivationProtocolErrorReason.INVALID_CALLER
+    assert _stream_snapshot(activation_world, battle_id) == after_first
+
+
+def test_pass_same_owner_maps_each_explicit_call_from_durable_priority(
+    activation_world: ActivationWorld,
+) -> None:
+    owner_id = activation_world.p1_id
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=_idle_state(active_player=0, initiative_player=1),
+        p1_id=owner_id,
+        p2_id=owner_id,
+    )
+    assert started.state.activation is not None
+    assert started.state.activation.controlling_player == 0
+    assert started.state.activation.window is not None
+    assert started.state.activation.window.priority_player == 1
+
+    with activation_world.sessions() as first_session:
+        first_pass = stage_battle_activation_pass(
+            first_session,
+            battle_id=battle_id,
+            caller_user_id=owner_id,
+            expected_sequence=started.new_sequence,
+            **_pass_guards(started.state),
+        )
+        first_session.commit()
+    assert first_pass.events[0].passed_player == 1
+    assert first_pass.state.activation.window.priority_player == 0
+
+    with activation_world.sessions() as second_session:
+        second_pass = stage_battle_activation_pass(
+            second_session,
+            battle_id=battle_id,
+            caller_user_id=owner_id,
+            expected_sequence=first_pass.new_sequence,
+            **_pass_guards(first_pass.state),
+        )
+        second_session.commit()
+    assert second_pass.events[0].passed_player == 0
+    assert second_pass.state.activation.phase is ActivationPhase.ACTION_READY
+
+
+def test_pass_missing_and_foreign_battles_share_the_same_no_oracle_error(
+    activation_world: ActivationWorld,
+) -> None:
+    foreign_id, started = _persist_started_battle(activation_world)
+    before = _stream_snapshot(activation_world, foreign_id)
+    failures = []
+
+    for battle_id in (foreign_id, foreign_id + 999):
+        with activation_world.sessions() as session:
+            with pytest.raises(BattleActivationPassNotFound) as exc_info:
+                stage_battle_activation_pass(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.outsider_id,
+                    expected_sequence=started.new_sequence,
+                    **_pass_guards(started.state),
+                )
+            failures.append((type(exc_info.value), str(exc_info.value)))
+
+    assert failures[0] == failures[1]
+    assert _stream_snapshot(activation_world, foreign_id) == before
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error_type", "reason"),
+    [
+        ("battle_id", True, BattleActivationPassNotFound, None),
+        ("battle_id", "1", BattleActivationPassNotFound, None),
+        ("battle_id", 0, BattleActivationPassNotFound, None),
+        ("caller_user_id", False, BattleActivationPassNotFound, None),
+        ("caller_user_id", "1", BattleActivationPassNotFound, None),
+        ("caller_user_id", 0, BattleActivationPassNotFound, None),
+        ("expected_sequence", True, BattleActivationPassInvalid, None),
+        ("expected_sequence", -1, BattleActivationPassInvalid, None),
+        ("expected_sequence", "2", BattleActivationPassInvalid, None),
+        (
+            "activation_id",
+            True,
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "activation_id",
+            "1",
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "activation_id",
+            0,
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "expected_activation_version",
+            "1",
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "expected_activation_version",
+            False,
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "expected_window_version",
+            0,
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_WINDOW,
+        ),
+        (
+            "expected_window_version",
+            True,
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_WINDOW,
+        ),
+        (
+            "expected_window_version",
+            "1",
+            BattleActivationPassInvalid,
+            ActivationProtocolErrorReason.STALE_WINDOW,
+        ),
+    ],
+)
+def test_pass_strict_inputs_reject_bool_coercion_and_invalid_ranges_without_writes(
+    activation_world: ActivationWorld,
+    field: str,
+    value: object,
+    error_type: type[Exception],
+    reason: ActivationProtocolErrorReason | None,
+) -> None:
+    battle_id, started = _persist_started_battle(activation_world)
+    before = _stream_snapshot(activation_world, battle_id)
+    kwargs = {
+        "battle_id": battle_id,
+        "caller_user_id": activation_world.p1_id,
+        "expected_sequence": started.new_sequence,
+        **_pass_guards(started.state),
+    }
+    kwargs[field] = value
+
+    with activation_world.sessions() as session:
+        with pytest.raises(error_type) as exc_info:
+            stage_battle_activation_pass(session, **kwargs)
+        if reason is not None:
+            assert exc_info.value.reason is reason
+
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_pass_rejects_v1_inactive_stale_sequence_and_wrong_phase_atomically(
+    activation_world: ActivationWorld,
+) -> None:
+    v1_id = _persist_battle(
+        activation_world,
+        state=_idle_state(initiative_player=None),
+        protocol_version=1,
+        checkpoint_version=1,
+    )
+    with activation_world.sessions() as v1_session:
+        with pytest.raises(BattleActivationPassUpgradeRequired):
+            stage_battle_activation_pass(
+                v1_session,
+                battle_id=v1_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=0,
+                activation_id=1,
+                expected_activation_version=1,
+                expected_window_version=1,
+            )
+
+    inactive_id, inactive_started = _persist_started_battle(activation_world)
+    with activation_world.sessions() as updater:
+        battle = updater.get(models.Battle, inactive_id)
+        assert battle is not None
+        battle.status = "finished"
+        updater.commit()
+    inactive_before = _stream_snapshot(activation_world, inactive_id)
+    with activation_world.sessions() as inactive_session:
+        with pytest.raises(BattleActivationPassInvalid) as exc_info:
+            stage_battle_activation_pass(
+                inactive_session,
+                battle_id=inactive_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=inactive_started.new_sequence,
+                **_pass_guards(inactive_started.state),
+            )
+    assert exc_info.value.reason is ActivationProtocolErrorReason.INVALID_PHASE
+    assert _stream_snapshot(activation_world, inactive_id) == inactive_before
+
+    active_id, active_started = _persist_started_battle(activation_world)
+    active_before = _stream_snapshot(activation_world, active_id)
+    with activation_world.sessions() as stale_session:
+        with pytest.raises(BattleActivationPassSequenceConflict) as exc_info:
+            stage_battle_activation_pass(
+                stale_session,
+                battle_id=active_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=active_started.new_sequence + 1,
+                **_pass_guards(active_started.state),
+            )
+    assert exc_info.value.actual_sequence == active_started.new_sequence
+    assert _stream_snapshot(activation_world, active_id) == active_before
+
+    idle_id = _persist_battle(activation_world)
+    idle_before = _stream_snapshot(activation_world, idle_id)
+    with activation_world.sessions() as idle_session:
+        with pytest.raises(BattleActivationPassInvalid) as exc_info:
+            stage_battle_activation_pass(
+                idle_session,
+                battle_id=idle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=0,
+                activation_id=1,
+                expected_activation_version=1,
+                expected_window_version=1,
+            )
+    assert exc_info.value.reason is ActivationProtocolErrorReason.INVALID_PHASE
+    assert _stream_snapshot(activation_world, idle_id) == idle_before
+
+
+def test_pass_missing_stale_and_protocol_mismatched_checkpoints_are_unavailable(
+    activation_world: ActivationWorld,
+) -> None:
+    missing_id = _persist_battle(activation_world, with_checkpoint=False)
+    stale_id = _persist_battle(activation_world)
+    mismatch_id = _persist_battle(
+        activation_world,
+        state=_idle_state(initiative_player=None),
+        protocol_version=2,
+        checkpoint_version=1,
+    )
+    with activation_world.sessions() as session:
+        save_events(
+            session,
+            stale_id,
+            [
+                MoveExecuted(
+                    sequence=1,
+                    unit_id=11,
+                    from_pos=(11.0, 0.0),
+                    to_pos=(12.0, 0.0),
+                )
+            ],
+            expected_latest_sequence=0,
+        )
+        session.commit()
+
+    for battle_id, actual_sequence in (
+        (missing_id, 0),
+        (stale_id, 1),
+        (mismatch_id, 0),
+    ):
+        with activation_world.sessions() as session:
+            with pytest.raises(BattleActivationPassUnavailable) as exc_info:
+                stage_battle_activation_pass(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.p1_id,
+                    expected_sequence=0,
+                    activation_id=1,
+                    expected_activation_version=1,
+                    expected_window_version=1,
+                )
+        assert exc_info.value.actual_sequence == actual_sequence
+
+
+@pytest.mark.parametrize(
+    ("guard", "reason"),
+    [
+        (
+            {"activation_id": 999},
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            {"expected_activation_version": 999},
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            {"expected_window_version": 999},
+            ActivationProtocolErrorReason.STALE_WINDOW,
+        ),
+    ],
+)
+def test_pass_stale_activation_and_window_guards_fail_without_writes(
+    activation_world: ActivationWorld,
+    guard: dict[str, int],
+    reason: ActivationProtocolErrorReason,
+) -> None:
+    battle_id, started = _persist_started_battle(activation_world)
+    before = _stream_snapshot(activation_world, battle_id)
+    guards = _pass_guards(started.state)
+    guards.update(guard)
+
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationPassInvalid) as exc_info:
+            stage_battle_activation_pass(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                **guards,
+            )
+
+    assert exc_info.value.reason is reason
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+@pytest.mark.parametrize("failure", ["checkpoint-conflict", "integrity-error"])
+def test_pass_caller_rollback_after_checkpoint_stage_removes_whole_batch(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    battle_id, started = _persist_started_battle(activation_world)
+    before = _stream_snapshot(activation_world, battle_id)
+    real_save_checkpoint = activation_service.save_checkpoint
+
+    def fail_after_checkpoint(*args, **kwargs):
+        real_save_checkpoint(*args, **kwargs)
+        if failure == "integrity-error":
+            raise IntegrityError(
+                "checkpoint race",
+                {},
+                Exception("unique"),
+            )
+        raise BattleCheckpointSequenceConflict(
+            args[1],
+            sequence_at=args[2],
+            latest_sequence=args[2] - 1,
+        )
+
+    monkeypatch.setattr(
+        activation_service,
+        "save_checkpoint",
+        fail_after_checkpoint,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationPassWriteConflict):
+            stage_battle_activation_pass(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                **_pass_guards(started.state),
+            )
+        session.rollback()
+
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_pass_concurrent_head_change_is_reported_without_partial_service_batch(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    battle_id, started = _persist_started_battle(activation_world)
+    real_save_events = activation_service.save_events
+    raced = False
+
+    def race_before_guard(db, persisted_battle_id, events, **kwargs):
+        nonlocal raced
+        if not raced:
+            raced = True
+            with activation_world.sessions() as competitor:
+                real_save_events(
+                    competitor,
+                    battle_id,
+                    [
+                        MoveExecuted(
+                            sequence=started.new_sequence + 1,
+                            unit_id=11,
+                            from_pos=(11.0, 0.0),
+                            to_pos=(12.0, 0.0),
+                        )
+                    ],
+                    expected_latest_sequence=started.new_sequence,
+                )
+                competitor.commit()
+        return real_save_events(db, persisted_battle_id, events, **kwargs)
+
+    monkeypatch.setattr(activation_service, "save_events", race_before_guard)
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationPassSequenceConflict) as exc_info:
+            stage_battle_activation_pass(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                **_pass_guards(started.state),
+            )
+        session.rollback()
+
+    assert exc_info.value.actual_sequence == started.new_sequence + 1
+    with activation_world.sessions() as session:
+        tail = load_events(
+            session,
+            battle_id,
+            since=started.new_sequence,
+        )
+        assert len(tail) == 1
+        assert type(tail[0]) is MoveExecuted
+        assert session.scalar(
+            select(func.count())
+            .select_from(models.BattleCheckpoint)
+            .where(models.BattleCheckpoint.battle_id == battle_id)
+        ) == 2
+
+
+def test_pass_success_query_shape_is_five_selects_without_n_plus_one(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    small_id, small_started = _persist_started_battle(activation_world)
+    large_id, large_started = _persist_started_battle(
+        activation_world,
+        extra_units_per_player=12,
+    )
+    statements: list[str] = []
+    save_event_calls = 0
+    save_checkpoint_calls = 0
+    real_save_events = activation_service.save_events
+    real_save_checkpoint = activation_service.save_checkpoint
+
+    def count_save_events(*args, **kwargs):
+        nonlocal save_event_calls
+        save_event_calls += 1
+        return real_save_events(*args, **kwargs)
+
+    def count_save_checkpoint(*args, **kwargs):
+        nonlocal save_checkpoint_calls
+        save_checkpoint_calls += 1
+        return real_save_checkpoint(*args, **kwargs)
+
+    def capture_statement(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        statements.append(statement)
+
+    monkeypatch.setattr(activation_service, "save_events", count_save_events)
+    monkeypatch.setattr(
+        activation_service,
+        "save_checkpoint",
+        count_save_checkpoint,
+    )
+    select_counts = []
+    event.listen(
+        activation_world.engine,
+        "before_cursor_execute",
+        capture_statement,
+    )
+    try:
+        for battle_id, started in (
+            (small_id, small_started),
+            (large_id, large_started),
+        ):
+            statements.clear()
+            with activation_world.sessions() as session:
+                stage_battle_activation_pass(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.p1_id,
+                    expected_sequence=started.new_sequence,
+                    **_pass_guards(started.state),
                 )
                 select_counts.append(
                     sum(

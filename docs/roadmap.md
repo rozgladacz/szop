@@ -326,6 +326,20 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   N+1; v1, stale/race, niespójny checkpoint, cudzy caller i nielegalny wybór
   failują bez częściowych zapisów. Routery, publiczne schema/scope'y, klient i
   pozostałe przejścia protokołu nie zostały dodane.
+  **B4.4c.3 durable explicit priority pass service DONE 2026-07-28:**
+  ten sam wąski serwis persistence dodaje jeden transakcyjnie neutralny pass
+  bieżącego `priority_player`. Z trwałego headu v2 sprawdza
+  participant/no-oracle, status, strict sequence oraz activation/window guardy,
+  mapuje ownera z trwałego priorytetu i deleguje całe handoff/close do pure
+  `pass_interrupt_priority` ([pkt 10 i 12.a–c](../app/static/docs/SZOP_Rozjemca.md)).
+  Każde jawne wywołanie stage'uje dokładny ciągły event delta oraz jeden
+  checkpoint v2 z bitowo niezmienionym RNG; pierwszy pass przetrwa restart z
+  przekazanym priorytetem, a drugi osobny pass właściwego ownera zamyka okno.
+  Same-owner nadal wymaga dwóch wywołań, two-owner egzekwuje bieżącego ownera,
+  a v1/checkpoint/stale/guard/phase/race/rollback failują bez częściowego zapisu.
+  Sukces pozostaje na 5 SELECT-ach bez N+1. Router, publiczne schema/scope'y,
+  accepted interrupt, akcja, continue/finalize, recovery i klient nie weszły
+  w ten slice.
   **Niepuste source-correct recovery handlery oraz produkcyjny
   transport/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:

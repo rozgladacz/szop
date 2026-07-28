@@ -162,6 +162,19 @@ liczby oddziałów. Nie ma nowego routera, schema, scope'u ani klienta.
 `POST /battles/{id}/interrupts`, prereq trasy aktywacji i scope
 `battle:interrupt`, produkcyjne wiring v2 dla action/finalize, niepuste recovery handlery oraz
 transport/API/client rollout pozostają **OPEN**.
+**B4.4c.3** rozszerza tę samą granicę o transakcyjnie neutralny
+`stage_battle_activation_pass` dla dokładnie jednego jawnego passu bieżącego
+`priority_player`. Participant/no-oracle i spójny head/checkpoint v2 pozostają
+wspólne ze startem; strict sequence oraz activation/window guardy poprzedzają
+wywołanie pure `pass_interrupt_priority`. W two-owner stronę wyznaczają ownerzy,
+a w same-owner — trwały `window.priority_player`, nie `active_player`, więc oba
+passy nadal wymagają osobnych wywołań
+([pkt 10 i 12.a–c](../app/static/docs/SZOP_Rozjemca.md)).
+Dokładny delta pure core trafia przez `save_events` do ciągłego batcha, po czym
+`save_checkpoint(..., state_version=2)` zapisuje jeden checkpoint z
+niezmienionym RNG. Restart po handoffie i zamknięciu, optimistic race/rollback
+oraz limit 5 SELECT-ów bez N+1 są pokryte testami. Publiczny transport, schema,
+scope'y i pozostałe przejścia nie zmieniły się.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.
