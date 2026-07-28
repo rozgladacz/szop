@@ -1,9 +1,8 @@
 """Pure control-plane transitions for durable activation protocol v2.
 
-This module owns the non-mechanical start/pass/continue operations plus the
-accepted-interrupt boundary from ADR-0056.  It performs no I/O or RNG work.
-Every live state returned here is derived by replaying emitted events through
-``apply_events``.
+This module owns the durable protocol transitions plus the narrow mechanical
+leaf boundaries from ADR-0056.  It performs no I/O.  Every live state returned
+here is derived by replaying emitted events through ``apply_events``.
 """
 
 from __future__ import annotations
@@ -13,7 +12,14 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Protocol, get_args
 
+from app.services.engine.actions import (
+    ACTION_TYPE_BY_CLASS,
+    Action,
+    can_append_activation_action_type,
+)
+from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
+    ActivationActionCommitted,
     ActivationContinuationChosen,
     ActivationInterruptTriggered,
     ActivationStarted,
@@ -26,6 +32,8 @@ from app.services.engine.events import (
     StatusRemoved,
     _PROTOCOL_EVENT_TYPES,
 )
+from app.services.engine.phases import _apply_single_action
+from app.services.engine.resolver import _validate_action
 from app.services.engine.state import (
     ActivationPhase,
     ActivationState,
@@ -51,6 +59,7 @@ class ActivationProtocolErrorReason(str, Enum):
     STALE_ACTIVATION = "stale_activation"
     STALE_WINDOW = "stale_window"
     ILLEGAL_CONTINUE = "illegal_continue"
+    ILLEGAL_ACTION = "illegal_action"
     ILLEGAL_INTERRUPT = "illegal_interrupt"
     INTERRUPT_LIMIT_REACHED = "interrupt_limit_reached"
 
@@ -70,6 +79,29 @@ class ActivationTransitionResult:
     state: BattleState
     events: tuple[BattleEvent, ...]
     next_sequence: int
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationActionTransitionResult:
+    """Action transition plus the advanced, independently checkpointable RNG."""
+
+    state: BattleState
+    events: tuple[BattleEvent, ...]
+    next_sequence: int
+    dice: DeterministicDice
+
+
+class ActivationActionOutcomeExecutor(Protocol):
+    """Injected leaf resolving exactly one action and its regroup outcomes."""
+
+    def __call__(
+        self,
+        *,
+        state: BattleState,
+        action: Action,
+        dice: DeterministicDice,
+        sequence: int,
+    ) -> tuple[BattleState, tuple[BattleEvent, ...], int]: ...
 
 
 class ActivationInterruptOutcomeExecutor(Protocol):
@@ -267,6 +299,73 @@ def _validated_interrupt_outcomes(
     if outcome_state != replay_state:
         _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
     return outcome_events, replay_state
+
+
+def _execute_single_action_outcomes(
+    *,
+    state: BattleState,
+    action: Action,
+    dice: DeterministicDice,
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    """Narrow adapter preserving the resolver validator and mechanical leaf."""
+
+    _validate_action(state, action)
+    return _apply_single_action(state, action, dice, sequence)
+
+
+def _validated_action_outcomes(
+    state: BattleState,
+    *,
+    action: Action,
+    dice: DeterministicDice,
+    sequence: int,
+    outcome_executor: ActivationActionOutcomeExecutor,
+) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
+    try:
+        result = outcome_executor(
+            state=state,
+            action=action,
+            dice=dice,
+            sequence=sequence,
+        )
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+
+    if type(result) is not tuple or len(result) != 3:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    outcome_state, outcome_events, next_sequence = result
+    if (
+        type(outcome_state) is not BattleState
+        or type(outcome_events) is not tuple
+        or not outcome_events
+        or type(next_sequence) is not int
+        or next_sequence != sequence + len(outcome_events)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+
+    for offset, event in enumerate(outcome_events):
+        if (
+            type(event) not in _BATTLE_EVENT_TYPES
+            or type(event) in _PROTOCOL_EVENT_TYPES
+            or type(getattr(event, "sequence", None)) is not int
+            or event.sequence != sequence + offset
+            or type(getattr(event, "version", None)) is not int
+            or event.version != SCHEMA_VERSION
+        ):
+            _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+
+    try:
+        replay_state = apply_events(state, outcome_events)
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+    if outcome_state != replay_state:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    return replay_state, outcome_events, next_sequence
 
 
 def start_activation(
@@ -482,11 +581,87 @@ def continue_activation(
     return _result(state, events, sequence=sequence)
 
 
+def commit_activation_action(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    action: Action,
+    dice: DeterministicDice,
+    sequence: int,
+    outcome_executor: ActivationActionOutcomeExecutor = _execute_single_action_outcomes,
+) -> ActivationActionTransitionResult:
+    """Resolve and commit exactly one selected-unit action in ``ACTION_READY``."""
+
+    _require_protocol_v2(state)
+    activation = _require_activation(
+        state,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+    )
+    if activation.phase is not ActivationPhase.ACTION_READY:
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    _require_caller(caller_player, activation.controlling_player)
+
+    action_type = ACTION_TYPE_BY_CLASS.get(type(action))
+    if (
+        action_type is None
+        or type(getattr(action, "unit_id", None)) is not int
+        or action.unit_id != activation.selected_unit_id
+        or not can_append_activation_action_type(
+            action_type,
+            activation.action_types,
+        )
+        or type(dice) is not DeterministicDice
+        or type(sequence) is not int
+        or sequence < 1
+        or not callable(outcome_executor)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+
+    try:
+        working_dice = DeterministicDice.from_checkpoint(dice.to_checkpoint())
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+    outcome_state, outcome_events, next_sequence = _validated_action_outcomes(
+        state,
+        action=action,
+        dice=working_dice,
+        sequence=sequence,
+        outcome_executor=outcome_executor,
+    )
+    committed = ActivationActionCommitted(
+        sequence=next_sequence,
+        activation_id=activation.activation_id,
+        activation_version=activation.version + 1,
+        action_type=action_type,
+    )
+    events = (*outcome_events, committed)
+    try:
+        result_state = apply_events(outcome_state, (committed,))
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+    return ActivationActionTransitionResult(
+        state=result_state,
+        events=events,
+        next_sequence=next_sequence + 1,
+        dice=working_dice,
+    )
+
+
 __all__ = [
+    "ActivationActionOutcomeExecutor",
+    "ActivationActionTransitionResult",
     "ActivationInterruptOutcomeExecutor",
     "ActivationProtocolError",
     "ActivationProtocolErrorReason",
     "ActivationTransitionResult",
+    "commit_activation_action",
     "continue_activation",
     "pass_interrupt_priority",
     "start_activation",

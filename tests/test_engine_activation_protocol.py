@@ -5,14 +5,23 @@ from dataclasses import dataclass, replace
 
 import pytest
 
+from app.services.engine.actions import (
+    ChargeAction,
+    DefendAction,
+    ManeuverAction,
+    ShootAction,
+    SpecialAction,
+)
 from app.services.engine.activation_protocol import (
     ActivationProtocolError,
     ActivationProtocolErrorReason,
+    commit_activation_action,
     continue_activation,
     pass_interrupt_priority,
     start_activation,
     trigger_activation_interrupt,
 )
+from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     AbilityOverrideApplied,
     ActivationActionCommitted,
@@ -24,6 +33,7 @@ from app.services.engine.events import (
     InterruptPriorityPassed,
     InterruptWindowClosed,
     InterruptWindowOpened,
+    MoveExecuted,
     StatusRemoved,
     event_to_json,
 )
@@ -33,6 +43,7 @@ from app.services.engine.state import (
     Lokalizacja,
     Position,
     UnitBlob,
+    WeaponProfile,
     apply_events,
 )
 from app.services.engine.state_codec import (
@@ -42,7 +53,11 @@ from app.services.engine.state_codec import (
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYGOTOWANY,
+    STATUS_WYCZERPANY,
 )
+
+RIFLE = WeaponProfile(slug="rifle", name="Rifle", range_inches=24, attacks=2)
+SWORD = WeaponProfile(slug="sword", name="Sword", range_inches=0, attacks=2)
 
 
 def _unit(
@@ -129,6 +144,118 @@ def _after_first_action(*, sequence: int = 10):
 def _restart(state: BattleState) -> BattleState:
     payload = json.loads(json.dumps(battle_state_to_json(state, version=2)))
     return battle_state_from_json(payload)
+
+
+def _action_idle_state(
+    *,
+    actor_statuses: tuple[str, ...] = (),
+    actor_overrides: tuple[tuple[str, bool], ...] = (),
+) -> BattleState:
+    actor = replace(
+        _unit(11, 0, models_alive=5, status_flags=actor_statuses),
+        position=Position(0, 0),
+        ranged_weapons=(RIFLE,),
+        melee_weapons=(SWORD,),
+        ability_overrides=actor_overrides,
+    )
+    target = replace(
+        _unit(21, 1, models_alive=20),
+        position=Position(6, 0),
+        melee_weapons=(SWORD,),
+    )
+    return BattleState(
+        round=1,
+        active_player=0,
+        activations_remaining=(1, 1),
+        blobs=(actor, target),
+        terrain=(),
+        initiative_player=0,
+        initial_toughness_snapshot=((11, 15), (21, 60)),
+    )
+
+
+def _ready_for_action(
+    *,
+    state: BattleState | None = None,
+    sequence: int = 800,
+):
+    started = start_activation(
+        _action_idle_state() if state is None else state,
+        selected_unit_id=11,
+        sequence=sequence,
+    )
+    first_pass = pass_interrupt_priority(
+        started.state,
+        caller_player=0,
+        activation_id=started.state.activation.activation_id,
+        expected_activation_version=1,
+        expected_window_version=1,
+        sequence=started.next_sequence,
+    )
+    return pass_interrupt_priority(
+        first_pass.state,
+        caller_player=1,
+        activation_id=first_pass.state.activation.activation_id,
+        expected_activation_version=2,
+        expected_window_version=2,
+        sequence=first_pass.next_sequence,
+    )
+
+
+def _ready_for_second_action(first_result):
+    continued = continue_activation(
+        first_result.state,
+        caller_player=0,
+        activation_id=first_result.state.activation.activation_id,
+        expected_activation_version=first_result.state.activation.version,
+        sequence=first_result.next_sequence,
+    )
+    first_pass = pass_interrupt_priority(
+        continued.state,
+        caller_player=0,
+        activation_id=continued.state.activation.activation_id,
+        expected_activation_version=continued.state.activation.version,
+        expected_window_version=1,
+        sequence=continued.next_sequence,
+    )
+    return pass_interrupt_priority(
+        first_pass.state,
+        caller_player=1,
+        activation_id=first_pass.state.activation.activation_id,
+        expected_activation_version=first_pass.state.activation.version,
+        expected_window_version=first_pass.state.activation.window.version,
+        sequence=first_pass.next_sequence,
+    )
+
+
+def _commit(
+    state: BattleState,
+    action,
+    dice: DeterministicDice,
+    *,
+    sequence: int,
+    caller_player: int = 0,
+    expected_activation_version: int | None = None,
+    outcome_executor=None,
+):
+    activation = state.activation
+    kwargs = {}
+    if outcome_executor is not None:
+        kwargs["outcome_executor"] = outcome_executor
+    return commit_activation_action(
+        state,
+        caller_player=caller_player,
+        activation_id=activation.activation_id,
+        expected_activation_version=(
+            activation.version
+            if expected_activation_version is None
+            else expected_activation_version
+        ),
+        action=action,
+        dice=dice,
+        sequence=sequence,
+        **kwargs,
+    )
 
 
 def _assert_rejected(
@@ -1263,3 +1390,391 @@ def test_v2_restart_interrupt_parity_and_later_explicit_close() -> None:
     )
     assert closed.state.activation.phase is ActivationPhase.ACTION_READY
     assert closed.state == apply_events(restarted.state, closed.events)
+
+
+def test_first_action_bridge_commits_after_outcomes_without_finalizing() -> None:
+    ready = _ready_for_action(
+        state=_action_idle_state(actor_overrides=(("ordered", True),)),
+        sequence=800,
+    )
+    dice = DeterministicDice(17)
+    input_rng = dice.to_checkpoint()
+
+    result = _commit(
+        ready.state,
+        DefendAction(11),
+        dice,
+        sequence=ready.next_sequence,
+    )
+
+    assert result.events
+    assert isinstance(result.events[-1], ActivationActionCommitted)
+    assert result.events[-1].action_type == "defend"
+    assert [event.sequence for event in result.events] == list(
+        range(ready.next_sequence, result.next_sequence)
+    )
+    assert all(
+        not isinstance(event, ActivationActionCommitted)
+        for event in result.events[:-1]
+    )
+    assert result.state == apply_events(ready.state, result.events)
+    assert result.state.activation.action_count == 1
+    assert result.state.activation.action_types == ("defend",)
+    assert result.state.activation.phase is ActivationPhase.AWAITING_CONTINUATION
+    assert result.state.active_player == ready.state.active_player == 0
+    actor = next(blob for blob in result.state.blobs if blob.id == 11)
+    assert STATUS_AKTYWOWANY not in actor.status_flags
+    assert actor.ability_overrides == (("ordered", True),)
+    assert dice.to_checkpoint() == input_rng
+
+
+def test_second_action_bridge_uses_durable_history_and_awaits_finalization() -> None:
+    ready = _ready_for_action(sequence=830)
+    first = _commit(
+        ready.state,
+        DefendAction(11),
+        DeterministicDice(3),
+        sequence=ready.next_sequence,
+    )
+    second_ready = _ready_for_second_action(first)
+
+    second = _commit(
+        second_ready.state,
+        ManeuverAction(11, Position(1, 0)),
+        first.dice,
+        sequence=second_ready.next_sequence,
+    )
+
+    assert any(isinstance(event, MoveExecuted) for event in second.events[:-1])
+    assert isinstance(second.events[-1], ActivationActionCommitted)
+    assert second.events[-1].action_type == "maneuver"
+    assert second.state == apply_events(second_ready.state, second.events)
+    assert second.state.activation.action_count == 2
+    assert second.state.activation.action_types == ("defend", "maneuver")
+    assert second.state.activation.phase is ActivationPhase.AWAITING_FINALIZATION
+    assert second.state.active_player == 0
+    actor = next(blob for blob in second.state.blobs if blob.id == 11)
+    assert actor.position == Position(1, 0)
+    assert STATUS_AKTYWOWANY not in actor.status_flags
+
+
+@pytest.mark.parametrize(
+    ("action", "action_type"),
+    [
+        (ManeuverAction(11, Position(1, 0)), "maneuver"),
+        (DefendAction(11), "defend"),
+        (ShootAction(11, 21, RIFLE), "shoot"),
+        (ChargeAction(11, 21, SWORD, counter_attack_declared=False), "charge"),
+        (SpecialAction(11, "discard_exhausted"), "special"),
+    ],
+)
+def test_action_bridge_uses_canonical_type_for_representative_actions(
+    action,
+    action_type: str,
+) -> None:
+    ready = _ready_for_action(
+        state=_action_idle_state(actor_statuses=(STATUS_WYCZERPANY,)),
+        sequence=860,
+    )
+
+    result = _commit(
+        ready.state,
+        action,
+        DeterministicDice(29),
+        sequence=ready.next_sequence,
+    )
+
+    assert result.events[-1].action_type == action_type
+    assert result.state.activation.action_types == (action_type,)
+    assert result.state.activation.phase is ActivationPhase.AWAITING_CONTINUATION
+
+
+@pytest.mark.parametrize(
+    ("override", "reason"),
+    [
+        ({"caller_player": 1}, ActivationProtocolErrorReason.INVALID_CALLER),
+        (
+            {"expected_activation_version": 1},
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            {"action": DefendAction(21)},
+            ActivationProtocolErrorReason.ILLEGAL_ACTION,
+        ),
+    ],
+)
+def test_action_bridge_rejects_wrong_caller_version_or_selected_unit_atomically(
+    override,
+    reason: ActivationProtocolErrorReason,
+) -> None:
+    ready = _ready_for_action(sequence=890)
+    dice = DeterministicDice(31)
+    rng_before = dice.to_checkpoint()
+    kwargs = {
+        "state": ready.state,
+        "caller_player": 0,
+        "activation_id": ready.state.activation.activation_id,
+        "expected_activation_version": ready.state.activation.version,
+        "action": DefendAction(11),
+        "dice": dice,
+        "sequence": ready.next_sequence,
+        **override,
+    }
+
+    _assert_rejected(
+        ready.state,
+        reason,
+        lambda: commit_activation_action(**kwargs),
+    )
+    assert dice.to_checkpoint() == rng_before
+
+
+def test_action_bridge_rejects_v1_wrong_phase_and_third_action() -> None:
+    dice = DeterministicDice(37)
+    with pytest.raises(ActivationProtocolError) as v1_error:
+        commit_activation_action(
+            _idle_state(initiative_player=None),
+            caller_player=0,
+            activation_id=1,
+            expected_activation_version=1,
+            action=DefendAction(11),
+            dice=dice,
+            sequence=1,
+        )
+    assert (
+        v1_error.value.reason
+        is ActivationProtocolErrorReason.PROTOCOL_UPGRADE_REQUIRED
+    )
+
+    started = start_activation(
+        _action_idle_state(),
+        selected_unit_id=11,
+        sequence=920,
+    )
+    _assert_rejected(
+        started.state,
+        ActivationProtocolErrorReason.INVALID_PHASE,
+        lambda: _commit(
+            started.state,
+            DefendAction(11),
+            dice,
+            sequence=started.next_sequence,
+        ),
+    )
+
+    first_ready = _ready_for_action(sequence=930)
+    first = _commit(
+        first_ready.state,
+        DefendAction(11),
+        DeterministicDice(41),
+        sequence=first_ready.next_sequence,
+    )
+    second_ready = _ready_for_second_action(first)
+    second = _commit(
+        second_ready.state,
+        ManeuverAction(11, Position(1, 0)),
+        first.dice,
+        sequence=second_ready.next_sequence,
+    )
+    _assert_rejected(
+        second.state,
+        ActivationProtocolErrorReason.INVALID_PHASE,
+        lambda: _commit(
+            second.state,
+            DefendAction(11),
+            second.dice,
+            sequence=second.next_sequence,
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        ShootAction(11, 21, RIFLE),
+        ChargeAction(11, 21, SWORD, counter_attack_declared=False),
+    ],
+)
+def test_action_bridge_rejects_repeated_shoot_or_charge_from_durable_history(
+    action,
+) -> None:
+    ready = _ready_for_action(sequence=960)
+    first = _commit(
+        ready.state,
+        action,
+        DeterministicDice(43),
+        sequence=ready.next_sequence,
+    )
+    second_ready = _ready_for_second_action(first)
+    rng_before = first.dice.to_checkpoint()
+
+    _assert_rejected(
+        second_ready.state,
+        ActivationProtocolErrorReason.ILLEGAL_ACTION,
+        lambda: _commit(
+            second_ready.state,
+            action,
+            first.dice,
+            sequence=second_ready.next_sequence,
+        ),
+    )
+    assert first.dice.to_checkpoint() == rng_before
+    result_type = first.state.activation.action_types[0]
+    assert second_ready.state.activation.action_types == (result_type,)
+    assert result_type in {"shoot", "charge"}
+
+
+def test_action_bridge_rejects_illegal_mechanical_action_atomically() -> None:
+    ready = _ready_for_action(sequence=990)
+    dice = DeterministicDice(47)
+    rng_before = dice.to_checkpoint()
+
+    _assert_rejected(
+        ready.state,
+        ActivationProtocolErrorReason.ILLEGAL_ACTION,
+        lambda: _commit(
+            ready.state,
+            ManeuverAction(11, Position(100, 0)),
+            dice,
+            sequence=ready.next_sequence,
+        ),
+    )
+    assert dice.to_checkpoint() == rng_before
+
+
+def _action_effect_leaf(
+    *,
+    state: BattleState,
+    action,
+    dice: DeterministicDice,
+    sequence: int,
+):
+    dice.roll_d6(3)
+    events = (
+        EffectApplied(
+            sequence=sequence,
+            slug="test_action",
+            target_unit_id=action.unit_id,
+        ),
+    )
+    return apply_events(state, events), events, sequence + 1
+
+
+def test_action_leaf_rejects_live_replay_mismatch_and_preserves_rng() -> None:
+    ready = _ready_for_action(sequence=1020)
+    dice = DeterministicDice(53)
+    rng_before = dice.to_checkpoint()
+
+    def mismatch_executor(**kwargs):
+        _, events, next_sequence = _action_effect_leaf(**kwargs)
+        return replace(kwargs["state"], active_player=1), events, next_sequence
+
+    _assert_rejected(
+        ready.state,
+        ActivationProtocolErrorReason.ILLEGAL_ACTION,
+        lambda: _commit(
+            ready.state,
+            DefendAction(11),
+            dice,
+            sequence=ready.next_sequence,
+            outcome_executor=mismatch_executor,
+        ),
+    )
+    assert dice.to_checkpoint() == rng_before
+
+
+@pytest.mark.parametrize("violation", ["sequence", "nested", "next-sequence"])
+def test_action_leaf_rejects_non_contiguous_nested_or_broken_result_atomically(
+    violation: str,
+) -> None:
+    ready = _ready_for_action(sequence=1050)
+    dice = DeterministicDice(59)
+    rng_before = dice.to_checkpoint()
+
+    def invalid_executor(*, state, action, dice, sequence):
+        dice.roll_d6(1)
+        if violation == "nested":
+            events = (
+                ActivationActionCommitted(
+                    sequence=sequence,
+                    activation_id=state.activation.activation_id,
+                    activation_version=state.activation.version + 1,
+                    action_type="defend",
+                ),
+            )
+        else:
+            events = (
+                EffectApplied(
+                    sequence=sequence + (1 if violation == "sequence" else 0),
+                    slug="test_action",
+                    target_unit_id=action.unit_id,
+                ),
+            )
+        return (
+            apply_events(state, events),
+            events,
+            sequence + len(events) + (1 if violation == "next-sequence" else 0),
+        )
+
+    _assert_rejected(
+        ready.state,
+        ActivationProtocolErrorReason.ILLEGAL_ACTION,
+        lambda: _commit(
+            ready.state,
+            DefendAction(11),
+            dice,
+            sequence=ready.next_sequence,
+            outcome_executor=invalid_executor,
+        ),
+    )
+    assert dice.to_checkpoint() == rng_before
+
+
+def test_action_bridge_rng_and_restart_checkpoint_parity_across_two_actions() -> None:
+    ready = _ready_for_action(sequence=1080)
+    source_dice = DeterministicDice(61)
+    source_dice.roll_d6(4)
+    checkpoint = json.loads(json.dumps(source_dice.to_checkpoint()))
+
+    live_first = _commit(
+        ready.state,
+        ShootAction(11, 21, RIFLE),
+        source_dice,
+        sequence=ready.next_sequence,
+    )
+    restarted_first = _commit(
+        _restart(ready.state),
+        ShootAction(11, 21, RIFLE),
+        DeterministicDice.from_checkpoint(checkpoint),
+        sequence=ready.next_sequence,
+    )
+
+    assert [event_to_json(event) for event in restarted_first.events] == [
+        event_to_json(event) for event in live_first.events
+    ]
+    assert restarted_first.state == live_first.state
+    assert restarted_first.next_sequence == live_first.next_sequence
+    assert restarted_first.dice.to_checkpoint() == live_first.dice.to_checkpoint()
+    assert source_dice.to_checkpoint() == checkpoint
+
+    second_ready = _ready_for_second_action(live_first)
+    second_rng = json.loads(json.dumps(live_first.dice.to_checkpoint()))
+    live_second = _commit(
+        second_ready.state,
+        ChargeAction(11, 21, SWORD, counter_attack_declared=False),
+        live_first.dice,
+        sequence=second_ready.next_sequence,
+    )
+    restarted_second = _commit(
+        _restart(second_ready.state),
+        ChargeAction(11, 21, SWORD, counter_attack_declared=False),
+        DeterministicDice.from_checkpoint(second_rng),
+        sequence=second_ready.next_sequence,
+    )
+
+    assert [event_to_json(event) for event in restarted_second.events] == [
+        event_to_json(event) for event in live_second.events
+    ]
+    assert restarted_second.state == live_second.state
+    assert restarted_second.dice.to_checkpoint() == live_second.dice.to_checkpoint()
+    assert live_second.state.activation.phase is ActivationPhase.AWAITING_FINALIZATION

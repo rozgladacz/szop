@@ -284,7 +284,15 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   dokładnie jeden kanoniczny `InterruptTriggered`, no-nested, event version i
   live/replay parity. Priorytet i wcześniejsze passy pozostają bez zmian,
   wersje/licznik rosną raz, a limit 64 accepted interruptów działa przed
-  executorem. **Built-in handler adapters/publiczna allowlista, action bridge,
+  executorem. **B4.4b.5 action bridge DONE 2026-07-27:**
+  `commit_activation_action` wykonuje dokładnie jeden istniejący leaf
+  `_apply_single_action`, waliduje outcome/live-replay/sequence/no-nested,
+  dopisuje na końcu `ActivationActionCommitted` i zwraca osobny checkpointowalny
+  RNG. Trwałe `activation.action_types` jest SSOT limitu dwóch akcji oraz
+  ograniczeń powtórnego Ostrzału/Szarży
+  ([pkt 11.b.iv, 14.c.v i 14.d.vi](../app/static/docs/SZOP_Rozjemca.md)); most
+  nie finalizuje aktywacji ani nie zmienia gracza. **Built-in handler
+  adapters/publiczna allowlista,
   finalize/recovery, produkcyjny restart oraz persistence/API/client rollout
   nadal OPEN.**
   Pozostały endpoint:

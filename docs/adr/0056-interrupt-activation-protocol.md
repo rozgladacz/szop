@@ -591,10 +591,24 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   i `interrupt_count` dokładnie raz oraz failuje przed executorem przy limicie
   64 accepted interruptów w oknie. Codec-v2 restart daje identyczne payloady,
   state i `next_sequence`.
+- **B4.4b.5 DONE 2026-07-27:** pure `commit_activation_action` akceptuje tylko
+  bieżącą aktywację v2 w `ACTION_READY`, jej controlling playera i action
+  wybranego oddziału. Wąski adapter reużywa walidację resolvera oraz
+  `_apply_single_action`; outcome events muszą być ciągłe, bez eventów
+  protokołu i odtwarzać dokładnie live state. Następnie bridge emituje
+  `ActivationActionCommitted` z kanonicznym discriminatorem. Durable
+  `action_types` jest jedyną historią limitu dwóch akcji ([pkt 11.b.iv][R11])
+  oraz powtórnego Ostrzału ([pkt 14.c.v][R14C]) i Szarży
+  ([pkt 14.d.vi][R14D]). Mechanika działa na kopii checkpointu
+  `DeterministicDice`;
+  błąd nie przesuwa RNG wejściowego, a sukces zwraca zaawansowaną kopię do
+  checkpointu. Pierwsza/druga akcja kończy odpowiednio w
+  `AWAITING_CONTINUATION`/`AWAITING_FINALIZATION`, bez finalizacji, transferu
+  inicjatywy, statusu Aktywowany i czyszczenia override'ów.
 - **OPEN:** source-correct built-in handler adapters i publiczna allowlista,
-  action bridge/producer `ActivationActionCommitted`, finalize/recovery,
-  transfer inicjatywy/active player oraz produkcyjny restart przez
-  persistence/API/client rollout. Te elementy pozostają osobnymi slice'ami.
+  finalize/recovery, transfer inicjatywy/active player oraz produkcyjny restart
+  przez persistence/API/client rollout. Te elementy pozostają osobnymi
+  slice'ami.
 
 ### B. Persistence/model + pass-only API state machine
 
@@ -640,6 +654,8 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [R11]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 11.b.i–vi"
 [R12]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 12.a–c"
 [R14]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.d.iv"
+[R14C]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.c.v"
+[R14D]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.d.vi"
 [R17]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 17"
 [R20]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 20"
 [R21]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 21"

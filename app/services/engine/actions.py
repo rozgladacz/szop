@@ -120,3 +120,33 @@ ACTION_TYPE_BY_CLASS = MappingProxyType(
     }
 )
 ACTION_TYPE_DISCRIMINATORS = frozenset(ACTION_TYPE_BY_CLASS.values())
+MAX_ACTIONS_PER_ACTIVATION = 2
+_SINGLE_USE_ACTION_TYPES = frozenset(
+    {
+        ACTION_TYPE_BY_CLASS[ShootAction],
+        ACTION_TYPE_BY_CLASS[ChargeAction],
+    }
+)
+
+
+def can_append_activation_action_type(
+    action_type: str,
+    action_types: tuple[str, ...],
+) -> bool:
+    """Return whether one canonical action type may extend durable history."""
+
+    if (
+        type(action_type) is not str
+        or action_type not in ACTION_TYPE_DISCRIMINATORS
+        or type(action_types) is not tuple
+        or any(
+            type(item) is not str or item not in ACTION_TYPE_DISCRIMINATORS
+            for item in action_types
+        )
+        or len(action_types) >= MAX_ACTIONS_PER_ACTIVATION
+    ):
+        return False
+    return (
+        action_type not in _SINGLE_USE_ACTION_TYPES
+        or action_type not in action_types
+    )

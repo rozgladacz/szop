@@ -32,10 +32,11 @@ from dataclasses import dataclass, replace
 from typing import Callable
 
 from app.services.engine.actions import (
+    ACTION_TYPE_BY_CLASS,
+    MAX_ACTIONS_PER_ACTIVATION,
     Action,
-    ChargeAction,
     ManeuverAction,
-    ShootAction,
+    can_append_activation_action_type,
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
@@ -52,9 +53,6 @@ from app.services.engine.phases import (
 )
 from app.services.engine.state import BattleState, UnitBlob, effective_move_inches
 from app.services.engine.status import STATUS_AKTYWOWANY
-
-#: Maks. liczba akcji w aktywacji (pkt 11.b.iv — Manewr liczy się do limitu).
-MAX_ACTIONS_PER_ACTIVATION = 2
 
 #: Tolerancja float dla walidacji dystansu Manewru (pkt 15.a). Boty skalują ruch
 #: dokładnie do budżetu (`_move_toward` ratio = max_dist/d) → wynik bywa
@@ -254,17 +252,21 @@ def _can_take_followup(action: Action, actions_taken: tuple[Action, ...]) -> boo
     Manewr+Manewr / Manewr+Ostrzał / Ostrzał+Szarża OK; Ostrzał+Ostrzał i
     Szarża+Szarża zabronione.
     """
-    if len(actions_taken) >= MAX_ACTIONS_PER_ACTIVATION:
+    def discriminator(item: Action) -> str | None:
+        return next(
+            (
+                action_type
+                for action_class, action_type in ACTION_TYPE_BY_CLASS.items()
+                if isinstance(item, action_class)
+            ),
+            None,
+        )
+
+    action_type = discriminator(action)
+    action_types = tuple(discriminator(item) for item in actions_taken)
+    if action_type is None or any(item is None for item in action_types):
         return False
-    if isinstance(action, ShootAction) and any(
-        isinstance(a, ShootAction) for a in actions_taken
-    ):
-        return False  # pkt 14.c.v
-    if isinstance(action, ChargeAction) and any(
-        isinstance(a, ChargeAction) for a in actions_taken
-    ):
-        return False  # pkt 14.d.vi
-    return True
+    return can_append_activation_action_type(action_type, action_types)
 
 
 def apply_activation(
