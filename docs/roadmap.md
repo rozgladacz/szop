@@ -315,7 +315,18 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `szop.battle_state/v2` z trwałą inicjatywą i bez rozpoczętej aktywacji.
   Publiczne create/invite/action schemas, payloady i domyślne call sites nie
   zostały zmienione.
-  **Niepuste source-correct recovery handlery, produkcyjny restart oraz
+  **B4.4c.2 durable activation start service DONE 2026-07-28:**
+  `app/services/battle_activations.py` dodaje transakcyjnie neutralny start
+  aktywacji wyłącznie dla trwałych bitew v2. Participant/no-oracle lookup,
+  mapowanie ownera na aktywną stronę (także same-owner sandbox), ścisły
+  `expected_sequence`, spójny checkpoint state+RNG i pure `start_activation`
+  poprzedzają jeden guarded batch eventów oraz dokładnie jeden checkpoint v2.
+  Caller nadal zarządza commit/rollback; restart odtwarza identyczny
+  `BEFORE_ACTION`, a RNG pozostaje bez zmian. Operacja ma stałe 5 SELECT-ów bez
+  N+1; v1, stale/race, niespójny checkpoint, cudzy caller i nielegalny wybór
+  failują bez częściowych zapisów. Routery, publiczne schema/scope'y, klient i
+  pozostałe przejścia protokołu nie zostały dodane.
+  **Niepuste source-correct recovery handlery oraz produkcyjny
   transport/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.

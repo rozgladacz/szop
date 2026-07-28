@@ -149,6 +149,16 @@ wiersza, a `stage_battle_creation(..., activation_protocol_version=1)` zapisuje
 tę samą wersję w `Battle` i checkpointcie. Jawne wewnętrzne v2 zachowuje
 inicjatywę w `szop.battle_state/v2`, pozostając w `IDLE`; router create i accept
 invite nadal wywołują serwis bez opt-in i publikują niezmienione payloady v1.
+**B4.4c.2** dodaje wąski, transakcyjnie neutralny
+`app/services/battle_activations.py` dla trwałego startu aktywacji v2. Serwis
+wykonuje participant/no-oracle lookup, rozstrzyga stronę caller-a z ownerów i
+`active_player`, wymaga spójnego headu/checkpointu oraz ścisłego
+`expected_sequence`, po czym deleguje całą walidację wyboru i event delta do
+pure `start_activation`. Istniejące `save_events` i `save_checkpoint` pozostają
+SSOT ciągłego optimistic batcha oraz pojedynczego checkpointu v2 z
+niezmienionym RNG. Serwis nie commitje ani nie rollbackuje; wynik zawiera state,
+eventy i previous/new sequence. Sukces wykonuje 5 SELECT-ów niezależnie od
+liczby oddziałów. Nie ma nowego routera, schema, scope'u ani klienta.
 `POST /battles/{id}/interrupts`, prereq trasy aktywacji i scope
 `battle:interrupt`, produkcyjne wiring v2 dla action/finalize, niepuste recovery handlery oraz
 transport/API/client rollout pozostają **OPEN**.

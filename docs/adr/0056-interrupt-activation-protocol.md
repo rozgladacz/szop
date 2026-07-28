@@ -641,6 +641,16 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   opt-in v2 zapisuje zgodny checkpoint z inicjatywą i bez aktywacji. Publiczne
   schemas/create/invite/action oraz ich domyślne call sites pozostają
   niezmienione.
+- **B4.4c.2 DONE 2026-07-28:** transakcyjnie neutralny
+  `stage_battle_activation_start` obsługuje wyłącznie participant-scoped trwały
+  start v2. Z jednego bieżącego headu weryfikuje ownera/aktywną stronę,
+  `expected_sequence` i spójny checkpoint state+RNG, deleguje wybór oddziału do
+  pure `start_activation`, a następnie przez istniejące persistence SSOT
+  stage'uje jeden ciągły batch eventów i jeden checkpoint v2 bez przesunięcia
+  RNG. Caller zarządza transakcją. Restart/race/rollback/no-oracle i same-owner
+  oraz two-owner matrix są pokryte; sukces ma stałe 5 SELECT-ów bez N+1.
+  Publiczny transport, schema, scope'y i pozostałe przejścia nie weszły w ten
+  slice.
 - **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
   transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
 
@@ -648,9 +658,12 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 
 - **B4.4c.1 DONE:** model, migracja istniejących wierszy do v1 i wewnętrzny
   spójny zapis początkowego checkpointu v1/v2;
+- **B4.4c.2 DONE:** transactionally-neutral participant/no-oracle service dla
+  startu v2, optimistic head, atomic event batch + checkpoint v2, restart/RNG,
+  race/rollback i SQL ceiling;
 - **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
-- participant/no-oracle, scopes, trzy trasy, CAS/unique/rollback i wspólny
-  envelope; `POST /actions` z kompatybilnymi guardami;
+- scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
+  persistence; `POST /actions` z kompatybilnymi guardami;
 - `POST /interrupts` początkowo publicznie obsługuje tylko `pass`; opcjonalny
   następny mini-slice w tym etapie włącza wyłącznie source-correct Rozkaz, a
   Klątwę dopiero po osobnym validatorze;
