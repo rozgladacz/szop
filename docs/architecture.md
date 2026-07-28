@@ -208,6 +208,21 @@ service dochodzi do legalnego `AWAITING_FINALIZATION`. Auth/no-oracle,
 strict/coherence/stale/race/rollback oraz limit 5 SELECT-ów bez N+1 są pokryte
 testami. Nie dodano produkcyjnego call site, ścieżki `continue=False`,
 finalizacji, transportu, publicznych schema/scope'ów, envelope ani klienta.
+**B4.4c.6** dodaje `stage_battle_activation_finalize` dla terminalnej
+finalizacji trwałej aktywacji v2 po jednej albo dwóch akcjach. Serwis wymaga
+strict `recovery_uses == ()`, wyznacza caller_player z trwałego
+`activation.controlling_player` także dla same-owner i deleguje fazę,
+action_count, opcjonalne `ActivationContinuationChosen(continue=False)`,
+legacy outcome oraz trzy terminalne eventy do pure `finalize_activation`.
+Jeden guarded `save_events` i jeden checkpoint v2 zachowują bitowo niezmieniony
+RNG bez commit/rollback. Oba warianty zachowują restart/replay parity, status
+Aktywowany, czyszczenie activation-scoped override'ów i umożliwiają następny
+legalny start po commicie zgodnie z
+[pkt 10, 11.b.iv–vi, 21 i 22.d](../app/static/docs/SZOP_Rozjemca.md).
+Auth/no-oracle, strict/coherence/stale/race/rollback, same-owner/two-owner oraz
+limit 5 SELECT-ów bez N+1 są pokryte testami. Nie dodano produkcyjnego call
+site, niepustych recovery handlerów, transportu, publicznych schema/scope'ów,
+envelope ani klienta.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.

@@ -691,6 +691,21 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   status/phase/action-count, auth/no-oracle, stale/coherence, race/rollback,
   same-owner/two-owner i stałe 5 SELECT-ów bez N+1 są pokryte. Nie dodano
   produkcyjnego call site, `continue=False`, finalizacji ani transportu.
+- **B4.4c.6 DONE 2026-07-28:** `stage_battle_activation_finalize` z jednego
+  participant-scoped trwałego headu v2 stage'uje legalną finalizację po jednej
+  albo dwóch akcjach. Strict `recovery_uses` dopuszcza wyłącznie dokładnie `()`,
+  durable `activation.controlling_player` wyznacza caller_player także dla
+  same-owner, a pure `finalize_activation` pozostaje SSOT fazy/action_count,
+  jawnego `continue=False` po jednej akcji, recovery seam, legacy outcome,
+  statusu Aktywowany, safety resetu, wygaśnięcia override'ów oraz transferu
+  inicjatywy/active playera zgodnie z [pkt 10][R10], [pkt 11.b.iv–vi][R11],
+  [pkt 21][R21] i [pkt 22.d][R22]. Dokładny ciągły delta trafia przez jeden
+  guarded event batch do jednego checkpointu v2 z bitowo niezmienionym RNG, bez
+  commit/rollback w serwisie. Oba warianty zachowują restart/replay parity i
+  dopuszczają kolejny legalny start po commicie. Strict input, v1,
+  status/phase/action-count, auth/no-oracle, stale/coherence, race/rollback,
+  same-owner/two-owner i stałe 5 SELECT-ów bez N+1 są pokryte. Nie dodano
+  produkcyjnego call site, niepustych recovery handlerów ani transportu.
 - **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
   transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
 
@@ -710,6 +725,9 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 - **B4.4c.5 DONE:** transactionally-neutral service dla jawnego
   `continue_activation=True`, pure delta otwierający drugie okno, niezmienny RNG,
   restart/replay przez passy i drugą akcję, auth/race/rollback i SQL ceiling;
+- **B4.4c.6 DONE:** transactionally-neutral service dla finalizacji po jednej
+  albo dwóch akcjach z dokładnie pustym recovery, pure terminal delta,
+  niezmiennym RNG, restart/replay, next-start, auth/race/rollback i SQL ceiling;
 - **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
 - scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
   persistence; `POST /actions` z kompatybilnymi guardami;
@@ -759,6 +777,7 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [R17]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 17"
 [R20]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 20"
 [R21]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 21"
+[R22]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 22.d"
 [Z31]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 31 Strażnik"
 [Z45]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 45 Klątwa(X)"
 [Z49]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 49 Oznaczenie(X)"

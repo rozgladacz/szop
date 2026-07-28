@@ -369,8 +369,24 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   zapisuje drugą akcję do `AWAITING_FINALIZATION`. Strict input, v1,
   status/phase/action-count, auth/no-oracle, stale/coherence, race/rollback,
   same-owner/two-owner oraz stałe 5 SELECT-ów bez N+1 są pokryte testami.
-  Ścieżka `continue=False`, finalizacja, transport, publiczne schema/scope'y,
-  envelope i klient nie weszły w ten slice.
+  Finalizacja, transport, publiczne schema/scope'y, envelope i klient nie weszły
+  w ten slice.
+  **B4.4c.6 durable activation finalization service DONE 2026-07-28:**
+  `stage_battle_activation_finalize` z jednego participant-scoped trwałego
+  headu v2 stage'uje legalny terminalny delta po jednej albo dwóch akcjach.
+  Strict `recovery_uses` akceptuje wyłącznie dokładnie `()`, caller_player
+  pochodzi z trwałego `activation.controlling_player`, a pure
+  `finalize_activation` pozostaje SSOT fazy/action_count, jawnego
+  `continue=False` po jednej akcji, legacy outcome, statusu Aktywowany,
+  czyszczenia override'ów oraz transferu inicjatywy i active playera zgodnie z
+  [pkt 10, 11.b.iv–vi, 21 i 22.d](../app/static/docs/SZOP_Rozjemca.md).
+  Jeden guarded event batch i jeden checkpoint v2 zachowują bitowo niezmieniony
+  RNG bez commit/rollback w serwisie. Oba warianty mają restart/replay parity,
+  a po commicie finalizacji istniejący start service może rozpocząć następną
+  legalną aktywację. Strict input, v1, status/phase/action-count,
+  auth/no-oracle, stale/coherence, race/rollback, same-owner/two-owner oraz
+  stałe 5 SELECT-ów bez N+1 są pokryte testami. Nie dodano produkcyjnego call
+  site, transportu, publicznych schema/scope'ów, envelope ani klienta.
   **Niepuste source-correct recovery handlery oraz produkcyjny
   transport/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:
