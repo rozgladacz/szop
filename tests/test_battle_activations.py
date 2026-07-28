@@ -19,6 +19,13 @@ from app.services.battle_activations import (
     BattleActivationActionUnavailable,
     BattleActivationActionUpgradeRequired,
     BattleActivationActionWriteConflict,
+    BattleActivationContinueForbidden,
+    BattleActivationContinueInvalid,
+    BattleActivationContinueNotFound,
+    BattleActivationContinueSequenceConflict,
+    BattleActivationContinueUnavailable,
+    BattleActivationContinueUpgradeRequired,
+    BattleActivationContinueWriteConflict,
     BattleActivationPassInvalid,
     BattleActivationPassNotFound,
     BattleActivationPassSequenceConflict,
@@ -33,6 +40,7 @@ from app.services.battle_activations import (
     BattleActivationStartUpgradeRequired,
     BattleActivationStartWriteConflict,
     stage_battle_activation_action,
+    stage_battle_activation_continue,
     stage_battle_activation_pass,
     stage_battle_activation_start,
 )
@@ -48,6 +56,7 @@ from app.services.engine.activation_protocol import (
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     ActivationActionCommitted,
+    ActivationContinuationChosen,
     ActivationStarted,
     InterruptPriorityPassed,
     InterruptWindowClosed,
@@ -326,6 +335,44 @@ def _action_guards(state: BattleState) -> dict[str, int]:
         "activation_id": activation.activation_id,
         "expected_activation_version": activation.version,
     }
+
+
+def _persist_awaiting_continuation_battle(
+    world: ActivationWorld,
+    *,
+    state: BattleState | None = None,
+    p1_id: int | None = None,
+    p2_id: int | None = None,
+    extra_units_per_player: int = 0,
+) -> int:
+    battle_id = _persist_action_ready_battle(
+        world,
+        state=state,
+        p1_id=p1_id,
+        p2_id=p2_id,
+        extra_units_per_player=extra_units_per_player,
+    )
+    initial = state or _idle_state(
+        extra_units_per_player=extra_units_per_player
+    )
+    participant_ids = (
+        world.p1_id if p1_id is None else p1_id,
+        world.p2_id if p2_id is None else p2_id,
+    )
+    selected_unit_id = 11 if initial.active_player == 0 else 21
+    with world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        stage_battle_activation_action(
+            session,
+            battle_id=battle_id,
+            caller_user_id=participant_ids[initial.active_player],
+            expected_sequence=checkpoint.sequence_at,
+            action_payload=action_to_json(DefendAction(selected_unit_id)),
+            **_action_guards(checkpoint.state),
+        )
+        session.commit()
+    return battle_id
 
 
 def test_stage_start_persists_exact_batch_checkpoint_and_restart_safe_rng(
@@ -2196,6 +2243,659 @@ def test_action_success_is_one_batch_one_checkpoint_and_five_selects(
                     caller_user_id=activation_world.p1_id,
                     expected_sequence=checkpoint.sequence_at,
                     action_payload=action_to_json(DefendAction(11)),
+                    **_action_guards(checkpoint.state),
+                )
+                select_counts.append(
+                    sum(
+                        statement.lstrip().upper().startswith("SELECT")
+                        for statement in statements
+                    )
+                )
+                session.rollback()
+    finally:
+        event.remove(
+            activation_world.engine,
+            "before_cursor_execute",
+            capture_statement,
+        )
+
+    assert select_counts == [5, 5]
+    assert save_event_calls == 2
+    assert save_checkpoint_calls == 2
+
+
+def test_continue_opens_durable_second_window_and_completes_second_action_chain(
+    activation_world: ActivationWorld,
+) -> None:
+    battle_id = _persist_action_ready_battle(activation_world)
+    first_action = DefendAction(11)
+    with activation_world.sessions() as session:
+        before_first = load_latest_checkpoint(session, battle_id)
+        assert before_first is not None
+        first = stage_battle_activation_action(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=before_first.sequence_at,
+            action_payload=action_to_json(first_action),
+            **_action_guards(before_first.state),
+        )
+        session.commit()
+
+    with activation_world.sessions() as restarted:
+        before_continue = load_latest_checkpoint(restarted, battle_id)
+        assert before_continue is not None
+        assert before_continue.state == first.state
+        assert before_continue.sequence_at == first.new_sequence
+        rng_before_continue = before_continue.dice.to_checkpoint()
+        expected_continue = continue_activation(
+            before_continue.state,
+            caller_player=0,
+            sequence=before_continue.sequence_at + 1,
+            **_action_guards(before_continue.state),
+        )
+        continued = stage_battle_activation_continue(
+            restarted,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=before_continue.sequence_at,
+            **_action_guards(before_continue.state),
+        )
+
+        assert continued.events == expected_continue.events
+        assert continued.state == expected_continue.state
+        assert continued.previous_sequence == before_continue.sequence_at
+        assert continued.new_sequence == expected_continue.next_sequence - 1
+        assert [type(item) for item in continued.events] == [
+            ActivationContinuationChosen,
+            InterruptWindowOpened,
+        ]
+        choice, opened = continued.events
+        assert choice.continue_activation is True
+        assert opened.window_ordinal == 2
+        assert opened.priority_player == 0
+        assert continued.state.activation is not None
+        assert continued.state.activation.phase is ActivationPhase.BEFORE_ACTION
+        assert continued.state.activation.window is not None
+        assert continued.state.activation.window.ordinal == 2
+        assert (
+            continued.dice.to_checkpoint()
+            == rng_before_continue
+            == before_continue.dice.to_checkpoint()
+        )
+        assert continued.state == apply_events(
+            before_continue.state,
+            continued.events,
+        )
+        restarted.commit()
+
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == continued.state
+        assert checkpoint.sequence_at == continued.new_sequence
+        assert checkpoint.dice.to_checkpoint() == rng_before_continue
+        first_pass = stage_battle_activation_pass(
+            restarted,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=checkpoint.sequence_at,
+            **_pass_guards(checkpoint.state),
+        )
+        restarted.commit()
+
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == first_pass.state
+        assert checkpoint.sequence_at == first_pass.new_sequence
+        assert checkpoint.dice.to_checkpoint() == rng_before_continue
+        ready = stage_battle_activation_pass(
+            restarted,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p2_id,
+            expected_sequence=checkpoint.sequence_at,
+            **_pass_guards(checkpoint.state),
+        )
+        assert ready.state.activation is not None
+        assert ready.state.activation.phase is ActivationPhase.ACTION_READY
+        restarted.commit()
+
+    second_action = ManeuverAction(11, Position(10, 0))
+    with activation_world.sessions() as restarted:
+        before_second = load_latest_checkpoint(restarted, battle_id)
+        assert before_second is not None
+        assert before_second.state == ready.state
+        assert before_second.sequence_at == ready.new_sequence
+        assert before_second.dice.to_checkpoint() == rng_before_continue
+        expected_second = commit_activation_action(
+            before_second.state,
+            caller_player=0,
+            action=second_action,
+            dice=before_second.dice,
+            sequence=before_second.sequence_at + 1,
+            **_action_guards(before_second.state),
+        )
+        second = stage_battle_activation_action(
+            restarted,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=before_second.sequence_at,
+            action_payload=action_to_json(second_action),
+            **_action_guards(before_second.state),
+        )
+        assert second.events == expected_second.events
+        assert second.state == expected_second.state
+        assert second.state.activation is not None
+        assert (
+            second.state.activation.phase
+            is ActivationPhase.AWAITING_FINALIZATION
+        )
+        restarted.commit()
+
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        tail = tuple(
+            load_events(
+                restarted,
+                battle_id,
+                since=before_continue.sequence_at,
+            )
+        )
+        assert checkpoint.state == second.state
+        assert checkpoint.state == apply_events(before_continue.state, tail)
+        assert checkpoint.sequence_at == second.new_sequence
+        assert checkpoint.dice.to_checkpoint() == second.dice.to_checkpoint()
+        assert checkpoint.dice.roll_d6(12) == second.dice.roll_d6(12)
+
+
+def test_continue_missing_and_foreign_battles_share_no_oracle_error(
+    activation_world: ActivationWorld,
+) -> None:
+    foreign_id = _persist_awaiting_continuation_battle(activation_world)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, foreign_id)
+        assert checkpoint is not None
+        for battle_id in (foreign_id, foreign_id + 100_000):
+            with pytest.raises(BattleActivationContinueNotFound):
+                stage_battle_activation_continue(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.outsider_id,
+                    expected_sequence=checkpoint.sequence_at,
+                    **_action_guards(checkpoint.state),
+                )
+
+
+def test_continue_two_owner_and_same_owner_authorization_matrix(
+    activation_world: ActivationWorld,
+) -> None:
+    two_owner_id = _persist_awaiting_continuation_battle(activation_world)
+    two_owner_before = _stream_snapshot(activation_world, two_owner_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, two_owner_id)
+        assert checkpoint is not None
+        rng_before = checkpoint.dice.to_checkpoint()
+        with pytest.raises(BattleActivationContinueForbidden):
+            stage_battle_activation_continue(
+                session,
+                battle_id=two_owner_id,
+                caller_user_id=activation_world.p2_id,
+                expected_sequence=checkpoint.sequence_at,
+                **_action_guards(checkpoint.state),
+            )
+        assert checkpoint.dice.to_checkpoint() == rng_before
+        session.rollback()
+    assert _stream_snapshot(activation_world, two_owner_id) == two_owner_before
+
+    same_owner_state = _idle_state(active_player=1, initiative_player=0)
+    same_owner_id = _persist_awaiting_continuation_battle(
+        activation_world,
+        state=same_owner_state,
+        p1_id=activation_world.p1_id,
+        p2_id=activation_world.p1_id,
+    )
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, same_owner_id)
+        assert checkpoint is not None
+        staged = stage_battle_activation_continue(
+            session,
+            battle_id=same_owner_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=checkpoint.sequence_at,
+            **_action_guards(checkpoint.state),
+        )
+        session.commit()
+
+    assert staged.state.activation is not None
+    assert staged.state.activation.controlling_player == 1
+    assert staged.state.activation.window is not None
+    assert staged.state.activation.window.priority_player == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "error_type", "reason"),
+    [
+        ("battle_id", True, BattleActivationContinueNotFound, None),
+        ("caller_user_id", False, BattleActivationContinueNotFound, None),
+        ("expected_sequence", True, BattleActivationContinueInvalid, None),
+        ("expected_sequence", -1, BattleActivationContinueInvalid, None),
+        (
+            "activation_id",
+            True,
+            BattleActivationContinueInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "activation_id",
+            0,
+            BattleActivationContinueInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "expected_activation_version",
+            False,
+            BattleActivationContinueInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+        (
+            "expected_activation_version",
+            0,
+            BattleActivationContinueInvalid,
+            ActivationProtocolErrorReason.STALE_ACTIVATION,
+        ),
+    ],
+)
+def test_continue_strict_inputs_reject_coercion_without_writes(
+    activation_world: ActivationWorld,
+    field: str,
+    value: object,
+    error_type: type[Exception],
+    reason: ActivationProtocolErrorReason | None,
+) -> None:
+    battle_id = _persist_awaiting_continuation_battle(activation_world)
+    before = _stream_snapshot(activation_world, battle_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        kwargs = {
+            "battle_id": battle_id,
+            "caller_user_id": activation_world.p1_id,
+            "expected_sequence": checkpoint.sequence_at,
+            **_action_guards(checkpoint.state),
+        }
+        kwargs[field] = value
+        with pytest.raises(error_type) as exc_info:
+            stage_battle_activation_continue(session, **kwargs)
+        if reason is not None:
+            assert exc_info.value.reason is reason
+        session.rollback()
+
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_continue_rejects_v1_inactive_stale_guards_and_wrong_phase_atomically(
+    activation_world: ActivationWorld,
+) -> None:
+    v1_id = _persist_battle(
+        activation_world,
+        state=_idle_state(initiative_player=None),
+        protocol_version=1,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationContinueUpgradeRequired):
+            stage_battle_activation_continue(
+                session,
+                battle_id=v1_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=0,
+                activation_id=1,
+                expected_activation_version=1,
+            )
+
+    inactive_id = _persist_awaiting_continuation_battle(activation_world)
+    with activation_world.sessions() as session:
+        battle = session.get(models.Battle, inactive_id)
+        assert battle is not None
+        battle.status = "finished"
+        session.commit()
+    inactive_before = _stream_snapshot(activation_world, inactive_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, inactive_id)
+        assert checkpoint is not None
+        with pytest.raises(BattleActivationContinueInvalid) as exc_info:
+            stage_battle_activation_continue(
+                session,
+                battle_id=inactive_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=checkpoint.sequence_at,
+                **_action_guards(checkpoint.state),
+            )
+        assert exc_info.value.reason is ActivationProtocolErrorReason.INVALID_PHASE
+    assert _stream_snapshot(activation_world, inactive_id) == inactive_before
+
+    continuation_id = _persist_awaiting_continuation_battle(activation_world)
+    continuation_before = _stream_snapshot(activation_world, continuation_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, continuation_id)
+        assert checkpoint is not None
+        activation = checkpoint.state.activation
+        assert activation is not None
+        with pytest.raises(BattleActivationContinueSequenceConflict):
+            stage_battle_activation_continue(
+                session,
+                battle_id=continuation_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=checkpoint.sequence_at - 1,
+                **_action_guards(checkpoint.state),
+            )
+        with pytest.raises(BattleActivationContinueInvalid) as wrong_id:
+            stage_battle_activation_continue(
+                session,
+                battle_id=continuation_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=checkpoint.sequence_at,
+                activation_id=activation.activation_id + 1,
+                expected_activation_version=activation.version,
+            )
+        assert (
+            wrong_id.value.reason
+            is ActivationProtocolErrorReason.STALE_ACTIVATION
+        )
+        with pytest.raises(BattleActivationContinueInvalid) as wrong_version:
+            stage_battle_activation_continue(
+                session,
+                battle_id=continuation_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=checkpoint.sequence_at,
+                activation_id=activation.activation_id,
+                expected_activation_version=activation.version + 1,
+            )
+        assert (
+            wrong_version.value.reason
+            is ActivationProtocolErrorReason.STALE_ACTIVATION
+        )
+        session.rollback()
+    assert (
+        _stream_snapshot(activation_world, continuation_id)
+        == continuation_before
+    )
+
+    wrong_phase_id = _persist_action_ready_battle(activation_world)
+    wrong_phase_before = _stream_snapshot(activation_world, wrong_phase_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, wrong_phase_id)
+        assert checkpoint is not None
+        with pytest.raises(BattleActivationContinueInvalid) as wrong_phase:
+            stage_battle_activation_continue(
+                session,
+                battle_id=wrong_phase_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=checkpoint.sequence_at,
+                **_action_guards(checkpoint.state),
+            )
+        assert (
+            wrong_phase.value.reason
+            is ActivationProtocolErrorReason.ILLEGAL_CONTINUE
+        )
+        session.rollback()
+    assert _stream_snapshot(activation_world, wrong_phase_id) == wrong_phase_before
+
+
+def test_continue_incoherent_or_malformed_current_checkpoint_is_unavailable(
+    activation_world: ActivationWorld,
+) -> None:
+    stale_id = _persist_awaiting_continuation_battle(activation_world)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, stale_id)
+        assert checkpoint is not None
+        save_events(
+            session,
+            stale_id,
+            (
+                MoveExecuted(
+                    sequence=checkpoint.sequence_at + 1,
+                    unit_id=11,
+                    from_pos=(11.0, 0.0),
+                    to_pos=(10.0, 0.0),
+                ),
+            ),
+            expected_latest_sequence=checkpoint.sequence_at,
+        )
+        session.commit()
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationContinueUnavailable) as stale:
+            stage_battle_activation_continue(
+                session,
+                battle_id=stale_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=checkpoint.sequence_at,
+                **_action_guards(checkpoint.state),
+            )
+        assert stale.value.actual_sequence == checkpoint.sequence_at + 1
+
+    for malformed_state in ("{}", "unreachable-action-count"):
+        malformed_id = _persist_awaiting_continuation_battle(activation_world)
+        with activation_world.sessions() as session:
+            checkpoint = load_latest_checkpoint(session, malformed_id)
+            assert checkpoint is not None
+            row = session.scalar(
+                select(models.BattleCheckpoint).where(
+                    models.BattleCheckpoint.battle_id == malformed_id,
+                    models.BattleCheckpoint.sequence_at == checkpoint.sequence_at,
+                )
+            )
+            assert row is not None
+            if malformed_state == "{}":
+                row.state_json = "{}"
+            else:
+                changed = row.state_json.replace(
+                    '"action_count":1',
+                    '"action_count":0',
+                ).replace(
+                    '"action_types":["defend"]',
+                    '"action_types":[]',
+                )
+                assert changed != row.state_json
+                row.state_json = changed
+            session.commit()
+        with activation_world.sessions() as session:
+            with pytest.raises(BattleActivationContinueUnavailable):
+                stage_battle_activation_continue(
+                    session,
+                    battle_id=malformed_id,
+                    caller_user_id=activation_world.p1_id,
+                    expected_sequence=checkpoint.sequence_at,
+                    **_action_guards(checkpoint.state),
+                )
+
+    mismatch_id = _persist_battle(
+        activation_world,
+        state=_idle_state(initiative_player=None),
+        protocol_version=2,
+        checkpoint_version=1,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationContinueUnavailable):
+            stage_battle_activation_continue(
+                session,
+                battle_id=mismatch_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=0,
+                activation_id=1,
+                expected_activation_version=1,
+            )
+
+
+@pytest.mark.parametrize("failure", ["checkpoint-conflict", "integrity-error"])
+def test_continue_caller_rollback_removes_the_whole_staged_write(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: str,
+) -> None:
+    battle_id = _persist_awaiting_continuation_battle(activation_world)
+    before = _stream_snapshot(activation_world, battle_id)
+    real_save_checkpoint = activation_service.save_checkpoint
+
+    def fail_after_checkpoint(*args, **kwargs):
+        real_save_checkpoint(*args, **kwargs)
+        if failure == "integrity-error":
+            raise IntegrityError("checkpoint race", {}, Exception("unique"))
+        raise BattleCheckpointSequenceConflict(
+            args[1],
+            sequence_at=args[2],
+            latest_sequence=args[2] - 1,
+        )
+
+    monkeypatch.setattr(
+        activation_service,
+        "save_checkpoint",
+        fail_after_checkpoint,
+    )
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        with pytest.raises(BattleActivationContinueWriteConflict):
+            stage_battle_activation_continue(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=checkpoint.sequence_at,
+                **_action_guards(checkpoint.state),
+            )
+        session.rollback()
+
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_continue_success_remains_staged_until_caller_commits(
+    activation_world: ActivationWorld,
+) -> None:
+    battle_id = _persist_awaiting_continuation_battle(activation_world)
+    before = _stream_snapshot(activation_world, battle_id)
+
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        stage_battle_activation_continue(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=checkpoint.sequence_at,
+            **_action_guards(checkpoint.state),
+        )
+        session.rollback()
+
+    assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_continue_two_sessions_allow_at_most_one_winner(
+    activation_world: ActivationWorld,
+) -> None:
+    battle_id = _persist_awaiting_continuation_battle(activation_world)
+    first_session = activation_world.sessions()
+    second_session = activation_world.sessions()
+    try:
+        first_checkpoint = load_latest_checkpoint(first_session, battle_id)
+        second_checkpoint = load_latest_checkpoint(second_session, battle_id)
+        assert first_checkpoint is not None
+        assert second_checkpoint is not None
+        assert first_checkpoint.sequence_at == second_checkpoint.sequence_at
+        first = stage_battle_activation_continue(
+            first_session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=first_checkpoint.sequence_at,
+            **_action_guards(first_checkpoint.state),
+        )
+        first_session.commit()
+
+        with pytest.raises(BattleActivationContinueSequenceConflict):
+            stage_battle_activation_continue(
+                second_session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=second_checkpoint.sequence_at,
+                **_action_guards(second_checkpoint.state),
+            )
+        second_session.rollback()
+    finally:
+        first_session.close()
+        second_session.close()
+
+    with activation_world.sessions() as session:
+        assert tuple(
+            load_events(
+                session,
+                battle_id,
+                since=first.previous_sequence,
+            )
+        ) == first.events
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.sequence_at == first.new_sequence
+
+
+def test_continue_success_is_one_batch_one_checkpoint_and_five_selects(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    small_id = _persist_awaiting_continuation_battle(activation_world)
+    large_id = _persist_awaiting_continuation_battle(
+        activation_world,
+        extra_units_per_player=30,
+    )
+    statements: list[str] = []
+    save_event_calls = 0
+    save_checkpoint_calls = 0
+    real_save_events = activation_service.save_events
+    real_save_checkpoint = activation_service.save_checkpoint
+
+    def count_save_events(*args, **kwargs):
+        nonlocal save_event_calls
+        save_event_calls += 1
+        return real_save_events(*args, **kwargs)
+
+    def count_save_checkpoint(*args, **kwargs):
+        nonlocal save_checkpoint_calls
+        save_checkpoint_calls += 1
+        return real_save_checkpoint(*args, **kwargs)
+
+    def capture_statement(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        statements.append(statement)
+
+    monkeypatch.setattr(activation_service, "save_events", count_save_events)
+    monkeypatch.setattr(
+        activation_service,
+        "save_checkpoint",
+        count_save_checkpoint,
+    )
+    select_counts = []
+    event.listen(
+        activation_world.engine,
+        "before_cursor_execute",
+        capture_statement,
+    )
+    try:
+        for battle_id in (small_id, large_id):
+            statements.clear()
+            with activation_world.sessions() as session:
+                checkpoint = load_latest_checkpoint(session, battle_id)
+                assert checkpoint is not None
+                statements.clear()
+                stage_battle_activation_continue(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.p1_id,
+                    expected_sequence=checkpoint.sequence_at,
                     **_action_guards(checkpoint.state),
                 )
                 select_counts.append(

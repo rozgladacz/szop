@@ -675,7 +675,22 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   zachowują restart/replay i future RNG. Strict input, v1, auth/no-oracle,
   stale/checkpoint/phase, race/rollback oraz same-owner/two-owner są pokryte,
   a sukces ma stałe 5 SELECT-ów bez N+1. Transport, publiczne schema/scope'y,
-  wspólny envelope, continue/finalize i recovery nie weszły w ten slice.
+  wspólny envelope, finalize i recovery nie weszły w ten slice.
+- **B4.4c.5 DONE 2026-07-28:** `stage_battle_activation_continue` z jednego
+  participant-scoped headu v2 stage'uje wyłącznie jawną kontynuację w
+  `AWAITING_CONTINUATION`. Durable `activation.controlling_player` wyznacza
+  caller_player także dla same-owner, a pure `continue_activation` pozostaje
+  SSOT fazy/action_count, activation guardów i wersji, snapshotu inicjatywy,
+  priorytetu oraz dokładnego delta
+  `ActivationContinuationChosen(continue_activation=True)` +
+  `InterruptWindowOpened(ordinal=2)` zgodnie z [pkt 10][R10],
+  [pkt 11.b.i–iv][R11C] i [pkt 12.a–c][R12]. Jeden guarded event batch oraz
+  jeden checkpoint v2 zachowują bitowo niezmieniony RNG bez commit/rollback.
+  Restart/replay przez dwa istniejące pass service calls i istniejącą action
+  service dochodzi do `AWAITING_FINALIZATION`. Strict input, v1,
+  status/phase/action-count, auth/no-oracle, stale/coherence, race/rollback,
+  same-owner/two-owner i stałe 5 SELECT-ów bez N+1 są pokryte. Nie dodano
+  produkcyjnego call site, `continue=False`, finalizacji ani transportu.
 - **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
   transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
 
@@ -692,6 +707,9 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 - **B4.4c.4 DONE:** transactionally-neutral service dla jednej akcji
   `ACTION_READY`, codec + pure action SSOT, guarded delta + jeden checkpoint z
   RNG transition, obie akcje, restart/replay, auth/race/rollback i SQL ceiling;
+- **B4.4c.5 DONE:** transactionally-neutral service dla jawnego
+  `continue_activation=True`, pure delta otwierający drugie okno, niezmienny RNG,
+  restart/replay przez passy i drugą akcję, auth/race/rollback i SQL ceiling;
 - **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
 - scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
   persistence; `POST /actions` z kompatybilnymi guardami;
@@ -732,6 +750,7 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [R10]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 10"
 [R11]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 11.b.i–vi"
 [R11A]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 11.b.ii–iv"
+[R11C]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 11.b.i–iv"
 [R12]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 12.a–c"
 [R14]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.d.iv"
 [R14A]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14"

@@ -190,7 +190,24 @@ osiągalna druga akcja, restart/replay, future RNG, auth/no-oracle,
 stale/race/rollback i strict payload są pokryte testami. Sukces wykonuje jeden
 batch eventów, jeden checkpoint i 5 SELECT-ów niezależnie od liczby oddziałów.
 Nie dodano produkcyjnego call site, routera, publicznego schema/scope'u,
-wspólnego envelope ani continue/finalize.
+wspólnego envelope ani finalize.
+**B4.4c.5** dodaje `stage_battle_activation_continue` dla wyłącznie jawnej
+decyzji o drugiej akcji w trwałym `AWAITING_CONTINUATION`. Serwis zachowuje
+participant/no-oracle, aktywny status, spójny checkpoint state+RNG, strict
+sequence i activation guardy, a caller_player wyznacza z trwałego
+`activation.controlling_player` także dla same-owner. Pure
+`continue_activation` pozostaje SSOT fazy, action_count, wersji, inicjatywy,
+priorytetu oraz dokładnego delta
+`ActivationContinuationChosen(continue_activation=True)` i
+`InterruptWindowOpened(ordinal=2)` zgodnie z
+[pkt 10, 11.b.i–iv i 12.a–c](../app/static/docs/SZOP_Rozjemca.md).
+Guarded `save_events` zapisuje jeden ciągły batch, a pojedynczy checkpoint v2
+zachowuje bitowo niezmieniony RNG; caller nadal zarządza commit/rollback.
+Restart/replay przez dwa istniejące pass service calls i istniejącą action
+service dochodzi do legalnego `AWAITING_FINALIZATION`. Auth/no-oracle,
+strict/coherence/stale/race/rollback oraz limit 5 SELECT-ów bez N+1 są pokryte
+testami. Nie dodano produkcyjnego call site, ścieżki `continue=False`,
+finalizacji, transportu, publicznych schema/scope'ów, envelope ani klienta.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.

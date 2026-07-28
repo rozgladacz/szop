@@ -352,8 +352,25 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   restart/replay oraz przyszłe rzuty; v1, malformed/coercive payload, auth,
   stale/checkpoint/phase, race i rollback failują bez częściowego zapisu.
   Same-owner/two-owner matrix oraz stałe 5 SELECT-ów bez N+1 są pokryte testami.
-  Routery, publiczne schema/scope'y, wspólny envelope, continue/finalize,
+  Routery, publiczne schema/scope'y, wspólny envelope, finalize,
   recovery i klient nie weszły w ten slice.
+  **B4.4c.5 durable activation continuation service DONE 2026-07-28:**
+  `stage_battle_activation_continue` z jednego participant-scoped trwałego
+  headu v2 stage'uje wyłącznie jawną deklarację drugiej akcji w
+  `AWAITING_CONTINUATION`. Caller_player pochodzi z trwałego
+  `activation.controlling_player`, a pure `continue_activation` pozostaje SSOT
+  fazy, guardów, wersji, priorytetu inicjatywy oraz dokładnego delta
+  `ActivationContinuationChosen(continue_activation=True)` +
+  `InterruptWindowOpened(ordinal=2)` zgodnie z
+  [pkt 10, 11.b.i–iv i 12.a–c](../app/static/docs/SZOP_Rozjemca.md).
+  Jeden guarded event batch i jeden checkpoint v2 zachowują bitowo niezmieniony
+  RNG bez commit/rollback w serwisie. Restart/replay prowadzi przez dwa
+  istniejące pass service calls do `ACTION_READY`, a istniejąca action service
+  zapisuje drugą akcję do `AWAITING_FINALIZATION`. Strict input, v1,
+  status/phase/action-count, auth/no-oracle, stale/coherence, race/rollback,
+  same-owner/two-owner oraz stałe 5 SELECT-ów bez N+1 są pokryte testami.
+  Ścieżka `continue=False`, finalizacja, transport, publiczne schema/scope'y,
+  envelope i klient nie weszły w ten slice.
   **Niepuste source-correct recovery handlery oraz produkcyjny
   transport/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:
