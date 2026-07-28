@@ -663,10 +663,23 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   guard/phase failures są atomowe, a sukces ma stałe 5 SELECT-ów bez N+1.
   Transport, publiczne schema/scope'y, accepted interrupt i pozostałe przejścia
   nie weszły w ten slice.
+- **B4.4c.4 DONE 2026-07-28:** `stage_battle_activation_action` z jednego
+  participant-scoped headu v2 stage'uje dokładnie jedną akcję w `ACTION_READY`.
+  Strict `action_from_json` / `action_to_json` pozostają wire SSOT, durable
+  `activation.controlling_player` wyznacza caller_player także dla same-owner, a
+  pure `commit_activation_action` pozostaje SSOT fazy, activation guardów,
+  legalności/outcome oraz RNG zgodnie z [pkt 11.b.ii–iv][R11A] i
+  [pkt 14][R14A]. Dokładny ciągły event delta i jeden checkpoint v2 ze zwróconym
+  RNG są stage'owane bez commit/rollback; wynik niesie canonical action, state,
+  eventy, dice i previous/new sequence. Pierwsza oraz osiągalna druga akcja
+  zachowują restart/replay i future RNG. Strict input, v1, auth/no-oracle,
+  stale/checkpoint/phase, race/rollback oraz same-owner/two-owner są pokryte,
+  a sukces ma stałe 5 SELECT-ów bez N+1. Transport, publiczne schema/scope'y,
+  wspólny envelope, continue/finalize i recovery nie weszły w ten slice.
 - **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
   transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
 
-### B. Persistence/model + pass-only API state machine — IN PROGRESS
+### B. Persistence/model + activation API state machine — IN PROGRESS
 
 - **B4.4c.1 DONE:** model, migracja istniejących wierszy do v1 i wewnętrzny
   spójny zapis początkowego checkpointu v1/v2;
@@ -676,6 +689,9 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 - **B4.4c.3 DONE:** transactionally-neutral service dla jednego jawnego passu
   priority ownera, pure handoff/close, guarded event delta + jeden checkpoint
   v2, restart/RNG, same-owner/two-owner, race/rollback i SQL ceiling;
+- **B4.4c.4 DONE:** transactionally-neutral service dla jednej akcji
+  `ACTION_READY`, codec + pure action SSOT, guarded delta + jeden checkpoint z
+  RNG transition, obie akcje, restart/replay, auth/race/rollback i SQL ceiling;
 - **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
 - scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
   persistence; `POST /actions` z kompatybilnymi guardami;
@@ -715,8 +731,10 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [R8]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 8.a"
 [R10]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 10"
 [R11]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 11.b.i–vi"
+[R11A]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 11.b.ii–iv"
 [R12]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 12.a–c"
 [R14]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.d.iv"
+[R14A]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14"
 [R14C]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.c.v"
 [R14D]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.d.vi"
 [R17]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 17"

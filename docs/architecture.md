@@ -175,6 +175,22 @@ Dokładny delta pure core trafia przez `save_events` do ciągłego batcha, po cz
 niezmienionym RNG. Restart po handoffie i zamknięciu, optimistic race/rollback
 oraz limit 5 SELECT-ów bez N+1 są pokryte testami. Publiczny transport, schema,
 scope'y i pozostałe przejścia nie zmieniły się.
+**B4.4c.4** dodaje `stage_battle_activation_action` dla dokładnie jednej akcji
+wybranego oddziału w trwałym `ACTION_READY`. Serwis odtwarza spójny checkpoint
+state+RNG, dekoduje i ponownie koduje wire action przez `action_from_json` /
+`action_to_json`, a stronę caller-a wyznacza z trwałego
+`activation.controlling_player` także w same-owner sandbox. Pure
+`commit_activation_action` pozostaje SSOT fazy, guardów domenowych, legalności
+akcji, outcome i przesunięcia RNG zgodnie z
+[pkt 11.b.ii–iv i 14](../app/static/docs/SZOP_Rozjemca.md). Jego dokładny event
+delta trafia przez guarded `save_events`, po czym jeden checkpoint v2 zapisuje
+zwrócone state i RNG. Wynik zawiera kanoniczną akcję, state, eventy, dice oraz
+previous/new sequence; serwis nie commitje ani nie rollbackuje. Pierwsza i
+osiągalna druga akcja, restart/replay, future RNG, auth/no-oracle,
+stale/race/rollback i strict payload są pokryte testami. Sukces wykonuje jeden
+batch eventów, jeden checkpoint i 5 SELECT-ów niezależnie od liczby oddziałów.
+Nie dodano produkcyjnego call site, routera, publicznego schema/scope'u,
+wspólnego envelope ani continue/finalize.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.

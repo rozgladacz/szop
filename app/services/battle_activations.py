@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
@@ -10,9 +12,11 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..battle_protocol import ACTIVATION_PROTOCOL_VERSION_V2
+from .engine.action_codec import ActionCodecError, action_from_json, action_to_json
 from .engine.activation_protocol import (
     ActivationProtocolError,
     ActivationProtocolErrorReason,
+    commit_activation_action,
     pass_interrupt_priority,
     start_activation,
 )
@@ -137,6 +141,62 @@ class BattleActivationPassWriteConflict(BattleActivationPassError):
     """A guarded event/checkpoint write lost a concurrent race."""
 
 
+class BattleActivationActionError(RuntimeError):
+    """Base error for the durable activation-action service boundary."""
+
+
+class BattleActivationActionNotFound(BattleActivationActionError):
+    """The battle is missing or outside the participant scope."""
+
+
+class BattleActivationActionUpgradeRequired(BattleActivationActionError):
+    """The battle uses the legacy activation protocol."""
+
+
+class BattleActivationActionUnavailable(BattleActivationActionError):
+    """The battle has no coherent resumable v2 checkpoint at its current head."""
+
+    def __init__(self, *, actual_sequence: int | None = None) -> None:
+        self.actual_sequence = actual_sequence
+        super().__init__("Current v2 battle checkpoint is unavailable")
+
+
+class BattleActivationActionSequenceConflict(BattleActivationActionError):
+    """The caller's optimistic sequence no longer matches the durable head."""
+
+    def __init__(
+        self,
+        *,
+        expected_sequence: int,
+        actual_sequence: int,
+    ) -> None:
+        self.expected_sequence = expected_sequence
+        self.actual_sequence = actual_sequence
+        super().__init__("Battle event sequence conflict")
+
+
+class BattleActivationActionForbidden(BattleActivationActionError):
+    """The participant does not control the durable activation."""
+
+
+class BattleActivationActionInvalid(BattleActivationActionError):
+    """The input or current domain state cannot commit this activation action."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        reason: ActivationProtocolErrorReason | None = None,
+    ) -> None:
+        self.detail = detail
+        self.reason = reason
+        super().__init__(detail)
+
+
+class BattleActivationActionWriteConflict(BattleActivationActionError):
+    """A guarded event/checkpoint write lost a concurrent race."""
+
+
 @dataclass(frozen=True, slots=True)
 class StagedBattleActivationStart:
     """A staged v2 activation start suitable for a future shared envelope."""
@@ -156,6 +216,19 @@ class StagedBattleActivationPass:
     battle_id: int
     previous_sequence: int
     new_sequence: int
+    state: BattleState
+    events: tuple[BattleEvent, ...]
+    dice: DeterministicDice
+
+
+@dataclass(frozen=True, slots=True)
+class StagedBattleActivationAction:
+    """One staged v2 action and its canonical, resumable durable result."""
+
+    battle_id: int
+    previous_sequence: int
+    new_sequence: int
+    action_wire: dict[str, Any]
     state: BattleState
     events: tuple[BattleEvent, ...]
     dice: DeterministicDice
@@ -419,6 +492,153 @@ def stage_battle_activation_pass(
     )
 
 
+def stage_battle_activation_action(
+    db: Session,
+    *,
+    battle_id: int,
+    caller_user_id: int,
+    expected_sequence: int,
+    activation_id: int,
+    expected_activation_version: int,
+    action_payload: Mapping[str, Any],
+) -> StagedBattleActivationAction:
+    """Stage exactly one legal v2 activation action without ending a transaction."""
+
+    try:
+        _validate_identity(
+            battle_id=battle_id,
+            caller_user_id=caller_user_id,
+        )
+    except BattleActivationStartNotFound as exc:
+        raise BattleActivationActionNotFound from exc
+    if type(expected_sequence) is not int or expected_sequence < 0:
+        raise BattleActivationActionInvalid("Invalid expected sequence")
+    if (
+        type(activation_id) is not int
+        or activation_id < 1
+        or type(expected_activation_version) is not int
+        or expected_activation_version < 1
+    ):
+        raise BattleActivationActionInvalid(
+            "Invalid activation guard",
+            reason=ActivationProtocolErrorReason.STALE_ACTIVATION,
+        )
+
+    try:
+        battle = _get_participant_battle(
+            db,
+            battle_id=battle_id,
+            caller_user_id=caller_user_id,
+        )
+    except BattleActivationStartNotFound as exc:
+        raise BattleActivationActionNotFound from exc
+    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+        raise BattleActivationActionUpgradeRequired
+    if battle.status != "active":
+        raise BattleActivationActionInvalid(
+            "Battle is not active",
+            reason=ActivationProtocolErrorReason.INVALID_PHASE,
+        )
+
+    try:
+        checkpoint = load_latest_checkpoint(db, battle.id)
+    except (TypeError, ValueError) as exc:
+        raise BattleActivationActionUnavailable from exc
+    if checkpoint is None:
+        raise BattleActivationActionUnavailable(
+            actual_sequence=latest_event_sequence(db, battle.id)
+        )
+    if expected_sequence != checkpoint.sequence_at:
+        raise BattleActivationActionSequenceConflict(
+            expected_sequence=expected_sequence,
+            actual_sequence=checkpoint.sequence_at,
+        )
+    if (
+        type(checkpoint.state.initiative_player) is not int
+        or checkpoint.state.initiative_player not in (0, 1)
+    ):
+        raise BattleActivationActionUnavailable(
+            actual_sequence=checkpoint.sequence_at
+        )
+
+    try:
+        action = action_from_json(action_payload)
+        canonical_action = action_to_json(action)
+    except (ActionCodecError, TypeError, ValueError) as exc:
+        raise BattleActivationActionInvalid("Invalid action payload") from exc
+
+    activation = checkpoint.state.activation
+    controlled_player = (
+        activation.controlling_player if activation is not None else 0
+    )
+    try:
+        caller_player = _caller_player(
+            battle,
+            caller_user_id=caller_user_id,
+            controlled_player=controlled_player,
+        )
+    except BattleActivationStartInvalid as exc:
+        raise BattleActivationActionUnavailable(
+            actual_sequence=checkpoint.sequence_at
+        ) from exc
+
+    try:
+        transition = commit_activation_action(
+            checkpoint.state,
+            caller_player=caller_player,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+            action=action,
+            dice=checkpoint.dice,
+            sequence=checkpoint.sequence_at + 1,
+        )
+    except ActivationProtocolError as exc:
+        if exc.reason is ActivationProtocolErrorReason.PROTOCOL_UPGRADE_REQUIRED:
+            raise BattleActivationActionUnavailable(
+                actual_sequence=checkpoint.sequence_at
+            ) from exc
+        if exc.reason is ActivationProtocolErrorReason.INVALID_CALLER:
+            raise BattleActivationActionForbidden from exc
+        raise BattleActivationActionInvalid(
+            "Activation action is not legal",
+            reason=exc.reason,
+        ) from exc
+
+    new_sequence = transition.next_sequence - 1
+    try:
+        save_events(
+            db,
+            battle.id,
+            transition.events,
+            expected_latest_sequence=checkpoint.sequence_at,
+        )
+        save_checkpoint(
+            db,
+            battle.id,
+            new_sequence,
+            transition.state,
+            transition.dice,
+            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+        )
+    except BattleEventSequenceConflict as exc:
+        raise BattleActivationActionSequenceConflict(
+            expected_sequence=exc.expected_latest_sequence,
+            actual_sequence=exc.actual_latest_sequence,
+        ) from exc
+    except (BattleCheckpointSequenceConflict, IntegrityError) as exc:
+        raise BattleActivationActionWriteConflict from exc
+
+    return StagedBattleActivationAction(
+        battle_id=battle.id,
+        previous_sequence=checkpoint.sequence_at,
+        new_sequence=new_sequence,
+        action_wire=canonical_action,
+        state=transition.state,
+        events=transition.events,
+        dice=transition.dice,
+    )
+
+
 def _validate_identity(*, battle_id: int, caller_user_id: int) -> None:
     if (
         type(battle_id) is not int
@@ -468,6 +688,14 @@ def _caller_player(
 
 
 __all__ = [
+    "BattleActivationActionError",
+    "BattleActivationActionForbidden",
+    "BattleActivationActionInvalid",
+    "BattleActivationActionNotFound",
+    "BattleActivationActionSequenceConflict",
+    "BattleActivationActionUnavailable",
+    "BattleActivationActionUpgradeRequired",
+    "BattleActivationActionWriteConflict",
     "BattleActivationPassError",
     "BattleActivationPassInvalid",
     "BattleActivationPassNotFound",
@@ -483,8 +711,10 @@ __all__ = [
     "BattleActivationStartUnavailable",
     "BattleActivationStartUpgradeRequired",
     "BattleActivationStartWriteConflict",
+    "StagedBattleActivationAction",
     "StagedBattleActivationPass",
     "StagedBattleActivationStart",
+    "stage_battle_activation_action",
     "stage_battle_activation_pass",
     "stage_battle_activation_start",
 ]

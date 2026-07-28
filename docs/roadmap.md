@@ -340,6 +340,20 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   Sukces pozostaje na 5 SELECT-ach bez N+1. Router, publiczne schema/scope'y,
   accepted interrupt, akcja, continue/finalize, recovery i klient nie weszły
   w ten slice.
+  **B4.4c.4 durable activation action service DONE 2026-07-28:**
+  `stage_battle_activation_action` z jednego participant-scoped trwałego headu
+  v2 stage'uje dokładnie jedną legalną akcję oddziału w `ACTION_READY`. Wire
+  payload jest ściśle dekodowany i kanonizowany przez istniejący action codec,
+  caller_player pochodzi z trwałego `activation.controlling_player`, a outcome,
+  reguły akcji i RNG pozostają w pure `commit_activation_action`
+  ([pkt 11.b.ii–iv i 14](../app/static/docs/SZOP_Rozjemca.md)). Dokładny ciągły
+  event delta oraz jeden checkpoint v2 z RNG transition są zapisywane bez
+  commit/rollback w serwisie. Pierwsza i osiągalna druga akcja zachowują
+  restart/replay oraz przyszłe rzuty; v1, malformed/coercive payload, auth,
+  stale/checkpoint/phase, race i rollback failują bez częściowego zapisu.
+  Same-owner/two-owner matrix oraz stałe 5 SELECT-ów bez N+1 są pokryte testami.
+  Routery, publiczne schema/scope'y, wspólny envelope, continue/finalize,
+  recovery i klient nie weszły w ten slice.
   **Niepuste source-correct recovery handlery oraz produkcyjny
   transport/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:
