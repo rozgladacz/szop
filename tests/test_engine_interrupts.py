@@ -8,7 +8,7 @@ trigger_interrupt z payload, Strażnik MVP stub.
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
@@ -17,11 +17,21 @@ from app.services.engine.interrupts import (
     _INTERRUPT_HANDLERS,
     InterruptContext,
     InterruptPoint,
+    InvalidInterruptError,
+    READY_INTERRUPT_HANDLERS,
+    execute_ready_activation_interrupt_outcomes,
     get_eligible_interrupts,
     register_interrupt_handler,
     trigger_interrupt,
 )
-from app.services.engine.state import BattleState, Position, UnitBlob
+from app.services.engine.activation_protocol import start_activation
+from app.services.engine.state import (
+    BattleState,
+    Lokalizacja,
+    Position,
+    UnitBlob,
+    apply_events,
+)
 
 
 def make_blob(
@@ -29,25 +39,33 @@ def make_blob(
     passives: tuple[str, ...] = (),
     models_alive: int = 5,
     owner: int = 0,
+    pos: tuple[float, float] = (0.0, 0.0),
+    location: Lokalizacja = Lokalizacja.FRONT,
 ) -> UnitBlob:
     return UnitBlob(
         id=blob_id,
         owner_player=owner,
-        position=Position(0.0, 0.0),
+        position=Position(*pos),
         radius_inches=1.0,
         models_alive=models_alive,
         toughness_per_model=3,
         passives=passives,
+        location=location,
     )
 
 
-def make_state(blobs: tuple[UnitBlob, ...] = ()) -> BattleState:
+def make_state(
+    blobs: tuple[UnitBlob, ...] = (),
+    *,
+    initiative_player: int | None = None,
+) -> BattleState:
     return BattleState(
         round=1,
         active_player=0,
         activations_remaining=(1, 1),
         blobs=blobs,
         terrain=(),
+        initiative_player=initiative_player,
     )
 
 
@@ -231,3 +249,215 @@ def test_handler_registry_keyed_by_tuple():
     """Klucz to (point, slug) tuple — niezarejestrowany slug w tym punkcie → brak."""
     assert (InterruptPoint.BEFORE_ACTION, "straznik") in _INTERRUPT_HANDLERS
     assert (InterruptPoint.BEFORE_ACTION, "nonexistent") not in _INTERRUPT_HANDLERS
+
+
+def _started_rozkaz_state(
+    *,
+    source: UnitBlob | None = None,
+    target: UnitBlob | None = None,
+    extra_blobs: tuple[UnitBlob, ...] = (),
+) -> BattleState:
+    actual_source = source or make_blob(
+        blob_id=10,
+        owner=0,
+        passives=("rozkaz",),
+        pos=(0.0, 0.0),
+    )
+    actual_target = target or make_blob(
+        blob_id=20,
+        owner=0,
+        pos=(5.0, 0.0),
+    )
+    state = make_state(
+        (actual_source, actual_target, *extra_blobs),
+        initiative_player=0,
+    )
+    return start_activation(state, selected_unit_id=20, sequence=10).state
+
+
+def _execute_rozkaz(
+    state: BattleState,
+    *,
+    source: UnitBlob | None = None,
+    payload=None,
+    ability_slug: str = "rozkaz",
+):
+    actual_source = source or next(blob for blob in state.blobs if blob.id == 10)
+    return execute_ready_activation_interrupt_outcomes(
+        state=state,
+        source=actual_source,
+        ability_slug=ability_slug,
+        payload=(
+            {"target_id": 20, "ability": "niewrazliwy", "granted": True}
+            if payload is None
+            else payload
+        ),
+        sequence=20,
+    )
+
+
+def test_ready_interrupt_allowlist_is_immutable_and_narrower_than_registry():
+    assert READY_INTERRUPT_HANDLERS == frozenset({"rozkaz"})
+    assert {"rozkaz", "klatwa", "oznaczenie", "straznik"} <= {
+        slug for _, slug in _INTERRUPT_HANDLERS
+    }
+
+
+@pytest.mark.parametrize("slug", ["klatwa", "oznaczenie", "straznik"])
+def test_ready_adapter_rejects_registered_unready_handler_before_dispatch(
+    slug,
+    monkeypatch,
+):
+    state = _started_rozkaz_state()
+    called = False
+
+    def forbidden_dispatch(context, payload):
+        nonlocal called
+        called = True
+        return context.state, ()
+
+    monkeypatch.setitem(
+        _INTERRUPT_HANDLERS,
+        (InterruptPoint.BEFORE_ACTION, slug),
+        forbidden_dispatch,
+    )
+    with pytest.raises(InvalidInterruptError, match="not ready"):
+        _execute_rozkaz(state, ability_slug=slug)
+    assert called is False
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"target_id": True, "ability": "niewrazliwy", "granted": True},
+        {"target_id": "20", "ability": "niewrazliwy", "granted": True},
+        {"target_id": 20, "ability": 1, "granted": True},
+        {"target_id": 20, "ability": "", "granted": True},
+        {"target_id": 20, "ability": "niewrazliwy", "granted": 1},
+        {"target_id": 20, "ability": "niewrazliwy", "granted": "true"},
+        {
+            "target_id": 20,
+            "ability": "niewrazliwy",
+            "granted": True,
+            "extra": "transport",
+        },
+        {
+            "target_id": 20,
+            "ability": "niewrazliwy",
+            "granted": True,
+            "sequence": 999,
+        },
+    ],
+)
+def test_ready_rozkaz_rejects_malformed_coerced_extra_or_client_sequence(payload):
+    state = _started_rozkaz_state()
+    with pytest.raises(InvalidInterruptError):
+        _execute_rozkaz(state, payload=payload)
+
+
+@pytest.mark.parametrize(
+    ("ability", "granted"),
+    [("niewrazliwy", False), ("nieustraszony", True)],
+)
+def test_ready_rozkaz_rejects_granted_direction_mismatch(ability, granted):
+    state = _started_rozkaz_state()
+    with pytest.raises(InvalidInterruptError, match="rozkaz_kierunek"):
+        _execute_rozkaz(
+            state,
+            payload={"target_id": 20, "ability": ability, "granted": granted},
+        )
+
+
+def test_ready_rozkaz_uses_internal_sequence_and_replays_exactly():
+    state = _started_rozkaz_state()
+    outcome_state, events = _execute_rozkaz(state)
+
+    assert [event.sequence for event in events] == [20, 21]
+    assert outcome_state == apply_events(state, events)
+    assert events[0].payload == {"ability": "niewrazliwy", "granted": True}
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        make_blob(blob_id=30, owner=1, pos=(5.0, 0.0)),
+        make_blob(blob_id=30, owner=0, pos=(5.0, 0.0), models_alive=0),
+        make_blob(
+            blob_id=30,
+            owner=0,
+            pos=(5.0, 0.0),
+            location=Lokalizacja.ZAPLECZE,
+        ),
+        make_blob(blob_id=30, owner=0, pos=(20.0, 0.0)),
+    ],
+)
+def test_ready_rozkaz_rejects_enemy_dead_off_field_or_out_of_range_target(target):
+    state = _started_rozkaz_state(extra_blobs=(target,))
+    with pytest.raises(InvalidInterruptError):
+        _execute_rozkaz(
+            state,
+            payload={
+                "target_id": 30,
+                "ability": "niewrazliwy",
+                "granted": True,
+            },
+        )
+
+
+def test_ready_rozkaz_rejects_missing_target_and_noncanonical_ability():
+    state = _started_rozkaz_state()
+    with pytest.raises(InvalidInterruptError):
+        _execute_rozkaz(
+            state,
+            payload={"target_id": 999, "ability": "niewrazliwy", "granted": True},
+        )
+    with pytest.raises(InvalidInterruptError, match="canonical rozkaz tags"):
+        _execute_rozkaz(
+            state,
+            payload={"target_id": 20, "ability": "wolny", "granted": False},
+        )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        make_blob(blob_id=10, owner=0, passives=(), pos=(0.0, 0.0)),
+        make_blob(
+            blob_id=10,
+            owner=1,
+            passives=("rozkaz",),
+            pos=(0.0, 0.0),
+        ),
+        make_blob(
+            blob_id=10,
+            owner=0,
+            passives=("rozkaz",),
+            pos=(0.0, 0.0),
+            models_alive=0,
+        ),
+        make_blob(
+            blob_id=10,
+            owner=0,
+            passives=("rozkaz",),
+            pos=(0.0, 0.0),
+            location=Lokalizacja.ZAPLECZE,
+        ),
+    ],
+)
+def test_ready_adapter_rejects_source_without_slug_dead_or_off_field(source):
+    state = _started_rozkaz_state(source=source)
+    with pytest.raises(InvalidInterruptError):
+        _execute_rozkaz(state)
+
+
+def test_ready_adapter_rejects_forged_or_missing_source():
+    state = _started_rozkaz_state()
+    forged = replace(
+        next(blob for blob in state.blobs if blob.id == 10),
+        owner_player=1,
+    )
+    missing = make_blob(blob_id=999, passives=("rozkaz",))
+    for source in (forged, missing):
+        with pytest.raises(InvalidInterruptError):
+            _execute_rozkaz(state, source=source)

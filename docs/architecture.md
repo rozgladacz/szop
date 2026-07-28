@@ -135,12 +135,13 @@ passy są zachowane. B4.4b.5 dodał action bridge po zamknięciu `BEFORE_ACTION`
 zgodnie z kolejnością
 [`SZOP_Rozjemca.md` pkt 11.b.i–ii](../app/static/docs/SZOP_Rozjemca.md), a
 B4.4b.6 — czystą finalizację z jawnie pustym recovery, reużyciem legacy
-outcome SSOT oraz transferem inicjatywy/active player. Priorytet w oknie zaczyna
+outcome SSOT oraz transferem inicjatywy/active player, a B4.4b.7 — immutable
+allowlistę tylko dla `rozkaz` i source-correct built-in outcome adapter ze
+ścisłym payloadem oraz kanonicznym `rozkaz_kierunek`. Priorytet w oknie zaczyna
 gracz z inicjatywą i przechodzi na drugiego dopiero po jawnym pass
 ([pkt 10 i 12.c](../app/static/docs/SZOP_Rozjemca.md)).
 `POST /battles/{id}/interrupts`, prereq trasy aktywacji i scope
-`battle:interrupt`, built-in handler adapters/publiczna allowlista, produkcyjne
-wiring v2 dla action/finalize, niepuste recovery handlery oraz
+`battle:interrupt`, produkcyjne wiring v2 dla action/finalize, niepuste recovery handlery oraz
 persistence/API/client rollout pozostają **OPEN**.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
@@ -293,7 +294,7 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `prediction.py` | ~210 | Analytic binomial bez RNG (ADR-0044), `expected_damage(...) → DamageDistribution`, `would_see` hipotetyczny LoS. **Monte Carlo parity** ±3σ z combat.resolve_ranged_attack |
 | `combat.py` | ~580 | `CombatResult` + `ChargeResult` + `resolve_ranged_attack` (3 fazy pkt 17 + osłona pkt 19) + `resolve_melee_attack` (z damage_balance pkt 20.c) + `resolve_charge_attack` (pkt 14.d + reactive kontratak ADR-0015a). **B3.9.b fix #4**: `circle_edge_distance` w `min_gap` (uwzględnia charger.radius). **B3.9.d**: emit `StatusAdded(Wyczerpany)` po kontrataku. **B3.9.e fix #7**: counter używa `defender.melee_weapons[0]` z fallback. Weapon abilities MVP: AP/Brutalny/Precyzyjny/Niezawodny/Podwójny |
 | `effects.py` | ~340 | Per-hook passive registry (3 kategorie: defense/attack/weapon modifiers; morale-modifier usunięty 2026-06 — drift pkt 20.e, Nieustraszony binarny w `phases._regroup_test`) + **`_ACTIVE_ABILITY_REGISTRY`** (B3.9.e/ADR-0047) z `register_active_ability(slug)` dekoratorem + `get_active_ability(slug)` lookup. MVP passive: Cierpliwy/Tarcza (defense). Built-in active: pełen `discard_exhausted` + 6 stubów (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik). |
-| `interrupts.py` | ~375 | `InterruptManager` z jednym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. Rozkaz/Klątwa/Oznaczenie mają wspólny uproszczony handler; Strażnik pozostaje stubem. Publiczna ekspozycja czeka na trwałe okno i readiness gate ADR-0056. |
+| `interrupts.py` | ~600 | `InterruptManager` z jednym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. B4.4b.7 dodaje osobną `READY_INTERRUPT_HANDLERS={"rozkaz"}`, built-in adapter trwałego protokołu oraz ścisły, source-correct Rozkaz z kierunkiem z rulesetu; legacy Klątwa/Oznaczenie pozostają uproszczone, a Strażnik stubem. Publiczny transport nadal czeka na rollout ADR-0056. |
 | `actions.py` | ~145 | 6 Action types frozen (`DeploymentAction/ManeuverAction/DefendAction/ShootAction/ChargeAction/SpecialAction`) + `Action` Union alias, kanoniczne discriminators oraz współdzielona walidacja trwałej historii follow-up |
 | `phases.py` | ~1030 | `setup_phase`, `deployment_round` oraz split aktywacji: `_begin_activation` raz, `_apply_single_action` = akcja + Przegrupowanie, `_finalize_activation` = Odzyskiwanie ran placeholder + Aktywowany + clear override'ów ([`SZOP_Rozjemca.md` pkt 11.b.i–vi](../app/static/docs/SZOP_Rozjemca.md)). **B3.9.c**: `ActivationContext` frozen dataclass + `_build_activation_context` (delta `wounds_received_this_activation` per blob + `melee_combatants` frozenset). **B3.9.d**: emit Status* + MeleeBalanceReset. **B3.9.e**: `_apply_special` deleguje do `effects.get_active_ability`. |
 | `resolver.py` | ~360 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` zamyka legacy jednoakcyjną aktywację; `apply_activation(..., continuation)` wykonuje do dwóch akcji, ale `actions_taken` jest tylko procesowe. `should_end_round` / `is_battle_over`. Trwałe przerwanie między krokami wymaga event-sourced activation/window z ADR-0056; obecny resolver nie jest restart-safe seam dla osobnego interrupt requestu. |

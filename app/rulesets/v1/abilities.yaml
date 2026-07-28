@@ -31,6 +31,7 @@ abilities:
   type: passive
   description: Porusza się o +2”.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: wolny
   name: Wolny
   type: passive
@@ -41,11 +42,13 @@ abilities:
   type: passive
   description: Przed Leczeniem możesz się ruszyć o 2”.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: instynkt
   name: Instynkt
   type: passive
   description: Rusza się zawsze w stronę najbliższego wroga i zawsze atakuje najbliższego wroga.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: nieruchomy
   name: Nieruchomy
   type: passive
@@ -56,11 +59,13 @@ abilities:
   type: passive
   description: Ignoruje trudny i niebezpieczny teren.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: niezgrabny
   name: Niezgrabny
   type: passive
   description: Na trudnym i niebezpiecznym terenie wykonuje dodatkowy test trudnego terenu.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: latajacy
   name: Latający
   type: passive
@@ -87,11 +92,13 @@ abilities:
   type: passive
   description: Nie testuje przegrupowania, gdy oddział jest powyżej połowy początkowej wytrzymałości.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: niestrudzony
   name: Niestrudzony
   type: passive
   description: Może wykonywać tę samą akcję wielokrotnie w rundzie.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: ucieczka
   name: Ucieczka
   type: passive
@@ -107,6 +114,7 @@ abilities:
   type: passive
   description: Podczas szarży naturalne 6 dają dodatkowe zwykłe trafienie.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: przygotowanie
   name: Przygotowanie
   type: passive
@@ -117,6 +125,7 @@ abilities:
   type: passive
   description: Może wykonać kontratak przed atakami szarżującego oddziału, a ten przestaje być uznawany za szarżującego.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: regeneracja
   name: Regeneracja
   type: passive
@@ -127,6 +136,7 @@ abilities:
   type: passive
   description: Jeżeli jesteś bliżej strefy rozstawienia przeciwnika niż atakowany oddział, przed wykonaniem ataków przeciwnik wybiera, czy podwaja ich liczbę, czy zostaje Przyszpilony.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: szpica
   name: Szpica
   type: passive
@@ -137,16 +147,19 @@ abilities:
   type: passive
   description: Podczas testów obrony naturalna 6 nie oznacza automatycznego sukcesu.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: niewrazliwy
   name: Niewrażliwy
   type: passive
   description: Podczas testów obrony naturalna 5 daje automatyczny sukces.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: maskowanie
   name: Maskowanie
   type: passive
   description: Ma osłonę, gdy jest dalej niż 3" od wrogów.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: waagh
   name: Waagh!
   type: passive
@@ -157,16 +170,19 @@ abilities:
   type: passive
   description: Jeżeli nie ma wrogów w zasięgu 12” od oddziału modelu, +1 do rzutów na trafienie.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: tarcza
   name: Tarcza
   type: passive
   description: +1 do testów obrony, gdy nie jest przyszpilony.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: okopany
   name: Okopany
   type: passive
   description: +1 do testów obrony, gdy ma osłonę z terenu.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: zdobywca
   name: Zdobywca
   type: passive
@@ -204,16 +220,19 @@ abilities:
   type: passive
   description: Możesz przerwać w aktywacji przeciwnika, aby wykonać Ostrzał. Następnie twój oddział zostaje wyczerpany.
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: bastion
   name: Bastion
   type: passive
   description: Nie zostajesz wyczerpany po kontrataku.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: parowanie
   name: Parowanie
   type: passive
   description: Ma osłonę podczas walki wręcz.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: zemsta
   name: Zemsta
   type: passive
@@ -234,6 +253,7 @@ abilities:
   type: passive
   description: Masz +1 do rzutów obrony, jeżeli nie rozpocząłeś swojej aktywacji w tej rundzie.
   rozkaz_tak: true
+  rozkaz_kierunek: "−"
 - slug: odrodzenie
   name: Odrodzenie
   type: passive
@@ -269,6 +289,7 @@ abilities:
   value_label: X
   value_type: text
   rozkaz_tak: true
+  rozkaz_kierunek: "+"
 - slug: mag
   name: Mag
   type: active

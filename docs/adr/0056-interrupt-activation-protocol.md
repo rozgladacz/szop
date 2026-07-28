@@ -483,13 +483,18 @@ historyczny error contract ADR-0054.
 
 | Handler | Publiczna gotowość | Prerequisite |
 |---|---|---|
-| Rozkaz(X) | Może być pierwszym bezpiecznym handlerem po fundamencie. | Osobny validator `rozkaz_tak`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool, limit raz/rundę i wygaśnięcie przy finalizacji ([pozycja 50][Z50]). |
+| Rozkaz(X) | Gotowy w pure engine od B4.4b.7; transport nadal niewystawiony. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
 | Klątwa(X) | Może wejść po tych samych gate'ach, ale jako osobny slice po Rozkazie. | Osobny validator `klatwa_tak`, enemy target, 12″ i limit raz/rundę; nie może reużyć `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
 | Strażnik | Publicznie niewspierany, dopóki jest stubem. | Pełny interrupt-action primitive: legalny source/weapon/targets, rzeczywisty Ostrzał, następnie Wyczerpany, outcome eventy, replay/RNG i no-nested ([pozycja 31][Z31], [pkt 17][R17]). |
 | Oznaczenie(X) | Publicznie niewspierane w obecnej semantyce. | Osobny attack-declaration/attack-scope prerequisite po zamknięciu ogólnego `BEFORE_ACTION`: cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, efekt tylko do `AttackResolved`, nie do końca aktywacji ([pozycja 49][Z49]). To rozszerzenie nadal użyje `POST /interrupts`, ale nie może udawać zwykłego activation override. |
 
 Registry może zawierać niegotowe handlery do testów engine; publiczna allowlista
 nie może ich eksportować.
+
+Drift zamknięty w B4.4b.7: wcześniejszy kontrakt ADR wymagał tylko strict bool
+`granted`, lecz kanoniczne konwencje wiążą `true` z kierunkiem `"+"` (nadanie)
+i `false` z `"−"` (odebranie). Adapter waliduje tę zgodność fail-closed; wpis
+rulesetu bez obu kanonicznych tagów nie jest legalnym X.
 
 ## Performance / query gate
 
@@ -619,8 +624,17 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   `ActivePlayerChanged`. Batch jest ciągły, nie dopuszcza zagnieżdżonych eventów
   protokołu, wymaga live/replay parity i kończy z `activation=None`. Codec-v2
   restart oraz pełny tail jednej i dwóch akcji odtwarzają identyczny stan.
-- **OPEN:** source-correct built-in handler adapters i publiczna allowlista,
-  niepuste recovery handlery oraz produkcyjny restart przez
+- **B4.4b.7 DONE 2026-07-28:** immutable `READY_INTERRUPT_HANDLERS` jest osobna
+  od registry i zawiera wyłącznie `rozkaz`. Built-in executor o sygnaturze
+  `ActivationInterruptOutcomeExecutor` odtwarza `BEFORE_ACTION`, source i
+  aktywowany oddział z trwałego stanu, używa wewnętrznej sekwencji i deleguje
+  outcome do istniejącego handlera. Ścisły Rozkaz odrzuca coercion, extra pola,
+  klientowe `sequence`, niegotowe slugi, nielegalne source/target/X/kierunek i
+  drugie użycie w rundzie przed częściowym outcome; success zachowuje
+  priority/passy, replay/checkpoint-v2 restart parity i wygaśnięcie przy
+  finalizacji ([konwencje][ZCONV], [pozycja 50][Z50], [pkt 11.b.i–vi][R11],
+  [pkt 12.a–c][R12]).
+- **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
   persistence/model/API/auth/client rollout. Te elementy pozostają osobnymi
   slice'ami.
 
@@ -677,3 +691,4 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [Z45]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 45 Klątwa(X)"
 [Z49]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 49 Oznaczenie(X)"
 [Z50]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 50 Rozkaz(X)"
+[ZCONV]: ../../app/static/docs/SZOP_Zdolnosci.md "Konwencje tagów Rozkazu"

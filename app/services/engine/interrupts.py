@@ -40,8 +40,8 @@ Zawartość:
 - `get_eligible_interrupts(state, point)` — lista (blob, slug) which CAN trigger
 - `trigger_interrupt(...)` — wywołuje konkretny handler
 - Handlery: Strażnik (id 31) stub (emit `InterruptTriggered` tylko — faktyczny
-  Ostrzał + Wyczerpany czeka na integrację w `phases.py`, H2/B4) oraz Rozkaz/
-  Klątwa/Oznaczenie (id 50/45/49, ADR-0049 — pełna mechanika override + limit).
+  Ostrzał + Wyczerpany czeka na osobny slice), source-correct Rozkaz (id 50)
+  oraz historyczne uproszczenia Klątwy/Oznaczenia (id 45/49).
 
 Auto-orkiestracja przerwań w pętli aktywacji (`phases.activation_phase` woła
 handlery sama) wciąż czeka na integrację (H2/B4); dziś handlery wywoływane jawnie.
@@ -49,9 +49,11 @@ handlery sama) wciąż czeka na integrację (H2/B4); dziś handlery wywoływane 
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import lru_cache
+from types import MappingProxyType
 from typing import Any, Callable
 
 from app.services.engine.events import (
@@ -60,7 +62,13 @@ from app.services.engine.events import (
     InterruptTriggered,
 )
 from app.services.engine.geometry import circle_edge_distance
-from app.services.engine.state import BattleState, UnitBlob, effective_passives
+from app.services.engine.state import (
+    ActivationPhase,
+    BattleState,
+    Lokalizacja,
+    UnitBlob,
+    effective_passives,
+)
 
 
 class InterruptPoint(Enum):
@@ -81,13 +89,15 @@ class InterruptContext:
     `state` = aktualny BattleState (read-only). `point` = punkt przerwania
     (`BEFORE_ACTION` — jedyny w MVP). `active_unit_id` = oddział obecnie
     aktywowany (jeśli applicable; None dla między-rundowych). `source_unit_id` =
-    oddział wywołujący interrupt (with eligible passive ability).
+    oddział wywołujący interrupt (with eligible passive ability). `sequence`
+    jest wyłącznie wewnętrznym początkiem outcome, nie polem payloadu klienta.
     """
 
     state: BattleState
     point: InterruptPoint
     source_unit_id: int
     active_unit_id: int | None = None
+    sequence: int = 0
 
 
 # Handler signature: (context, **kwargs) → (new_state, events)
@@ -98,6 +108,9 @@ InterruptHandlerFn = Callable[
 
 # Registry: (point, slug) → handler
 _INTERRUPT_HANDLERS: dict[tuple[InterruptPoint, str], InterruptHandlerFn] = {}
+
+# Public readiness is deliberately narrower than the internal registry.
+READY_INTERRUPT_HANDLERS = frozenset({"rozkaz"})
 
 
 def register_interrupt_handler(
@@ -220,8 +233,9 @@ def _straznik_handler(
 # Mechanika: emit `AbilityOverrideApplied(target, X, granted)` → substrat
 # `UnitBlob.ability_overrides` (Faza 1) → `effective_passives` aplikuje X do
 # końca aktywacji (`activation_phase` emituje `AbilityOverridesCleared`).
-# `granted` (payload, default True) rozróżnia wariant pozytywny (nadaj X) od
-# negatywnego (odbierz X) — „(nie)miał zdolność X" (pkt 12).
+# Dla source-correct Rozkazu `granted` jest wymaganym strict bool i musi zgadzać
+# się z `rozkaz_kierunek`; historyczne Klątwa/Oznaczenie zachowują coercion do
+# czasu własnych source-correct slice'ów.
 
 ORDER_RANGE_INCHES = 12.0
 # Sluggi przerwań z limitem „raz na rundę" (pkt 12). Strażnik NIE jest tu —
@@ -234,6 +248,9 @@ class InvalidInterruptError(ValueError):
     `rozkaz_tak` / limit raz-na-rundę)."""
 
 
+_ROZKAZ_PAYLOAD_FIELDS = frozenset({"target_id", "ability", "granted"})
+
+
 @lru_cache(maxsize=4)
 def _rozkaz_capable_slugs(ruleset_version: str = "v1") -> frozenset[str]:
     """Zbiór slugów pasywek z `rozkaz_tak: true` (dozwolone jako X). lru_cache —
@@ -244,54 +261,60 @@ def _rozkaz_capable_slugs(ruleset_version: str = "v1") -> frozenset[str]:
     return frozenset(a.slug for a in ruleset.abilities if a.rozkaz_tak)
 
 
-def _apply_order_like(
+@lru_cache(maxsize=4)
+def _rozkaz_capable_directions(
+    ruleset_version: str = "v1",
+) -> Mapping[str, bool]:
+    """Immutable source-correct Rozkaz catalog: slug -> required `granted`."""
+    from app.services.rulesets.loader import load_ruleset
+
+    directions = {"+": True, "−": False}
+    ruleset = load_ruleset(ruleset_version)
+    return MappingProxyType(
+        {
+            ability.slug: directions[ability.rozkaz_kierunek]
+            for ability in ruleset.abilities
+            if ability.type == "passive"
+            and ability.rozkaz_tak is True
+            and ability.rozkaz_kierunek in directions
+        }
+    )
+
+
+def _order_like_participants(
     context: InterruptContext,
-    payload: dict[str, Any],
     *,
     slug: str,
+    target_id: int,
     require_enemy: bool,
-) -> tuple[BattleState, tuple[BattleEvent, ...]]:
-    """Wspólna logika Rozkaz/Klątwa/Oznaczenie (pkt 12 + 45/49/50).
-
-    Payload: `target_id` (oddział-cel), `ability` (X — pasywka `rozkaz_tak:true`),
-    `granted` (bool, default True — nadaj/odbierz), `sequence`.
-
-    Walidacja (raise `InvalidInterruptError`): limit raz-na-rundę, istnienie celu,
-    `rozkaz_tak`, ally/enemy, zasięg 12″ (krawędź-krawędź). Emit `InterruptTriggered`
-    + `AbilityOverrideApplied`; mutacja live state (override na celu + zapis limitu).
-    """
+    require_front: bool = False,
+    require_source_slug: bool = False,
+) -> tuple[UnitBlob, UnitBlob]:
     state = context.state
     source_id = context.source_unit_id
-    source = next((b for b in state.blobs if b.id == source_id), None)
-    if source is None or source.models_alive == 0:
+    source = next((blob for blob in state.blobs if blob.id == source_id), None)
+    if (
+        source is None
+        or source.models_alive <= 0
+        or (require_front and source.location is not Lokalizacja.FRONT)
+        or (require_source_slug and slug not in effective_passives(source))
+    ):
         raise InvalidInterruptError(
-            f"{slug}: source unit {source_id} not found or defeated"
+            f"{slug}: source unit {source_id} is not a live Front source with {slug}"
         )
-
-    if "target_id" not in payload or "ability" not in payload:
-        raise InvalidInterruptError(
-            f"{slug}: payload requires 'target_id' and 'ability'"
-        )
-    target_id = int(payload["target_id"])
-    ability = str(payload["ability"])
-    granted = bool(payload.get("granted", True))
-    seq = int(payload.get("sequence", 0))
-
     if (source_id, slug) in state.used_interrupts_this_round:
         raise InvalidInterruptError(
             f"{slug}: already used by unit {source_id} this round (raz na rundę)"
         )
 
-    target = next((b for b in state.blobs if b.id == target_id), None)
-    if target is None or target.models_alive == 0:
+    target = next((blob for blob in state.blobs if blob.id == target_id), None)
+    if (
+        target is None
+        or target.models_alive <= 0
+        or (require_front and target.location is not Lokalizacja.FRONT)
+    ):
         raise InvalidInterruptError(
-            f"{slug}: target {target_id} not found or defeated"
-        )
-
-    if ability not in _rozkaz_capable_slugs():
-        raise InvalidInterruptError(
-            f"{slug}: ability {ability!r} is not rozkaz_tak-capable (pkt 12 — X "
-            f"musi mieć rozkaz_tak: true)"
+            f"{slug}: target {target_id} is not a live Front unit"
         )
 
     is_enemy = target.owner_player != source.owner_player
@@ -309,37 +332,154 @@ def _apply_order_like(
             f"{slug}: target {target_id} out of {ORDER_RANGE_INCHES}\" range "
             f"(edge gap={gap:.2f})"
         )
+    return source, target
 
+
+def _apply_order_like_outcome(
+    context: InterruptContext,
+    *,
+    source: UnitBlob,
+    target: UnitBlob,
+    slug: str,
+    ability: str,
+    granted: bool,
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     events: tuple[BattleEvent, ...] = (
         InterruptTriggered(
-            sequence=seq,
+            sequence=sequence,
             interrupt_point=context.point.value,
             slug=slug,
-            source_unit_id=source_id,
-            target_unit_id=target_id,
+            source_unit_id=source.id,
+            target_unit_id=target.id,
             payload={"ability": ability, "granted": granted},
             consumes_round_limit=slug in ONCE_PER_ROUND_INTERRUPTS,
         ),
         AbilityOverrideApplied(
-            sequence=seq + 1,
-            target_id=target_id,
+            sequence=sequence + 1,
+            target_id=target.id,
             ability=ability,
             granted=granted,
-            source_id=source_id,
+            source_id=source.id,
         ),
     )
-    # Mutacja live state (mirror reducerów: AbilityOverrideApplied + InterruptTriggered).
     new_target = replace(
         target, ability_overrides=target.ability_overrides + ((ability, granted),)
     )
-    new_blobs = tuple(new_target if b.id == target_id else b for b in state.blobs)
+    new_blobs = tuple(
+        new_target if blob.id == target.id else blob for blob in context.state.blobs
+    )
     new_state = replace(
-        state,
+        context.state,
         blobs=new_blobs,
-        used_interrupts_this_round=state.used_interrupts_this_round
-        + ((source_id, slug),),
+        used_interrupts_this_round=context.state.used_interrupts_this_round
+        + ((source.id, slug),),
     )
     return new_state, events
+
+
+def _apply_order_like(
+    context: InterruptContext,
+    payload: dict[str, Any],
+    *,
+    slug: str,
+    require_enemy: bool,
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Historyczna wspólna logika niegotowych Klątwy/Oznaczenia.
+
+    Payload: `target_id` (oddział-cel), `ability` (X — pasywka `rozkaz_tak:true`),
+    `granted` (bool, default True — nadaj/odbierz), `sequence`.
+
+    Walidacja (raise `InvalidInterruptError`): limit raz-na-rundę, istnienie celu,
+    `rozkaz_tak`, ally/enemy, zasięg 12″ (krawędź-krawędź). Emit `InterruptTriggered`
+    + `AbilityOverrideApplied`; mutacja live state (override na celu + zapis limitu).
+    """
+    if "target_id" not in payload or "ability" not in payload:
+        raise InvalidInterruptError(
+            f"{slug}: payload requires 'target_id' and 'ability'"
+        )
+    target_id = int(payload["target_id"])
+    ability = str(payload["ability"])
+    granted = bool(payload.get("granted", True))
+    seq = int(payload.get("sequence", 0))
+    source, target = _order_like_participants(
+        context,
+        slug=slug,
+        target_id=target_id,
+        require_enemy=require_enemy,
+    )
+
+    if ability not in _rozkaz_capable_slugs():
+        raise InvalidInterruptError(
+            f"{slug}: ability {ability!r} is not rozkaz_tak-capable (pkt 12 — X "
+            f"musi mieć rozkaz_tak: true)"
+        )
+
+    return _apply_order_like_outcome(
+        context,
+        source=source,
+        target=target,
+        slug=slug,
+        ability=ability,
+        granted=granted,
+        sequence=seq,
+    )
+
+
+def _apply_rozkaz(
+    context: InterruptContext,
+    payload: Mapping[str, Any],
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Strict source-correct Rozkaz(X) outcome from canonical ruleset metadata."""
+    try:
+        payload_fields = frozenset(payload)
+    except Exception as exc:
+        raise InvalidInterruptError("rozkaz: malformed payload") from exc
+    if payload_fields != _ROZKAZ_PAYLOAD_FIELDS:
+        raise InvalidInterruptError(
+            "rozkaz: payload requires exactly target_id, ability and granted"
+        )
+    target_id = payload["target_id"]
+    ability = payload["ability"]
+    granted = payload["granted"]
+    if (
+        type(target_id) is not int
+        or target_id < 1
+        or type(ability) is not str
+        or not ability
+        or type(granted) is not bool
+        or type(context.sequence) is not int
+        or context.sequence < 0
+    ):
+        raise InvalidInterruptError("rozkaz: payload types are invalid")
+
+    required_granted = _rozkaz_capable_directions().get(ability)
+    if required_granted is None:
+        raise InvalidInterruptError(
+            f"rozkaz: ability {ability!r} lacks canonical rozkaz tags"
+        )
+    if granted is not required_granted:
+        raise InvalidInterruptError(
+            f"rozkaz: granted does not match rozkaz_kierunek for {ability!r}"
+        )
+
+    source, target = _order_like_participants(
+        context,
+        slug="rozkaz",
+        target_id=target_id,
+        require_enemy=False,
+        require_front=True,
+        require_source_slug=True,
+    )
+    return _apply_order_like_outcome(
+        context,
+        source=source,
+        target=target,
+        slug="rozkaz",
+        ability=ability,
+        granted=granted,
+        sequence=context.sequence,
+    )
 
 
 @register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "rozkaz")
@@ -347,7 +487,7 @@ def _rozkaz_handler(
     context: InterruptContext, payload: dict[str, Any]
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Rozkaz(X) (id 50): sojuszniczy oddział w 12″ (nie)ma X do końca aktywacji."""
-    return _apply_order_like(context, payload, slug="rozkaz", require_enemy=False)
+    return _apply_rozkaz(context, payload)
 
 
 @register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "klatwa")
@@ -372,3 +512,84 @@ def _oznaczenie_handler(
     trigger ataku — follow-up po wpięciu deklaracji przerwań w pętlę aktywacji.
     """
     return _apply_order_like(context, payload, slug="oznaczenie", require_enemy=False)
+
+
+def execute_ready_activation_interrupt_outcomes(
+    *,
+    state: BattleState,
+    source: UnitBlob,
+    ability_slug: str,
+    payload: Mapping[str, Any],
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Built-in leaf for public-ready durable activation interrupts."""
+    if (
+        type(ability_slug) is not str
+        or ability_slug not in READY_INTERRUPT_HANDLERS
+    ):
+        raise InvalidInterruptError(f"interrupt {ability_slug!r} is not ready")
+    if (
+        type(state) is not BattleState
+        or type(source) is not UnitBlob
+        or not isinstance(payload, Mapping)
+        or type(sequence) is not int
+        or sequence < 1
+    ):
+        raise InvalidInterruptError("ready interrupt adapter input is malformed")
+    try:
+        dispatch_payload = dict(payload)
+    except Exception as exc:
+        raise InvalidInterruptError("ready interrupt payload is malformed") from exc
+
+    activation = state.activation
+    if (
+        activation is None
+        or activation.phase is not ActivationPhase.BEFORE_ACTION
+        or activation.window is None
+    ):
+        raise InvalidInterruptError("ready interrupt requires a durable open window")
+    current_source = next(
+        (blob for blob in state.blobs if blob.id == source.id),
+        None,
+    )
+    active_unit = next(
+        (blob for blob in state.blobs if blob.id == activation.selected_unit_id),
+        None,
+    )
+    if (
+        current_source is None
+        or current_source != source
+        or current_source.owner_player != activation.window.priority_player
+        or current_source.models_alive <= 0
+        or current_source.location is not Lokalizacja.FRONT
+        or ability_slug not in effective_passives(current_source)
+        or active_unit is None
+        or active_unit.models_alive <= 0
+        or active_unit.location is not Lokalizacja.FRONT
+    ):
+        raise InvalidInterruptError("ready interrupt source or active unit is invalid")
+
+    context = InterruptContext(
+        state=state,
+        point=InterruptPoint.BEFORE_ACTION,
+        source_unit_id=current_source.id,
+        active_unit_id=active_unit.id,
+        sequence=sequence,
+    )
+    return trigger_interrupt(
+        context,
+        ability_slug,
+        dispatch_payload,
+    )
+
+
+__all__ = [
+    "InterruptContext",
+    "InterruptPoint",
+    "InvalidInterruptError",
+    "READY_INTERRUPT_HANDLERS",
+    "execute_ready_activation_interrupt_outcomes",
+    "get_eligible_interrupts",
+    "register_interrupt_handler",
+    "trigger_interrupt",
+]

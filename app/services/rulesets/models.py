@@ -149,7 +149,9 @@ class RulesetAbility(BaseModel):
     None gdy abilities nie wymagają parametru (jak procedural).
 
     `rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X)/Klątwa(X)/
-    Oznaczenie(X). Tylko passive abilities mają to pole. None = nieznane/false.
+    Oznaczenie(X). `rozkaz_kierunek` zachowuje kanoniczny znacznik efektu:
+    "+" nadaje korzystną zdolność, "−" odbiera niekorzystną. Tylko passive
+    abilities mają te pola. None = nieznane/false.
     """
 
     model_config = _FrozenConfig
@@ -162,6 +164,7 @@ class RulesetAbility(BaseModel):
     value_type: Literal["number", "text"] | None = None
     value_choices: tuple[str, ...] | None = None
     rozkaz_tak: bool | None = None
+    rozkaz_kierunek: Literal["+", "−"] | None = None
 
 
 class RulesetAbilitiesDocument(BaseModel):

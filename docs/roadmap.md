@@ -298,9 +298,17 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   emituje `ActivationFinalized`, `InitiativeTransferred` i
   `ActivePlayerChanged`. Batch jest ciągły, fail-closed i replayowalny;
   inicjatywa przechodzi ze snapshotu aktywacji, a protokół wraca do `IDLE`.
-  **Built-in handler adapters/publiczna allowlista, niepuste source-correct
-  recovery handlery, produkcyjny restart oraz persistence/model/API/auth/client
-  rollout nadal OPEN.**
+  **B4.4b.7 source-correct Rozkaz adapter DONE 2026-07-28:** osobna immutable
+  `READY_INTERRUPT_HANDLERS` dopuszcza tylko `rozkaz`, a pure built-in executor
+  buduje `InterruptContext` z trwałego okna i deleguje do outcome SSOT.
+  Rozkaz ma exact payload bez klientowego `sequence`, żywy/frontowy source i
+  target, ally/range/round-limit oraz kierunek `granted` wynikający z
+  kanonicznego `rozkaz_kierunek`; outcome zachowuje replay/restart parity i
+  wygasa przez finalizację
+  ([pozycja 50 i konwencje tagów](../app/static/docs/SZOP_Zdolnosci.md),
+  [pkt 11.b.i i 12.a–c](../app/static/docs/SZOP_Rozjemca.md)).
+  **Niepuste source-correct recovery handlery, produkcyjny restart oraz
+  persistence/model/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE

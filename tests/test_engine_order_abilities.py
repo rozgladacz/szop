@@ -63,25 +63,29 @@ def _state(*blobs: UnitBlob) -> BattleState:
 # ---------------------------------------------------------------------------
 
 
-def _ctx(state: BattleState, source_id: int) -> InterruptContext:
+def _ctx(
+    state: BattleState, source_id: int, *, sequence: int = 0
+) -> InterruptContext:
     return InterruptContext(
-        state=state, point=InterruptPoint.BEFORE_ACTION, source_unit_id=source_id
+        state=state,
+        point=InterruptPoint.BEFORE_ACTION,
+        source_unit_id=source_id,
+        sequence=sequence,
     )
 
 
-def test_rozkaz_grants_ability_to_ally_in_range():
-    """Rozkaz(nieustraszony) na sojuszniku w 12″ → override + efekt morale."""
+def test_rozkaz_grants_positive_ability_to_ally_in_range():
     source = _blob(blob_id=1, passives=("rozkaz",), owner=0, pos=(0.0, 0.0))
     ally = _blob(blob_id=2, owner=0, pos=(5.0, 0.0))
     state = _state(source, ally)
     new_state, events = trigger_interrupt(
-        _ctx(state, 1),
+        _ctx(state, 1, sequence=1),
         slug="rozkaz",
-        payload={"target_id": 2, "ability": "nieustraszony", "sequence": 1},
+        payload={"target_id": 2, "ability": "niewrazliwy", "granted": True},
     )
     target = next(b for b in new_state.blobs if b.id == 2)
-    assert target.ability_overrides == (("nieustraszony", True),)
-    assert effective_passives(target) == ("nieustraszony",)
+    assert target.ability_overrides == (("niewrazliwy", True),)
+    assert effective_passives(target) == ("niewrazliwy",)
     assert (1, "rozkaz") in new_state.used_interrupts_this_round
     assert any(isinstance(e, AbilityOverrideApplied) for e in events)
     assert any(isinstance(e, InterruptTriggered) for e in events)
@@ -123,7 +127,7 @@ def test_klatwa_rejects_ally():
         trigger_interrupt(
             _ctx(state, 1),
             slug="klatwa",
-            payload={"target_id": 2, "ability": "nieustraszony"},
+            payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
         )
 
 
@@ -135,7 +139,7 @@ def test_rozkaz_rejects_enemy():
         trigger_interrupt(
             _ctx(state, 1),
             slug="rozkaz",
-            payload={"target_id": 2, "ability": "nieustraszony"},
+            payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
         )
 
 
@@ -147,7 +151,7 @@ def test_order_rejects_out_of_range():
         trigger_interrupt(
             _ctx(state, 1),
             slug="rozkaz",
-            payload={"target_id": 2, "ability": "nieustraszony"},
+            payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
         )
 
 
@@ -156,11 +160,11 @@ def test_order_rejects_non_rozkaz_capable_ability():
     source = _blob(blob_id=1, passives=("rozkaz",), owner=0)
     ally = _blob(blob_id=2, owner=0, pos=(3.0, 0.0))
     state = _state(source, ally)
-    with pytest.raises(InvalidInterruptError, match="rozkaz_tak"):
+    with pytest.raises(InvalidInterruptError, match="canonical rozkaz tags"):
         trigger_interrupt(
             _ctx(state, 1),
             slug="rozkaz",
-            payload={"target_id": 2, "ability": "mag"},
+            payload={"target_id": 2, "ability": "mag", "granted": True},
         )
 
 
@@ -173,13 +177,13 @@ def test_order_once_per_round_limit():
     state, _ = trigger_interrupt(
         _ctx(state, 1),
         slug="rozkaz",
-        payload={"target_id": 2, "ability": "nieustraszony"},
+        payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
     )
     with pytest.raises(InvalidInterruptError, match="raz na rundę"):
         trigger_interrupt(
             _ctx(state, 1),
             slug="rozkaz",
-            payload={"target_id": 3, "ability": "nieustraszony"},
+            payload={"target_id": 3, "ability": "nieustraszony", "granted": False},
         )
 
 
@@ -190,11 +194,11 @@ def test_order_rejects_defeated_target():
         models_alive=0, toughness_per_model=3,
     )
     state = _state(source, dead)
-    with pytest.raises(InvalidInterruptError, match="not found or defeated"):
+    with pytest.raises(InvalidInterruptError, match="live Front"):
         trigger_interrupt(
             _ctx(state, 1),
             slug="rozkaz",
-            payload={"target_id": 2, "ability": "nieustraszony"},
+            payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
         )
 
 
@@ -205,13 +209,13 @@ def test_order_replay_reconstructs_override_and_limit():
     ally = _blob(blob_id=2, owner=0, pos=(3.0, 0.0))
     state = _state(source, ally)
     live_state, events = trigger_interrupt(
-        _ctx(state, 1),
+        _ctx(state, 1, sequence=1),
         slug="rozkaz",
-        payload={"target_id": 2, "ability": "nieustraszony", "sequence": 1},
+        payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
     )
     replayed = apply_events(state, events)
     target = next(b for b in replayed.blobs if b.id == 2)
-    assert target.ability_overrides == (("nieustraszony", True),)
+    assert target.ability_overrides == (("nieustraszony", False),)
     assert replayed.used_interrupts_this_round == live_state.used_interrupts_this_round
     assert (1, "rozkaz") in replayed.used_interrupts_this_round
 

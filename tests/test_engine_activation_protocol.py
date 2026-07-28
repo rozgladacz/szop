@@ -24,6 +24,9 @@ from app.services.engine.activation_protocol import (
     trigger_activation_interrupt,
 )
 from app.services.engine.dice import DeterministicDice
+from app.services.engine.interrupts import (
+    execute_ready_activation_interrupt_outcomes,
+)
 from app.services.engine.events import (
     ActivePlayerChanged,
     AbilityOverrideApplied,
@@ -53,6 +56,7 @@ from app.services.engine.state import (
     UnitBlob,
     WeaponProfile,
     apply_events,
+    effective_passives,
 )
 from app.services.engine.state_codec import (
     battle_state_from_json,
@@ -1429,6 +1433,113 @@ def test_v2_restart_interrupt_parity_and_later_explicit_close() -> None:
     )
     assert closed.state.activation.phase is ActivationPhase.ACTION_READY
     assert closed.state == apply_events(restarted.state, closed.events)
+
+
+def test_builtin_rozkaz_full_v2_flow_replay_restart_limit_and_finalization() -> None:
+    base = _action_idle_state()
+    actor = replace(
+        base.blobs[0],
+        passives=("rozkaz", "nieustraszony"),
+    )
+    initial = replace(base, blobs=(actor, base.blobs[1]))
+    started = start_activation(initial, selected_unit_id=11, sequence=710)
+    payload = {
+        "target_id": 11,
+        "ability": "nieustraszony",
+        "granted": False,
+    }
+
+    def trigger(current):
+        activation = current.activation
+        return trigger_activation_interrupt(
+            current,
+            caller_player=0,
+            activation_id=activation.activation_id,
+            expected_activation_version=activation.version,
+            expected_window_version=activation.window.version,
+            source_unit_id=11,
+            ability_slug="rozkaz",
+            payload=payload,
+            sequence=started.next_sequence,
+            outcome_executor=execute_ready_activation_interrupt_outcomes,
+        )
+
+    interrupted = trigger(started.state)
+    restarted = trigger(_restart(started.state))
+    assert [event_to_json(event) for event in restarted.events] == [
+        event_to_json(event) for event in interrupted.events
+    ]
+    assert restarted.state == interrupted.state
+    assert restarted.next_sequence == interrupted.next_sequence
+    assert [type(event) for event in interrupted.events] == [
+        ActivationInterruptTriggered,
+        InterruptTriggered,
+        AbilityOverrideApplied,
+    ]
+    interrupted_actor = next(
+        blob for blob in interrupted.state.blobs if blob.id == 11
+    )
+    assert "nieustraszony" not in effective_passives(interrupted_actor)
+    assert interrupted.state.used_interrupts_this_round == ((11, "rozkaz"),)
+
+    preserved = interrupted.state
+    with pytest.raises(ActivationProtocolError) as exc_info:
+        trigger_activation_interrupt(
+            preserved,
+            caller_player=0,
+            activation_id=preserved.activation.activation_id,
+            expected_activation_version=preserved.activation.version,
+            expected_window_version=preserved.activation.window.version,
+            source_unit_id=11,
+            ability_slug="rozkaz",
+            payload=payload,
+            sequence=interrupted.next_sequence,
+            outcome_executor=execute_ready_activation_interrupt_outcomes,
+        )
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert interrupted.state is preserved
+
+    first_pass = pass_interrupt_priority(
+        interrupted.state,
+        caller_player=0,
+        activation_id=interrupted.state.activation.activation_id,
+        expected_activation_version=interrupted.state.activation.version,
+        expected_window_version=interrupted.state.activation.window.version,
+        sequence=interrupted.next_sequence,
+    )
+    ready = pass_interrupt_priority(
+        first_pass.state,
+        caller_player=1,
+        activation_id=first_pass.state.activation.activation_id,
+        expected_activation_version=first_pass.state.activation.version,
+        expected_window_version=first_pass.state.activation.window.version,
+        sequence=first_pass.next_sequence,
+    )
+    committed = _commit(
+        ready.state,
+        DefendAction(11),
+        DeterministicDice(73),
+        sequence=ready.next_sequence,
+    )
+    finalized = _finalize(
+        committed.state,
+        sequence=committed.next_sequence,
+    )
+    terminal_actor = next(blob for blob in finalized.state.blobs if blob.id == 11)
+    assert terminal_actor.ability_overrides == ()
+    complete_tail = tuple(
+        event
+        for transition in (
+            started,
+            interrupted,
+            first_pass,
+            ready,
+            committed,
+            finalized,
+        )
+        for event in transition.events
+    )
+    assert finalized.state == apply_events(initial, complete_tail)
 
 
 def test_first_action_bridge_commits_after_outcomes_without_finalizing() -> None:
