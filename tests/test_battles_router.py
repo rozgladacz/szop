@@ -350,6 +350,7 @@ def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
     assert battle.current_round == 1
     assert battle.rng_seed == 777
     assert battle.status == "active"
+    assert battle.activation_protocol_version == 1
     events = load_events(session, battle.id)
     checkpoint = load_latest_checkpoint(session, battle.id)
     assert events
@@ -357,8 +358,16 @@ def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
     assert response.latest_sequence == len(events)
     assert checkpoint.sequence_at == response.latest_sequence
     assert checkpoint.state.round == battle.current_round
+    assert checkpoint.state.initiative_player is None
     assert checkpoint.dice.seed == battle.rng_seed
     assert [event.sequence for event in events] == list(range(1, len(events) + 1))
+    checkpoint_row = session.execute(
+        select(models.BattleCheckpoint).where(
+            models.BattleCheckpoint.battle_id == battle.id
+        )
+    ).scalar_one()
+    assert json.loads(checkpoint_row.state_json)["version"] == 1
+    assert "activation_protocol_version" not in response.model_dump()
 
 
 def test_create_battle_reports_roster_adapter_omissions() -> None:

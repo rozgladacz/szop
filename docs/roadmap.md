@@ -307,8 +307,16 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   wygasa przez finalizację
   ([pozycja 50 i konwencje tagów](../app/static/docs/SZOP_Zdolnosci.md),
   [pkt 11.b.i i 12.a–c](../app/static/docs/SZOP_Rozjemca.md)).
+  **B4.4c.1 activation protocol persistence DONE 2026-07-28:** `Battle` ma
+  trwałe, ograniczone do `1|2` `activation_protocol_version`; świeży schema i
+  idempotentna migracja SQLite oznaczają historię dokładnie v1 bez przepisywania
+  checkpointów. `save_checkpoint` oraz wspólne `stage_battle_creation`
+  zachowują domyślne v1, a wewnętrzny jawny opt-in v2 zapisuje spójny checkpoint
+  `szop.battle_state/v2` z trwałą inicjatywą i bez rozpoczętej aktywacji.
+  Publiczne create/invite/action schemas, payloady i domyślne call sites nie
+  zostały zmienione.
   **Niepuste source-correct recovery handlery, produkcyjny restart oraz
-  persistence/model/API/auth/client rollout nadal OPEN.**
+  transport/API/auth/client rollout nadal OPEN.**
   Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE

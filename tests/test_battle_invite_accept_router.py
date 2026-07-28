@@ -353,12 +353,14 @@ def test_direct_admin_and_open_success_persist_complete_battle_graph(
     assert payload["status"] == "active"
     assert payload["current_round"] == 1
     assert payload["adaptation_report"] is not None
+    assert "activation_protocol_version" not in payload
 
     with api_world.sessions() as session:
         invite = session.get(models.BattleInvite, invite_id)
         battle = session.get(models.Battle, payload["battle_id"])
         assert invite is not None
         assert battle is not None
+        assert battle.activation_protocol_version == 1
         assert invite.status == models.BATTLE_INVITE_STATUS_ACCEPTED
         assert invite.accepted_by_user_id == acceptor_id
         assert invite.accepted_roster_id == roster_id
@@ -374,6 +376,7 @@ def test_direct_admin_and_open_success_persist_complete_battle_graph(
         assert checkpoint.sequence_at == events[-1].sequence == payload["latest_sequence"]
         assert checkpoint.state.round == battle.current_round == 1
         assert checkpoint.state.active_player == FIXED_SEED & 1
+        assert checkpoint.state.initiative_player is None
         assert checkpoint.state.terrain == fixture.terrain
         assert checkpoint.state.objectives == fixture.objectives
         assert checkpoint.dice.seed == FIXED_SEED

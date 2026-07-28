@@ -634,14 +634,21 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   priority/passy, replay/checkpoint-v2 restart parity i wygaśnięcie przy
   finalizacji ([konwencje][ZCONV], [pozycja 50][Z50], [pkt 11.b.i–vi][R11],
   [pkt 12.a–c][R12]).
+- **B4.4c.1 DONE 2026-07-28:** `Battle.activation_protocol_version` ma
+  nie-nullowalny default i constraint `1|2`, a idempotentna migracja SQLite
+  oznacza istniejące wiersze v1 bez przepisywania historii. `save_checkpoint`
+  i `stage_battle_creation` domyślnie zachowują dokładny v1; jawny wewnętrzny
+  opt-in v2 zapisuje zgodny checkpoint z inicjatywą i bez aktywacji. Publiczne
+  schemas/create/invite/action oraz ich domyślne call sites pozostają
+  niezmienione.
 - **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
-  persistence/model/API/auth/client rollout. Te elementy pozostają osobnymi
-  slice'ami.
+  transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
 
-### B. Persistence/model + pass-only API state machine
+### B. Persistence/model + pass-only API state machine — IN PROGRESS
 
-- `activation_protocol_version`, migracja istniejących wierszy do v1, jawne
-  opt-in v2 w create/invite metadata;
+- **B4.4c.1 DONE:** model, migracja istniejących wierszy do v1 i wewnętrzny
+  spójny zapis początkowego checkpointu v1/v2;
+- **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
 - participant/no-oracle, scopes, trzy trasy, CAS/unique/rollback i wspólny
   envelope; `POST /actions` z kompatybilnymi guardami;
 - `POST /interrupts` początkowo publicznie obsługuje tylko `pass`; opcjonalny

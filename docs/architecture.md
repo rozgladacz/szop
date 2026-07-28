@@ -140,9 +140,18 @@ allowlistę tylko dla `rozkaz` i source-correct built-in outcome adapter ze
 ścisłym payloadem oraz kanonicznym `rozkaz_kierunek`. Priorytet w oknie zaczyna
 gracz z inicjatywą i przechodzi na drugiego dopiero po jawnym pass
 ([pkt 10 i 12.c](../app/static/docs/SZOP_Rozjemca.md)).
+**B4.4c.1** dodaje minimalną trwałą granicę wersji: lekki SSOT stałych i
+ścisłej walidacji `1|2`, nie-nullowalne
+`Battle.activation_protocol_version` z defaultem v1 i idempotentny SQLite
+backfill istniejących bitew do v1 bez zmian event-logów/checkpointów.
+`save_checkpoint(..., state_version=1)` koduje wybraną wersję przed dodaniem
+wiersza, a `stage_battle_creation(..., activation_protocol_version=1)` zapisuje
+tę samą wersję w `Battle` i checkpointcie. Jawne wewnętrzne v2 zachowuje
+inicjatywę w `szop.battle_state/v2`, pozostając w `IDLE`; router create i accept
+invite nadal wywołują serwis bez opt-in i publikują niezmienione payloady v1.
 `POST /battles/{id}/interrupts`, prereq trasy aktywacji i scope
 `battle:interrupt`, produkcyjne wiring v2 dla action/finalize, niepuste recovery handlery oraz
-persistence/API/client rollout pozostają **OPEN**.
+transport/API/client rollout pozostają **OPEN**.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable
 
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSION_V1,
+    ACTIVATION_PROTOCOL_VERSION_V2,
+    validate_activation_protocol_version,
+)
 from .agents.roster_adapter import AdaptResult, roster_to_engine_roster
 from .engine.dice import DeterministicDice
 from .engine.persistence import save_checkpoint, save_events
@@ -33,8 +38,12 @@ def stage_battle_creation(
     initiative_player: int,
     terrain: Iterable[TerrainCircle | TerrainLine] = (),
     objectives: Iterable[Objective] = (),
+    activation_protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V1,
 ) -> StagedBattleCreation:
     """Stage one active Battle, its initial events, and current checkpoint."""
+    protocol_version = validate_activation_protocol_version(
+        activation_protocol_version
+    )
     adapted_p1 = roster_to_engine_roster(p1_roster, owner_player=0)
     adapted_p2 = roster_to_engine_roster(p2_roster, owner_player=1)
     state = setup_phase(
@@ -43,6 +52,8 @@ def stage_battle_creation(
         objectives=objectives,
         initiative_player=initiative_player,
     )
+    if protocol_version == ACTIVATION_PROTOCOL_VERSION_V2:
+        state = replace(state, initiative_player=initiative_player)
     state, deploy_events = deployment_round(state, ())
     battle = models.Battle(
         p1_user_id=p1_user_id,
@@ -52,6 +63,7 @@ def stage_battle_creation(
         current_round=state.round,
         rng_seed=rng_seed,
         status="active",
+        activation_protocol_version=protocol_version,
     )
     session.add(battle)
     session.flush()
@@ -68,6 +80,7 @@ def stage_battle_creation(
         sequence_at,
         state,
         DeterministicDice(seed=rng_seed),
+        state_version=protocol_version,
     )
     return StagedBattleCreation(
         battle=battle,

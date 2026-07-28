@@ -27,6 +27,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from app.battle_protocol import ACTIVATION_PROTOCOL_VERSION_V1
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     BattleEvent as EngineEvent,
@@ -228,6 +229,7 @@ def save_checkpoint(
     state: BattleState,
     dice: DeterministicDice,
     *,
+    state_version: int = ACTIVATION_PROTOCOL_VERSION_V1,
     flush: bool = True,
 ) -> None:
     """Persist state and RNG iff ``sequence_at`` is the current event-log end.
@@ -239,6 +241,10 @@ def save_checkpoint(
 
     if type(sequence_at) is not int or sequence_at < 0:
         raise ValueError("sequence_at must be >= 0")
+    state_json = _canonical_json(
+        battle_state_to_json(state, version=state_version)
+    )
+    rng_json = _canonical_json(dice.to_checkpoint())
     latest_sequence = latest_event_sequence(session, battle_id)
     if sequence_at != latest_sequence:
         raise BattleCheckpointSequenceConflict(
@@ -249,8 +255,8 @@ def save_checkpoint(
     row = BattleCheckpointRow(
         battle_id=battle_id,
         sequence_at=sequence_at,
-        state_json=_canonical_json(battle_state_to_json(state)),
-        rng_json=_canonical_json(dice.to_checkpoint()),
+        state_json=state_json,
+        rng_json=rng_json,
     )
     session.add(row)
     if flush:

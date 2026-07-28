@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import MetaData, create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -102,6 +104,195 @@ def test_unit_base_geometry_defaults_on_fresh_schema():
         column["name"]: column for column in inspector.get_columns("agent_proposals")
     }
     assert proposal_columns["result_json"]["nullable"] is True
+
+
+def test_battle_activation_protocol_version_fresh_schema_is_strict_v1_default():
+    engine = _memory_engine()
+    Base.metadata.create_all(engine)
+
+    with pytest.raises(ValueError, match="activation_protocol_version"):
+        models.Battle(activation_protocol_version=True)
+
+    columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("battles")
+    }
+    protocol_column = columns["activation_protocol_version"]
+    assert protocol_column["nullable"] is False
+    assert str(protocol_column["default"]).strip("'\"()") == "1"
+    checks = inspect(engine).get_check_constraints("battles")
+    assert any(
+        "activation_protocol_version IN (1, 2)" in check["sqltext"]
+        for check in checks
+    )
+
+    timestamp = "2026-07-28 10:00:00"
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO battles (
+                    current_round, rng_seed, status, created_at, updated_at
+                ) VALUES (0, 7, 'active', :timestamp, :timestamp)
+                """
+            ),
+            {"timestamp": timestamp},
+        )
+        assert connection.execute(
+            text("SELECT activation_protocol_version FROM battles")
+        ).scalar_one() == 1
+
+    for invalid_version in (0, 3):
+        with pytest.raises(IntegrityError):
+            with engine.begin() as connection:
+                connection.execute(
+                    text(
+                        """
+                        INSERT INTO battles (
+                            current_round, rng_seed, status,
+                            activation_protocol_version, created_at, updated_at
+                        ) VALUES (
+                            0, 7, 'active', :version, :timestamp, :timestamp
+                        )
+                        """
+                    ),
+                    {"version": invalid_version, "timestamp": timestamp},
+                )
+
+
+def test_migrate_schema_marks_legacy_battles_v1_once_without_rewriting_logs(
+    monkeypatch,
+):
+    engine = _memory_engine()
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE battles (
+                    id INTEGER PRIMARY KEY,
+                    status VARCHAR(20) NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text("INSERT INTO battles (id, status) VALUES (7, 'active')")
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE battle_events (
+                    id INTEGER PRIMARY KEY,
+                    battle_id INTEGER NOT NULL,
+                    sequence INTEGER NOT NULL,
+                    payload_json TEXT NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO battle_events (
+                    id, battle_id, sequence, payload_json
+                ) VALUES (11, 7, 1, '{"event_type":"legacy"}')
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                CREATE TABLE battle_checkpoints (
+                    id INTEGER PRIMARY KEY,
+                    battle_id INTEGER NOT NULL,
+                    sequence_at INTEGER NOT NULL,
+                    state_json TEXT NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO battle_checkpoints (
+                    id, battle_id, sequence_at, state_json
+                ) VALUES (
+                    13, 7, 1, :state_json
+                )
+                """
+            ),
+            {
+                "state_json": (
+                    '{"schema":"szop.battle_state","version":1,"state":{}}'
+                )
+            },
+        )
+
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DB_URL", "sqlite://")
+    db._migrate_schema()
+
+    with engine.connect() as connection:
+        first_snapshot = {
+            "battle": connection.execute(
+                text(
+                    "SELECT id, status, activation_protocol_version "
+                    "FROM battles"
+                )
+            ).mappings().all(),
+            "event": connection.execute(
+                text(
+                    "SELECT id, battle_id, sequence, payload_json "
+                    "FROM battle_events"
+                )
+            ).mappings().all(),
+            "checkpoint": connection.execute(
+                text(
+                    "SELECT id, battle_id, sequence_at, state_json "
+                    "FROM battle_checkpoints"
+                )
+            ).mappings().all(),
+        }
+
+    db._migrate_schema()
+
+    with engine.connect() as connection:
+        second_snapshot = {
+            "battle": connection.execute(
+                text(
+                    "SELECT id, status, activation_protocol_version "
+                    "FROM battles"
+                )
+            ).mappings().all(),
+            "event": connection.execute(
+                text(
+                    "SELECT id, battle_id, sequence, payload_json "
+                    "FROM battle_events"
+                )
+            ).mappings().all(),
+            "checkpoint": connection.execute(
+                text(
+                    "SELECT id, battle_id, sequence_at, state_json "
+                    "FROM battle_checkpoints"
+                )
+            ).mappings().all(),
+        }
+
+    assert first_snapshot == second_snapshot
+    assert first_snapshot["battle"] == [
+        {"id": 7, "status": "active", "activation_protocol_version": 1}
+    ]
+    assert first_snapshot["event"][0]["payload_json"] == '{"event_type":"legacy"}'
+    assert '"version":1' in first_snapshot["checkpoint"][0]["state_json"]
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE battles SET activation_protocol_version = 3 "
+                    "WHERE id = 7"
+                )
+            )
 
 
 def test_migrate_schema_adds_unit_base_geometry_columns(monkeypatch):

@@ -16,6 +16,11 @@ from functools import lru_cache
 from types import UnionType
 from typing import Any, Union, get_args, get_origin, get_type_hints
 
+from app.battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSION_V1,
+    ACTIVATION_PROTOCOL_VERSION_V2,
+    validate_activation_protocol_version,
+)
 from app.services.engine.state import (
     ActivationPhase,
     ActivationState,
@@ -32,8 +37,8 @@ from app.services.engine.state import (
 from app.services.engine.status import StatusFlag
 
 STATE_CHECKPOINT_SCHEMA = "szop.battle_state"
-STATE_CHECKPOINT_VERSION = 1
-STATE_CHECKPOINT_VERSION_V2 = 2
+STATE_CHECKPOINT_VERSION = ACTIVATION_PROTOCOL_VERSION_V1
+STATE_CHECKPOINT_VERSION_V2 = ACTIVATION_PROTOCOL_VERSION_V2
 
 _V1_DATACLASS_TYPES = (
     BattleState,
@@ -85,6 +90,15 @@ class BattleStateCodecError(ValueError):
     """Serialized battle state is malformed or uses an unsupported version."""
 
 
+def _checkpoint_version(value: object) -> int:
+    try:
+        return validate_activation_protocol_version(value)
+    except ValueError as exc:
+        raise BattleStateCodecError(
+            "unsupported battle state checkpoint version"
+        ) from exc
+
+
 def battle_state_to_json(
     state: BattleState,
     *,
@@ -93,11 +107,7 @@ def battle_state_to_json(
     """Return a JSON-safe, versioned representation of ``state``."""
     if not isinstance(state, BattleState):
         raise TypeError("state must be a BattleState")
-    if type(version) is not int or version not in (
-        STATE_CHECKPOINT_VERSION,
-        STATE_CHECKPOINT_VERSION_V2,
-    ):
-        raise BattleStateCodecError("unsupported battle state checkpoint version")
+    version = _checkpoint_version(version)
     if version == STATE_CHECKPOINT_VERSION:
         if state.initiative_player is not None or state.activation is not None:
             raise BattleStateCodecError(
@@ -126,12 +136,7 @@ def battle_state_from_json(payload: Mapping[str, Any]) -> BattleState:
         raise BattleStateCodecError("battle state checkpoint must be an object")
     if payload.get("schema") != STATE_CHECKPOINT_SCHEMA:
         raise BattleStateCodecError("unsupported battle state checkpoint schema")
-    version = payload.get("version")
-    if type(version) is not int or version not in (
-        STATE_CHECKPOINT_VERSION,
-        STATE_CHECKPOINT_VERSION_V2,
-    ):
-        raise BattleStateCodecError("unsupported battle state checkpoint version")
+    version = _checkpoint_version(payload.get("version"))
     if set(payload) != {"schema", "version", "state"}:
         raise BattleStateCodecError("battle state checkpoint has unexpected fields")
     state = _decode_value(payload["state"], version=version)

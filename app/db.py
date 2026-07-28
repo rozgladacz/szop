@@ -7,6 +7,10 @@ from typing import Generator
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
+from .battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSION_V1,
+    ACTIVATION_PROTOCOL_VERSIONS,
+)
 from .config import DB_URL
 
 logger = logging.getLogger(__name__)
@@ -308,6 +312,24 @@ def _migrate_schema() -> None:
     with engine.begin() as connection:
         inspector = inspect(connection)
         table_names = set(inspector.get_table_names())
+
+        if "battles" in table_names:
+            columns = inspector.get_columns("battles")
+            column_names = {column["name"] for column in columns}
+            if "activation_protocol_version" not in column_names:
+                logger.info("Adding activation protocol version to battles table")
+                allowed_versions = ", ".join(
+                    str(version) for version in ACTIVATION_PROTOCOL_VERSIONS
+                )
+                connection.execute(
+                    text(
+                        "ALTER TABLE battles ADD COLUMN "
+                        "activation_protocol_version INTEGER NOT NULL "
+                        f"DEFAULT {ACTIVATION_PROTOCOL_VERSION_V1} "
+                        f"CHECK (activation_protocol_version IN ({allowed_versions}))"
+                    )
+                )
+
         if "armories" not in table_names:
             return
 

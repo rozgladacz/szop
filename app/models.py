@@ -17,8 +17,13 @@ from sqlalchemy import (
     UniqueConstraint,
     event,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
+from .battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSION_V1,
+    ACTIVATION_PROTOCOL_VERSIONS,
+    validate_activation_protocol_version,
+)
 from .db import Base, utcnow
 
 
@@ -622,6 +627,13 @@ class Battle(TimestampMixin, Base):
     """
 
     __tablename__ = "battles"
+    __table_args__ = (
+        CheckConstraint(
+            "activation_protocol_version IN "
+            f"({', '.join(str(version) for version in ACTIVATION_PROTOCOL_VERSIONS)})",
+            name="ck_battles_activation_protocol_version_valid",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     p1_user_id: Mapped[Optional[int]] = mapped_column(
@@ -642,6 +654,12 @@ class Battle(TimestampMixin, Base):
     current_round: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     rng_seed: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default="pending", nullable=False)
+    activation_protocol_version: Mapped[int] = mapped_column(
+        Integer,
+        default=ACTIVATION_PROTOCOL_VERSION_V1,
+        server_default=str(ACTIVATION_PROTOCOL_VERSION_V1),
+        nullable=False,
+    )
 
     events: Mapped[List["BattleEvent"]] = relationship(
         back_populates="battle",
@@ -653,6 +671,11 @@ class Battle(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="BattleCheckpoint.sequence_at",
     )
+
+    @validates("activation_protocol_version")
+    def _validate_activation_protocol_version(self, key: str, value: object) -> int:
+        del key
+        return validate_activation_protocol_version(value)
 
 
 class BattleInvite(TimestampMixin, Base):

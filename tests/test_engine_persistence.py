@@ -11,7 +11,9 @@ Objective/Initiative/MoraleTest/MeleeBalanceReset eventy.
 
 from __future__ import annotations
 
+import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -215,6 +217,93 @@ def test_checkpoint_survives_session_reopen_with_state_and_rng(tmp_path: Path) -
     assert loaded.sequence_at == max(event.sequence for event in events)
     assert loaded.state == state
     assert loaded.dice.roll_d6(50) == expected_rolls
+
+
+def test_checkpoint_default_remains_exact_v1() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    state, _, _ = _play_smoke_battle()
+
+    save_checkpoint(
+        session,
+        battle.id,
+        0,
+        state,
+        DeterministicDice(seed=battle.rng_seed),
+    )
+
+    row = session.query(models.BattleCheckpoint).one()
+    payload = json.loads(row.state_json)
+    loaded = load_latest_checkpoint(session, battle.id)
+    assert payload["schema"] == "szop.battle_state"
+    assert payload["version"] == 1
+    assert loaded is not None
+    assert loaded.state == state
+    assert loaded.state.initiative_player is None
+
+
+def test_checkpoint_explicit_v2_preserves_durable_initiative() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    state, _, _ = _play_smoke_battle()
+    state = replace(state, initiative_player=state.active_player)
+
+    save_checkpoint(
+        session,
+        battle.id,
+        0,
+        state,
+        DeterministicDice(seed=battle.rng_seed),
+        state_version=2,
+    )
+
+    row = session.query(models.BattleCheckpoint).one()
+    payload = json.loads(row.state_json)
+    loaded = load_latest_checkpoint(session, battle.id)
+    assert payload["schema"] == "szop.battle_state"
+    assert payload["version"] == 2
+    assert loaded is not None
+    assert loaded.state == state
+    assert loaded.state.initiative_player == state.active_player
+
+
+@pytest.mark.parametrize("state_version", [None, True, 0, 3, 1.0, "2"])
+def test_checkpoint_rejects_invalid_state_version_before_insert(state_version) -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    state, _, _ = _play_smoke_battle()
+
+    with pytest.raises(ValueError, match="unsupported battle state checkpoint version"):
+        save_checkpoint(
+            session,
+            battle.id,
+            0,
+            state,
+            DeterministicDice(seed=battle.rng_seed),
+            state_version=state_version,
+        )
+
+    assert session.query(models.BattleCheckpoint).count() == 0
+
+
+def test_checkpoint_rejects_state_version_mismatch_before_insert() -> None:
+    session = _build_session()
+    battle = _new_battle(session)
+    v1_state, _, _ = _play_smoke_battle()
+    v2_state = replace(v1_state, initiative_player=v1_state.active_player)
+
+    mismatches = ((v1_state, 2), (v2_state, 1))
+    for state, state_version in mismatches:
+        with pytest.raises(ValueError):
+            save_checkpoint(
+                session,
+                battle.id,
+                0,
+                state,
+                DeterministicDice(seed=battle.rng_seed),
+                state_version=state_version,
+            )
+        assert session.query(models.BattleCheckpoint).count() == 0
 
 
 def test_checkpoint_requires_current_event_sequence() -> None:
