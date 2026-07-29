@@ -230,6 +230,7 @@ def _invite(
     accepted_by_user_id: int | None = None,
     accepted_roster_id: int | None = None,
     battle_id: int | None = None,
+    activation_protocol_version: int = 1,
 ) -> int:
     with world.sessions() as session:
         invite = models.BattleInvite(
@@ -238,6 +239,7 @@ def _invite(
             roster_id=world.ids.inviter_roster_id,
             scenario=scenario,
             status=status,
+            activation_protocol_version=activation_protocol_version,
             expires_at=expires_at or FIXED_NOW + timedelta(hours=24),
             accepted_by_user_id=accepted_by_user_id,
             accepted_roster_id=accepted_roster_id,
@@ -353,7 +355,7 @@ def test_direct_admin_and_open_success_persist_complete_battle_graph(
     assert payload["status"] == "active"
     assert payload["current_round"] == 1
     assert payload["adaptation_report"] is not None
-    assert "activation_protocol_version" not in payload
+    assert payload["activation_protocol_version"] == 1
 
     with api_world.sessions() as session:
         invite = session.get(models.BattleInvite, invite_id)
@@ -361,6 +363,7 @@ def test_direct_admin_and_open_success_persist_complete_battle_graph(
         assert invite is not None
         assert battle is not None
         assert battle.activation_protocol_version == 1
+        assert invite.activation_protocol_version == 1
         assert invite.status == models.BATTLE_INVITE_STATUS_ACCEPTED
         assert invite.accepted_by_user_id == acceptor_id
         assert invite.accepted_roster_id == roster_id
@@ -386,6 +389,42 @@ def test_direct_admin_and_open_success_persist_complete_battle_graph(
             .where(models.BattleCheckpoint.battle_id == battle.id)
         )
         assert checkpoint_count == 1
+
+
+def test_explicit_v2_invite_accept_and_retry_preserve_coherent_version(
+    api_world: ApiWorld,
+) -> None:
+    invite_id = _invite(
+        api_world,
+        to_user_id=api_world.ids.target_id,
+        activation_protocol_version=2,
+    )
+    _login(api_world, api_world.ids.target_id)
+
+    first = _accept(api_world, invite_id, api_world.ids.target_roster_id)
+    counts = _domain_counts(api_world)
+    retry = _accept(api_world, invite_id, api_world.ids.target_roster_id)
+
+    assert first.status_code == retry.status_code == 200
+    assert first.json()["battle_id"] == retry.json()["battle_id"]
+    assert first.json()["activation_protocol_version"] == 2
+    assert retry.json()["activation_protocol_version"] == 2
+    assert _domain_counts(api_world) == counts
+    with api_world.sessions() as session:
+        invite = session.get(models.BattleInvite, invite_id)
+        battle = session.get(models.Battle, first.json()["battle_id"])
+        checkpoint = load_latest_checkpoint(session, battle.id)
+        checkpoint_row = session.execute(
+            select(models.BattleCheckpoint).where(
+                models.BattleCheckpoint.battle_id == battle.id
+            )
+        ).scalar_one()
+        assert invite.activation_protocol_version == 2
+        assert battle.activation_protocol_version == 2
+        assert checkpoint is not None
+        assert checkpoint.state.initiative_player == FIXED_SEED & 1
+        assert checkpoint.state.activation is None
+        assert json.loads(checkpoint_row.state_json)["version"] == 2
 
 
 def test_idempotent_retry_returns_same_battle_without_domain_writes(
@@ -702,6 +741,40 @@ def test_inconsistent_accepted_linkage_returns_constant_409(
     assert _domain_counts(api_world) == (1, 0, 0)
 
 
+def test_existing_acceptance_rejects_invite_battle_protocol_mismatch(
+    api_world: ApiWorld,
+) -> None:
+    with api_world.sessions() as session:
+        battle = models.Battle(
+            p1_user_id=api_world.ids.inviter_id,
+            p2_user_id=api_world.ids.target_id,
+            p1_roster_id=api_world.ids.inviter_roster_id,
+            p2_roster_id=api_world.ids.target_roster_id,
+            rng_seed=7,
+            status="active",
+            activation_protocol_version=1,
+        )
+        session.add(battle)
+        session.commit()
+        battle_id = battle.id
+    invite_id = _invite(
+        api_world,
+        to_user_id=api_world.ids.target_id,
+        status=models.BATTLE_INVITE_STATUS_ACCEPTED,
+        accepted_by_user_id=api_world.ids.target_id,
+        accepted_roster_id=api_world.ids.target_roster_id,
+        battle_id=battle_id,
+        activation_protocol_version=2,
+    )
+    _login(api_world, api_world.ids.target_id)
+
+    response = _accept(api_world, invite_id, api_world.ids.target_roster_id)
+
+    assert response.status_code == 409
+    assert response.json() == ACCEPT_CONFLICT
+    assert _domain_counts(api_world) == (1, 0, 0)
+
+
 def test_missing_linked_battle_returns_constant_409(api_world: ApiWorld) -> None:
     missing_battle_id = 999_999
     with api_world.engine.connect() as connection:
@@ -748,6 +821,10 @@ def test_strict_accept_body_rejects_bool_extra_and_status_linkage_fields(
         {"roster_id": api_world.ids.target_roster_id, "scenario": "lustrzana_a"},
         {"roster_id": api_world.ids.target_roster_id, "seed": 7},
         {"roster_id": api_world.ids.target_roster_id, "initiative": 0},
+        {
+            "roster_id": api_world.ids.target_roster_id,
+            "activation_protocol_version": 1,
+        },
         {"roster_id": api_world.ids.target_roster_id, "expires_at": "now"},
     )
 
@@ -828,6 +905,17 @@ def test_sql_control_plane_is_constant_for_one_vs_twelve_units_and_history(
         invite_id=small_invite_id,
         roster_id=api_world.ids.target_roster_id,
     )
+    v2_invite_id = _invite(
+        api_world,
+        to_user_id=api_world.ids.target_id,
+        activation_protocol_version=2,
+    )
+    v2 = _record_accept_statements(
+        api_world,
+        invite_id=v2_invite_id,
+        roster_id=api_world.ids.target_roster_id,
+    )
+    assert len(v2) == len(small)
 
     with api_world.sessions() as session:
         army_id = session.get(models.Roster, api_world.ids.inviter_roster_id).army_id
@@ -893,8 +981,9 @@ def test_sql_control_plane_is_constant_for_one_vs_twelve_units_and_history(
     )
 
     small_selects = [sql for sql in small if sql.lstrip().upper().startswith("SELECT")]
+    v2_selects = [sql for sql in v2 if sql.lstrip().upper().startswith("SELECT")]
     large_selects = [sql for sql in large if sql.lstrip().upper().startswith("SELECT")]
-    assert len(small_selects) == len(large_selects) == 13
+    assert len(small_selects) == len(v2_selects) == len(large_selects) == 13
     assert len(large) > len(small)  # required per-unit event INSERTs, not ORM N+1 reads
     for statement in large:
         normalized = " ".join(statement.lower().split())

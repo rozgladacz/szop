@@ -46,6 +46,7 @@ def _invite_payload(*, to_user_id: int | None = 12) -> dict[str, Any]:
         "roster_id": 21,
         "scenario": "lustrzana_a",
         "status": "pending",
+        "activation_protocol_version": 1,
         "expires_at": "2026-07-20T10:00:00",
         "created_at": "2026-07-19T10:00:00",
         "updated_at": "2026-07-19T10:00:00",
@@ -64,6 +65,7 @@ def _battle_payload() -> dict[str, Any]:
         "rng_seed": 777,
         "status": "active",
         "latest_sequence": 2,
+        "activation_protocol_version": 1,
         "adaptation_report": None,
     }
 
@@ -102,6 +104,7 @@ def test_create_battle_invite_posts_exact_contract_once_and_decodes_metadata(
         roster_id=21,
         scenario="lustrzana_a",
         status="pending",
+        activation_protocol_version=1,
         expires_at=datetime(2026, 7, 20, 10, 0),
         created_at=datetime(2026, 7, 19, 10, 0),
         updated_at=datetime(2026, 7, 19, 10, 0),
@@ -149,6 +152,7 @@ def test_accept_battle_invite_posts_once_and_reuses_battle_metadata_decoder() ->
         rng_seed=777,
         status="active",
         latest_sequence=2,
+        activation_protocol_version=1,
     )
     assert len(seen) == 1
     request = seen[0]
@@ -157,6 +161,34 @@ def test_accept_battle_invite_posts_once_and_reuses_battle_metadata_decoder() ->
     assert request.headers["Authorization"] == "Bearer accept-token"
     assert json.loads(request.body or b"") == {"roster_id": 22}
     assert request.timeout == 6.0
+
+
+def test_create_battle_invite_explicit_v2_emits_only_opt_in_field() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        payload = _invite_payload()
+        payload["activation_protocol_version"] = 2
+        return _json_response(payload, status_code=201)
+
+    result = HttpClient(
+        "http://localhost",
+        transport=transport,
+    ).create_battle_invite(
+        roster_id=21,
+        activation_protocol_version=2,
+    )
+
+    assert result.activation_protocol_version == 2
+    body = json.loads(seen[0].body or b"")
+    assert body == {
+        "to_user_id": None,
+        "roster_id": 21,
+        "scenario": "lustrzana_a",
+        "expires_in_hours": 24,
+        "activation_protocol_version": 2,
+    }
 
 
 @pytest.mark.parametrize(
@@ -172,6 +204,12 @@ def test_accept_battle_invite_posts_once_and_reuses_battle_metadata_decoder() ->
         {"roster_id": 1, "expires_in_hours": True},
         {"roster_id": 1, "expires_in_hours": 0},
         {"roster_id": 1, "expires_in_hours": 169},
+        {"roster_id": 1, "activation_protocol_version": 0},
+        {"roster_id": 1, "activation_protocol_version": 3},
+        {"roster_id": 1, "activation_protocol_version": True},
+        {"roster_id": 1, "activation_protocol_version": "2"},
+        {"roster_id": 1, "activation_protocol_version": 2.0},
+        {"roster_id": 1, "activation_protocol_version": None},
     ],
 )
 def test_create_battle_invite_rejects_invalid_input_before_transport(
@@ -224,6 +262,9 @@ def _without(payload: dict[str, Any], key: str) -> dict[str, Any]:
         {**_invite_payload(), "expires_at": "not-a-timestamp"},
         {**_invite_payload(), "created_at": "2026-07-19T10:00:00+00:00"},
         {**_invite_payload(), "updated_at": 123},
+        _without(_invite_payload(), "activation_protocol_version"),
+        {**_invite_payload(), "activation_protocol_version": True},
+        {**_invite_payload(), "activation_protocol_version": 3},
         {**_invite_payload(), "battle_id": 41},
     ],
 )
@@ -247,6 +288,10 @@ def test_create_battle_invite_rejects_malformed_payload(payload: Any) -> None:
         [],
         _without(_battle_payload(), "battle_id"),
         {**_battle_payload(), "p2_roster_id": True},
+        _without(_battle_payload(), "activation_protocol_version"),
+        {**_battle_payload(), "activation_protocol_version": True},
+        {**_battle_payload(), "activation_protocol_version": 3},
+        {**_battle_payload(), "unexpected": "field"},
     ],
 )
 def test_accept_battle_invite_rejects_malformed_battle_public(payload: Any) -> None:
@@ -297,6 +342,7 @@ def test_public_invite_type_rejects_invalid_values() -> None:
         "roster_id": 21,
         "scenario": "lustrzana_a",
         "status": "pending",
+        "activation_protocol_version": 1,
         "expires_at": datetime(2026, 7, 20, 10, 0),
         "created_at": datetime(2026, 7, 19, 10, 0),
         "updated_at": datetime(2026, 7, 19, 10, 0),
@@ -308,6 +354,8 @@ def test_public_invite_type_rejects_invalid_values() -> None:
         ("roster_id", 0),
         ("scenario", ""),
         ("status", "accepted"),
+        ("activation_protocol_version", True),
+        ("activation_protocol_version", 3),
         ("expires_at", datetime.fromisoformat("2026-07-20T10:00:00+00:00")),
     )
 
@@ -578,12 +626,14 @@ def test_real_transport_direct_open_idempotency_errors_and_body_blind_audit(
         roster_id=world.inviter_roster_id,
         to_user_id=world.target_id,
         scenario="  LuStRzAnA_A  ",
+        activation_protocol_version=2,
     )
     assert len(world.transport.requests) == before + 1
     assert direct.from_user_id == world.inviter_id
     assert direct.to_user_id == world.target_id
     assert direct.scenario == "lustrzana_a"
     assert direct.status == "pending"
+    assert direct.activation_protocol_version == 2
 
     with pytest.raises(HttpClientError) as foreign_acceptor:
         world.other_client.accept_battle_invite(
@@ -615,6 +665,7 @@ def test_real_transport_direct_open_idempotency_errors_and_body_blind_audit(
     assert accepted.p1_roster_id == world.inviter_roster_id
     assert accepted.p2_roster_id == world.target_roster_id
     assert accepted.status == "active"
+    assert accepted.activation_protocol_version == 2
     after_first_accept = _domain_counts(world)
     assert after_first_accept[0] == 1
     assert after_first_accept[1] > 0
@@ -627,6 +678,7 @@ def test_real_transport_direct_open_idempotency_errors_and_body_blind_audit(
     )
     assert len(world.transport.requests) == requests_before_retry + 1
     assert retried.battle_id == accepted.battle_id
+    assert retried.activation_protocol_version == 2
     assert _domain_counts(world) == after_first_accept
 
     with pytest.raises(HttpClientError) as terminal_conflict:
@@ -641,6 +693,7 @@ def test_real_transport_direct_open_idempotency_errors_and_body_blind_audit(
         roster_id=world.inviter_roster_id,
     )
     assert open_invite.to_user_id is None
+    assert open_invite.activation_protocol_version == 1
     open_battle = world.other_client.accept_battle_invite(
         open_invite.invite_id,
         roster_id=world.other_roster_id,
@@ -649,6 +702,7 @@ def test_real_transport_direct_open_idempotency_errors_and_body_blind_audit(
     assert open_battle.p1_user_id == world.inviter_id
     assert open_battle.p2_user_id == world.other_id
     assert open_battle.p2_roster_id == world.other_roster_id
+    assert open_battle.activation_protocol_version == 1
     final_counts = _domain_counts(world)
     assert final_counts[0] == 2
     assert final_counts[1] > after_first_accept[1]

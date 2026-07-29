@@ -722,8 +722,20 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   v1/no-oracle/stale/race/rollback oraz stałe 5 SELECT-ów bez N+1 są pokryte.
   Nie dodano produkcyjnego call site, transportu, publicznych schema/scope'ów,
   envelope ani klienta; Klątwa/Oznaczenie/Strażnik pozostają nie-ready.
-- **OPEN:** niepuste recovery handlery oraz produkcyjny restart przez
-  transport/API/auth/client rollout. Te elementy pozostają osobnymi slice'ami.
+- **B4.4c.8 DONE 2026-07-29:** direct `POST /battles` oraz create invite mają
+  addytywny, strict `activation_protocol_version: 1|2`, którego brak zachowuje
+  dokładnie v1. Obie ścieżki delegują inicjalizację do `stage_battle_creation`
+  i publikują wybraną wersję. `BattleInvite` przechowuje ją nie-nullowalnie z
+  defaultem/checkiem `1|2`; idempotentna migracja SQLite oznacza istniejące
+  zaproszenia jako v1. Accept nie przyjmuje wersji od klienta, lecz używa
+  wyłącznie wartości zaproszenia, obejmuje ją CAS-em i przy retry/race rereadzie
+  wymaga zgodnego `Battle`. `HttpClient` zachowuje stare body dla defaultu v1,
+  emituje jawne v2 i ściśle dekoduje wersję w `BattleMetadata` oraz
+  `BattleInviteMetadata`. Scope'y i route names są bez zmian; v2 ma zero
+  dodatkowych SQL statements względem v1 dla direct create, invite create i
+  accept.
+- **OPEN:** niepuste recovery handlery oraz produkcyjny transport mutacji
+  aktywacji/przerwań. Te elementy pozostają osobnymi slice'ami.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -747,7 +759,9 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 - **B4.4c.7 DONE:** transactionally-neutral service dla public-ready Rozkazu,
   strict preflight przed I/O, pure accepted-interrupt + built-in outcome SSOT,
   exact delta/checkpoint/RNG, restart/finalize, auth/race/rollback i SQL ceiling;
-- **OPEN:** jawny opt-in v2 w versioned create/invite metadata;
+- **B4.4c.8 DONE:** jawny, domyślnie v1 opt-in direct/create-invite, trwała
+  wersja invite, accept-only-from-invite, mismatch detection, ścisłe publiczne
+  metadata/HttpClient oraz zerowa delta SQL;
 - scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
   persistence; `POST /actions` z kompatybilnymi guardami;
 - `POST /interrupts` może publicznie obsłużyć `pass` oraz trwały source-correct

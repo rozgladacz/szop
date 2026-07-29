@@ -18,6 +18,10 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from app.battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSION_V1,
+    validate_activation_protocol_version,
+)
 from app.services.engine.action_codec import (
     ActionCodecError,
     action_from_json,
@@ -117,6 +121,10 @@ class BattleMetadata:
     rng_seed: int
     status: str
     latest_sequence: int
+    activation_protocol_version: int
+
+    def __post_init__(self) -> None:
+        validate_activation_protocol_version(self.activation_protocol_version)
 
 
 Transport = Callable[[HttpRequest], HttpResponse]
@@ -160,19 +168,26 @@ class HttpClient:
         p2_roster_id: int,
         rng_seed: int = 0,
         initiative_player: int = 0,
+        activation_protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V1,
     ) -> BattleMetadata:
         """Create a sandbox battle via `POST /battles` and return its metadata."""
+        protocol_version = validate_activation_protocol_version(
+            activation_protocol_version
+        )
+        request_body = {
+            "p1_roster_id": p1_roster_id,
+            "p2_roster_id": p2_roster_id,
+            "rng_seed": rng_seed,
+            "initiative_player": initiative_player,
+        }
+        if protocol_version != ACTIVATION_PROTOCOL_VERSION_V1:
+            request_body["activation_protocol_version"] = protocol_version
         error_label = "POST create battle"
         payload = self._request_json(
             "POST",
             "/battles",
             {},
-            json_body={
-                "p1_roster_id": p1_roster_id,
-                "p2_roster_id": p2_roster_id,
-                "rng_seed": rng_seed,
-                "initiative_player": initiative_player,
-            },
+            json_body=request_body,
             error_label=error_label,
         )
         return _metadata_from_payload(payload, error_label=error_label)
@@ -184,6 +199,7 @@ class HttpClient:
         to_user_id: int | None = None,
         scenario: str = "lustrzana_a",
         expires_in_hours: int = 24,
+        activation_protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V1,
     ) -> BattleInviteMetadata:
         """Create one direct or open pending invite with no follow-up request."""
         _validate_positive_id(roster_id, name="roster_id")
@@ -195,18 +211,24 @@ class HttpClient:
             raise ValueError("scenario must contain at most 100 characters")
         if type(expires_in_hours) is not int or not 1 <= expires_in_hours <= 168:
             raise ValueError("expires_in_hours must be an int between 1 and 168")
+        protocol_version = validate_activation_protocol_version(
+            activation_protocol_version
+        )
+        request_body = {
+            "to_user_id": to_user_id,
+            "roster_id": roster_id,
+            "scenario": scenario,
+            "expires_in_hours": expires_in_hours,
+        }
+        if protocol_version != ACTIVATION_PROTOCOL_VERSION_V1:
+            request_body["activation_protocol_version"] = protocol_version
 
         error_label = "POST create battle invite"
         payload = self._request_json(
             "POST",
             "/battles/invite",
             {},
-            json_body={
-                "to_user_id": to_user_id,
-                "roster_id": roster_id,
-                "scenario": scenario,
-                "expires_in_hours": expires_in_hours,
-            },
+            json_body=request_body,
             error_label=error_label,
         )
         return _battle_invite_metadata_from_payload(
@@ -2065,6 +2087,22 @@ def _metadata_from_payload(
             error_label=error_label,
         )
     try:
+        expected_keys = {
+            "battle_id",
+            "p1_user_id",
+            "p2_user_id",
+            "p1_roster_id",
+            "p2_roster_id",
+            "winner_user_id",
+            "current_round",
+            "rng_seed",
+            "status",
+            "latest_sequence",
+            "activation_protocol_version",
+        }
+        if "adaptation_report" in payload:
+            expected_keys.add("adaptation_report")
+        _require_exact_keys(payload, expected_keys)
         return BattleMetadata(
             battle_id=_required_int(payload, "battle_id"),
             p1_user_id=_optional_int(payload, "p1_user_id"),
@@ -2076,8 +2114,11 @@ def _metadata_from_payload(
             rng_seed=_required_int(payload, "rng_seed"),
             status=_required_str(payload, "status"),
             latest_sequence=_required_int(payload, "latest_sequence"),
+            activation_protocol_version=validate_activation_protocol_version(
+                _required_int(payload, "activation_protocol_version")
+            ),
         )
-    except (KeyError, TypeError) as exc:
+    except (KeyError, TypeError, ValueError) as exc:
         raise HttpClientError(error_message) from exc
 
 
@@ -2099,6 +2140,7 @@ def _battle_invite_metadata_from_payload(
                 "roster_id",
                 "scenario",
                 "status",
+                "activation_protocol_version",
                 "expires_at",
                 "created_at",
                 "updated_at",
@@ -2111,6 +2153,9 @@ def _battle_invite_metadata_from_payload(
             roster_id=_required_int(payload, "roster_id"),
             scenario=_required_str(payload, "scenario"),
             status=_required_str(payload, "status"),
+            activation_protocol_version=validate_activation_protocol_version(
+                _required_int(payload, "activation_protocol_version")
+            ),
             expires_at=_required_naive_datetime(payload, "expires_at"),
             created_at=_required_naive_datetime(payload, "created_at"),
             updated_at=_required_naive_datetime(payload, "updated_at"),

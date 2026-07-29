@@ -8,7 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -367,7 +367,102 @@ def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:
         )
     ).scalar_one()
     assert json.loads(checkpoint_row.state_json)["version"] == 1
-    assert "activation_protocol_version" not in response.model_dump()
+    assert response.activation_protocol_version == 1
+
+
+def test_create_battle_explicit_v2_persists_coherent_idle_checkpoint() -> None:
+    session = _build_session()
+    owner = _seed_user(session, "owner-v2")
+    roster_a = _seed_roster(session, name="A-v2", owner_id=owner.id)
+    roster_b = _seed_roster(session, name="B-v2", owner_id=owner.id)
+
+    response = battles.create_battle(
+        battles.BattleCreate(
+            p1_roster_id=roster_a.id,
+            p2_roster_id=roster_b.id,
+            rng_seed=778,
+            initiative_player=1,
+            activation_protocol_version=2,
+        ),
+        db=session,
+        creator=battles.BattleCreator(user_id=owner.id),
+    )
+
+    battle = session.get(models.Battle, response.battle_id)
+    checkpoint = load_latest_checkpoint(session, response.battle_id)
+    checkpoint_row = session.execute(
+        select(models.BattleCheckpoint).where(
+            models.BattleCheckpoint.battle_id == response.battle_id
+        )
+    ).scalar_one()
+    assert battle is not None
+    assert checkpoint is not None
+    assert response.activation_protocol_version == 2
+    assert battle.activation_protocol_version == 2
+    assert checkpoint.state.initiative_player == 1
+    assert checkpoint.state.activation is None
+    assert json.loads(checkpoint_row.state_json)["version"] == 2
+
+
+@pytest.mark.parametrize("invalid_version", [0, 3, True, "2", 2.0, None])
+def test_create_battle_protocol_version_is_strict_before_write(
+    invalid_version,
+) -> None:
+    session = _build_session()
+    with pytest.raises(ValueError):
+        battles.BattleCreate.model_validate(
+            {
+                "p1_roster_id": 1,
+                "p2_roster_id": 2,
+                "activation_protocol_version": invalid_version,
+            }
+        )
+    assert session.execute(select(models.Battle)).scalars().all() == []
+
+
+def _direct_create_statement_count(protocol_version: int) -> tuple[int, int]:
+    session = _build_session()
+    owner = _seed_user(session, f"sql-owner-{protocol_version}")
+    roster_a = _seed_roster(
+        session,
+        name=f"SQL-A-{protocol_version}",
+        owner_id=owner.id,
+    )
+    roster_b = _seed_roster(
+        session,
+        name=f"SQL-B-{protocol_version}",
+        owner_id=owner.id,
+    )
+    statements: list[str] = []
+
+    def record(_conn, _cursor, statement, _params, _context, _executemany):
+        statements.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        response = battles.create_battle(
+            battles.BattleCreate(
+                p1_roster_id=roster_a.id,
+                p2_roster_id=roster_b.id,
+                activation_protocol_version=protocol_version,
+            ),
+            db=session,
+            creator=battles.BattleCreator(user_id=owner.id),
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+        session.close()
+    assert response.activation_protocol_version == protocol_version
+    select_count = sum(
+        statement.lstrip().upper().startswith("SELECT")
+        for statement in statements
+    )
+    return len(statements), select_count
+
+
+def test_direct_create_v2_has_zero_sql_statement_delta_from_v1() -> None:
+    assert _direct_create_statement_count(2) == _direct_create_statement_count(1)
 
 
 def test_create_battle_reports_roster_adapter_omissions() -> None:

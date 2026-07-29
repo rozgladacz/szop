@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session
 from starlette.responses import StreamingResponse
 
 from .. import models
+from ..battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSION_V1,
+    validate_activation_protocol_version,
+)
 from ..db import get_db
 from ..security import get_current_user, require_agent_scope
 from ..services import battle_invites as battle_invite_service
@@ -100,6 +104,15 @@ class BattleCreate(BaseModel):
     p2_roster_id: int = Field(..., ge=1)
     rng_seed: int = 0
     initiative_player: int = Field(0, ge=0, le=1)
+    activation_protocol_version: int = Field(
+        ACTIVATION_PROTOCOL_VERSION_V1,
+        strict=True,
+    )
+
+    @field_validator("activation_protocol_version")
+    @classmethod
+    def validate_protocol_version(cls, value: object) -> int:
+        return validate_activation_protocol_version(value)
 
 
 class BattleInviteCreate(BaseModel):
@@ -114,11 +127,20 @@ class BattleInviteCreate(BaseModel):
         max_length=100,
     )
     expires_in_hours: int = Field(24, strict=True, ge=1, le=168)
+    activation_protocol_version: int = Field(
+        ACTIVATION_PROTOCOL_VERSION_V1,
+        strict=True,
+    )
 
     @field_validator("scenario", mode="before")
     @classmethod
     def canonicalize_scenario(cls, value: object) -> object:
         return value.strip().lower() if isinstance(value, str) else value
+
+    @field_validator("activation_protocol_version")
+    @classmethod
+    def validate_protocol_version(cls, value: object) -> int:
+        return validate_activation_protocol_version(value)
 
 
 class BattleInvitePublic(BaseModel):
@@ -130,6 +152,7 @@ class BattleInvitePublic(BaseModel):
     roster_id: int = Field(..., strict=True, ge=1)
     scenario: str = Field(..., min_length=1, max_length=100)
     status: Literal["pending"]
+    activation_protocol_version: int = Field(..., strict=True)
     expires_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -231,6 +254,7 @@ class BattlePublic(BaseModel):
     current_round: int = Field(..., ge=0)
     rng_seed: int
     status: str
+    activation_protocol_version: int = Field(..., strict=True)
     latest_sequence: int = Field(..., ge=0)
     adaptation_report: BattleAdaptationPublic | None = None
 
@@ -477,6 +501,7 @@ def _public_battle(
         current_round=battle.current_round,
         rng_seed=battle.rng_seed,
         status=battle.status,
+        activation_protocol_version=battle.activation_protocol_version,
         latest_sequence=latest_event_sequence(db, battle.id),
         adaptation_report=adaptation_report,
     )
@@ -490,6 +515,7 @@ def _public_battle_invite(invite: models.BattleInvite) -> BattleInvitePublic:
         roster_id=invite.roster_id,
         scenario=invite.scenario,
         status=invite.status,
+        activation_protocol_version=invite.activation_protocol_version,
         expires_at=invite.expires_at,
         created_at=invite.created_at,
         updated_at=invite.updated_at,
@@ -576,6 +602,7 @@ def create_battle(
         p2_roster=roster_p1,
         rng_seed=payload.rng_seed,
         initiative_player=payload.initiative_player,
+        activation_protocol_version=payload.activation_protocol_version,
     )
     db.commit()
     db.refresh(staged.battle)
@@ -654,6 +681,7 @@ def create_battle_invite(
             roster_id=payload.roster_id,
             scenario=payload.scenario,
             expires_in_hours=payload.expires_in_hours,
+            activation_protocol_version=payload.activation_protocol_version,
         )
         public = _public_battle_invite(invite)
         db.commit()

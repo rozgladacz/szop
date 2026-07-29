@@ -330,6 +330,25 @@ def _migrate_schema() -> None:
                     )
                 )
 
+        if "battle_invites" in table_names:
+            columns = inspector.get_columns("battle_invites")
+            column_names = {column["name"] for column in columns}
+            if "activation_protocol_version" not in column_names:
+                logger.info(
+                    "Adding activation protocol version to battle invites table"
+                )
+                allowed_versions = ", ".join(
+                    str(version) for version in ACTIVATION_PROTOCOL_VERSIONS
+                )
+                connection.execute(
+                    text(
+                        "ALTER TABLE battle_invites ADD COLUMN "
+                        "activation_protocol_version INTEGER NOT NULL "
+                        f"DEFAULT {ACTIVATION_PROTOCOL_VERSION_V1} "
+                        f"CHECK (activation_protocol_version IN ({allowed_versions}))"
+                    )
+                )
+
         if "armories" not in table_names:
             return
 

@@ -1065,6 +1065,7 @@ def test_battle_observation_tools_call_exact_public_client_methods() -> None:
         rng_seed=777,
         status="active",
         latest_sequence=9,
+        activation_protocol_version=1,
     )
     checkpoint = BattleStateCheckpoint(
         battle_id=42,
@@ -1359,6 +1360,7 @@ def test_battle_observation_rejects_mismatched_client_battle_ids() -> None:
         rng_seed=777,
         status="active",
         latest_sequence=9,
+        activation_protocol_version=1,
     )
     client.get_state_checkpoint.return_value = BattleStateCheckpoint(
         battle_id=43,

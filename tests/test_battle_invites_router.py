@@ -30,6 +30,7 @@ PUBLIC_FIELDS = {
     "roster_id",
     "scenario",
     "status",
+    "activation_protocol_version",
     "expires_at",
     "created_at",
     "updated_at",
@@ -268,6 +269,7 @@ def test_session_user_creates_canonical_direct_pending_invite(
     assert payload["roster_id"] == api_world.roster_id
     assert payload["scenario"] == "lustrzana_a"
     assert payload["status"] == models.BATTLE_INVITE_STATUS_PENDING
+    assert payload["activation_protocol_version"] == 1
     assert datetime.fromisoformat(payload["expires_at"]) == FIXED_NOW + timedelta(
         hours=24
     )
@@ -281,6 +283,7 @@ def test_session_user_creates_canonical_direct_pending_invite(
         assert invite.roster_id == api_world.roster_id
         assert invite.scenario == "lustrzana_a"
         assert invite.status == models.BATTLE_INVITE_STATUS_PENDING
+        assert invite.activation_protocol_version == 1
         assert invite.expires_at == FIXED_NOW + timedelta(hours=24)
         assert invite.expires_at.tzinfo is None
         assert invite.created_at == FIXED_NOW
@@ -302,6 +305,28 @@ def test_session_user_creates_open_invite_with_default_expiry(
     assert datetime.fromisoformat(response.json()["expires_at"]) == (
         FIXED_NOW + timedelta(hours=24)
     )
+
+
+def test_explicit_v2_invite_is_public_and_persisted_immutably(
+    api_world: ApiWorld,
+) -> None:
+    _login(api_world)
+
+    response = _post(
+        api_world,
+        body={
+            "to_user_id": api_world.target_id,
+            "roster_id": api_world.roster_id,
+            "activation_protocol_version": 2,
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["activation_protocol_version"] == 2
+    with api_world.sessions() as session:
+        invite = session.get(models.BattleInvite, response.json()["id"])
+        assert invite is not None
+        assert invite.activation_protocol_version == 2
 
 
 @pytest.mark.parametrize("expires_in_hours", [1, 168])
@@ -463,6 +488,12 @@ def test_missing_self_and_agent_targets_share_bodyless_404_without_insert(
         {"roster_id": 1, "expires_in_hours": 0},
         {"roster_id": 1, "expires_in_hours": 169},
         {"roster_id": 1, "expires_in_hours": True},
+        {"roster_id": 1, "activation_protocol_version": 0},
+        {"roster_id": 1, "activation_protocol_version": 3},
+        {"roster_id": 1, "activation_protocol_version": True},
+        {"roster_id": 1, "activation_protocol_version": "2"},
+        {"roster_id": 1, "activation_protocol_version": 2.0},
+        {"roster_id": 1, "activation_protocol_version": None},
     ],
 )
 def test_invalid_strict_request_returns_422_without_domain_write(
@@ -602,9 +633,17 @@ def test_session_sql_statement_bound_is_constant_for_open_and_direct(
             "roster_id": api_world.roster_id,
         },
     )
+    v2_count = _statement_count(
+        api_world,
+        body={
+            "roster_id": api_world.roster_id,
+            "activation_protocol_version": 2,
+        },
+    )
 
     assert open_count == 3
     assert direct_count == 4
+    assert v2_count == open_count
 
 
 def test_session_sql_bound_does_not_scale_with_roster_units_or_invite_history(

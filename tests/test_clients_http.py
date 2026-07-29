@@ -73,6 +73,7 @@ def _battle_public_payload(battle_id: int) -> dict:
         "rng_seed": 5,
         "status": "active",
         "latest_sequence": 4,
+        "activation_protocol_version": 1,
     }
 
 
@@ -1062,6 +1063,7 @@ def test_create_battle_posts_rosters_and_returns_metadata() -> None:
         rng_seed=5,
         status="active",
         latest_sequence=4,
+        activation_protocol_version=1,
     )
     assert len(seen) == 1
     request = seen[0]
@@ -1075,6 +1077,40 @@ def test_create_battle_posts_rosters_and_returns_metadata() -> None:
         "rng_seed": 5,
         "initiative_player": 1,
     }
+
+
+def test_create_battle_explicit_v2_emits_opt_in() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        payload = _battle_public_payload(77)
+        payload["activation_protocol_version"] = 2
+        return _json_response(payload)
+
+    metadata = HttpClient("http://localhost", transport=transport).create_battle(
+        p1_roster_id=100,
+        p2_roster_id=200,
+        activation_protocol_version=2,
+    )
+
+    assert metadata.activation_protocol_version == 2
+    assert json.loads(seen[0].body or b"")["activation_protocol_version"] == 2
+
+
+@pytest.mark.parametrize("invalid_version", [0, 3, True, "2", 2.0, None])
+def test_create_battle_rejects_invalid_protocol_before_transport(
+    invalid_version,
+) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        raise AssertionError("transport should not be called")
+
+    with pytest.raises(ValueError, match="activation_protocol_version"):
+        HttpClient("http://localhost", transport=transport).create_battle(
+            p1_roster_id=1,
+            p2_roster_id=2,
+            activation_protocol_version=invalid_version,
+        )
 
 
 def test_create_battle_raises_for_http_error_status() -> None:
@@ -1100,6 +1136,32 @@ def test_create_battle_raises_create_label_for_malformed_payload() -> None:
 
     assert "POST create battle returned malformed payload" in str(exc_info.value)
     assert "GET battle metadata" not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {key: value for key, value in _battle_public_payload(77).items()
+         if key != "activation_protocol_version"},
+        {**_battle_public_payload(77), "activation_protocol_version": True},
+        {**_battle_public_payload(77), "activation_protocol_version": 3},
+        {**_battle_public_payload(77), "unexpected": "field"},
+    ],
+)
+def test_create_battle_rejects_missing_malformed_or_unknown_version_field(
+    payload,
+) -> None:
+    def transport(_request: HttpRequest) -> HttpResponse:
+        return _json_response(payload)
+
+    with pytest.raises(
+        HttpClientError,
+        match="POST create battle returned malformed payload",
+    ):
+        HttpClient("http://localhost", transport=transport).create_battle(
+            p1_roster_id=1,
+            p2_roster_id=2,
+        )
 
 
 def test_create_battle_ignores_additive_adaptation_report() -> None:
@@ -1293,6 +1355,7 @@ def test_get_battle_metadata_fetches_b4_metadata_endpoint() -> None:
                 "rng_seed": 777,
                 "status": "active",
                 "latest_sequence": 9,
+                "activation_protocol_version": 1,
             }
         )
 
@@ -1309,6 +1372,7 @@ def test_get_battle_metadata_fetches_b4_metadata_endpoint() -> None:
         rng_seed=777,
         status="active",
         latest_sequence=9,
+        activation_protocol_version=1,
     )
     assert len(seen) == 1
     request = seen[0]

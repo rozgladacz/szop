@@ -404,8 +404,21 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   odrzuceniem Klątwy/Oznaczenia/Strażnika bez zapisu. Sukces pozostaje na stałych
   5 SELECT-ach bez N+1. Nie dodano produkcyjnego call site, transportu,
   publicznych schema/scope'ów, envelope ani klienta.
+  **B4.4c.8 public activation protocol opt-in DONE 2026-07-29:** publiczne
+  direct create i create invite przyjmują opcjonalne, strict
+  `activation_protocol_version: 1|2` z dokładnym defaultem v1. Obie ścieżki
+  reużywają `stage_battle_creation`; v2 zapisuje zgodne metadata, trwałą
+  inicjatywę i checkpoint v2 w `IDLE`. `BattleInvite` utrwala niezmienny wybór
+  z idempotentną migracją SQLite do v1, a accept używa wyłącznie tej wartości;
+  CAS oraz idempotentny reread odrzucają mismatch invite↔battle. Publiczne
+  `BattlePublic`/`BattleInvitePublic` i ścisłe `BattleMetadata`/
+  `BattleInviteMetadata` ujawniają wersję. `HttpClient` zachowuje dotychczasowe
+  body dla defaultu v1, emituje pole dla jawnego v2 i odrzuca brakujące,
+  nieznane lub błędnie typowane metadata. Auth/scope'y są bez zmian, a opt-in
+  ma zerową deltę liczby SQL statements dla direct create, invite create i
+  accept.
   **Niepuste source-correct recovery handlery oraz produkcyjny
-  transport/API/auth/client rollout nadal OPEN.**
+  transport API trwałych mutacji aktywacji nadal OPEN.**
   Pozostały endpoint:
   `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
   `POST /battles/{id}/replay` **DONE

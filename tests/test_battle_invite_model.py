@@ -125,6 +125,7 @@ def test_schema_contract_has_exact_columns_constraints_and_indexes(database):
         "roster_id",
         "scenario",
         "status",
+        "activation_protocol_version",
         "expires_at",
         "accepted_by_user_id",
         "accepted_roster_id",
@@ -140,6 +141,10 @@ def test_schema_contract_has_exact_columns_constraints_and_indexes(database):
     assert columns["scenario"]["type"].length == 100
     assert columns["status"]["nullable"] is False
     assert columns["status"]["type"].length == 20
+    assert columns["activation_protocol_version"]["nullable"] is False
+    assert str(columns["activation_protocol_version"]["default"]).strip(
+        "'\"()"
+    ) == "1"
     assert columns["expires_at"]["nullable"] is False
     assert columns["accepted_by_user_id"]["nullable"] is True
     assert columns["accepted_roster_id"]["nullable"] is True
@@ -169,9 +174,14 @@ def test_schema_contract_has_exact_columns_constraints_and_indexes(database):
         "ck_battle_invites_direct_not_self",
         "ck_battle_invites_accepted_result_complete",
         "ck_battle_invites_nonaccepted_result_empty",
+        "ck_battle_invites_activation_protocol_version_valid",
     }
     status_check = checks["ck_battle_invites_status_valid"]
     assert all(status in status_check for status in models.BATTLE_INVITE_STATUSES)
+    assert (
+        "activation_protocol_version IN (1, 2)"
+        in checks["ck_battle_invites_activation_protocol_version_valid"]
+    )
 
     unique_constraints = {
         constraint["name"]: tuple(constraint["column_names"])
@@ -229,6 +239,7 @@ def test_direct_and_open_pending_round_trip_with_default_and_timestamps(database
         assert loaded_direct is not None
         assert loaded_open is not None
         assert loaded_direct.status == models.BATTLE_INVITE_STATUS_PENDING
+        assert loaded_direct.activation_protocol_version == 1
         assert loaded_direct.from_user.username == "inviter"
         assert loaded_direct.to_user.username == "target"
         assert loaded_direct.roster.name == "Inviter roster"
@@ -238,8 +249,25 @@ def test_direct_and_open_pending_round_trip_with_default_and_timestamps(database
         assert loaded_direct.created_at.tzinfo is None
         assert loaded_direct.updated_at.tzinfo is None
         assert loaded_open.status == models.BATTLE_INVITE_STATUS_PENDING
+        assert loaded_open.activation_protocol_version == 1
         assert loaded_open.to_user_id is None
         assert loaded_open.to_user is None
+
+
+@pytest.mark.parametrize("invalid_version", [0, 3, True, "2", 2.0, None])
+def test_activation_protocol_version_is_strict_before_flush(
+    database,
+    invalid_version,
+):
+    _, Session = database
+    with Session() as session:
+        world = _seed_world(session)
+        with pytest.raises(ValueError, match="activation_protocol_version"):
+            models.BattleInvite(
+                **_pending_invite_ids(world),
+                activation_protocol_version=invalid_version,
+            )
+        assert session.scalar(select(models.BattleInvite.id)) is None
 
 
 def test_accepted_open_invite_round_trips_first_acceptor_and_complete_result(database):

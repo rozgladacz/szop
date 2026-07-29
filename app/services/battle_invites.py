@@ -11,6 +11,10 @@ from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from .. import models
+from ..battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSION_V1,
+    validate_activation_protocol_version,
+)
 from ..db import utcnow
 from .agents.maps import MAP_BUILDERS, build_map
 from .agents.roster_adapter import AdaptResult
@@ -83,9 +87,13 @@ def create_battle_invite(
     roster_id: int,
     scenario: str,
     expires_in_hours: int,
+    activation_protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V1,
     now: datetime | None = None,
 ) -> models.BattleInvite:
     """Stage one pending invite without committing the caller's transaction."""
+    protocol_version = validate_activation_protocol_version(
+        activation_protocol_version
+    )
     canonical_scenario = scenario.strip().lower()
     if canonical_scenario not in MAP_BUILDERS:
         raise BattleInviteScenarioInvalid
@@ -120,6 +128,7 @@ def create_battle_invite(
         roster_id=owned_roster_id,
         scenario=canonical_scenario,
         status=models.BATTLE_INVITE_STATUS_PENDING,
+        activation_protocol_version=protocol_version,
         expires_at=timestamp + timedelta(hours=expires_in_hours),
         accepted_by_user_id=None,
         accepted_roster_id=None,
@@ -217,6 +226,7 @@ def stage_battle_invite_acceptance(
         initiative_player=initiative_player,
         terrain=fixture.terrain,
         objectives=fixture.objectives,
+        activation_protocol_version=invite.activation_protocol_version,
     )
     battle = staged.battle
 
@@ -229,6 +239,8 @@ def stage_battle_invite_acceptance(
             models.BattleInvite.from_user_id == invite.from_user_id,
             models.BattleInvite.roster_id == invite.roster_id,
             models.BattleInvite.scenario == invite.scenario,
+            models.BattleInvite.activation_protocol_version
+            == invite.activation_protocol_version,
             _acceptor_target_clause(acceptor_user_id),
         )
         .values(
@@ -335,6 +347,8 @@ def _existing_acceptance(
         or battle.p2_user_id != invite.accepted_by_user_id
         or battle.p1_roster_id != invite.roster_id
         or battle.p2_roster_id != invite.accepted_roster_id
+        or battle.activation_protocol_version
+        != invite.activation_protocol_version
     ):
         raise BattleInviteAcceptConflict
     return BattleInviteAccepted(battle=battle, created=False)

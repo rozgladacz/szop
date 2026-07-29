@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal
 
+from app.battle_protocol import validate_activation_protocol_version
+
 if TYPE_CHECKING:
     from app.services.engine.state import BattleState
 
@@ -24,6 +26,7 @@ class BattleInviteMetadata:
     roster_id: int
     scenario: str
     status: str
+    activation_protocol_version: int
     expires_at: datetime
     created_at: datetime
     updated_at: datetime
@@ -41,6 +44,7 @@ class BattleInviteMetadata:
             raise ValueError("scenario must be a non-empty string")
         if self.status != "pending":
             raise ValueError("new battle invite must be pending")
+        validate_activation_protocol_version(self.activation_protocol_version)
         for name in ("expires_at", "created_at", "updated_at"):
             value = getattr(self, name)
             if not isinstance(value, datetime) or value.tzinfo is not None:

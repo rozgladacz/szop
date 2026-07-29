@@ -295,6 +295,56 @@ def test_migrate_schema_marks_legacy_battles_v1_once_without_rewriting_logs(
             )
 
 
+def test_migrate_schema_marks_legacy_invites_v1_idempotently(monkeypatch):
+    engine = _memory_engine()
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE battle_invites (
+                    id INTEGER PRIMARY KEY,
+                    status VARCHAR(20) NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO battle_invites (id, status) "
+                "VALUES (9, 'pending')"
+            )
+        )
+
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DB_URL", "sqlite://")
+    db._migrate_schema()
+    db._migrate_schema()
+
+    columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("battle_invites")
+    }
+    protocol_column = columns["activation_protocol_version"]
+    assert protocol_column["nullable"] is False
+    assert str(protocol_column["default"]).strip("'\"()") == "1"
+    with engine.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT activation_protocol_version "
+                "FROM battle_invites WHERE id = 9"
+            )
+        ).scalar_one() == 1
+
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "UPDATE battle_invites "
+                    "SET activation_protocol_version = 3 WHERE id = 9"
+                )
+            )
+
+
 def test_migrate_schema_adds_unit_base_geometry_columns(monkeypatch):
     engine = _memory_engine()
     with engine.begin() as connection:

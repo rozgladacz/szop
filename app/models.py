@@ -703,6 +703,11 @@ class BattleInvite(TimestampMixin, Base):
             "accepted_roster_id IS NULL AND battle_id IS NULL)",
             name="ck_battle_invites_nonaccepted_result_empty",
         ),
+        CheckConstraint(
+            "activation_protocol_version IN "
+            f"({', '.join(str(version) for version in ACTIVATION_PROTOCOL_VERSIONS)})",
+            name="ck_battle_invites_activation_protocol_version_valid",
+        ),
         UniqueConstraint("battle_id", name="uq_battle_invites_battle_id"),
         Index(
             "ix_battle_invites_to_status_expires_at",
@@ -732,6 +737,12 @@ class BattleInvite(TimestampMixin, Base):
     status: Mapped[str] = mapped_column(
         String(20), default=BATTLE_INVITE_STATUS_PENDING, nullable=False
     )
+    activation_protocol_version: Mapped[int] = mapped_column(
+        Integer,
+        default=ACTIVATION_PROTOCOL_VERSION_V1,
+        server_default=str(ACTIVATION_PROTOCOL_VERSION_V1),
+        nullable=False,
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     accepted_by_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id"), nullable=True
@@ -753,6 +764,11 @@ class BattleInvite(TimestampMixin, Base):
         foreign_keys=[accepted_roster_id]
     )
     battle: Mapped[Optional[Battle]] = relationship(foreign_keys=[battle_id])
+
+    @validates("activation_protocol_version")
+    def _validate_activation_protocol_version(self, key: str, value: object) -> int:
+        del key
+        return validate_activation_protocol_version(value)
 
 
 class BattleEvent(Base):
