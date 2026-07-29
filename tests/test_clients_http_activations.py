@@ -448,6 +448,42 @@ def test_activation_v2_closed_error_exposes_status_and_detail_code() -> None:
     assert exc_info.value.detail_code == "stale_window"
 
 
+def test_http_client_straznik_remains_one_post_server_rejected() -> None:
+    seen: list[HttpRequest] = []
+
+    def transport(request: HttpRequest) -> HttpResponse:
+        seen.append(request)
+        return _response(
+            {"detail": {"code": "unsupported_interrupt"}},
+            status_code=422,
+        )
+
+    client = HttpClient("http://localhost", transport=transport)
+    with pytest.raises(HttpClientActivationError) as exc_info:
+        client.interrupt(
+            42,
+            expected_sequence=7,
+            activation_id=8,
+            expected_activation_version=1,
+            expected_window_version=1,
+            source_unit_id=10,
+            ability_slug="straznik",
+            payload={
+                "assignments": [
+                    {"weapon_slug": "rifle", "target_id": 20}
+                ]
+            },
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail_code == "unsupported_interrupt"
+    assert len(seen) == 1
+    request = seen[0]
+    assert request.method == "POST"
+    assert request.url.endswith("/battles/42/interrupts")
+    assert json.loads(request.body.decode("utf-8"))["ability_slug"] == "straznik"
+
+
 def test_activation_v2_error_code_with_wrong_status_fails_closed() -> None:
     def transport(_request: HttpRequest) -> HttpResponse:
         return _response({"detail": {"code": "stale_window"}}, status_code=422)

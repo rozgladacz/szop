@@ -485,7 +485,7 @@ historyczny error contract ADR-0054.
 |---|---|---|
 | Rozkaz(X) | Public-ready w pure engine i trwałym transporcie v2 od B4.4b.7/B4.4c.9. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
 | Klątwa(X) | Public-ready od B4.4d.C0; reużywa istniejący transport v2 i klienta. | Osobny validator `klatwa_tak`, pięć jawnych pasywek (`delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`), enemy target, 12″, oba kierunki strict bool, limit raz/rundę i wygaśnięcie przy finalizacji; nie reużywa `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
-| Strażnik | Publicznie niewspierany, dopóki jest stubem; C1a dostarcza wyłącznie RNG-aware substrate. | Nadal potrzebuje pełnego interrupt-action primitive: legalny source/weapon/targets, rzeczywisty Ostrzał, następnie Wyczerpany, outcome eventy i no-nested ([pozycja 31][Z31], [pkt 17][R17]). |
+| Strażnik | Publicznie niewspierany; C1b dostarcza prywatny pure fundament bez produkcyjnego call site'u. | Private activation-v2 outcome ma strict canonical-inventory plan, legalny source/weapon/1–2 targets, pełny multi-profile Ostrzał z per-target pools, następnie Wyczerpany, bounded eventy, RNG/replay i no-nested. Nadal potrzebuje osobnego durable/public wiring oraz real-transport/auth/race/query gates przed zmianą allowlisty ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]). |
 | Oznaczenie(X) | Publicznie niewspierane w obecnej semantyce. | Osobny attack-declaration/attack-scope prerequisite po zamknięciu ogólnego `BEFORE_ACTION`: cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, efekt tylko do `AttackResolved`, nie do końca aktywacji ([pozycja 49][Z49]). To rozszerzenie nadal użyje `POST /interrupts`, ale nie może udawać zwykłego activation override. |
 
 Registry może zawierać niegotowe handlery do testów engine; publiczna allowlista
@@ -510,6 +510,10 @@ rulesetu bez obu kanonicznych tagów nie jest legalnym X.
 - B4.4d.C1a nie dodaje SQL: prywatny klon RNG jest pure, a durable interrupt
   nadal zapisuje jeden guarded event batch i jeden checkpoint przy pułapach
   5/6/7 SELECT-ów dla service/session/bearer.
+- B4.4d.C1b nie ma I/O ani produkcyjnego durable call site'u. Pure validator
+  skanuje już załadowane frozen bloby/inventory, combat wykonuje tylko CPU/RNG,
+  a publiczny reject `straznik` nadal kończy się przed zapisem przy istniejących
+  pułapach; delta SELECT = 0 i brak N+1.
 - Hot concurrency path używa istniejących indeksów/constraintów:
   `battle_events(battle_id, sequence) UNIQUE`, indeksu `battle_id`,
   `battle_checkpoints(battle_id, sequence_at) UNIQUE` i PK `battles.id`.
@@ -790,6 +794,21 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   i zachowują exact event/restart/future-roll parity. Publiczne wire, auth,
   statusy, schematy, allowlista `{"rozkaz", "klatwa"}` i pułapy 5/6/7 SELECT
   pozostają bez zmian. To fundament, nie implementacja Strażnika.
+- **B4.4d.C1b DONE 2026-07-29:** prywatny frozen plan i strict decoder
+  rozstrzygają profile wyłącznie z `source.ranged_weapons`; caller nie podaje
+  statystyk. Pure activation-v2 outcome waliduje enemy activation, source
+  ze Strażnikiem, Front/live/Wyczerpany, blokadę 2″, 1–2 cele, zasięg, LoS
+  oraz jawnie obsługiwane wyjątki, a nieobsługiwane mechaniki odrzuca.
+  Wspólny combat SSOT rozpatruje wszystkie profile przed per-target alokacją
+  pul ([pkt 14.c][R14S], [pkt 17][R17]); outcome emituje jeden kanoniczny
+  `InterruptTriggered(straznik)`, komplet eventów Ostrzału i dopiero potem
+  `StatusAdded(Wyczerpany)` ([pozycja 31][Z31], [pkt 22.a][R22A]).
+  Sukces przesuwa wyłącznie returned RNG o realne rzuty, a executor/replay/
+  protocol failure po częściowym zużyciu nie mutuje wejść. C1b nie publikuje
+  sluga: allowlista pozostaje `{"rozkaz", "klatwa"}`, service/FastAPI/HttpClient
+  nadal odrzucają Strażnika bez zapisu/request amplification. C1/Strażnik
+  pozostaje OPEN do osobnego durable/public wiring oraz pełnych
+  real-transport/auth/race/query gates.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
   pakowanie pozostają osobnymi slice'ami; public-ready Oznaczenie i Strażnik
   wymagają własnych C1/C2.
@@ -833,9 +852,13 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   bez nowych eventów, API, DB ani kodu klienta.
 - **C1a RNG-aware substrate DONE 2026-07-29:** prywatny RNG outcome,
   fail-closed izolacja i atomowy durable RNG checkpoint; bez publikacji sluga.
-- **C1 Strażnik nadal OPEN:** pełny Ostrzał + Wyczerpany, source/weapon/target
-  i no-nested nadal wymagają osobnego dalszego etapu oraz DoD
-  ([pozycja 31][Z31], [pkt 17][R17]).
+- **C1b private pure Strażnik foundation DONE 2026-07-29:** canonical-inventory
+  plan/decoder, pełny multi-profile/multi-target Ostrzał, per-target pools,
+  późniejszy Wyczerpany, bounded outcome i RNG/replay/no-nested gate
+  ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]).
+- **C1 Strażnik nadal OPEN:** durable/public wiring, real transport, auth,
+  race/rollback/query gates i świadoma zmiana allowlisty pozostają osobnym
+  etapem; C1b nie tworzy produkcyjnego call site'u.
 - **C2 Oznaczenie:** najpierw attack-declaration/attack-scope events i
   wygaśnięcie po jednym ataku, potem handler; żadnego activation-scoped fallback;
   własny commit i DoD.
@@ -868,6 +891,7 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [R11C]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 11.b.i–iv"
 [R12]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 12.a–c"
 [R14]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.d.iv"
+[R14S]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.c"
 [R14A]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14"
 [R14C]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.c.v"
 [R14D]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 14.d.vi"
@@ -875,6 +899,7 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [R20]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 20"
 [R21]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 21"
 [R22]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 22.d"
+[R22A]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 22.a"
 [Z31]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 31 Strażnik"
 [Z45]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 45 Klątwa(X)"
 [Z49]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 49 Oznaczenie(X)"

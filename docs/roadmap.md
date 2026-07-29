@@ -467,6 +467,25 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   niedostępny; rzeczywisty Ostrzał, późniejszy Wyczerpany oraz walidacja
   source/broni/celu z [pozycji 31](../app/static/docs/SZOP_Zdolnosci.md)
   pozostają otwartym dalszym zakresem C1.
+  **B4.4d.C1b private pure Strażnik foundation DONE 2026-07-29:**
+  activation-v2 ma prywatny frozen plan i strict decoder przypisań
+  `{weapon_slug,target_id}` bez statystyk broni od callera. Profile są
+  rozwiązywane wyłącznie z `source.ranged_weapons`; coercion, extra fields,
+  duplikaty, niejednoznaczne inventory i mechaniki bez reprezentowalnego stanu
+  failują zamknięcie. Pure outcome egzekwuje wrogą trwającą aktywację,
+  żywy Front, brak Wyczerpanego i blokady 2″, 1–2 wrogie cele, zasięg oraz LoS
+  z jawnymi wyjątkami broni. Combat SSOT rozpatruje wszystkie testy profili
+  przed per-target alokacją pul, emituje dokładnie jeden
+  `InterruptTriggered(straznik)`, komplet `ShotResolved`/`ModelKilled`, a na
+  końcu `StatusAdded(Wyczerpany)` zgodnie z
+  [`SZOP_Rozjemca.md` pkt 14.c, 17 i 22.a](../app/static/docs/SZOP_Rozjemca.md)
+  oraz [pozycją 31](../app/static/docs/SZOP_Zdolnosci.md). Prywatny RNG C1a
+  przesuwa się tylko o wykonane rzuty; replay/restart/future-roll parity i
+  rollback po częściowym zużyciu są pokryte. C1/Strażnik pozostaje OPEN do
+  osobnego durable/public podpięcia oraz real-transport/auth/race/query gates:
+  allowlista nadal wynosi dokładnie `{"rozkaz", "klatwa"}`, a service,
+  FastAPI i `HttpClient` nadal odrzucają `straznik` bez zapisu i bez
+  request amplification.
   **Niepuste source-correct recovery handlery, Strażnik, Oznaczenie,
   LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
   `POST /battles/{id}/replay` **DONE

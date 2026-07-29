@@ -39,9 +39,10 @@ Zawartość:
 - `register_interrupt_handler(point, slug)` decorator
 - `get_eligible_interrupts(state, point)` — lista (blob, slug) which CAN trigger
 - `trigger_interrupt(...)` — wywołuje konkretny handler
-- Handlery: Strażnik (id 31) stub (emit `InterruptTriggered` tylko — faktyczny
-  Ostrzał + Wyczerpany czeka na osobny slice), source-correct Rozkaz/Klątwa
-  (id 50/45) oraz historyczne uproszczenie Oznaczenia (id 49).
+- Handlery registry: kompatybilny stub Strażnika, source-correct Rozkaz/Klątwa
+  (id 50/45) oraz historyczne uproszczenie Oznaczenia (id 49). B4.4d.C1b ma
+  osobny prywatny activation-v2 outcome pełnego Ostrzału + Wyczerpany; nie jest
+  podpięty do publicznego adaptera ani allowlisty.
 
 Auto-orkiestracja przerwań w pętli aktywacji (`phases.activation_phase` woła
 handlery sama) wciąż czeka na integrację (H2/B4); dziś handlery wywoływane jawnie.
@@ -56,20 +57,30 @@ from functools import lru_cache
 from types import MappingProxyType
 from typing import Any, Callable
 
+from app.services.engine.combat import (
+    ABILITY_NAMIERZANIE,
+    _RangedProfileDeclaration,
+    _resolve_ranged_volley,
+)
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     AbilityOverrideApplied,
     BattleEvent,
     InterruptTriggered,
+    StatusAdded,
 )
 from app.services.engine.geometry import circle_edge_distance
+from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
     ActivationPhase,
     BattleState,
     Lokalizacja,
     UnitBlob,
+    WeaponProfile,
+    apply_events,
     effective_passives,
 )
+from app.services.engine.status import STATUS_WYCZERPANY
 
 
 class InterruptPoint(Enum):
@@ -201,13 +212,9 @@ def _straznik_handler(
 
     Wyzwalany w `BEFORE_ACTION` (pkt 11.b.i) — przed akcją aktywowanego wroga.
 
-    **MVP stub**: emit `InterruptTriggered` event tylko (faktyczny Ostrzał +
-    set status Wyczerpany w B3.6 phases gdy integrate z full activation).
-
-    Full implementation (B3.6+):
-    1. Call `resolve_ranged_attack(state, source_blob, active_blob, weapon, dice, ...)`
-    2. Apply Wyczerpany status do source_blob
-    3. Return (new_state, all_events)
+    Kompatybilny legacy stub: emituje tylko `InterruptTriggered`. Prywatny,
+    source-correct activation-v2 outcome C1b żyje osobno i nie zmienia tego
+    historycznego call site'u ani publicznego allowlistu.
     """
     event = InterruptTriggered(
         sequence=payload.get("sequence", 0),
@@ -219,6 +226,490 @@ def _straznik_handler(
     )
     # MVP: state nie ulega zmianie (stub). B3.6 zaktualizuje state.
     return context.state, (event,)
+
+
+# ---------------------------------------------------------------------------
+# B4.4d.C1b — private, source-correct Strażnik activation-v2 outcome
+# ---------------------------------------------------------------------------
+
+
+_STRAZNIK_PAYLOAD_FIELDS = frozenset({"assignments"})
+_STRAZNIK_ASSIGNMENT_FIELDS = frozenset({"weapon_slug", "target_id"})
+_STRAZNIK_SUPPORTED_WEAPON_ABILITIES = frozenset(
+    {
+        "ap",
+        "artyleria",
+        "brutalny",
+        "namierzanie",
+        "niebezposredni",
+        "nieporeczny",
+        "niezawodny",
+        "podwojny",
+        "precyzyjny",
+        "rozrywajacy",
+        "szturmowa",
+        "zguba",
+    }
+)
+_STRAZNIK_UNSUPPORTED_SOURCE_PASSIVES = frozenset(
+    {
+        "dobrze_strzela",
+        "dywersant",
+        "instynkt",
+        "mistrzostwo",
+        "ostrozny",
+        "planowanie",
+        "szpica",
+        "zle_strzela",
+        "zwrot",
+    }
+)
+_STRAZNIK_UNSUPPORTED_TARGET_PASSIVES = frozenset(
+    {
+        "maskowanie",
+        "okopany",
+        "zemsta",
+        "zwrot",
+    }
+)
+_STRAZNIK_MAX_OUTCOME_EVENTS = 64
+_STRAZNIK_MAX_ASSIGNMENTS = 64
+_STRAZNIK_MAX_ATTACK_DICE = 10_000
+_STRAZNIK_ARTILLERY_RANGE_INCHES = 12.0
+
+
+@dataclass(frozen=True, slots=True)
+class _StraznikProfileAssignment:
+    weapon: WeaponProfile
+    weapon_count: int
+    target_id: int
+
+
+@dataclass(frozen=True, slots=True)
+class _StraznikShootPlan:
+    assignments: tuple[_StraznikProfileAssignment, ...]
+    target_ids: tuple[int, ...]
+
+
+def _canonical_straznik_inventory(
+    source: UnitBlob,
+) -> dict[str, tuple[WeaponProfile, int]]:
+    if type(source.ranged_weapons) is not tuple:
+        raise InvalidInterruptError(
+            "straznik: canonical ranged inventory must be a tuple"
+        )
+    grouped: dict[str, list[WeaponProfile]] = {}
+    for weapon in source.ranged_weapons:
+        if (
+            type(weapon) is not WeaponProfile
+            or type(weapon.slug) is not str
+            or not weapon.slug
+            or type(weapon.name) is not str
+            or type(weapon.range_inches) is not int
+            or weapon.range_inches <= 0
+            or type(weapon.attacks) is not int
+            or weapon.attacks <= 0
+            or type(weapon.ap) is not int
+            or (
+                weapon.attack_quality_override is not None
+                and (
+                    type(weapon.attack_quality_override) is not int
+                    or weapon.attack_quality_override < 2
+                )
+            )
+            or type(weapon.weapon_abilities) is not tuple
+            or any(
+                type(ability) is not str or not ability
+                for ability in weapon.weapon_abilities
+            )
+            or len(weapon.weapon_abilities) != len(set(weapon.weapon_abilities))
+        ):
+            raise InvalidInterruptError(
+                "straznik: canonical ranged inventory is malformed"
+            )
+        unsupported = (
+            frozenset(weapon.weapon_abilities)
+            - _STRAZNIK_SUPPORTED_WEAPON_ABILITIES
+        )
+        if unsupported:
+            raise InvalidInterruptError(
+                "straznik: canonical inventory has unsupported weapon abilities"
+            )
+        grouped.setdefault(weapon.slug, []).append(weapon)
+
+    inventory: dict[str, tuple[WeaponProfile, int]] = {}
+    for slug, profiles in grouped.items():
+        canonical = profiles[0]
+        if any(profile != canonical for profile in profiles[1:]):
+            raise InvalidInterruptError(
+                f"straznik: canonical profile {slug!r} is ambiguous"
+            )
+        inventory[slug] = (canonical, len(profiles))
+    return inventory
+
+
+def _validated_straznik_plan(
+    source: UnitBlob,
+    payload: Mapping[str, Any],
+) -> _StraznikShootPlan:
+    if type(payload) is not dict or frozenset(payload) != _STRAZNIK_PAYLOAD_FIELDS:
+        raise InvalidInterruptError(
+            "straznik: payload requires exactly assignments"
+        )
+    raw_assignments = payload["assignments"]
+    if (
+        type(raw_assignments) is not list
+        or not raw_assignments
+        or len(raw_assignments) > _STRAZNIK_MAX_ASSIGNMENTS
+        or len(raw_assignments) > len(source.ranged_weapons)
+    ):
+        raise InvalidInterruptError(
+            "straznik: assignments list has an invalid size"
+        )
+
+    inventory = _canonical_straznik_inventory(source)
+    assignments: list[_StraznikProfileAssignment] = []
+    assigned_slugs: set[str] = set()
+    target_ids: list[int] = []
+    for raw_assignment in raw_assignments:
+        if (
+            type(raw_assignment) is not dict
+            or frozenset(raw_assignment) != _STRAZNIK_ASSIGNMENT_FIELDS
+        ):
+            raise InvalidInterruptError(
+                "straznik: each assignment requires weapon_slug and target_id"
+            )
+        weapon_slug = raw_assignment["weapon_slug"]
+        target_id = raw_assignment["target_id"]
+        if (
+            type(weapon_slug) is not str
+            or not weapon_slug
+            or type(target_id) is not int
+            or target_id < 0
+        ):
+            raise InvalidInterruptError(
+                "straznik: assignment types are invalid"
+            )
+        if weapon_slug in assigned_slugs:
+            raise InvalidInterruptError(
+                "straznik: one profile cannot be assigned more than once"
+            )
+        canonical = inventory.get(weapon_slug)
+        if canonical is None:
+            raise InvalidInterruptError(
+                f"straznik: profile {weapon_slug!r} is not in source inventory"
+            )
+        assigned_slugs.add(weapon_slug)
+        if target_id not in target_ids:
+            target_ids.append(target_id)
+        assignments.append(
+            _StraznikProfileAssignment(
+                weapon=canonical[0],
+                weapon_count=canonical[1],
+                target_id=target_id,
+            )
+        )
+
+    if not 1 <= len(target_ids) <= 2:
+        raise InvalidInterruptError(
+            "straznik: Ostrzal requires one or two distinct targets"
+        )
+    return _StraznikShootPlan(
+        assignments=tuple(assignments),
+        target_ids=tuple(target_ids),
+    )
+
+
+def _unique_blob(state: BattleState, unit_id: int, label: str) -> UnitBlob:
+    matches = tuple(blob for blob in state.blobs if blob.id == unit_id)
+    if len(matches) != 1:
+        raise InvalidInterruptError(
+            f"straznik: {label} {unit_id} is missing or ambiguous"
+        )
+    return matches[0]
+
+
+def _straznik_has_artillery_range(
+    state: BattleState,
+    source: UnitBlob,
+    target: UnitBlob,
+) -> bool:
+    return any(
+        ally.owner_player == source.owner_player
+        and ally.models_alive > 0
+        and ally.location is Lokalizacja.FRONT
+        and circle_edge_distance(
+            ally.position,
+            ally.radius_inches,
+            target.position,
+            target.radius_inches,
+        )
+        <= _STRAZNIK_ARTILLERY_RANGE_INCHES
+        for ally in state.blobs
+    )
+
+
+def _validate_straznik_assignment(
+    state: BattleState,
+    source: UnitBlob,
+    target: UnitBlob,
+    assignment: _StraznikProfileAssignment,
+) -> None:
+    weapon = assignment.weapon
+    abilities = frozenset(weapon.weapon_abilities)
+    source_passives = frozenset(effective_passives(source))
+    target_passives = frozenset(effective_passives(target))
+    gap = circle_edge_distance(
+        source.position,
+        source.radius_inches,
+        target.position,
+        target.radius_inches,
+    )
+
+    if "nieporeczny" in abilities and gap <= 12.0:
+        raise InvalidInterruptError(
+            "straznik: Nieporeczny profile cannot attack within 12 inches"
+        )
+    if "niebezposredni" in abilities and "samolot" in target_passives:
+        raise InvalidInterruptError(
+            "straznik: Niebezposredni profile cannot target Samolot"
+        )
+
+    effective_range = weapon.range_inches
+    if (
+        "samolot" in target_passives
+        and ABILITY_NAMIERZANIE not in abilities
+    ):
+        effective_range -= 12
+    nominal_range_ok = effective_range >= 0 and gap <= effective_range
+    artillery_range_ok = (
+        "artyleria" in abilities
+        and _straznik_has_artillery_range(state, source, target)
+    )
+    if (
+        "artyleria" in abilities
+        and "samolot" in target_passives
+        and ABILITY_NAMIERZANIE not in abilities
+    ):
+        raise InvalidInterruptError(
+            "straznik: Artyleria versus Samolot is unsupported without Namierzanie"
+        )
+    if not nominal_range_ok and not artillery_range_ok:
+        raise InvalidInterruptError(
+            f"straznik: profile {weapon.slug!r} is out of range"
+        )
+
+    if "niebezposredni" not in abilities:
+        if state.terrain and (
+            "wysoki" in source_passives
+            or "wysoki" in target_passives
+            or "samolot" in source_passives
+            or "samolot" in target_passives
+        ):
+            raise InvalidInterruptError(
+                "straznik: elevated line of sight is not representable"
+            )
+        if check_los(source, target, state.terrain) is LoSState.NIE_WIDZI:
+            raise InvalidInterruptError(
+                f"straznik: target {target.id} is outside line of sight"
+            )
+
+
+def _validate_straznik_lock(
+    state: BattleState,
+    source: UnitBlob,
+) -> None:
+    source_passives = frozenset(effective_passives(source))
+    for enemy in state.blobs:
+        if (
+            enemy.owner_player == source.owner_player
+            or enemy.models_alive <= 0
+            or enemy.location is not Lokalizacja.FRONT
+        ):
+            continue
+        gap = circle_edge_distance(
+            source.position,
+            source.radius_inches,
+            enemy.position,
+            enemy.radius_inches,
+        )
+        if gap > 2.0:
+            continue
+        enemy_passives = frozenset(effective_passives(enemy))
+        if state.terrain and (
+            "wysoki" in source_passives
+            or "wysoki" in enemy_passives
+            or "samolot" in source_passives
+            or "samolot" in enemy_passives
+        ):
+            raise InvalidInterruptError(
+                "straznik: elevated 2-inch lock line of sight is not representable"
+            )
+        if check_los(source, enemy, state.terrain) is not LoSState.NIE_WIDZI:
+            raise InvalidInterruptError(
+                "straznik: Ostrzal is locked by a visible enemy within 2 inches"
+            )
+
+
+def _execute_straznik_activation_interrupt_outcomes(
+    *,
+    state: BattleState,
+    source: UnitBlob,
+    ability_slug: str,
+    payload: Mapping[str, Any],
+    dice: DeterministicDice,
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Private activation-v2 leaf for one complete Strażnik Ostrzał."""
+
+    if (
+        type(state) is not BattleState
+        or type(source) is not UnitBlob
+        or ability_slug != "straznik"
+        or type(dice) is not DeterministicDice
+        or type(sequence) is not int
+        or sequence < 1
+    ):
+        raise InvalidInterruptError("straznik: outcome input is malformed")
+    activation = state.activation
+    if (
+        activation is None
+        or activation.phase is not ActivationPhase.BEFORE_ACTION
+        or activation.window is None
+    ):
+        raise InvalidInterruptError(
+            "straznik: durable BEFORE_ACTION window is required"
+        )
+
+    current_source = _unique_blob(state, source.id, "source")
+    active_unit = _unique_blob(
+        state,
+        activation.selected_unit_id,
+        "active unit",
+    )
+    source_passives = frozenset(effective_passives(current_source))
+    if (
+        current_source != source
+        or current_source.owner_player != activation.window.priority_player
+        or type(current_source.models_alive) is not int
+        or current_source.models_alive <= 0
+        or current_source.location is not Lokalizacja.FRONT
+        or "straznik" not in source_passives
+        or STATUS_WYCZERPANY in current_source.status_flags
+        or type(active_unit.owner_player) is not int
+        or active_unit.owner_player not in (0, 1)
+        or type(active_unit.models_alive) is not int
+        or active_unit.models_alive <= 0
+        or active_unit.location is not Lokalizacja.FRONT
+        or active_unit.owner_player != activation.controlling_player
+        or active_unit.owner_player == current_source.owner_player
+    ):
+        raise InvalidInterruptError(
+            "straznik: source or enemy activation is invalid"
+        )
+    if source_passives & _STRAZNIK_UNSUPPORTED_SOURCE_PASSIVES:
+        raise InvalidInterruptError(
+            "straznik: source has an unsupported ranged combat passive"
+        )
+
+    plan = _validated_straznik_plan(current_source, payload)
+    targets: dict[int, UnitBlob] = {}
+    for target_id in plan.target_ids:
+        target = _unique_blob(state, target_id, "target")
+        target_passives = frozenset(effective_passives(target))
+        if (
+            type(target.owner_player) is not int
+            or target.owner_player not in (0, 1)
+            or type(target.models_alive) is not int
+            or target.models_alive <= 0
+            or target.location is not Lokalizacja.FRONT
+            or target.owner_player == current_source.owner_player
+            or target_passives & _STRAZNIK_UNSUPPORTED_TARGET_PASSIVES
+        ):
+            raise InvalidInterruptError(
+                f"straznik: target {target_id} is not a supported live enemy"
+            )
+        targets[target_id] = target
+
+    _validate_straznik_lock(state, current_source)
+    for assignment in plan.assignments:
+        _validate_straznik_assignment(
+            state,
+            current_source,
+            targets[assignment.target_id],
+            assignment,
+        )
+
+    max_outcome_events = (
+        2
+        + len(plan.assignments)
+        + sum(targets[target_id].models_alive for target_id in plan.target_ids)
+    )
+    if max_outcome_events > _STRAZNIK_MAX_OUTCOME_EVENTS:
+        raise InvalidInterruptError("straznik: outcome would exceed event bound")
+    attack_dice = sum(
+        current_source.models_alive
+        * assignment.weapon.attacks
+        * assignment.weapon_count
+        for assignment in plan.assignments
+    )
+    if attack_dice > _STRAZNIK_MAX_ATTACK_DICE:
+        raise InvalidInterruptError("straznik: attack dice bound exceeded")
+
+    marker = InterruptTriggered(
+        sequence=sequence,
+        interrupt_point=InterruptPoint.BEFORE_ACTION.value,
+        slug="straznik",
+        source_unit_id=current_source.id,
+        target_unit_id=active_unit.id,
+        payload={
+            "assignments": [
+                {
+                    "weapon_slug": assignment.weapon.slug,
+                    "target_id": assignment.target_id,
+                }
+                for assignment in plan.assignments
+            ]
+        },
+    )
+    declarations = tuple(
+        _RangedProfileDeclaration(
+            defender=targets[assignment.target_id],
+            weapon=assignment.weapon,
+            weapon_count=assignment.weapon_count,
+        )
+        for assignment in plan.assignments
+    )
+    volley = _resolve_ranged_volley(
+        state,
+        current_source,
+        declarations,
+        dice,
+        sequence + 1,
+        state.terrain,
+        source_correct=True,
+    )
+    replayed_volley_state = apply_events(state, volley.events)
+    if any(
+        _unique_blob(replayed_volley_state, defender.id, "replayed target")
+        != defender
+        for defender in volley.new_defenders
+    ):
+        raise InvalidInterruptError(
+            "straznik: live combat outcome does not match event replay"
+        )
+    status_event = StatusAdded(
+        sequence=sequence + 1 + len(volley.events),
+        target_id=current_source.id,
+        status=STATUS_WYCZERPANY,
+    )
+    outcome_events: tuple[BattleEvent, ...] = (
+        marker,
+        *volley.events,
+        status_event,
+    )
+    replay_state = apply_events(state, outcome_events)
+    return replay_state, outcome_events
 
 
 # ---------------------------------------------------------------------------

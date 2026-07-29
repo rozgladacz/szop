@@ -61,7 +61,11 @@ from app.services.engine.state import (
     WeaponProfile,
     effective_passives,
 )
-from app.services.engine.status import STATUS_WYCZERPANY, add_status
+from app.services.engine.status import (
+    STATUS_PRZYGOTOWANY,
+    STATUS_WYCZERPANY,
+    add_status,
+)
 
 
 def effective_attack_quality(weapon: WeaponProfile, attacker: UnitBlob) -> int:
@@ -78,7 +82,12 @@ def effective_attack_quality(weapon: WeaponProfile, attacker: UnitBlob) -> int:
     return attacker.quality
 
 
-def _apply_podwojny_extra_hits(hit_result, weapon: WeaponProfile) -> int:
+def _apply_podwojny_extra_hits(
+    hit_result,
+    weapon: WeaponProfile,
+    *,
+    canonical_aliases: bool = False,
+) -> int:
     """Podwojny (id 66): "6 na trafienie dają dodatkowe normalne trafienie".
 
     Post-process inspekcja `hit_result.rolls`: za każdą naturalną 6 dorzucamy
@@ -86,7 +95,13 @@ def _apply_podwojny_extra_hits(hit_result, weapon: WeaponProfile) -> int:
     augmentation.
     """
     hits = hit_result.successes
-    if ABILITY_PODWOJNY in weapon.weapon_abilities:
+    if (
+        ABILITY_PODWOJNY in weapon.weapon_abilities
+        or (
+            canonical_aliases
+            and ABILITY_ROZRYWAJACY in weapon.weapon_abilities
+        )
+    ):
         extra = sum(1 for r in hit_result.rolls if r == 6)
         hits += extra
     return hits
@@ -117,6 +132,8 @@ ABILITY_BRUTALNY = "brutalny"
 ABILITY_PRECYZYJNY = "precyzyjny"
 ABILITY_NIEZAWODNY = "niezawodny"  # weapon Q=2+ (id 63)
 ABILITY_PODWOJNY = "podwojny"  # natural 6 hit → dodatkowe trafienie (id 66)
+ABILITY_ROZRYWAJACY = "rozrywajacy"  # canonical YAML slug for Podwójny
+ABILITY_NAMIERZANIE = "namierzanie"
 ABILITY_ZGUBA = "zguba"  # pokonane modele → ELIMINOWANY, nie wracają (id 76, pkt 26.d/27.a)
 
 FEATURE_OBRONNY = "Obronny"
@@ -138,6 +155,34 @@ class CombatResult:
     events: tuple[BattleEvent, ...]
     new_attacker: UnitBlob
     new_defender: UnitBlob
+
+
+@dataclass(frozen=True, slots=True)
+class _RangedProfileDeclaration:
+    """One canonical ranged profile assigned to one target."""
+
+    defender: UnitBlob
+    weapon: WeaponProfile
+    weapon_count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
+class _RangedProfilePools:
+    """Dice outcome for one profile before any wound allocation."""
+
+    hits: int
+    wounds_pending: int
+    wounds_pending_precise: int
+    wounds_eliminating: int
+
+
+@dataclass(frozen=True, slots=True)
+class _RangedVolleyResult:
+    """Whole multi-profile Attack after target-scoped pool allocation."""
+
+    events: tuple[BattleEvent, ...]
+    new_attacker: UnitBlob
+    new_defenders: tuple[UnitBlob, ...]
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +375,207 @@ def _allocate_wounds_to_defender(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_ranged_profile_pools(
+    state: BattleState,
+    attacker: UnitBlob,
+    defender: UnitBlob,
+    weapon: WeaponProfile,
+    weapon_count: int,
+    dice: DeterministicDice,
+    terrain: Iterable[TerrainCircle | TerrainLine],
+    *,
+    source_correct: bool,
+) -> _RangedProfilePools:
+    """Resolve all dice for one profile without allocating any wounds."""
+
+    terrain_list = list(terrain)
+    defender_passives = effective_passives(defender)
+    has_cover = compute_cover(attacker, defender, terrain_list) or (
+        source_correct and "samolot" in defender_passives
+    )
+    attack_quality = effective_attack_quality(weapon, attacker)
+    attack_modifier, extra_defense_bonus = compute_attack_modifiers(
+        attacker_quality=attack_quality,
+        has_cover=has_cover,
+    )
+    defense_modifier = compute_defense_modifier(
+        weapon_ap=weapon.ap,
+        extra_defense_bonus=extra_defense_bonus,
+    )
+    attack_modifier += _aggregate_passive_attack(
+        attacker,
+        state=state if source_correct else None,
+        weapon=weapon,
+    )
+    defense_modifier += _aggregate_passive_defense(
+        defender,
+        state=state if source_correct else None,
+        weapon=weapon,
+    )
+    if source_correct and STATUS_PRZYGOTOWANY in defender.status_flags:
+        defense_modifier += 1
+    if (
+        source_correct
+        and ABILITY_NAMIERZANIE in weapon.weapon_abilities
+    ):
+        attack_modifier = max(0, attack_modifier)
+
+    is_precyzyjny = ABILITY_PRECYZYJNY in weapon.weapon_abilities
+    is_brutalny = ABILITY_BRUTALNY in weapon.weapon_abilities
+    disables_auto_six = is_brutalny or (
+        source_correct and "delikatny" in defender_passives
+    )
+
+    total_attacks = attacker.models_alive * weapon.attacks * weapon_count
+    hit_result = dice.roll_with_threshold(
+        count=total_attacks,
+        threshold=attack_quality,
+        modifier=attack_modifier,
+    )
+    hits = _apply_podwojny_extra_hits(
+        hit_result,
+        weapon,
+        canonical_aliases=source_correct,
+    )
+
+    wounds_pending = 0
+    wounds_pending_precise = 0
+    if hits > 0:
+        defense_result = dice.roll_with_threshold(
+            count=hits,
+            threshold=defender.defense,
+            modifier=defense_modifier,
+            natural_6_auto_success=not disables_auto_six,
+        )
+        defense_successes = defense_result.successes
+        if (
+            source_correct
+            and "niewrazliwy" in defender_passives
+            and not is_brutalny
+        ):
+            defense_successes += sum(
+                1
+                for roll in defense_result.rolls
+                if roll == 5 and roll < defense_result.effective_threshold
+            )
+        failed_count = hits - defense_successes
+        if failed_count > 0:
+            if is_precyzyjny:
+                wounds_pending_precise = failed_count
+            elif defense_result.effective_threshold > 2:
+                natural_ones_count = sum(
+                    1 for roll in defense_result.rolls if roll == 1
+                )
+                wounds_pending_precise = natural_ones_count
+                wounds_pending = failed_count - natural_ones_count
+            else:
+                wounds_pending = failed_count
+
+    wounds_eliminating = (
+        wounds_pending + wounds_pending_precise
+        if ABILITY_ZGUBA in weapon.weapon_abilities
+        else 0
+    )
+    return _RangedProfilePools(
+        hits=hits,
+        wounds_pending=wounds_pending,
+        wounds_pending_precise=wounds_pending_precise,
+        wounds_eliminating=wounds_eliminating,
+    )
+
+
+def _resolve_ranged_volley(
+    state: BattleState,
+    attacker: UnitBlob,
+    declarations: tuple[_RangedProfileDeclaration, ...],
+    dice: DeterministicDice,
+    sequence: int,
+    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    *,
+    source_correct: bool = False,
+) -> _RangedVolleyResult:
+    """Resolve one whole ranged Attack before allocating target-scoped pools.
+
+    All profile hit/defense tests happen first. Only then are the accumulated
+    attacker and defender pools allocated, target by target, preserving pkt 17.
+    """
+
+    events: list[BattleEvent] = []
+    pools_by_target: dict[int, list[int]] = {}
+    defenders_by_id: dict[int, UnitBlob] = {}
+    target_order: list[int] = []
+    next_sequence = sequence
+
+    for declaration in declarations:
+        defender = declaration.defender
+        if defender.id not in pools_by_target:
+            pools_by_target[defender.id] = [0, 0, 0]
+            defenders_by_id[defender.id] = defender
+            target_order.append(defender.id)
+        pools = _resolve_ranged_profile_pools(
+            state,
+            attacker,
+            defender,
+            declaration.weapon,
+            declaration.weapon_count,
+            dice,
+            terrain,
+            source_correct=source_correct,
+        )
+        events.append(
+            ShotResolved(
+                sequence=next_sequence,
+                attacker_id=attacker.id,
+                defender_id=defender.id,
+                weapon_slug=declaration.weapon.slug,
+                hits=pools.hits,
+                wounds_dealt=pools.wounds_pending,
+                wounds_precise=pools.wounds_pending_precise,
+                wounds_eliminating=pools.wounds_eliminating,
+            )
+        )
+        target_pools = pools_by_target[defender.id]
+        target_pools[0] += pools.wounds_pending_precise
+        target_pools[1] += pools.wounds_pending
+        target_pools[2] += pools.wounds_eliminating
+        next_sequence += 1
+
+    new_defenders: list[UnitBlob] = []
+    for target_id in target_order:
+        precise, regular, eliminating = pools_by_target[target_id]
+        new_defender = defenders_by_id[target_id]
+        if eliminating > 0:
+            new_defender = replace(
+                new_defender,
+                wounds_eliminating=new_defender.wounds_eliminating + eliminating,
+            )
+        if precise > 0:
+            new_defender, killed, next_sequence = _allocate_wounds_to_defender(
+                new_defender,
+                precise,
+                attacker_id=attacker.id,
+                start_sequence=next_sequence,
+                prefer_hero=True,
+            )
+            events.extend(killed)
+        if regular > 0:
+            new_defender, killed, next_sequence = _allocate_wounds_to_defender(
+                new_defender,
+                regular,
+                attacker_id=attacker.id,
+                start_sequence=next_sequence,
+                prefer_hero=False,
+            )
+            events.extend(killed)
+        new_defenders.append(new_defender)
+
+    return _RangedVolleyResult(
+        events=tuple(events),
+        new_attacker=attacker,
+        new_defenders=tuple(new_defenders),
+    )
+
+
 def resolve_ranged_attack(
     state: BattleState,
     attacker: UnitBlob,
@@ -339,136 +585,20 @@ def resolve_ranged_attack(
     sequence: int,
     terrain: Iterable[TerrainCircle | TerrainLine] = (),
 ) -> CombatResult:
-    """Resolves Ostrzał (pkt 14.c + 17 + 18 + 19).
+    """Resolve the legacy one-profile ranged Attack through the volley SSOT."""
 
-    Pure function. Brak DB access, brak mutation `state`/`attacker`/`defender`.
-
-    Args:
-        state: aktualny BattleState (read-only; pozwala query na inne bloby/teren).
-        attacker, defender: zamieszane bloby.
-        weapon: profile broni atakującego.
-        dice: DeterministicDice; konsumuje rolls deterministycznie.
-        sequence: pierwszy sequence dla generowanych eventów.
-        terrain: lista terrainów; dla Osłony pkt 19.
-
-    Returns:
-        CombatResult(events, new_attacker, new_defender).
-    """
-    del state  # MVP: state nie wpływa na pojedynczy ranged attack poza tymi argami
-    terrain_list = list(terrain)
-
-    # Faza 1 — Declare + modifiers
-    has_cover = compute_cover(attacker, defender, terrain_list)
-    attack_quality = effective_attack_quality(weapon, attacker)
-    attack_modifier, extra_defense_bonus = compute_attack_modifiers(
-        attacker_quality=attack_quality, has_cover=has_cover
+    result = _resolve_ranged_volley(
+        state,
+        attacker,
+        (_RangedProfileDeclaration(defender=defender, weapon=weapon),),
+        dice,
+        sequence,
+        terrain,
     )
-    defense_modifier = compute_defense_modifier(
-        weapon_ap=weapon.ap, extra_defense_bonus=extra_defense_bonus
-    )
-
-    # Passive modifiers z effects.py (Cierpliwy/Tarcza/Ostrożny/etc.)
-    attack_modifier += _aggregate_passive_attack(attacker, weapon=weapon)
-    defense_modifier += _aggregate_passive_defense(defender, weapon=weapon)
-
-    is_precyzyjny = ABILITY_PRECYZYJNY in weapon.weapon_abilities
-    is_brutalny = ABILITY_BRUTALNY in weapon.weapon_abilities
-
-    # Faza 2 — Dice (per model living attacker rolls weapon.attacks dice)
-    total_attacks = attacker.models_alive * weapon.attacks
-    hit_result = dice.roll_with_threshold(
-        count=total_attacks,
-        threshold=attack_quality,
-        modifier=attack_modifier,
-    )
-    # Podwójny (id 66): natural 6 trafienia → dodatkowe normalne trafienie
-    hits = _apply_podwojny_extra_hits(hit_result, weapon)
-
-    # Per trafienie → test obrony
-    wounds_pending = 0
-    wounds_pending_precise = 0
-    if hits > 0:
-        defense_result = dice.roll_with_threshold(
-            count=hits,
-            threshold=defender.defense,
-            modifier=defense_modifier,
-            natural_6_auto_success=not is_brutalny,
-        )
-        # Każda porażka obrony → rana; klasyfikacja per pkt 17.d
-        # 17.d.i: pula atakującego gdy naturalna 1 + effective threshold > 2+
-        # 17.d.ii: pula obrońcy w pozostałych
-        # Precyzyjny (id 68): wszystkie rany do puli atakującego.
-        # B3.9.f cleanup: usunięty dead-loop `for r in defense_result.rolls: if r == 1: continue`
-        # (no-op, TODO marker który nigdy nie dostał logiki — faktyczna logika w
-        # `if failed_count > 0` poniżej, gdzie liczymy natural_ones_count).
-        failed_count = hits - defense_result.successes
-        if failed_count > 0:
-            if is_precyzyjny:
-                wounds_pending_precise = failed_count
-            else:
-                # Per pkt 17.d.i: natural 1 + effective_threshold > 2 → pula attacker
-                # Liczymy ile failed rolls miało natural 1 (każdy 1 jest auto-fail per 1.c).
-                if defense_result.effective_threshold > 2:
-                    natural_ones_count = sum(
-                        1 for r in defense_result.rolls if r == 1
-                    )
-                    wounds_pending_precise = natural_ones_count
-                    wounds_pending = failed_count - natural_ones_count
-                else:
-                    wounds_pending = failed_count
-
-    # R4.Zguba (pkt 26.d): broń Zguba dorzuca licznik `wounds_eliminating` o
-    # wszystkie zadane rany PRZED alokacją — pokonane nimi modele będą ELIMINOWANE.
-    is_zguba = ABILITY_ZGUBA in weapon.weapon_abilities
-    wounds_eliminating = (wounds_pending + wounds_pending_precise) if is_zguba else 0
-
-    # Emit ShotResolved event
-    events: list[BattleEvent] = [
-        ShotResolved(
-            sequence=sequence,
-            attacker_id=attacker.id,
-            defender_id=defender.id,
-            weapon_slug=weapon.slug,
-            hits=hits,
-            wounds_dealt=wounds_pending,
-            wounds_precise=wounds_pending_precise,
-            wounds_eliminating=wounds_eliminating,
-        )
-    ]
-    next_sequence = sequence + 1
-
-    # Faza 3 — Wound allocation (pkt 17.e + 18)
-    new_defender = defender
-    if wounds_eliminating > 0:
-        new_defender = replace(
-            new_defender,
-            wounds_eliminating=new_defender.wounds_eliminating + wounds_eliminating,
-        )
-    # Pula atakującego najpierw (pkt 17.e: "najpierw w całości pulę atakującego")
-    if wounds_pending_precise > 0:
-        new_defender, killed_a, next_sequence = _allocate_wounds_to_defender(
-            new_defender,
-            wounds_pending_precise,
-            attacker_id=attacker.id,
-            start_sequence=next_sequence,
-            prefer_hero=True,
-        )
-        events.extend(killed_a)
-    # Pula obrońcy potem
-    if wounds_pending > 0:
-        new_defender, killed_b, next_sequence = _allocate_wounds_to_defender(
-            new_defender,
-            wounds_pending,
-            attacker_id=attacker.id,
-            start_sequence=next_sequence,
-            prefer_hero=False,
-        )
-        events.extend(killed_b)
-
     return CombatResult(
-        events=tuple(events),
-        new_attacker=attacker,  # ranged: attacker nie ulega zmianie
-        new_defender=new_defender,
+        events=result.events,
+        new_attacker=result.new_attacker,
+        new_defender=result.new_defenders[0],
     )
 
 
