@@ -323,6 +323,15 @@ def test_battles_router_is_registered_in_app() -> None:
     assert "GET" in methods_by_path["/battles/{battle_id}/state"]
     assert "/battles/{battle_id}/actions" in route_paths
     assert "POST" in methods_by_path["/battles/{battle_id}/actions"]
+    assert "/battles/{battle_id}/activations" in route_paths
+    assert "POST" in methods_by_path["/battles/{battle_id}/activations"]
+    assert "/battles/{battle_id}/interrupts" in route_paths
+    assert "POST" in methods_by_path["/battles/{battle_id}/interrupts"]
+    transitions_path = (
+        "/battles/{battle_id}/activations/{activation_id}/transitions"
+    )
+    assert transitions_path in route_paths
+    assert "POST" in methods_by_path[transitions_path]
 
 
 def test_create_battle_starts_owner_scoped_battle_and_persists_events() -> None:

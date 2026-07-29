@@ -33,6 +33,7 @@ from app.services.battle_activations import (
     BattleActivationFinalizeUnavailable,
     BattleActivationFinalizeUpgradeRequired,
     BattleActivationFinalizeWriteConflict,
+    BattleActivationInterruptForbidden,
     BattleActivationInterruptInvalid,
     BattleActivationInterruptNotFound,
     BattleActivationInterruptSequenceConflict,
@@ -3972,6 +3973,7 @@ def test_interrupt_missing_and_foreign_battles_share_no_oracle_error(
         "source_models_alive",
         "source_location",
         "source_passives",
+        "error_type",
         "reason",
     ),
     [
@@ -3981,6 +3983,7 @@ def test_interrupt_missing_and_foreign_battles_share_no_oracle_error(
             1,
             Lokalizacja.FRONT,
             ("rozkaz",),
+            BattleActivationInterruptInvalid,
             ActivationProtocolErrorReason.INVALID_CALLER,
         ),
         (
@@ -3989,7 +3992,8 @@ def test_interrupt_missing_and_foreign_battles_share_no_oracle_error(
             1,
             Lokalizacja.FRONT,
             ("rozkaz",),
-            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+            BattleActivationInterruptForbidden,
+            None,
         ),
         (
             0,
@@ -3997,6 +4001,7 @@ def test_interrupt_missing_and_foreign_battles_share_no_oracle_error(
             0,
             Lokalizacja.FRONT,
             ("rozkaz",),
+            BattleActivationInterruptInvalid,
             ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
         ),
         (
@@ -4005,6 +4010,7 @@ def test_interrupt_missing_and_foreign_battles_share_no_oracle_error(
             1,
             Lokalizacja.ZAPLECZE,
             ("rozkaz",),
+            BattleActivationInterruptInvalid,
             ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
         ),
         (
@@ -4013,6 +4019,7 @@ def test_interrupt_missing_and_foreign_battles_share_no_oracle_error(
             1,
             Lokalizacja.FRONT,
             (),
+            BattleActivationInterruptInvalid,
             ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
         ),
     ],
@@ -4031,7 +4038,8 @@ def test_interrupt_rejects_wrong_priority_or_illegal_source_atomically(
     source_models_alive: int,
     source_location: Lokalizacja,
     source_passives: tuple[str, ...],
-    reason: ActivationProtocolErrorReason,
+    error_type: type[Exception],
+    reason: ActivationProtocolErrorReason | None,
 ) -> None:
     initial, source_id, target_id = _rozkaz_window_state(
         source_owner=source_owner,
@@ -4046,7 +4054,7 @@ def test_interrupt_rejects_wrong_priority_or_illegal_source_atomically(
     before = _stream_snapshot(activation_world, battle_id)
 
     with activation_world.sessions() as session:
-        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+        with pytest.raises(error_type) as exc_info:
             stage_battle_activation_interrupt(
                 session,
                 battle_id=battle_id,
@@ -4062,7 +4070,8 @@ def test_interrupt_rejects_wrong_priority_or_illegal_source_atomically(
                 **_interrupt_guards(started.state),
             )
 
-    assert exc_info.value.reason is reason
+    if reason is not None:
+        assert exc_info.value.reason is reason
     assert _stream_snapshot(activation_world, battle_id) == before
 
 

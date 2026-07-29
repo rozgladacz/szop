@@ -27,6 +27,7 @@ from .engine.dice import DeterministicDice
 from .engine.events import BattleEvent
 from .engine.interrupts import (
     InvalidInterruptError,
+    READY_INTERRUPT_HANDLERS,
     execute_ready_activation_interrupt_outcomes,
     validate_ready_activation_interrupt_request,
 )
@@ -183,6 +184,10 @@ class BattleActivationInterruptSequenceConflict(BattleActivationInterruptError):
         super().__init__("Battle event sequence conflict")
 
 
+class BattleActivationInterruptForbidden(BattleActivationInterruptError):
+    """The participant selected a source controlled by the other side."""
+
+
 class BattleActivationInterruptInvalid(BattleActivationInterruptError):
     """The input or current domain state cannot accept this interrupt."""
 
@@ -195,6 +200,16 @@ class BattleActivationInterruptInvalid(BattleActivationInterruptError):
         self.detail = detail
         self.reason = reason
         super().__init__(detail)
+
+
+class BattleActivationInterruptUnsupported(BattleActivationInterruptInvalid):
+    """The requested interrupt is registered internally but not public-ready."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Unsupported interrupt",
+            reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        )
 
 
 class BattleActivationInterruptWriteConflict(BattleActivationInterruptError):
@@ -453,7 +468,7 @@ def stage_battle_activation_start(
     """Stage one v2 activation start without committing or rolling back."""
 
     _validate_identity(battle_id=battle_id, caller_user_id=caller_user_id)
-    if type(selected_unit_id) is not int or selected_unit_id < 1:
+    if type(selected_unit_id) is not int or selected_unit_id < 0:
         raise BattleActivationStartInvalid(
             "Invalid selected unit",
             reason=ActivationProtocolErrorReason.INVALID_SELECTION,
@@ -744,7 +759,7 @@ def stage_battle_activation_interrupt(
         )
     if (
         type(source_unit_id) is not int
-        or source_unit_id < 1
+        or source_unit_id < 0
         or type(ability_slug) is not str
         or not ability_slug
         or not isinstance(payload, Mapping)
@@ -753,6 +768,8 @@ def stage_battle_activation_interrupt(
             "Invalid interrupt request",
             reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
         )
+    if ability_slug not in READY_INTERRUPT_HANDLERS:
+        raise BattleActivationInterruptUnsupported
     try:
         canonical_payload = validate_ready_activation_interrupt_request(
             ability_slug=ability_slug,
@@ -817,7 +834,6 @@ def stage_battle_activation_interrupt(
         raise BattleActivationInterruptUnavailable(
             actual_sequence=checkpoint.sequence_at
         ) from exc
-
     try:
         transition = trigger_activation_interrupt(
             checkpoint.state,
@@ -836,6 +852,21 @@ def stage_battle_activation_interrupt(
             raise BattleActivationInterruptUnavailable(
                 actual_sequence=checkpoint.sequence_at
             ) from exc
+        if exc.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT:
+            source = next(
+                (
+                    blob
+                    for blob in checkpoint.state.blobs
+                    if blob.id == source_unit_id
+                ),
+                None,
+            )
+            if (
+                source is not None
+                and source.owner_player in (0, 1)
+                and source.owner_player != caller_player
+            ):
+                raise BattleActivationInterruptForbidden from exc
         raise BattleActivationInterruptInvalid(
             "Activation interrupt is not legal",
             reason=exc.reason,
@@ -1377,11 +1408,13 @@ __all__ = [
     "BattleActivationFinalizeUpgradeRequired",
     "BattleActivationFinalizeWriteConflict",
     "BattleActivationInterruptError",
+    "BattleActivationInterruptForbidden",
     "BattleActivationInterruptInvalid",
     "BattleActivationInterruptNotFound",
     "BattleActivationInterruptSequenceConflict",
     "BattleActivationInterruptUnavailable",
     "BattleActivationInterruptUpgradeRequired",
+    "BattleActivationInterruptUnsupported",
     "BattleActivationInterruptWriteConflict",
     "BattleActivationPassError",
     "BattleActivationPassInvalid",

@@ -417,10 +417,25 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   nieznane lub błędnie typowane metadata. Auth/scope'y są bez zmian, a opt-in
   ma zerową deltę liczby SQL statements dla direct create, invite create i
   accept.
-  **Niepuste source-correct recovery handlery oraz produkcyjny
-  transport API trwałych mutacji aktywacji nadal OPEN.**
-  Pozostały endpoint:
-  `POST /battles/{id}/interrupts` wraz z prereq trasami aktywacji z ADR-0056.
+  **B4.4c.9 public durable activation transport DONE 2026-07-29:** trzy nowe
+  participant-scoped trasy FastAPI wystawiają start, interrupt/pass oraz
+  continue/finalize, a istniejące `POST /actions` addytywnie obsługuje strict
+  guardy v2 przy niezmienionym body/statusie/semantyce v1. Router reużywa
+  wyłącznie `stage_battle_activation_*`, wspólny zamknięty envelope state v2 +
+  exact event delta oraz stabilne kody błędów bez oracle. `battle:act` chroni
+  start/action/continue/finalize, a nowy `battle:interrupt` — interrupt/pass;
+  sesje i bearer ownera zachowują body-blind audit. Publiczny allowlist nadal
+  dopuszcza tylko source-correct Rozkaz
+  ([`SZOP_Zdolnosci.md` pozycja 50](../app/static/docs/SZOP_Zdolnosci.md),
+  [`SZOP_Rozjemca.md` pkt 12.a–c](../app/static/docs/SZOP_Rozjemca.md)),
+  recovery wyłącznie dokładnie puste `uses`. Realny transport
+  same-owner/two-owner przechodzi od `IDLE` do
+  następnego `IDLE`, w tym dwa jawne passy każdego okna, opcjonalną drugą akcję,
+  restart, stale/race/rollback i replay/RNG parity. Pełny request ma stały
+  ceiling 6 SELECT-ów dla sesji i 7 dla bearera; v1 action pozostaje przy
+  6 SELECT-ach i historycznym 200.
+  **Niepuste source-correct recovery handlery pozostają OPEN. HttpClient,
+  LocalClient, Protocol, MCP i UI pozostają osobnym kolejnym slice'em.**
   `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
   bounded rekonstrukcję `BattleState` z najwcześniejszego trwałego checkpointu

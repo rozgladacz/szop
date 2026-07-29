@@ -188,7 +188,7 @@ def _selected_unit(state: BattleState, selected_unit_id: int) -> UnitBlob:
         or type(state.active_player) is not int
         or state.active_player not in (0, 1)
         or type(selected_unit_id) is not int
-        or selected_unit_id < 1
+        or selected_unit_id < 0
     ):
         _reject(
             ActivationProtocolErrorReason.INVALID_PHASE
@@ -231,7 +231,7 @@ def _interrupt_source(
 ) -> UnitBlob:
     if (
         type(source_unit_id) is not int
-        or source_unit_id < 1
+        or source_unit_id < 0
         or type(ability_slug) is not str
         or not ability_slug
     ):

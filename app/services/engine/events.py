@@ -396,7 +396,13 @@ class ActivationStarted:
             raise ValueError("ActivationStarted.activation_id must equal sequence")
         if self.activation_version != 1:
             raise ValueError("ActivationStarted.activation_version must be 1")
-        _require_protocol_int(self.selected_unit_id, "selected_unit_id")
+        _require_protocol_int(
+            self.selected_unit_id,
+            "selected_unit_id",
+            positive=False,
+        )
+        if self.selected_unit_id < 0:
+            raise ValueError("selected_unit_id must be non-negative")
         _require_protocol_player(self.controlling_player, "controlling_player")
         _require_protocol_player(self.initiative_player, "initiative_player")
 

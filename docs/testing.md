@@ -133,6 +133,24 @@ zapisów po simulate, no-oracle i odrzucenie HTTP continuation przed transportem
 .\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_parity.py tests/test_clients_local.py tests/test_clients_http.py tests/test_battles_router.py tests/test_engine_regression.py tests/test_engine_persistence.py tests/test_engine_checkpoints.py tests/test_engine_action_codec.py tests/test_engine_multi_action.py tests/test_battle_action_proposals.py
 ```
 
+## B4.4c.9 — publiczny transport trwałego protokołu aktywacji v2
+
+`tests/test_battle_activation_transport.py` uruchamia rzeczywisty FastAPI
+`TestClient` na SQLite in-memory z osobną sesją DB per request. Gate obejmuje
+same-owner i dwie niezależne tożsamości, pełny flow jednej/dwóch akcji od
+`IDLE` do następnego `IDLE`, jawne passy obu okien i source-correct Rozkaz
+([`SZOP_Zdolnosci.md` pozycja 50](../app/static/docs/SZOP_Zdolnosci.md),
+[`SZOP_Rozjemca.md` pkt 12.a–c](../app/static/docs/SZOP_Rozjemca.md)). Gate
+obejmuje też restart, stale/race/rollback, scope'y, no-oracle, body-blind audit,
+strict request/response oraz brak częściowych zapisów. SQL gate mierzy pełne requesty:
+session ma stałe 6 SELECT-ów (usługa 5 + auth 1), bearer 7; wszystkie mutacje v2
+session pozostają na 6 niezależnie od event delta. Historyczny v1 action nadal
+ma 6 SELECT-ów i status 200.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_battle_activation_transport.py tests/test_battle_activations.py tests/test_battles_router.py tests/test_battle_replay_router.py tests/test_battle_invites_router.py tests/test_battle_invite_accept_router.py tests/test_agent_token_security.py tests/test_engine_activation_protocol.py tests/test_engine_interrupts.py tests/test_engine_persistence.py tests/test_engine_checkpoints.py tests/test_engine_action_codec.py
+```
+
 ## B5.2 — real-transport HttpClient battle invites
 
 `tests/test_clients_http_invites.py` łączy ścisłe testy wstrzykiwanego

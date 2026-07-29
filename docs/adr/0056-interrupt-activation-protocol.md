@@ -734,8 +734,22 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   `BattleInviteMetadata`. Scope'y i route names są bez zmian; v2 ma zero
   dodatkowych SQL statements względem v1 dla direct create, invite create i
   accept.
-- **OPEN:** niepuste recovery handlery oraz produkcyjny transport mutacji
-  aktywacji/przerwań. Te elementy pozostają osobnymi slice'ami.
+- **B4.4c.9 DONE 2026-07-29:** publiczne FastAPI wystawia trzy zamrożone trasy
+  start, interrupt/pass i continue/finalize oraz kompatybilne guardy v2 na
+  `POST /actions`. Wszystkie sukcesy używają jednego zamkniętego envelope state
+  v2 + exact event delta; router deleguje domenę i persistence wyłącznie do
+  `stage_battle_activation_*`, a sam zarządza pojedynczym commit/rollback.
+  Session participant i bearer ownera egzekwują `battle:act` albo
+  `battle:interrupt`, controlling/priority ownership, no-oracle i body-blind
+  audit. Rozkaz jest jedynym public-ready slugiem zgodnie z [pozycją 50][Z50] i
+  [pkt 12.a–c][R12], recovery akceptuje wyłącznie dokładnie puste `uses`, a v1
+  zachowuje historyczny action contract i nie jest auto-upgrade'owane. Realny
+  transport same-owner/two-owner, restart po
+  trwałych headach, stale/race/rollback, response exactness i SQL-count gate są
+  pokryte; request session ma ceiling 6 SELECT-ów, bearer 7, a v1 action
+  pozostaje przy 6.
+- **OPEN:** niepuste recovery handlery oraz klienci v2. Te elementy pozostają
+  osobnymi slice'ami.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -762,12 +776,11 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 - **B4.4c.8 DONE:** jawny, domyślnie v1 opt-in direct/create-invite, trwała
   wersja invite, accept-only-from-invite, mismatch detection, ścisłe publiczne
   metadata/HttpClient oraz zerowa delta SQL;
-- scope'y, trzy trasy, wspólny publiczny envelope i pozostałe serwisy
-  persistence; `POST /actions` z kompatybilnymi guardami;
-- `POST /interrupts` może publicznie obsłużyć `pass` oraz trwały source-correct
-  Rozkaz; Klątwa wymaga osobnego validatora i pozostaje poza allowlistą;
-- DoD: real DB restart/race dwóch sesji, SQL-count ceiling, v1 fail-closed,
-  same-owner i two-owner auth matrix, security review.
+- **B4.4c.9 DONE:** scope'y, trzy trasy, wspólny publiczny envelope,
+  kompatybilne guardy `POST /actions`, publiczny pass/Rozkaz, real DB
+  restart/race, SQL-count ceiling, v1 fail-closed i same-owner/two-owner auth
+  matrix;
+- niepuste recovery handlery pozostają osobnym etapem.
 
 ### C. Source-correct handlers
 

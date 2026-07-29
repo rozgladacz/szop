@@ -267,7 +267,7 @@ def _validated_rozkaz_payload(
     granted = payload["granted"]
     if (
         type(target_id) is not int
-        or target_id < 1
+        or target_id < 0
         or type(ability) is not str
         or not ability
         or type(granted) is not bool

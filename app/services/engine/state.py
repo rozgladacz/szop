@@ -275,10 +275,16 @@ class ActivationState:
     window: InterruptWindowState | None
 
     def __post_init__(self) -> None:
-        for field_name in ("activation_id", "version", "selected_unit_id"):
+        for field_name in ("activation_id", "version"):
             value = _require_strict_int(getattr(self, field_name), field_name)
             if value < 1:
                 raise ValueError(f"{field_name} must be positive")
+        selected_unit_id = _require_strict_int(
+            self.selected_unit_id,
+            "selected_unit_id",
+        )
+        if selected_unit_id < 0:
+            raise ValueError("selected_unit_id must be non-negative")
         _require_player(self.controlling_player, "controlling_player")
         initiative_player = _require_player(
             self.initiative_player,
