@@ -748,8 +748,23 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   trwałych headach, stale/race/rollback, response exactness i SQL-count gate są
   pokryte; request session ma ceiling 6 SELECT-ów, bearer 7, a v1 action
   pozostaje przy 6.
-- **OPEN:** niepuste recovery handlery oraz klienci v2. Te elementy pozostają
-  osobnymi slice'ami.
+- **B5.4 DONE 2026-07-29:** `HttpClient` publikuje frozen+slots
+  `ActivationMutationResult` oraz jawne `start_activation`, `interrupt`,
+  `pass_interrupt_priority`, `commit_activation_action`, `continue_activation`
+  i `finalize_activation`. Każda metoda przyjmuje strict optimistic guardy,
+  waliduje przed I/O i wykonuje dokładnie jeden POST bez GET/retry/cache.
+  Wspólny fail-closed decoder wymaga exact battle id, previous sequence zgodnego
+  z requestem, wersjonowanego state v2 oraz dodatniego ciągłego exact event
+  delta kończącego się w new sequence. Zamknięty błąd klienta zachowuje HTTP
+  status i `detail.code` bez body; malformed/unknown envelope failuje
+  zamknięcie. Legacy `take_action` zachowuje wire v1, a na v2 zwraca typowany
+  kierunek do jawnych metod. Realny FastAPI gate obejmuje same-owner, dwa
+  niezależne bearery, handoff, interrupt, stale window/sequence, brak drugiego
+  zwycięzcy, restart z checkpointu, dwie akcje i puste recovery. Każda mutacja
+  klienta ma jeden transport request; session flow potwierdza istniejący ceiling
+  6 SELECT-ów per request.
+- **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
+  pakowanie pozostają osobnymi slice'ami.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -793,12 +808,15 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 
 ### D. HttpClient real-transport parity
 
-- typowane `start_activation`, `interrupt`, `pass_interrupt_priority`,
-  `continue_activation`, `finalize_activation`; protocol/state v1+v2 decode;
-- LocalClient i Protocol reużywają transition core; stare `take_action` jawnie
-  ograniczone do v1;
-- real FastAPI parity: dwie niezależne tożsamości, multiple interrupts jednego
-  gracza, handoff, stale window race, restart, druga akcja i recovery empty;
+- **B5.4 DONE:** typowane `start_activation`, `interrupt`,
+  `pass_interrupt_priority`, `commit_activation_action`, `continue_activation`
+  i `finalize_activation`; state v1+v2 decode oraz jawnie v1-only legacy
+  `take_action`;
+- **B5.4 DONE:** real FastAPI parity dla same-owner i dwóch niezależnych bearerów,
+  accepted interruptu, handoffu, stale window/sequence, duplicate-loser,
+  restartu, drugiej akcji i recovery empty;
+- **DEFERRED:** LocalClient i Protocol reużywające transition core pozostają poza
+  publicznym transportowym slice'em B5.4;
 - `agent_proposals`/MCP nie wykonują automatycznie cudzych passów; MCP pozostaje
   consent-only i dostaje nowe write tools dopiero w osobnym scope review.
 

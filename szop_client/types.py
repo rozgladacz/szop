@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from app.battle_protocol import validate_activation_protocol_version
 
 if TYPE_CHECKING:
+    from app.services.engine.events import BattleEvent
     from app.services.engine.state import BattleState
 
 
@@ -70,6 +71,41 @@ class BattleStateCheckpoint:
             raise ValueError("schema must be a non-empty string")
         if type(self.version) is not int or self.version < 1:
             raise ValueError("version must be an int >= 1")
+
+
+@dataclass(frozen=True, slots=True)
+class ActivationMutationResult:
+    """One exact accepted mutation of the durable activation protocol v2."""
+
+    battle_id: int
+    previous_sequence: int
+    new_sequence: int
+    state: BattleState
+    events: tuple[BattleEvent, ...]
+
+    def __post_init__(self) -> None:
+        if type(self.battle_id) is not int or self.battle_id < 1:
+            raise ValueError("battle_id must be an int >= 1")
+        if type(self.previous_sequence) is not int or self.previous_sequence < 0:
+            raise ValueError("previous_sequence must be an int >= 0")
+        if type(self.new_sequence) is not int or self.new_sequence < 1:
+            raise ValueError("new_sequence must be an int >= 1")
+        if type(self.events) is not tuple or not self.events:
+            raise ValueError("events must be a non-empty tuple")
+
+        from app.services.engine.state import BattleState
+
+        if not isinstance(self.state, BattleState):
+            raise ValueError("state must be a BattleState")
+        try:
+            sequences = tuple(event.sequence for event in self.events)
+        except AttributeError:
+            raise ValueError("events must contain BattleEvent values") from None
+        expected = tuple(range(self.previous_sequence + 1, self.new_sequence + 1))
+        if sequences != expected:
+            raise ValueError(
+                "events must be the exact contiguous previous/new sequence delta"
+            )
 
 
 @dataclass(frozen=True, slots=True)

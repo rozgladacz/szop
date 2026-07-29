@@ -5,6 +5,7 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from fastapi import FastAPI, Request
@@ -19,9 +20,16 @@ from app import models
 from app.db import Base, get_db
 from app.routers import battles
 from app.security import hash_agent_token
+from app.services.engine.actions import DefendAction
 from app.services.engine.persistence import load_latest_checkpoint
 from app.services.engine.state import ActivationPhase
 from app.services.engine.state_codec import battle_state_from_json
+from szop_client import (
+    HttpClient,
+    HttpClientActivationError,
+    HttpRequest,
+    HttpResponse,
+)
 
 
 @dataclass(frozen=True)
@@ -42,6 +50,26 @@ class ActivationTransportWorld:
     sessions: sessionmaker[Session]
     engine: Any
     ids: ActivationTransportIds
+
+
+class CountingTestClientTransport:
+    def __init__(self, client: TestClient) -> None:
+        self.client = client
+        self.requests: list[HttpRequest] = []
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        self.requests.append(request)
+        parsed = urlsplit(request.url)
+        target = parsed.path
+        if parsed.query:
+            target = f"{target}?{parsed.query}"
+        response = self.client.request(
+            request.method,
+            target,
+            headers=request.headers,
+            content=request.body,
+        )
+        return HttpResponse(status_code=response.status_code, body=response.content)
 
 
 def _enable_sqlite_foreign_keys(engine: Any) -> None:
@@ -313,6 +341,19 @@ def _activation_guards(response) -> dict[str, int]:
     assert activation is not None
     guards = {
         "expected_sequence": response.json()["new_sequence"],
+        "activation_id": activation.activation_id,
+        "expected_activation_version": activation.version,
+    }
+    if activation.window is not None:
+        guards["expected_window_version"] = activation.window.version
+    return guards
+
+
+def _client_activation_guards(result: Any) -> dict[str, int]:
+    activation = result.state.activation
+    assert activation is not None
+    guards = {
+        "expected_sequence": result.new_sequence,
         "activation_id": activation.activation_id,
         "expected_activation_version": activation.version,
     }
@@ -1703,3 +1744,308 @@ def test_two_independent_http_sessions_allow_exactly_one_duplicate_winner(
         assert head is not None
         assert head.sequence_at == first.json()["new_sequence"]
     assert checkpoints == 2
+
+
+def test_http_client_same_owner_v2_flow_uses_one_post_per_mutation_and_sql_ceiling(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=2)
+    battle_id = battle["battle_id"]
+    transport = CountingTestClientTransport(world.p0)
+    client = HttpClient("http://testserver", transport=transport)
+    statements: list[str] = []
+
+    def capture(
+        conn,
+        cursor,
+        statement,
+        parameters,
+        context,
+        executemany,
+    ) -> None:
+        del conn, cursor, parameters, context, executemany
+        statements.append(statement)
+
+    event.listen(world.engine, "before_cursor_execute", capture)
+    try:
+        started = client.start_activation(
+            battle_id,
+            expected_sequence=battle["latest_sequence"],
+            selected_unit_id=1,
+        )
+        first_pass = client.pass_interrupt_priority(
+            battle_id,
+            **_client_activation_guards(started),
+        )
+        second_pass = client.pass_interrupt_priority(
+            battle_id,
+            **_client_activation_guards(first_pass),
+        )
+        action_guards = _client_activation_guards(second_pass)
+        action_guards.pop("expected_window_version", None)
+        first_action = client.commit_activation_action(
+            battle_id,
+            DefendAction(unit_id=1),
+            **action_guards,
+        )
+        finalize_guards = _client_activation_guards(first_action)
+        finalized = client.finalize_activation(
+            battle_id,
+            **finalize_guards,
+            recovery_uses=[],
+        )
+    finally:
+        event.remove(world.engine, "before_cursor_execute", capture)
+
+    assert finalized.state.activation is None
+    assert [request.method for request in transport.requests] == ["POST"] * 5
+    assert [urlsplit(request.url).path for request in transport.requests] == [
+        f"/battles/{battle_id}/activations",
+        f"/battles/{battle_id}/interrupts",
+        f"/battles/{battle_id}/interrupts",
+        f"/battles/{battle_id}/actions",
+        f"/battles/{battle_id}/activations/{started.state.activation.activation_id}/transitions",
+    ]
+    assert sum(
+        statement.lstrip().upper().startswith("SELECT")
+        for statement in statements
+    ) == 30
+
+
+def test_http_client_two_owner_tokens_restart_races_and_second_action(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_two_owner_battle(world)
+    battle_id = battle["battle_id"]
+    scopes = {
+        battles.BATTLE_READ_SCOPE: True,
+        battles.BATTLE_ACT_SCOPE: True,
+        battles.BATTLE_INTERRUPT_SCOPE: True,
+    }
+    _seed_token(
+        world,
+        owner_user_id=world.ids.p0_user_id,
+        raw_token="client-v2-p0",
+        scopes=scopes,
+    )
+    _seed_token(
+        world,
+        owner_user_id=world.ids.p1_user_id,
+        raw_token="client-v2-p1",
+        scopes=scopes,
+    )
+    transports = {
+        world.ids.p0_user_id: CountingTestClientTransport(world.p0),
+        world.ids.p1_user_id: CountingTestClientTransport(world.p1),
+    }
+    clients = {
+        world.ids.p0_user_id: HttpClient(
+            "http://testserver",
+            token="client-v2-p0",
+            transport=transports[world.ids.p0_user_id],
+        ),
+        world.ids.p1_user_id: HttpClient(
+            "http://testserver",
+            token="client-v2-p1",
+            transport=transports[world.ids.p1_user_id],
+        ),
+    }
+    player_clients = (
+        clients[battle["p1_user_id"]],
+        clients[battle["p2_user_id"]],
+    )
+    player_transports = (
+        transports[battle["p1_user_id"]],
+        transports[battle["p2_user_id"]],
+    )
+
+    checkpoint = player_clients[0].get_state_checkpoint(battle_id)
+    controlling_player = checkpoint.state.active_player
+    controlling_client = player_clients[controlling_player]
+    controlling_transport = player_transports[controlling_player]
+    selected_unit_id = next(
+        blob.id
+        for blob in checkpoint.state.blobs
+        if blob.owner_player == controlling_player and blob.id >= 1
+    )
+
+    def one_post(transport: CountingTestClientTransport, call):
+        before = len(transport.requests)
+        try:
+            return call()
+        finally:
+            assert len(transport.requests) == before + 1
+            assert transport.requests[-1].method == "POST"
+
+    started = one_post(
+        controlling_transport,
+        lambda: controlling_client.start_activation(
+            battle_id,
+            expected_sequence=checkpoint.sequence_at,
+            selected_unit_id=selected_unit_id,
+        ),
+    )
+    with pytest.raises(HttpClientActivationError) as duplicate:
+        one_post(
+            controlling_transport,
+            lambda: controlling_client.start_activation(
+                battle_id,
+                expected_sequence=checkpoint.sequence_at,
+                selected_unit_id=selected_unit_id,
+            ),
+        )
+    assert duplicate.value.detail_code == "stale_sequence"
+    with world.sessions() as session:
+        durable = load_latest_checkpoint(session, battle_id)
+        assert durable is not None
+        assert durable.sequence_at == started.new_sequence
+
+    started_activation = started.state.activation
+    assert started_activation is not None
+    started_window = started_activation.window
+    assert started_window is not None
+    priority_player = started_window.priority_player
+    priority_client = player_clients[priority_player]
+    priority_transport = player_transports[priority_player]
+    next_priority_player = 1 - priority_player
+    next_priority_client = player_clients[next_priority_player]
+    next_priority_transport = player_transports[next_priority_player]
+    priority_units = [
+        blob.id
+        for blob in started.state.blobs
+        if blob.owner_player == priority_player and blob.id >= 1
+    ]
+    interrupted = one_post(
+        priority_transport,
+        lambda: priority_client.interrupt(
+            battle_id,
+            **_client_activation_guards(started),
+            source_unit_id=priority_units[-1],
+            ability_slug="rozkaz",
+            payload={
+                "target_id": priority_units[0],
+                "ability": "nieustraszony",
+                "granted": False,
+            },
+        ),
+    )
+
+    interrupted_activation = interrupted.state.activation
+    assert interrupted_activation is not None
+    with pytest.raises(HttpClientActivationError) as stale_window:
+        one_post(
+            priority_transport,
+            lambda: priority_client.pass_interrupt_priority(
+                battle_id,
+                expected_sequence=interrupted.new_sequence,
+                activation_id=interrupted_activation.activation_id,
+                expected_activation_version=interrupted_activation.version,
+                expected_window_version=started_window.version,
+            ),
+        )
+    assert stale_window.value.detail_code == "stale_window"
+
+    first_pass = one_post(
+        priority_transport,
+        lambda: priority_client.pass_interrupt_priority(
+            battle_id,
+            **_client_activation_guards(interrupted),
+        ),
+    )
+    with pytest.raises(HttpClientActivationError) as stale_sequence:
+        one_post(
+            priority_transport,
+            lambda: priority_client.pass_interrupt_priority(
+                battle_id,
+                **_client_activation_guards(interrupted),
+            ),
+        )
+    assert stale_sequence.value.detail_code == "stale_sequence"
+    second_pass = one_post(
+        next_priority_transport,
+        lambda: next_priority_client.pass_interrupt_priority(
+            battle_id,
+            **_client_activation_guards(first_pass),
+        ),
+    )
+
+    action_guards = _client_activation_guards(second_pass)
+    action_guards.pop("expected_window_version", None)
+    first_action = one_post(
+        controlling_transport,
+        lambda: controlling_client.commit_activation_action(
+            battle_id,
+            DefendAction(unit_id=selected_unit_id),
+            **action_guards,
+        ),
+    )
+    continued = one_post(
+        controlling_transport,
+        lambda: controlling_client.continue_activation(
+            battle_id,
+            **_client_activation_guards(first_action),
+        ),
+    )
+    continued_activation = continued.state.activation
+    assert continued_activation is not None
+    continued_window = continued_activation.window
+    assert continued_window is not None
+    second_window_priority = continued_window.priority_player
+    second_window_next = 1 - second_window_priority
+    third_pass = one_post(
+        player_transports[second_window_priority],
+        lambda: player_clients[
+            second_window_priority
+        ].pass_interrupt_priority(
+            battle_id,
+            **_client_activation_guards(continued),
+        ),
+    )
+    fourth_pass = one_post(
+        player_transports[second_window_next],
+        lambda: player_clients[second_window_next].pass_interrupt_priority(
+            battle_id,
+            **_client_activation_guards(third_pass),
+        ),
+    )
+    second_action_guards = _client_activation_guards(fourth_pass)
+    second_action_guards.pop("expected_window_version", None)
+    second_action = one_post(
+        controlling_transport,
+        lambda: controlling_client.commit_activation_action(
+            battle_id,
+            DefendAction(unit_id=selected_unit_id),
+            **second_action_guards,
+        ),
+    )
+
+    controlling_owner_id = (
+        battle["p1_user_id"] if controlling_player == 0 else battle["p2_user_id"]
+    )
+    restarted_transport = CountingTestClientTransport(
+        world.p0 if controlling_owner_id == world.ids.p0_user_id else world.p1
+    )
+    restarted_client = HttpClient(
+        "http://testserver",
+        token="client-v2-p0"
+        if controlling_owner_id == world.ids.p0_user_id
+        else "client-v2-p1",
+        transport=restarted_transport,
+    )
+    restarted_checkpoint = restarted_client.get_state_checkpoint(battle_id)
+    assert restarted_checkpoint.sequence_at == second_action.new_sequence
+    assert restarted_checkpoint.state == second_action.state
+    finalized = one_post(
+        restarted_transport,
+        lambda: restarted_client.finalize_activation(
+            battle_id,
+            expected_sequence=restarted_checkpoint.sequence_at,
+            activation_id=restarted_checkpoint.state.activation.activation_id,
+            expected_activation_version=restarted_checkpoint.state.activation.version,
+            recovery_uses=(),
+        ),
+    )
+    assert finalized.state.activation is None
+    assert len(restarted_transport.requests) == 2

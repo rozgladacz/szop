@@ -20,6 +20,7 @@ from urllib.request import Request, urlopen
 
 from app.battle_protocol import (
     ACTIVATION_PROTOCOL_VERSION_V1,
+    ACTIVATION_PROTOCOL_VERSION_V2,
     validate_activation_protocol_version,
 )
 from app.services.engine.action_codec import (
@@ -30,8 +31,12 @@ from app.services.engine.action_codec import (
 from app.services.engine.actions import Action
 from app.services.engine.events import BattleEvent, json_to_event
 from app.services.engine.state import BattleState
-from app.services.engine.state_codec import battle_state_from_json
+from app.services.engine.state_codec import (
+    STATE_CHECKPOINT_SCHEMA,
+    battle_state_from_json,
+)
 from szop_client.types import (
+    ActivationMutationResult,
     BattleActionProposal,
     BattleInviteMetadata,
     BattleReplayResult,
@@ -86,6 +91,25 @@ MAX_EXPLOIT_ROSTERS = 7
 MAX_EXPLOIT_GAMES_PER_PAIR = 3
 MAX_EXPLOIT_PAIRS = 21
 MAX_EXPLOIT_TOTAL_GAMES = 50
+_ACTIVATION_ERROR_STATUS_CODES = {
+    "unauthorized": 401,
+    "forbidden": 403,
+    "battle_not_found": 404,
+    "stale_sequence": 409,
+    "stale_activation": 409,
+    "stale_window": 409,
+    "invalid_phase": 409,
+    "not_current_priority": 409,
+    "battle_protocol_upgrade_required": 409,
+    "write_conflict": 409,
+    "invalid_selection": 422,
+    "activation_guard_required": 422,
+    "illegal_action": 422,
+    "unsupported_interrupt": 422,
+    "illegal_interrupt": 422,
+    "interrupt_limit_reached": 422,
+    "illegal_recovery": 422,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +164,20 @@ class HttpClientError(RuntimeError):
 
 class HttpClientTransportError(HttpClientError):
     """HTTP transport failed before a valid API response was received."""
+
+
+class HttpClientActivationError(HttpClientError):
+    """Closed activation-protocol v2 error with a stable public code."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        detail_code: str,
+    ) -> None:
+        super().__init__(message, status_code=status_code)
+        self.detail_code = detail_code
 
 
 class HttpClient:
@@ -341,6 +379,10 @@ class HttpClient:
             raise HttpClientError(f"{error_label} returned malformed payload")
         _ensure_expected_battle_id(payload, battle_id, error_label=error_label)
         try:
+            _require_exact_keys(
+                payload,
+                {"battle_id", "sequence_at", "schema", "version", "state"},
+            )
             sequence_at = _required_int(payload, "sequence_at")
             if sequence_at < 0:
                 raise TypeError("sequence_at")
@@ -672,6 +714,237 @@ class HttpClient:
             error_label=error_label,
         )
 
+    def start_activation(
+        self,
+        battle_id: int,
+        *,
+        expected_sequence: int,
+        selected_unit_id: int,
+    ) -> ActivationMutationResult:
+        """Start one durable protocol-v2 activation with explicit guards."""
+        _validate_positive_id(battle_id, name="battle_id")
+        _validate_int_at_least(expected_sequence, name="expected_sequence", minimum=0)
+        _validate_int_at_least(selected_unit_id, name="selected_unit_id", minimum=0)
+        return self._post_activation_mutation(
+            battle_id=battle_id,
+            path=f"/battles/{battle_id}/activations",
+            body={
+                "expected_sequence": expected_sequence,
+                "selected_unit_id": selected_unit_id,
+            },
+            expected_statuses=frozenset({201}),
+            error_label="POST start battle activation",
+        )
+
+    def interrupt(
+        self,
+        battle_id: int,
+        *,
+        expected_sequence: int,
+        activation_id: int,
+        expected_activation_version: int,
+        expected_window_version: int,
+        source_unit_id: int,
+        ability_slug: str,
+        payload: dict[str, Any],
+    ) -> ActivationMutationResult:
+        """Execute one explicit interrupt without passing priority."""
+        _validate_activation_mutation_guards(
+            battle_id=battle_id,
+            expected_sequence=expected_sequence,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+        )
+        _validate_int_at_least(
+            expected_window_version,
+            name="expected_window_version",
+            minimum=1,
+        )
+        _validate_int_at_least(source_unit_id, name="source_unit_id", minimum=0)
+        if type(ability_slug) is not str or not ability_slug:
+            raise ValueError("ability_slug must be a non-empty string")
+        canonical_payload = _canonical_json_object(payload, label="payload")
+        return self._post_activation_mutation(
+            battle_id=battle_id,
+            path=f"/battles/{battle_id}/interrupts",
+            body={
+                "operation": "interrupt",
+                "expected_sequence": expected_sequence,
+                "activation_id": activation_id,
+                "expected_activation_version": expected_activation_version,
+                "expected_window_version": expected_window_version,
+                "source_unit_id": source_unit_id,
+                "ability_slug": ability_slug,
+                "payload": canonical_payload,
+            },
+            expected_statuses=frozenset({200}),
+            error_label="POST battle activation interrupt",
+        )
+
+    def pass_interrupt_priority(
+        self,
+        battle_id: int,
+        *,
+        expected_sequence: int,
+        activation_id: int,
+        expected_activation_version: int,
+        expected_window_version: int,
+    ) -> ActivationMutationResult:
+        """Pass the caller's current interrupt priority exactly once."""
+        _validate_activation_mutation_guards(
+            battle_id=battle_id,
+            expected_sequence=expected_sequence,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+        )
+        _validate_int_at_least(
+            expected_window_version,
+            name="expected_window_version",
+            minimum=1,
+        )
+        return self._post_activation_mutation(
+            battle_id=battle_id,
+            path=f"/battles/{battle_id}/interrupts",
+            body={
+                "operation": "pass",
+                "expected_sequence": expected_sequence,
+                "activation_id": activation_id,
+                "expected_activation_version": expected_activation_version,
+                "expected_window_version": expected_window_version,
+            },
+            expected_statuses=frozenset({200, 202}),
+            error_label="POST pass battle interrupt priority",
+            status_by_open_window=True,
+        )
+
+    def commit_activation_action(
+        self,
+        battle_id: int,
+        action: Action,
+        *,
+        expected_sequence: int,
+        activation_id: int,
+        expected_activation_version: int,
+    ) -> ActivationMutationResult:
+        """Commit one explicit action inside a durable protocol-v2 activation."""
+        _validate_activation_mutation_guards(
+            battle_id=battle_id,
+            expected_sequence=expected_sequence,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+        )
+        try:
+            wire_action = action_to_json(action)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("action must be a supported Action") from exc
+        return self._post_activation_mutation(
+            battle_id=battle_id,
+            path=f"/battles/{battle_id}/actions",
+            body={
+                "expected_sequence": expected_sequence,
+                "activation_id": activation_id,
+                "expected_activation_version": expected_activation_version,
+                "action": wire_action,
+            },
+            expected_statuses=frozenset({202}),
+            error_label="POST commit battle activation action",
+        )
+
+    def continue_activation(
+        self,
+        battle_id: int,
+        *,
+        expected_sequence: int,
+        activation_id: int,
+        expected_activation_version: int,
+    ) -> ActivationMutationResult:
+        """Choose the explicit second-action branch of an activation."""
+        _validate_activation_mutation_guards(
+            battle_id=battle_id,
+            expected_sequence=expected_sequence,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+        )
+        return self._post_activation_mutation(
+            battle_id=battle_id,
+            path=f"/battles/{battle_id}/activations/{activation_id}/transitions",
+            body={
+                "operation": "continue",
+                "expected_sequence": expected_sequence,
+                "expected_activation_version": expected_activation_version,
+            },
+            expected_statuses=frozenset({202}),
+            error_label="POST continue battle activation",
+        )
+
+    def finalize_activation(
+        self,
+        battle_id: int,
+        *,
+        expected_sequence: int,
+        activation_id: int,
+        expected_activation_version: int,
+        recovery_uses: tuple[Mapping[str, Any], ...] | list[Mapping[str, Any]] = (),
+    ) -> ActivationMutationResult:
+        """Finalize a v2 activation with the currently supported empty recovery."""
+        _validate_activation_mutation_guards(
+            battle_id=battle_id,
+            expected_sequence=expected_sequence,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+        )
+        if type(recovery_uses) not in {tuple, list} or recovery_uses:
+            raise ValueError("recovery_uses must be an empty tuple or list")
+        return self._post_activation_mutation(
+            battle_id=battle_id,
+            path=f"/battles/{battle_id}/activations/{activation_id}/transitions",
+            body={
+                "operation": "finalize",
+                "expected_sequence": expected_sequence,
+                "expected_activation_version": expected_activation_version,
+                "recovery": {"uses": []},
+            },
+            expected_statuses=frozenset({200}),
+            error_label="POST finalize battle activation",
+        )
+
+    def _post_activation_mutation(
+        self,
+        *,
+        battle_id: int,
+        path: str,
+        body: dict[str, Any],
+        expected_statuses: frozenset[int],
+        error_label: str,
+        status_by_open_window: bool = False,
+    ) -> ActivationMutationResult:
+        expected_sequence = body["expected_sequence"]
+        payload, status_code = self._request_activation_json(
+            path,
+            json_body=body,
+            expected_statuses=expected_statuses,
+            error_label=error_label,
+        )
+        result = _activation_mutation_result_from_payload(
+            payload,
+            expected_battle_id=battle_id,
+            expected_previous_sequence=expected_sequence,
+            error_label=error_label,
+        )
+        if status_by_open_window:
+            activation = result.state.activation
+            expected_status = (
+                202
+                if activation is not None and activation.window is not None
+                else 200
+            )
+            if status_code != expected_status:
+                raise HttpClientError(
+                    f"{error_label} returned status inconsistent with state",
+                    status_code=status_code,
+                )
+        return result
+
     def take_action(
         self,
         battle_id: int,
@@ -700,6 +973,7 @@ class HttpClient:
                 "action": wire_action,
             },
             error_label=error_label,
+            decode_activation_error=True,
         )
         return _action_result_from_payload(
             payload,
@@ -728,7 +1002,65 @@ class HttpClient:
         json_body: dict[str, Any] | None,
         error_label: str,
         timeout: float | None = None,
+        decode_activation_error: bool = False,
     ) -> Any:
+        response = self._send_json_request(
+            method,
+            path,
+            query,
+            json_body=json_body,
+            timeout=timeout,
+        )
+        if not 200 <= response.status_code < 300:
+            if decode_activation_error:
+                raise _activation_error_from_response(
+                    response,
+                    error_label=error_label,
+                    require_closed=False,
+                )
+            raise HttpClientError(
+                f"{error_label} failed with HTTP {response.status_code}",
+                status_code=response.status_code,
+            )
+        return _decode_json(response.body)
+
+    def _request_activation_json(
+        self,
+        path: str,
+        *,
+        json_body: dict[str, Any],
+        expected_statuses: frozenset[int],
+        error_label: str,
+    ) -> tuple[Any, int]:
+        response = self._send_json_request(
+            "POST",
+            path,
+            {},
+            json_body=json_body,
+            timeout=None,
+        )
+        if response.status_code not in expected_statuses:
+            if not 200 <= response.status_code < 300:
+                raise _activation_error_from_response(
+                    response,
+                    error_label=error_label,
+                    require_closed=True,
+                )
+            raise HttpClientError(
+                f"{error_label} returned unexpected HTTP {response.status_code}",
+                status_code=response.status_code,
+            )
+        return _decode_json(response.body), response.status_code
+
+    def _send_json_request(
+        self,
+        method: str,
+        path: str,
+        query: dict[str, Any],
+        *,
+        json_body: dict[str, Any] | None,
+        timeout: float | None,
+    ) -> HttpResponse:
         body = (
             None
             if json_body is None
@@ -738,7 +1070,7 @@ class HttpClient:
                 allow_nan=False,
             ).encode("utf-8")
         )
-        response = self._transport(
+        return self._transport(
             HttpRequest(
                 method=method,
                 url=self._url(path, query),
@@ -747,12 +1079,6 @@ class HttpClient:
                 timeout=self._timeout if timeout is None else timeout,
             )
         )
-        if not 200 <= response.status_code < 300:
-            raise HttpClientError(
-                f"{error_label} failed with HTTP {response.status_code}",
-                status_code=response.status_code,
-            )
-        return _decode_json(response.body)
 
     def _headers(self, *, with_json_body: bool = False) -> dict[str, str]:
         headers = {"Accept": "application/json"}
@@ -775,6 +1101,50 @@ def _decode_json(body: bytes) -> Any:
         raise HttpClientError("HTTP response body is not valid JSON") from exc
 
 
+def _activation_error_from_response(
+    response: HttpResponse,
+    *,
+    error_label: str,
+    require_closed: bool,
+) -> HttpClientError:
+    try:
+        payload = _decode_json(response.body)
+    except HttpClientError:
+        payload = None
+    if (
+        type(payload) is dict
+        and set(payload) == {"detail"}
+        and type(payload["detail"]) is dict
+        and set(payload["detail"]) == {"code"}
+        and type(payload["detail"]["code"]) is str
+        and _ACTIVATION_ERROR_STATUS_CODES.get(payload["detail"]["code"])
+        == response.status_code
+    ):
+        detail_code = payload["detail"]["code"]
+        if detail_code == "activation_guard_required":
+            message = (
+                f"{error_label} conflicts with activation protocol v2; use "
+                "start_activation, pass_interrupt_priority/interrupt, "
+                "commit_activation_action, continue_activation and "
+                "finalize_activation"
+            )
+        else:
+            message = (
+                f"{error_label} failed with HTTP {response.status_code} "
+                f"({detail_code})"
+            )
+        return HttpClientActivationError(
+            message,
+            status_code=response.status_code,
+            detail_code=detail_code,
+        )
+    if require_closed:
+        message = f"{error_label} returned malformed activation error envelope"
+    else:
+        message = f"{error_label} failed with HTTP {response.status_code}"
+    return HttpClientError(message, status_code=response.status_code)
+
+
 def _normalize_reference_query(query: str, *, max_length: int) -> str:
     if not isinstance(query, str):
         raise ValueError("query must be a string")
@@ -790,6 +1160,29 @@ def _validate_positive_id(value: Any, *, name: str) -> int:
     if type(value) is not int or value < 1:
         raise ValueError(f"{name} must be an int >= 1")
     return value
+
+
+def _validate_int_at_least(value: Any, *, name: str, minimum: int) -> int:
+    if type(value) is not int or value < minimum:
+        raise ValueError(f"{name} must be an int >= {minimum}")
+    return value
+
+
+def _validate_activation_mutation_guards(
+    *,
+    battle_id: Any,
+    expected_sequence: Any,
+    activation_id: Any,
+    expected_activation_version: Any,
+) -> None:
+    _validate_positive_id(battle_id, name="battle_id")
+    _validate_int_at_least(expected_sequence, name="expected_sequence", minimum=0)
+    _validate_int_at_least(activation_id, name="activation_id", minimum=1)
+    _validate_int_at_least(
+        expected_activation_version,
+        name="expected_activation_version",
+        minimum=1,
+    )
 
 
 def _is_strict_json_value(value: Any) -> bool:
@@ -2192,6 +2585,74 @@ def _simulation_summary_from_payload(
     ):
         raise HttpClientError(error_message)
     return summary
+
+
+def _activation_mutation_result_from_payload(
+    payload: Any,
+    *,
+    expected_battle_id: int,
+    expected_previous_sequence: int,
+    error_label: str,
+) -> ActivationMutationResult:
+    error_message = f"{error_label} returned malformed payload"
+    if type(payload) is not dict:
+        raise HttpClientError(error_message)
+    try:
+        _require_exact_keys(
+            payload,
+            {
+                "battle_id",
+                "previous_sequence",
+                "new_sequence",
+                "state",
+                "events",
+            },
+        )
+        battle_id = _required_int(payload, "battle_id")
+        previous_sequence = _required_int(payload, "previous_sequence")
+        new_sequence = _required_int(payload, "new_sequence")
+        if (
+            battle_id != expected_battle_id
+            or previous_sequence != expected_previous_sequence
+            or new_sequence <= previous_sequence
+        ):
+            raise TypeError("activation mutation identity or sequence")
+
+        state_payload = payload["state"]
+        if type(state_payload) is not dict:
+            raise TypeError("state")
+        _require_exact_keys(state_payload, {"schema", "version", "state"})
+        if (
+            _required_str(state_payload, "schema") != STATE_CHECKPOINT_SCHEMA
+            or _required_int(state_payload, "version")
+            != ACTIVATION_PROTOCOL_VERSION_V2
+        ):
+            raise TypeError("state version")
+        state = battle_state_from_json(state_payload)
+
+        raw_events = payload["events"]
+        if type(raw_events) is not list or not raw_events:
+            raise TypeError("events")
+        events: list[BattleEvent] = []
+        for item in raw_events:
+            if type(item) is not dict:
+                raise TypeError("event")
+            _require_exact_keys(item, {"sequence", "event_type", "payload"})
+            events.append(_event_from_public_payload(item))
+        exact_delta = tuple(events)
+        if tuple(event.sequence for event in exact_delta) != tuple(
+            range(previous_sequence + 1, new_sequence + 1)
+        ):
+            raise TypeError("event delta")
+        return ActivationMutationResult(
+            battle_id=battle_id,
+            previous_sequence=previous_sequence,
+            new_sequence=new_sequence,
+            state=state,
+            events=exact_delta,
+        )
+    except (HttpClientError, KeyError, TypeError, ValueError) as exc:
+        raise HttpClientError(error_message) from exc
 
 
 def _action_result_from_payload(

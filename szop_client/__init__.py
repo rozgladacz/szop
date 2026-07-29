@@ -10,6 +10,10 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS = {
+    "ActivationMutationResult": (
+        "szop_client.types",
+        "ActivationMutationResult",
+    ),
     "BattleActionProposal": ("szop_client.types", "BattleActionProposal"),
     "BattleInviteMetadata": ("szop_client.types", "BattleInviteMetadata"),
     "BattleMetadata": ("szop_client.http", "BattleMetadata"),
@@ -40,6 +44,10 @@ _EXPORTS = {
     "SCORE_LIST_BOTS": ("szop_client.http", "SCORE_LIST_BOTS"),
     "SCORE_LIST_MAPS": ("szop_client.http", "SCORE_LIST_MAPS"),
     "HttpClient": ("szop_client.http", "HttpClient"),
+    "HttpClientActivationError": (
+        "szop_client.http",
+        "HttpClientActivationError",
+    ),
     "HttpClientError": ("szop_client.http", "HttpClientError"),
     "HttpClientTransportError": ("szop_client.http", "HttpClientTransportError"),
     "HttpRequest": ("szop_client.http", "HttpRequest"),
