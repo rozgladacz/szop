@@ -21,6 +21,7 @@ from app.db import Base, get_db
 from app.routers import battles
 from app.security import hash_agent_token
 from app.services.engine.actions import DefendAction
+from app.services.engine.dice import DeterministicDice
 from app.services.engine.persistence import load_latest_checkpoint
 from app.services.engine.state import ActivationPhase
 from app.services.engine.state_codec import battle_state_from_json
@@ -1016,6 +1017,7 @@ def test_public_rozkaz_and_klatwa_succeed_and_nonready_slugs_fail_closed(
     battle = _create_same_owner_battle(world, protocol_version=2)
     battle_id = battle["battle_id"]
     started = _start(world.p0, battle)
+    rng_before = _stream_counts(world, battle_id)[3]
     guards = _activation_guards(started)
     accepted = world.p0.post(
         f"/battles/{battle_id}/interrupts",
@@ -1033,6 +1035,7 @@ def test_public_rozkaz_and_klatwa_succeed_and_nonready_slugs_fail_closed(
     )
     assert accepted.status_code == 200, accepted.text
     _assert_exact_envelope(accepted, battle_id)
+    assert _stream_counts(world, battle_id)[3] == rng_before
     accepted_state = _wire_state(accepted)
     assert accepted_state.activation.window.priority_player == 0
 
@@ -1057,6 +1060,11 @@ def test_public_rozkaz_and_klatwa_succeed_and_nonready_slugs_fail_closed(
     )
     assert cursed.status_code == 200, cursed.text
     _assert_exact_envelope(cursed, battle_id)
+    rng_after = _stream_counts(world, battle_id)[3]
+    assert rng_after == rng_before
+    future_before = DeterministicDice.from_checkpoint(json.loads(rng_before))
+    future_after = DeterministicDice.from_checkpoint(json.loads(rng_after))
+    assert future_after.roll_d6(8) == future_before.roll_d6(8)
     cursed_state = _wire_state(cursed)
     cursed_target = next(
         blob for blob in cursed_state.blobs if blob.id == enemy_target_id

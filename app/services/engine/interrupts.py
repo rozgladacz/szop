@@ -56,6 +56,7 @@ from functools import lru_cache
 from types import MappingProxyType
 from typing import Any, Callable
 
+from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     AbilityOverrideApplied,
     BattleEvent,
@@ -626,12 +627,14 @@ def execute_ready_activation_interrupt_outcomes(
     source: UnitBlob,
     ability_slug: str,
     payload: Mapping[str, Any],
+    dice: DeterministicDice,
     sequence: int,
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Built-in leaf for public-ready durable activation interrupts."""
     if (
         type(state) is not BattleState
         or type(source) is not UnitBlob
+        or type(dice) is not DeterministicDice
         or type(sequence) is not int
         or sequence < 1
     ):

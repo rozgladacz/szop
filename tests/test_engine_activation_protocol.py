@@ -321,8 +321,10 @@ def _fake_outcome_executor(
     source: UnitBlob,
     ability_slug: str,
     payload,
+    dice: DeterministicDice,
     sequence: int,
 ):
+    del dice
     target_id = payload.get("target_id", source.id)
     events = (
         InterruptTriggered(
@@ -352,6 +354,7 @@ def _trigger(
     outcome_executor=_fake_outcome_executor,
     ability_slug: str = "test_interrupt",
     payload=None,
+    dice: DeterministicDice | None = None,
 ):
     activation = state.activation
     return trigger_activation_interrupt(
@@ -363,6 +366,7 @@ def _trigger(
         source_unit_id=source_unit_id,
         ability_slug=ability_slug,
         payload={} if payload is None else payload,
+        dice=DeterministicDice(2026) if dice is None else dice,
         sequence=sequence,
         outcome_executor=outcome_executor,
     )
@@ -701,6 +705,7 @@ def test_legacy_state_is_not_implicitly_upgraded_for_any_operation() -> None:
             source_unit_id=11,
             ability_slug="test_interrupt",
             payload={},
+            dice=DeterministicDice(2026),
             sequence=1,
             outcome_executor=_fake_outcome_executor,
         ),
@@ -956,6 +961,111 @@ def test_interrupt_versions_and_count_increase_once_for_multi_event_outcome() ->
     )
 
 
+def test_interrupt_rng_consuming_executor_returns_advanced_private_copy() -> None:
+    started = start_activation(_idle_state(), selected_unit_id=11, sequence=525)
+    input_dice = DeterministicDice(2026)
+    input_checkpoint = copy.deepcopy(input_dice.to_checkpoint())
+    expected_dice = DeterministicDice.from_checkpoint(input_checkpoint)
+    expected_rolls = expected_dice.roll_d6(4)
+    observed_rolls: tuple[int, ...] | None = None
+
+    def consuming_executor(
+        *, state, source, ability_slug, payload, dice, sequence
+    ):
+        nonlocal observed_rolls
+        observed_rolls = dice.roll_d6(4)
+        return _fake_outcome_executor(
+            state=state,
+            source=source,
+            ability_slug=ability_slug,
+            payload=payload,
+            dice=dice,
+            sequence=sequence,
+        )
+
+    result = _trigger(
+        started.state,
+        caller_player=0,
+        source_unit_id=11,
+        sequence=started.next_sequence,
+        outcome_executor=consuming_executor,
+        dice=input_dice,
+    )
+
+    assert observed_rolls == expected_rolls
+    assert input_dice.to_checkpoint() == input_checkpoint
+    assert result.dice is not input_dice
+    assert result.dice.to_checkpoint() == expected_dice.to_checkpoint()
+    assert result.state == apply_events(started.state, result.events)
+    assert result.next_sequence == started.next_sequence + len(result.events)
+    future_from_result = DeterministicDice.from_checkpoint(result.dice.to_checkpoint())
+    future_from_expected = DeterministicDice.from_checkpoint(
+        expected_dice.to_checkpoint()
+    )
+    assert future_from_result.roll_d6(8) == future_from_expected.roll_d6(8)
+
+
+@pytest.mark.parametrize(
+    "failure",
+    ["raise", "malformed", "replay-mismatch", "protocol-event"],
+)
+def test_interrupt_rng_consumption_is_isolated_on_fail_closed_outcome(
+    failure: str,
+) -> None:
+    started = start_activation(_idle_state(), selected_unit_id=11, sequence=527)
+    input_dice = DeterministicDice(2026)
+    input_checkpoint = copy.deepcopy(input_dice.to_checkpoint())
+    consumed_checkpoints: list[dict[str, object]] = []
+
+    def failing_executor(
+        *, state, source, ability_slug, payload, dice, sequence
+    ):
+        dice.roll_d6(3)
+        consumed_checkpoints.append(dice.to_checkpoint())
+        if failure == "raise":
+            raise RuntimeError("after RNG consumption")
+        if failure == "malformed":
+            return (state,)
+        outcome_state, outcome_events = _fake_outcome_executor(
+            state=state,
+            source=source,
+            ability_slug=ability_slug,
+            payload=payload,
+            dice=dice,
+            sequence=sequence,
+        )
+        if failure == "replay-mismatch":
+            return state, outcome_events
+        activation = state.activation
+        nested = ActivationInterruptTriggered(
+            sequence=sequence + len(outcome_events),
+            activation_id=activation.activation_id,
+            activation_version=activation.version + 1,
+            window_ordinal=activation.window.ordinal,
+            window_version=activation.window.version + 1,
+            priority_player=activation.window.priority_player,
+        )
+        return outcome_state, (*outcome_events, nested)
+
+    _assert_rejected(
+        started.state,
+        ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        lambda: _trigger(
+            started.state,
+            caller_player=0,
+            source_unit_id=11,
+            sequence=started.next_sequence,
+            outcome_executor=failing_executor,
+            dice=input_dice,
+        ),
+    )
+    assert consumed_checkpoints
+    assert consumed_checkpoints[0] != input_checkpoint
+    assert input_dice.to_checkpoint() == input_checkpoint
+    assert started.state.activation.version == 1
+    assert started.state.activation.window.interrupt_count == 0
+
+
 def test_interrupt_limit_64_rejects_before_executor() -> None:
     started = start_activation(_idle_state(), selected_unit_id=11, sequence=530)
     activation_id = started.state.activation.activation_id
@@ -1065,6 +1175,7 @@ def test_interrupt_rejects_stale_guards_wrong_priority_and_wrong_phase() -> None
         "source_unit_id": 11,
         "ability_slug": "test_interrupt",
         "payload": {},
+        "dice": DeterministicDice(2026),
         "sequence": started.next_sequence,
         "outcome_executor": _fake_outcome_executor,
     }
@@ -1131,12 +1242,15 @@ def test_interrupt_executor_exception_is_fail_closed() -> None:
 def test_interrupt_rejects_live_replay_state_mismatch() -> None:
     started = start_activation(_idle_state(), selected_unit_id=11, sequence=630)
 
-    def mismatched_executor(*, state, source, ability_slug, payload, sequence):
+    def mismatched_executor(
+        *, state, source, ability_slug, payload, dice, sequence
+    ):
         _, events = _fake_outcome_executor(
             state=state,
             source=source,
             ability_slug=ability_slug,
             payload=payload,
+            dice=dice,
             sequence=sequence,
         )
         return state, events
@@ -1157,7 +1271,10 @@ def test_interrupt_rejects_live_replay_state_mismatch() -> None:
 def test_interrupt_rejects_non_contiguous_outcome_sequence() -> None:
     started = start_activation(_idle_state(), selected_unit_id=11, sequence=640)
 
-    def skipped_sequence_executor(*, state, source, ability_slug, payload, sequence):
+    def skipped_sequence_executor(
+        *, state, source, ability_slug, payload, dice, sequence
+    ):
+        del dice
         events = (
             InterruptTriggered(
                 sequence + 1,
@@ -1185,7 +1302,10 @@ def test_interrupt_rejects_non_contiguous_outcome_sequence() -> None:
 def test_interrupt_requires_exactly_one_interrupt_triggered(marker_count) -> None:
     started = start_activation(_idle_state(), selected_unit_id=11, sequence=650)
 
-    def marker_count_executor(*, state, source, ability_slug, payload, sequence):
+    def marker_count_executor(
+        *, state, source, ability_slug, payload, dice, sequence
+    ):
+        del dice
         events = tuple(
             InterruptTriggered(
                 sequence + index,
@@ -1223,7 +1343,8 @@ def test_interrupt_requires_exactly_one_interrupt_triggered(marker_count) -> Non
 def test_interrupt_rejects_nested_activation_protocol_event() -> None:
     started = start_activation(_idle_state(), selected_unit_id=11, sequence=660)
 
-    def nested_executor(*, state, source, ability_slug, payload, sequence):
+    def nested_executor(*, state, source, ability_slug, payload, dice, sequence):
+        del dice
         activation = state.activation
         events = (
             InterruptTriggered(
@@ -1305,7 +1426,10 @@ def test_interrupt_rejects_unsupported_malformed_or_noncanonical_event(
 ) -> None:
     started = start_activation(_idle_state(), selected_unit_id=11, sequence=670)
 
-    def invalid_event_executor(*, state, source, ability_slug, payload, sequence):
+    def invalid_event_executor(
+        *, state, source, ability_slug, payload, dice, sequence
+    ):
+        del dice
         return state, (event_factory(sequence, source.id),)
 
     _assert_rejected(
@@ -1324,7 +1448,10 @@ def test_interrupt_rejects_unsupported_malformed_or_noncanonical_event(
 def test_interrupt_rejects_more_than_64_outcome_events() -> None:
     started = start_activation(_idle_state(), selected_unit_id=11, sequence=680)
 
-    def oversized_executor(*, state, source, ability_slug, payload, sequence):
+    def oversized_executor(
+        *, state, source, ability_slug, payload, dice, sequence
+    ):
+        del dice
         events = (
             InterruptTriggered(
                 sequence,
@@ -1367,6 +1494,7 @@ def test_interrupt_rejects_more_than_64_outcome_events() -> None:
         {"source_unit_id": True},
         {"ability_slug": 7},
         {"payload": []},
+        {"dice": object()},
         {"sequence": True},
         {"outcome_executor": None},
     ],
@@ -1383,6 +1511,7 @@ def test_interrupt_rejects_bool_and_non_integer_or_malformed_inputs(override) ->
         "source_unit_id": 11,
         "ability_slug": "test_interrupt",
         "payload": {},
+        "dice": DeterministicDice(2026),
         "sequence": started.next_sequence,
         "outcome_executor": _fake_outcome_executor,
         **override,
@@ -1449,7 +1578,7 @@ def test_builtin_rozkaz_full_v2_flow_replay_restart_limit_and_finalization() -> 
         "granted": False,
     }
 
-    def trigger(current):
+    def trigger(current, dice):
         activation = current.activation
         return trigger_activation_interrupt(
             current,
@@ -1460,17 +1589,26 @@ def test_builtin_rozkaz_full_v2_flow_replay_restart_limit_and_finalization() -> 
             source_unit_id=11,
             ability_slug="rozkaz",
             payload=payload,
+            dice=dice,
             sequence=started.next_sequence,
             outcome_executor=execute_ready_activation_interrupt_outcomes,
         )
 
-    interrupted = trigger(started.state)
-    restarted = trigger(_restart(started.state))
+    input_dice = DeterministicDice(73)
+    input_rng = input_dice.to_checkpoint()
+    interrupted = trigger(started.state, input_dice)
+    restarted = trigger(
+        _restart(started.state),
+        DeterministicDice.from_checkpoint(input_rng),
+    )
     assert [event_to_json(event) for event in restarted.events] == [
         event_to_json(event) for event in interrupted.events
     ]
     assert restarted.state == interrupted.state
     assert restarted.next_sequence == interrupted.next_sequence
+    assert input_dice.to_checkpoint() == input_rng
+    assert interrupted.dice.to_checkpoint() == input_rng
+    assert restarted.dice.to_checkpoint() == input_rng
     assert [type(event) for event in interrupted.events] == [
         ActivationInterruptTriggered,
         InterruptTriggered,
@@ -1493,6 +1631,7 @@ def test_builtin_rozkaz_full_v2_flow_replay_restart_limit_and_finalization() -> 
             source_unit_id=11,
             ability_slug="rozkaz",
             payload=payload,
+            dice=DeterministicDice(73),
             sequence=interrupted.next_sequence,
             outcome_executor=execute_ready_activation_interrupt_outcomes,
         )
@@ -1554,7 +1693,7 @@ def test_builtin_klatwa_full_v2_flow_replay_restart_limit_and_finalization() -> 
         "granted": False,
     }
 
-    def trigger(current):
+    def trigger(current, dice):
         activation = current.activation
         return trigger_activation_interrupt(
             current,
@@ -1565,17 +1704,26 @@ def test_builtin_klatwa_full_v2_flow_replay_restart_limit_and_finalization() -> 
             source_unit_id=source.id,
             ability_slug="klatwa",
             payload=payload,
+            dice=dice,
             sequence=started.next_sequence,
             outcome_executor=execute_ready_activation_interrupt_outcomes,
         )
 
-    interrupted = trigger(started.state)
-    restarted = trigger(_restart(started.state))
+    input_dice = DeterministicDice(79)
+    input_rng = input_dice.to_checkpoint()
+    interrupted = trigger(started.state, input_dice)
+    restarted = trigger(
+        _restart(started.state),
+        DeterministicDice.from_checkpoint(input_rng),
+    )
     assert [event_to_json(event) for event in restarted.events] == [
         event_to_json(event) for event in interrupted.events
     ]
     assert restarted.state == interrupted.state
     assert restarted.next_sequence == interrupted.next_sequence
+    assert input_dice.to_checkpoint() == input_rng
+    assert interrupted.dice.to_checkpoint() == input_rng
+    assert restarted.dice.to_checkpoint() == input_rng
     assert [type(event) for event in interrupted.events] == [
         ActivationInterruptTriggered,
         InterruptTriggered,
@@ -1597,6 +1745,7 @@ def test_builtin_klatwa_full_v2_flow_replay_restart_limit_and_finalization() -> 
             source_unit_id=source.id,
             ability_slug="klatwa",
             payload=payload,
+            dice=DeterministicDice(79),
             sequence=interrupted.next_sequence,
             outcome_executor=execute_ready_activation_interrupt_outcomes,
         )

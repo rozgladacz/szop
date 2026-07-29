@@ -95,6 +95,16 @@ class ActivationActionTransitionResult:
     dice: DeterministicDice
 
 
+@dataclass(frozen=True, slots=True)
+class ActivationInterruptTransitionResult:
+    """Interrupt transition plus the advanced, independently checkpointable RNG."""
+
+    state: BattleState
+    events: tuple[BattleEvent, ...]
+    next_sequence: int
+    dice: DeterministicDice
+
+
 class ActivationActionOutcomeExecutor(Protocol):
     """Injected leaf resolving exactly one action and its regroup outcomes."""
 
@@ -118,6 +128,7 @@ class ActivationInterruptOutcomeExecutor(Protocol):
         source: UnitBlob,
         ability_slug: str,
         payload: Mapping[str, Any],
+        dice: DeterministicDice,
         sequence: int,
     ) -> tuple[BattleState, tuple[BattleEvent, ...]]: ...
 
@@ -255,6 +266,7 @@ def _validated_interrupt_outcomes(
     source: UnitBlob,
     ability_slug: str,
     payload: Mapping[str, Any],
+    dice: DeterministicDice,
     sequence: int,
     outcome_executor: ActivationInterruptOutcomeExecutor,
 ) -> tuple[tuple[BattleEvent, ...], BattleState]:
@@ -264,6 +276,7 @@ def _validated_interrupt_outcomes(
             source=source,
             ability_slug=ability_slug,
             payload=payload,
+            dice=dice,
             sequence=sequence,
         )
     except Exception as exc:
@@ -525,9 +538,10 @@ def trigger_activation_interrupt(
     source_unit_id: int,
     ability_slug: str,
     payload: Mapping[str, Any],
+    dice: DeterministicDice,
     sequence: int,
     outcome_executor: ActivationInterruptOutcomeExecutor,
-) -> ActivationTransitionResult:
+) -> ActivationInterruptTransitionResult:
     """Atomically accept one interrupt and its bounded mechanical outcomes."""
 
     _require_protocol_v2(state)
@@ -550,6 +564,7 @@ def trigger_activation_interrupt(
         _reject(ActivationProtocolErrorReason.INTERRUPT_LIMIT_REACHED)
     if (
         not isinstance(payload, Mapping)
+        or type(dice) is not DeterministicDice
         or type(sequence) is not int
         or sequence < 1
         or not callable(outcome_executor)
@@ -571,19 +586,27 @@ def trigger_activation_interrupt(
         priority_player=window.priority_player,
     )
     protocol_state = apply_events(state, (protocol_event,))
+    try:
+        working_dice = DeterministicDice.from_checkpoint(dice.to_checkpoint())
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+        ) from exc
     outcome_events, replay_state = _validated_interrupt_outcomes(
         protocol_state,
         source=source,
         ability_slug=ability_slug,
         payload=payload,
+        dice=working_dice,
         sequence=sequence + 1,
         outcome_executor=outcome_executor,
     )
     events = (protocol_event, *outcome_events)
-    return ActivationTransitionResult(
+    return ActivationInterruptTransitionResult(
         state=replay_state,
         events=events,
         next_sequence=sequence + len(events),
+        dice=working_dice,
     )
 
 
@@ -881,6 +904,7 @@ __all__ = [
     "ActivationActionOutcomeExecutor",
     "ActivationActionTransitionResult",
     "ActivationInterruptOutcomeExecutor",
+    "ActivationInterruptTransitionResult",
     "ActivationProtocolError",
     "ActivationProtocolErrorReason",
     "ActivationTransitionResult",

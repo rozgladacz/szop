@@ -280,6 +280,18 @@ są żywe oraz na Froncie, cel jest wrogi i w edge-to-edge 12″ zgodnie z
 Walidacja działa na jednym załadowanym state i cache'owanym rulesecie: 5
 SELECT-ów w serwisie, 6 w pełnym request session i 7 dla bearera, dokładnie
 jak Rozkaz. Oznaczenie i Strażnik pozostają publicznie niedostępne.
+**B4.4d.C1a** rozszerza accepted-interrupt seam o `DeterministicDice`.
+Pure transition klonuje wejściowy checkpoint RNG przed executorem, izoluje
+oryginał także po częściowym zużyciu zakończonym błędem i zwraca osobny typowany
+wynik state/events/next-sequence/RNG. Durable service przekazuje RNG spójnego
+headu i checkpointuje zwróconą pozycję atomowo z jednym guarded event batchem;
+rollback i race nie przesuwają trwałego RNG. Built-in Rozkaz/Klątwa przyjmują
+wspólny RNG-aware seam, lecz nie wykonują rzutów, więc ich eventy i RNG
+pozostają bitowo zgodne. Nie powstało I/O w pure core ani dodatkowy SQL.
+Allowlista pozostaje dokładnie `{"rozkaz", "klatwa"}`, response nie zawiera
+RNG, a Strażnik nadal nie realizuje wymaganego Ostrzału i późniejszego stanu
+Wyczerpany ([`SZOP_Zdolnosci.md` pozycja 31](../app/static/docs/SZOP_Zdolnosci.md));
+C1 pozostaje nieukończone.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.
@@ -425,7 +437,7 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `state_codec.py` **(B4.4b.1)** | ~410 | Whitelist-based checkpoint codec z osobnymi exact-fields rejestrami v1/v2. Publiczny no-arg encoder pozostaje v1; jawny `version=2` wymaga dowodu inicjatywy, koduje frozen activation/window i pomija legacy `pending_interrupts`. Decoder nie auto-upgrade'uje v1. Persistence/router/client nadal wywołują domyślny v1. |
 | `events.py` | ~650 | **26 event types**: 16 historycznych eventów mechanicznych oraz B4.4b.2 `ActivationStarted/InterruptWindowOpened/ActivationInterruptTriggered/InterruptPriorityPassed/InterruptWindowClosed/ActivationActionCommitted/ActivationContinuationChosen/ActivationFinalized/InitiativeTransferred/ActivePlayerChanged`. Nowe tagi mają ścisłe payloady v1; historyczne zachowują istniejące tagi/payloady i ogólną kompatybilność `event_to_json` / `json_to_event`. `ActivationActionCommitted` reużywa SSOT discriminatorów `Action`. |
 | `reducers.py` **(B3.9.d + B4.4b.2)** | ~650 | `@register_reducer` dla wszystkich 26 event types. Historyczne outcome reducerry pozostają SSOT skutków mechanicznych; 10 reducerów protokołu zmienia wyłącznie activation/window albo top-level initiative/active player i pozwala ręcznemu tailowi odtworzyć każdy checkpoint v2. Auto-rejestracja przez side-effect import w `__init__.py`; gate kompletności porównuje registry eventów i reducerów. |
-| `activation_protocol.py` **(B4.4b.3–6)** | ~860 | Pure transition core dla `start_activation`, pass/handoff/close, `continue_activation`, accepted interrupt, `commit_activation_action` i `finalize_activation`. Action bridge reużywa walidację resolvera i `_apply_single_action`; finalizacja przyjmuje tylko jawnie puste recovery, wymaga exact no-op od prywatnego recovery seam, reużywa `_finalize_activation`, emituje trzy eventy terminalne i wraca do `IDLE`. Outcome seams sprawdzają ciągłość/no-nested/live-replay; durable `activation.action_types` jest SSOT ograniczeń follow-up. Bez built-in wiring/allowlisty, recovery handlerów, I/O i persistence. |
+| `activation_protocol.py` **(B4.4b.3–6, B4.4d.C1a)** | ~880 | Pure transition core dla `start_activation`, pass/handoff/close, `continue_activation`, accepted interrupt, `commit_activation_action` i `finalize_activation`. Action oraz interrupt bridge klonują wejściowy RNG i zwracają niezależnie checkpointowalną pozycję; błędy outcome nie mutują oryginału. Finalizacja przyjmuje tylko jawnie puste recovery, wymaga exact no-op od prywatnego recovery seam, reużywa `_finalize_activation`, emituje trzy eventy terminalne i wraca do `IDLE`. Outcome seams sprawdzają ciągłość/no-nested/live-replay; durable `activation.action_types` jest SSOT ograniczeń follow-up. Bez built-in wiring/allowlisty, recovery handlerów, I/O i persistence. |
 | `dice.py` | ~110 | `DeterministicDice(seed)` na `random.Random` (ADR-0012), `RollResult` z natural rolls, `roll_with_threshold` pełna semantyka pkt 1 (a/b/c/d) |
 | `los.py` | ~175 | `check_los` 3-state (WIDZI/NIE_WIDZI/OSŁONA) z sampling N=16 (ADR-0043), Zasłaniający exception pkt 4.c.iii. **B3.9.b**: importuje primitive z `geometry.py`; `UNIT_CIRCLE_16` precomputed dla perf (16× math.cos/sin → 0 per call). |
 | `prediction.py` | ~210 | Analytic binomial bez RNG (ADR-0044), `expected_damage(...) → DamageDistribution`, `would_see` hipotetyczny LoS. **Monte Carlo parity** ±3σ z combat.resolve_ranged_attack |

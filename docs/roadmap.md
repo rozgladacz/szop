@@ -452,6 +452,21 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   jak Rozkaz: 5 SELECT-ów w serwisie, 6 w pełnym request session i 7 dla
   bearera. `HttpClient.interrupt(..., ability_slug="klatwa", ...)` reużywa
   istniejące API i wykonuje dokładnie jeden POST bez GET/retry/cache.
+  **B4.4d.C1a RNG-aware accepted-interrupt substrate DONE 2026-07-29:**
+  `trigger_activation_interrupt` klonuje RNG z wejściowego checkpointu przed
+  outcome i zwraca typowany state/events/next-sequence wraz z prywatnym,
+  ewentualnie zaawansowanym RNG. Błąd executora, malformed wynik,
+  live/replay mismatch albo protocol event po częściowym zużyciu RNG failują
+  bez zmiany wejściowego state/RNG. Durable interrupt zapisuje zwrócony RNG w
+  tym samym pojedynczym checkpointcie co jeden guarded event batch; rollback,
+  write race i optimistic race zachowują poprzedni trwały RNG. Rozkaz i Klątwa
+  nadal nie konsumują RNG, zachowują dokładne eventy i future-roll parity, a
+  publiczny transport nadal nie ujawnia RNG. Bez dodatkowych SQL i bez zmiany
+  allowlisty: pozostaje dokładnie `{"rozkaz", "klatwa"}`.
+  To wyłącznie fundament C1. Strażnik nadal jest stubem i pozostaje publicznie
+  niedostępny; rzeczywisty Ostrzał, późniejszy Wyczerpany oraz walidacja
+  source/broni/celu z [pozycji 31](../app/static/docs/SZOP_Zdolnosci.md)
+  pozostają otwartym dalszym zakresem C1.
   **Niepuste source-correct recovery handlery, Strażnik, Oznaczenie,
   LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
   `POST /battles/{id}/replay` **DONE

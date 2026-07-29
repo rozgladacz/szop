@@ -12,6 +12,7 @@ from dataclasses import FrozenInstanceError, replace
 
 import pytest
 
+from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import InterruptTriggered
 from app.services.engine.interrupts import (
     _INTERRUPT_HANDLERS,
@@ -292,6 +293,7 @@ def _execute_rozkaz(
             if payload is None
             else payload
         ),
+        dice=DeterministicDice(2026),
         sequence=20,
     )
 
@@ -324,6 +326,7 @@ def _execute_klatwa(state: BattleState, *, granted: bool = True):
             "ability": "delikatny",
             "granted": granted,
         },
+        dice=DeterministicDice(2026),
         sequence=20,
     )
 

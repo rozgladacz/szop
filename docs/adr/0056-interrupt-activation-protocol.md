@@ -485,7 +485,7 @@ historyczny error contract ADR-0054.
 |---|---|---|
 | Rozkaz(X) | Public-ready w pure engine i trwałym transporcie v2 od B4.4b.7/B4.4c.9. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
 | Klątwa(X) | Public-ready od B4.4d.C0; reużywa istniejący transport v2 i klienta. | Osobny validator `klatwa_tak`, pięć jawnych pasywek (`delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`), enemy target, 12″, oba kierunki strict bool, limit raz/rundę i wygaśnięcie przy finalizacji; nie reużywa `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
-| Strażnik | Publicznie niewspierany, dopóki jest stubem. | Pełny interrupt-action primitive: legalny source/weapon/targets, rzeczywisty Ostrzał, następnie Wyczerpany, outcome eventy, replay/RNG i no-nested ([pozycja 31][Z31], [pkt 17][R17]). |
+| Strażnik | Publicznie niewspierany, dopóki jest stubem; C1a dostarcza wyłącznie RNG-aware substrate. | Nadal potrzebuje pełnego interrupt-action primitive: legalny source/weapon/targets, rzeczywisty Ostrzał, następnie Wyczerpany, outcome eventy i no-nested ([pozycja 31][Z31], [pkt 17][R17]). |
 | Oznaczenie(X) | Publicznie niewspierane w obecnej semantyce. | Osobny attack-declaration/attack-scope prerequisite po zamknięciu ogólnego `BEFORE_ACTION`: cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, efekt tylko do `AttackResolved`, nie do końca aktywacji ([pozycja 49][Z49]). To rozszerzenie nadal użyje `POST /interrupts`, ale nie może udawać zwykłego activation override. |
 
 Registry może zawierać niegotowe handlery do testów engine; publiczna allowlista
@@ -507,6 +507,9 @@ rulesetu bez obu kanonicznych tagów nie jest legalnym X.
   ani event; `get_eligible_interrupts` nie może powodować N+1.
 - B4.4d.C0 zamraża pomiar Klątwy równy Rozkazowi: 5 SELECT-ów w serwisie,
   6 w pełnym request session i 7 dla bearera.
+- B4.4d.C1a nie dodaje SQL: prywatny klon RNG jest pure, a durable interrupt
+  nadal zapisuje jeden guarded event batch i jeden checkpoint przy pułapach
+  5/6/7 SELECT-ów dla service/session/bearer.
 - Hot concurrency path używa istniejących indeksów/constraintów:
   `battle_events(battle_id, sequence) UNIQUE`, indeksu `battle_id`,
   `battle_checkpoints(battle_id, sequence_at) UNIQUE` i PK `battles.id`.
@@ -778,6 +781,15 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   `HttpClient.interrupt` są pokryte bez zmian API/DB/klienta; klient wykonuje
   jeden POST. Query gate pozostał równy Rozkazowi: 5 SELECT-ów w serwisie,
   6 session i 7 bearer.
+- **B4.4d.C1a DONE 2026-07-29:** accepted-interrupt outcome executor otrzymuje
+  prywatny klon `DeterministicDice`, a pure transition zwraca typowany
+  state/events/next-sequence oraz ewentualnie zaawansowany RNG. Wszystkie
+  błędy po częściowym zużyciu failują bez mutacji wejściowego state/RNG.
+  Durable service checkpointuje zwrócony RNG atomowo z dokładnym event delta;
+  rollback/race zachowują poprzednią pozycję. Rozkaz i Klątwa nie konsumują RNG
+  i zachowują exact event/restart/future-roll parity. Publiczne wire, auth,
+  statusy, schematy, allowlista `{"rozkaz", "klatwa"}` i pułapy 5/6/7 SELECT
+  pozostają bez zmian. To fundament, nie implementacja Strażnika.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
   pakowanie pozostają osobnymi slice'ami; public-ready Oznaczenie i Strażnik
   wymagają własnych C1/C2.
@@ -819,8 +831,11 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   source-correct X, enemy/12″/raz-rundę/finalize, publiczny allowlist
   `Rozkaz|Klątwa`, pełny pure/durable/FastAPI/HttpClient/replay/query gate;
   bez nowych eventów, API, DB ani kodu klienta.
-- **C1 Strażnik:** pełny Ostrzał + Wyczerpany, RNG/replay, source/weapon/target,
-  no-nested; własny commit i DoD.
+- **C1a RNG-aware substrate DONE 2026-07-29:** prywatny RNG outcome,
+  fail-closed izolacja i atomowy durable RNG checkpoint; bez publikacji sluga.
+- **C1 Strażnik nadal OPEN:** pełny Ostrzał + Wyczerpany, source/weapon/target
+  i no-nested nadal wymagają osobnego dalszego etapu oraz DoD
+  ([pozycja 31][Z31], [pkt 17][R17]).
 - **C2 Oznaczenie:** najpierw attack-declaration/attack-scope events i
   wygaśnięcie po jednym ataku, potem handler; żadnego activation-scoped fallback;
   własny commit i DoD.

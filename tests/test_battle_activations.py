@@ -90,6 +90,9 @@ from app.services.engine.events import (
     StatusAdded,
     StatusRemoved,
 )
+from app.services.engine.interrupts import (
+    execute_ready_activation_interrupt_outcomes,
+)
 from app.services.engine.persistence import (
     BattleCheckpointSequenceConflict,
     load_events,
@@ -3811,6 +3814,26 @@ def _rozkaz_payload(
     }
 
 
+def _rng_consuming_ready_interrupt_executor(
+    *,
+    state,
+    source,
+    ability_slug,
+    payload,
+    dice,
+    sequence,
+):
+    dice.roll_d6(5)
+    return execute_ready_activation_interrupt_outcomes(
+        state=state,
+        source=source,
+        ability_slug=ability_slug,
+        payload=payload,
+        dice=dice,
+        sequence=sequence,
+    )
+
+
 @pytest.mark.parametrize(
     ("priority_player", "same_owner"),
     [(0, False), (1, False), (1, True)],
@@ -3869,6 +3892,51 @@ def test_interrupt_success_uses_durable_priority_for_both_owners_and_same_owner(
         assert tuple(
             load_events(restarted, battle_id, since=started.new_sequence)
         ) == staged.events
+
+
+def test_interrupt_rng_consuming_executor_persists_atomic_advanced_checkpoint(
+    activation_world: ActivationWorld,
+) -> None:
+    initial, source_id, target_id = _rozkaz_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+
+    with activation_world.sessions() as session:
+        before = load_latest_checkpoint(session, battle_id)
+        assert before is not None
+        input_rng = before.dice.to_checkpoint()
+        expected_dice = DeterministicDice.from_checkpoint(input_rng)
+        expected_dice.roll_d6(5)
+        staged = stage_battle_activation_interrupt(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=started.new_sequence,
+            source_unit_id=source_id,
+            ability_slug="rozkaz",
+            payload=_rozkaz_payload(target_id),
+            outcome_executor=_rng_consuming_ready_interrupt_executor,
+            **_interrupt_guards(started.state),
+        )
+        assert before.dice.to_checkpoint() == input_rng
+        session.commit()
+
+    assert staged.dice.to_checkpoint() == expected_dice.to_checkpoint()
+    assert staged.state == apply_events(started.state, staged.events)
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == staged.state
+        assert checkpoint.dice.to_checkpoint() == expected_dice.to_checkpoint()
+        future_persisted = DeterministicDice.from_checkpoint(
+            checkpoint.dice.to_checkpoint()
+        )
+    future_expected = DeterministicDice.from_checkpoint(
+        expected_dice.to_checkpoint()
+    )
+    assert future_persisted.roll_d6(8) == future_expected.roll_d6(8)
 
 
 @pytest.mark.parametrize(
@@ -4571,6 +4639,10 @@ def test_interrupt_caller_rollback_removes_whole_staged_delta_and_checkpoint(
         state=initial,
     )
     before = _stream_snapshot(activation_world, battle_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        rng_before = checkpoint.dice.to_checkpoint()
 
     with activation_world.sessions() as session:
         stage_battle_activation_interrupt(
@@ -4581,11 +4653,16 @@ def test_interrupt_caller_rollback_removes_whole_staged_delta_and_checkpoint(
             source_unit_id=source_id,
             ability_slug="rozkaz",
             payload=_rozkaz_payload(target_id),
+            outcome_executor=_rng_consuming_ready_interrupt_executor,
             **_interrupt_guards(started.state),
         )
         session.rollback()
 
     assert _stream_snapshot(activation_world, battle_id) == before
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.dice.to_checkpoint() == rng_before
 
 
 @pytest.mark.parametrize("failure", ["checkpoint-conflict", "integrity-error"])
@@ -4600,6 +4677,10 @@ def test_interrupt_write_conflict_rolls_back_events_and_checkpoint(
         state=initial,
     )
     before = _stream_snapshot(activation_world, battle_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        rng_before = checkpoint.dice.to_checkpoint()
     real_save_checkpoint = activation_service.save_checkpoint
 
     def fail_after_checkpoint(*args, **kwargs):
@@ -4631,11 +4712,16 @@ def test_interrupt_write_conflict_rolls_back_events_and_checkpoint(
                 source_unit_id=source_id,
                 ability_slug="rozkaz",
                 payload=_rozkaz_payload(target_id),
+                outcome_executor=_rng_consuming_ready_interrupt_executor,
                 **_interrupt_guards(started.state),
             )
         session.rollback()
 
     assert _stream_snapshot(activation_world, battle_id) == before
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.dice.to_checkpoint() == rng_before
 
 
 def test_interrupt_concurrent_head_change_reports_sequence_conflict_only(
@@ -4647,6 +4733,14 @@ def test_interrupt_concurrent_head_change_reports_sequence_conflict_only(
         activation_world,
         state=initial,
     )
+    with activation_world.sessions() as session:
+        rng_json_before = session.scalar(
+            select(models.BattleCheckpoint.rng_json)
+            .where(models.BattleCheckpoint.battle_id == battle_id)
+            .order_by(models.BattleCheckpoint.sequence_at.desc())
+            .limit(1)
+        )
+        assert rng_json_before is not None
     real_save_events = activation_service.save_events
     raced = False
 
@@ -4684,6 +4778,7 @@ def test_interrupt_concurrent_head_change_reports_sequence_conflict_only(
                 source_unit_id=source_id,
                 ability_slug="rozkaz",
                 payload=_rozkaz_payload(target_id),
+                outcome_executor=_rng_consuming_ready_interrupt_executor,
                 **_interrupt_guards(started.state),
             )
         session.rollback()
@@ -4702,6 +4797,12 @@ def test_interrupt_concurrent_head_change_reports_sequence_conflict_only(
             .select_from(models.BattleCheckpoint)
             .where(models.BattleCheckpoint.battle_id == battle_id)
         ) == 2
+        assert session.scalar(
+            select(models.BattleCheckpoint.rng_json)
+            .where(models.BattleCheckpoint.battle_id == battle_id)
+            .order_by(models.BattleCheckpoint.sequence_at.desc())
+            .limit(1)
+        ) == rng_json_before
 
 
 @pytest.mark.parametrize(
@@ -4895,6 +4996,7 @@ def test_interrupt_success_is_one_batch_one_checkpoint_and_five_selects(
                     source_unit_id=source_id,
                     ability_slug="rozkaz",
                     payload=_rozkaz_payload(target_id),
+                    outcome_executor=_rng_consuming_ready_interrupt_executor,
                     **_interrupt_guards(started.state),
                 )
                 select_counts.append(

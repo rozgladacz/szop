@@ -14,6 +14,7 @@ from .. import models
 from ..battle_protocol import ACTIVATION_PROTOCOL_VERSION_V2
 from .engine.action_codec import ActionCodecError, action_from_json, action_to_json
 from .engine.activation_protocol import (
+    ActivationInterruptOutcomeExecutor,
     ActivationProtocolError,
     ActivationProtocolErrorReason,
     commit_activation_action,
@@ -727,6 +728,9 @@ def stage_battle_activation_interrupt(
     source_unit_id: int,
     ability_slug: str,
     payload: Mapping[str, Any],
+    outcome_executor: ActivationInterruptOutcomeExecutor = (
+        execute_ready_activation_interrupt_outcomes
+    ),
 ) -> StagedBattleActivationInterrupt:
     """Stage one public-ready v2 interrupt without ending a transaction."""
 
@@ -844,8 +848,9 @@ def stage_battle_activation_interrupt(
             source_unit_id=source_unit_id,
             ability_slug=ability_slug,
             payload=canonical_payload,
+            dice=checkpoint.dice,
             sequence=checkpoint.sequence_at + 1,
-            outcome_executor=execute_ready_activation_interrupt_outcomes,
+            outcome_executor=outcome_executor,
         )
     except ActivationProtocolError as exc:
         if exc.reason is ActivationProtocolErrorReason.PROTOCOL_UPGRADE_REQUIRED:
@@ -885,7 +890,7 @@ def stage_battle_activation_interrupt(
             battle.id,
             new_sequence,
             transition.state,
-            checkpoint.dice,
+            transition.dice,
             state_version=ACTIVATION_PROTOCOL_VERSION_V2,
         )
     except BattleEventSequenceConflict as exc:
@@ -902,7 +907,7 @@ def stage_battle_activation_interrupt(
         new_sequence=new_sequence,
         state=transition.state,
         events=transition.events,
-        dice=checkpoint.dice,
+        dice=transition.dice,
     )
 
 
