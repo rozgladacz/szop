@@ -503,8 +503,47 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   race i rollback są pokryte; `HttpClient.interrupt` używa istniejącej metody i
   wykonuje dokładnie jeden POST. Pełne listy SELECT są takie same jak dla
   Rozkazu/Klątwy: 5 w serwisie, 6 w request session i 7 dla bearera, bez N+1.
-  **C1/Strażnik jest public-ready DONE. C2/Oznaczenie pozostaje OPEN; niepuste
-  recovery, LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
+  **C1/Strażnik jest public-ready DONE.**
+  **B4.4d.C2a0 attack-declaration/attack-scope design DONE 2026-07-30:**
+  [ADR-0056 sekcja 5](adr/0056-interrupt-activation-protocol.md) zamraża bez
+  implementacji jawny protocol/checkpoint v3. V1/v2 pozostają niezmienione;
+  v3 zachowuje maneuver/defend/special jak v2, natomiast dopiero po zamknięciu
+  ogólnego `BEFORE_ACTION` accepted `ShootAction|ChargeAction` utrwala minimalny
+  frozen intent `{attacker,target,weapon_slug[,counter_attack_declared]}` i
+  otwiera osobny no-nested attack window. Statystyki broni zawsze pochodzą z
+  kanonicznego inventory, a declaration nie wykonuje rzutów.
+
+  Priority/passy reużywają dwugraczową kolejkę od snapshotu inicjatywy.
+  Oznaczenie może nadać tylko X z `oznaczenie_tak: true` innemu żywemu/frontowemu
+  sojuszniczemu atakującemu; edge-to-edge 12″ mierzy się do utrwalonego celu
+  ataku, a strict payload nie może podmienić attacker/target ani podać statystyk
+  ([`SZOP_Zdolnosci.md` konwencje tagów i pozycja 49](../app/static/docs/SZOP_Zdolnosci.md)).
+  Attack-only override żyje w `AttackState`, combat widzi go tylko dla
+  zadeklarowanego attacker ID, a `AttackResolved` usuwa wyłącznie ten scope po
+  wszystkich outcome eventach; nie używa ani nie czyści
+  `UnitBlob.ability_overrides`, więc Rozkaz/Klątwa pozostają do końca aktywacji.
+  Event ordering deklaracji/interruptu/passów/close/resolve, optimistic guardy,
+  same-owner/two-owner, complete-tail replay, prywatny RNG resolve, atomowy
+  rollback/race/no-oracle/auth i pułapy 5/6/7 SELECT są normatywne w ADR.
+
+  Nie dochodzi nowa trasa ani scope: przyszły v3 użyje istniejących
+  `POST /actions` do declaration i `operation=resolve_attack` oraz
+  `POST /interrupts` ze strict `scope=attack`; klient rozpozna pending scope ze
+  state v3 i dostanie tylko jedną nową metodę resolve. Intent nie istnieje w
+  trwałym/publicznym stanie przed legalną deklaracją. Publiczny allowlist po
+  C2a0 nadal wynosi dokładnie `{"rozkaz", "klatwa", "straznik"}`;
+  `oznaczenie` nadal jest odrzucane bez zapisu.
+
+  Dalszy podział pozostaje OPEN i każdy slice wymaga osobnego commitu/DoD:
+  **C2a1** immutable model + exact codec v3 z golden v1/v2;
+  **C2a2** siedem eventów, reducery i pure declare/pass/close/resolve z
+  restart/RNG parity; **C2b** immutable `oznaczenie_tak`, strict private handler
+  i attack effect view bez I/O/allowlisty; **C2c** durable service, opt-in/DB
+  constraint v3, FastAPI, publiczna allowlista i
+  `HttpClient.resolve_activation_attack` z same-owner/two-bearer, auth/audit,
+  stale/race/rollback/no-oracle i exact 5/6/7 SELECT gates.
+  **C2/Oznaczenie implementacja pozostaje OPEN; niepuste recovery,
+  LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
   `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
   bounded rekonstrukcję `BattleState` z najwcześniejszego trwałego checkpointu

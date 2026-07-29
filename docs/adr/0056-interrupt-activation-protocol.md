@@ -2,6 +2,8 @@
 
 - **Status:** Accepted
 - **Data:** 2026-07-19
+- **Rozszerzenie:** B4.4d.C2a0, 2026-07-30 — frozen design trwałej
+  deklaracji i zakresu jednego ataku; bez implementacji
 - **Kontekst:** B4.4a; projekt przed implementacją
   `POST /battles/{id}/interrupts`
 - **Rozszerza:** ADR-0010, ADR-0015, ADR-0015a, ADR-0049, ADR-0051 i
@@ -240,6 +242,321 @@ zamknięcie okna, pierwsza akcja, otwarcie drugiego okna i finalizacja. Ten sam
 checkpoint po zamknięciu i ponownym otwarciu sesji musi dopuszczać dokładnie te
 same następne operacje i zachować pozycję RNG.
 
+### 5. B4.4d.C2a0 — trwała deklaracja i zakres jednego ataku
+
+Ta sekcja jest normatywnym projektem przyszłego protocol/checkpoint v3.
+Nie zmienia istniejącego runtime v2. Powodem nowej wersji jest zmiana znaczenia
+zaakceptowanego `ShootAction`/`ChargeAction`: v2 rozstrzyga go od razu, natomiast
+v3 najpierw utrwala deklarację i dopiero po osobnym attack-scope window pozwala
+go rozstrzygnąć. Historyczne checkpointy i requesty v1/v2 nie są przepisywane
+ani reinterpretowane.
+
+Kanon wymaga, aby Oznaczenie wybrało X z `oznaczenie_tak: true`, dotyczyło
+innego sojuszniczego atakującego, mierzyło edge-to-edge 12″ do wskazanego celu
+ataku i trwało wyłącznie podczas tego jednego ataku ([konwencje][ZCONV],
+[pozycja 49][Z49]). Ogólne `BEFORE_ACTION` kończy się przed wykonaniem akcji
+([pkt 11.b.i–ii][R11]), a każde przerwanie musi zakończyć się przed następnym
+([pkt 12.a–c][R12]). Dlatego attack scope jest osobnym, no-nested oknem
+otwieranym dopiero po przyjęciu konkretnej deklaracji ataku; nie jest trzecim
+ogólnym `BEFORE_ACTION`.
+
+#### 5.1. Wersja i relacja do `ActivationState`
+
+`Battle.activation_protocol_version = 3` oraz
+`szop.battle_state/version = 3` są jawnym opt-inem. Decoder zachowuje osobne,
+dokładne registry pól dla v1, v2 i v3. V3 rozszerza `ActivationState` o:
+
+```text
+attack: AttackState | null
+```
+
+oraz `ActivationPhase` o:
+
+```text
+ATTACK_WINDOW
+ATTACK_RESOLUTION_READY
+```
+
+V1 i v2 nie kodują `attack` i nie znają nowych faz. V3 zachowuje wszystkie
+dotychczasowe fazy oraz ich znaczenie dla `ManeuverAction`, `DefendAction` i
+`SpecialAction`. Osiągalność jest konstrukcyjnym invariantem:
+
+- `ATTACK_WINDOW` wymaga `activation.window = null`,
+  `activation.attack != null` i `attack.window != null`;
+- `ATTACK_RESOLUTION_READY` wymaga `activation.window = null`,
+  `activation.attack != null` i `attack.window = null`;
+- każda pozostała faza wymaga `activation.attack = null`;
+- w jednym momencie istnieje najwyżej jedna aktywacja, jedno ogólne okno albo
+  jeden attack scope i najwyżej jeden pending attack;
+- `attack.ordinal == activation.action_count + 1` i wynosi `1 | 2`;
+  `action_count/action_types` rosną dopiero po pełnym rozstrzygnięciu ataku.
+
+`AttackState` jest frozen+slots i ma dokładnie:
+
+```text
+attack_id: int                         # sequence eventu AttackDeclared
+version: int                           # licznik accepted attack operations
+ordinal: 1 | 2
+intent: ShootAttackIntent | ChargeAttackIntent
+window: InterruptWindowState | null    # reuse immutable priority/pass shape
+ability_overrides: tuple[AttackAbilityOverride, ...]
+```
+
+`ShootAttackIntent` przechowuje wyłącznie
+`attacker_unit_id`, `target_unit_id` i `weapon_slug`.
+`ChargeAttackIntent` przechowuje te same pola oraz strict
+`counter_attack_declared: bool`, aby wznowić dokładną obecną semantykę
+`ChargeAction`. Oba warianty są osobnymi immutable dataclassami, nie
+`dict`-ami z polami opcjonalnymi. Nie zapisują nazwy, zasięgu, liczby ataków,
+AP, jakości ani zdolności broni.
+
+Przy deklaracji `weapon_slug` musi jednoznacznie wskazać profil w kanonicznym
+`UnitBlob.ranged_weapons` dla Ostrzału albo `UnitBlob.melee_weapons` dla
+Szarży. Powtórzone identyczne profile są jednym rozstrzygnięciem; brak profilu
+lub ten sam slug z różnymi statystykami jest nielegalny. Pełny profil w
+historycznym `szop.action/v1` jest wyłącznie nieufnym wire inputem: musi być
+bitowo równy profilowi kanonicznemu, ale nie jest zapisywany ani używany do
+rzutów. Przy późniejszym resolve serwer ponownie bierze profil wyłącznie z
+inventory i konstruuje lokalny `ShootAction`/`ChargeAction`. Inventory pozostaje
+jedynym SSOT statystyk.
+
+Deklaracja waliduje strict shape, caller/attacker, bieżący `ACTION_READY`,
+historię limitów akcji, dokładnie jeden obecnie reprezentowalny cel, żywy Front,
+relację enemy oraz jednoznaczny canonical weapon reference. Pełna walidacja
+mechaniczna i wszystkie rzuty są ponawiane dopiero podczas resolve na stanie
+z attack-scoped X; deklaracja nie emituje obrażeń/statusów i nie dotyka RNG.
+Obecne `ShootAction` i `ChargeAction` wspierają po jednym celu, mimo że kanon
+opisuje do dwóch celów Ostrzału/Szarży ([pkt 14.c–d][R14A]); C2 nie rozszerza
+modelu produktu.
+
+#### 5.2. Maszyna stanów i właściciele decyzji
+
+Gałąź v3 zastępuje wyłącznie przejście atakujących akcji z `ACTION_READY`:
+
+```text
+ACTION_READY
+  -> declare ShootAction|ChargeAction
+ATTACK_WINDOW (priority = activation.initiative_player)
+  -> attack interrupt* -> pass/handoff -> attack interrupt* -> pass/close
+ATTACK_RESOLUTION_READY
+  -> resolve_attack
+AWAITING_CONTINUATION | AWAITING_FINALIZATION
+```
+
+Nieatakujące akcje v3 nadal przechodzą atomowo z `ACTION_READY` do
+`AWAITING_CONTINUATION` albo `AWAITING_FINALIZATION`, dokładnie jak v2.
+
+Deklarację i resolve wykonuje `activation.controlling_player` z
+`battle:act`. Attack interrupt/pass wykonuje wyłącznie bieżący
+`attack.window.priority_player` z `battle:interrupt`. Priorytet zaczyna
+`activation.initiative_player`, interrupt nie zeruje passów ani nie przekazuje
+priorytetu, pierwszy pass przekazuje go drugiej stronie, a drugi zamyka okno,
+tak samo jak w ogólnym oknie ([pkt 10][R10], [pkt 12.c][R12]).
+
+Oznaczenie może wykonać tylko owner source. Source musi być żywy, na Froncie,
+naprawdę mieć Oznaczenie, być sojusznikiem zadeklarowanego atakującego i być od
+niego różny. Jedynym targetem pomiaru jest
+`attack.intent.target_unit_id`; klient nie może podać zastępczego targetu.
+Edge-to-edge gap source→cel ataku musi wynosić najwyżej 12″, a X musi być
+pasywką z jawnym `oznaczenie_tak: true` ([pozycja 49][Z49]). Payload handlera
+ma dokładnie `{"ability": <non-empty slug>}`; nie zawiera `target_id`,
+`attacker_id`, `granted`, statystyk broni, playera ani sequence. Oznaczenie
+zawsze nadaje X; nie dziedziczy `rozkaz_kierunek`.
+
+Same-owner nadal wysyła oba passy jawnie, a serwis mapuje tę samą tożsamość na
+stronę z trwałego priority. W two-owner tylko owner bieżącego priority może
+wykonać pass/interrupt; ze względu na ally/source invariant Oznaczenie może
+wykonać tylko strona atakującego, gdy otrzyma priorytet. Serwer nie auto-passuje
+strony bez legalnego Oznaczenia.
+
+Bounds są częścią modelu: jedno pending attack, jeden target i jeden weapon slug
+na obecny action type, maksymalnie 64 zaakceptowane attack interrupts i
+64 `AttackAbilityOverride` w jednym oknie, bez duplikatu tej samej pary
+`(source_unit_id, ability_slug)`. Slugi mają limit 128 znaków, JSON zachowuje
+istniejący limit głębokości 64, a całe atomowe resolve nie może przekroczyć
+10 000 eventów (ten sam publiczny pułap bounded replay). Osiągnięcie limitu
+interruptów blokuje następny interrupt jako 422, ale nie blokuje passu.
+
+Accepted declaration zwiększa `activation.version` dokładnie o 1, ustawia
+`attack.version = 1` i `attack.window.version = 1`; jawne open nie jest drugą
+operacją ani drugą inkrementacją. Każdy accepted attack interrupt lub pass
+zwiększa wszystkie trzy istniejące wersje dokładnie o 1, niezależnie od liczby
+eventów outcome; closing pass i close event współdzielą te same wersje. Resolve
+zwiększa `activation.version` i `attack.version` dokładnie o 1, a następnie
+usuwa attack. Wszystkie nowe attack-protocol eventy jednego requestu niosą
+jego końcowe wersje; istniejące outcome eventy zachowują własne payloady.
+`expected_sequence` guarduje globalny head, `activation_id/version` aktywację,
+`attack_id/version` deklarację, a `expected_window_version` konkretną pozycję
+priority/passów.
+
+#### 5.3. Eventy, reducery i exact replay
+
+V3 dodaje zamknięte eventy protokołu:
+
+- `AttackDeclared` — tworzy `AttackState`, przypina immutable intent i ustawia
+  końcowe `activation_version`, `attack_version = 1`;
+- `AttackInterruptWindowOpened` — jawnie potwierdza scope, ordinal,
+  `window_version = 1` i początkowy priority;
+- `AttackInterruptTriggered` — zwiększa raz activation/attack/window version
+  i `interrupt_count`, ale nie opisuje mechanicznego outcome;
+- `AttackInterruptPriorityPassed` — zapisuje handoff albo closing pass;
+- `AttackInterruptWindowClosed` — usuwa wyłącznie `attack.window` i przechodzi
+  do `ATTACK_RESOLUTION_READY`;
+- `AttackAbilityOverrideApplied` — dodaje do bieżącego attack scope dokładnie
+  `(source_unit_id, ability_slug)` dla zadeklarowanego atakującego;
+- `AttackResolved` — po kompletnych outcome eventach usuwa cały `AttackState`
+  i wyłącznie jego override'y.
+
+Akceptowana deklaracja emituje kolejno `AttackDeclared`,
+`AttackInterruptWindowOpened`. Akceptowane Oznaczenie emituje kolejno
+`AttackInterruptTriggered`, istniejący kanoniczny
+`InterruptTriggered(consumes_round_limit=true)` i
+`AttackAbilityOverrideApplied`. Nie emituje `AbilityOverrideApplied`.
+Pierwszy pass emituje jeden `AttackInterruptPriorityPassed`; closing pass
+emituje `AttackInterruptPriorityPassed`, `AttackInterruptWindowClosed`.
+
+Resolve emituje najpierw istniejące outcome eventy obrażeń/statusów, następnie
+`AttackResolved`, a na końcu istniejący `ActivationActionCommitted` z
+`action_type = shoot | charge`. Oba terminalne eventy jednej operacji niosą tę
+samą końcową `activation_version`; `AttackResolved` niesie końcową
+`attack_version`. `AttackResolved` przywraca na czas redukcji `ACTION_READY`,
+a `ActivationActionCommitted` pozostaje jedynym reducerem zwiększającym
+`action_count/action_types` i wybierającym
+`AWAITING_CONTINUATION|AWAITING_FINALIZATION`.
+
+Outcome eventy obrażeń, zabitych modeli i statusów pozostają SSOT. Reducery
+attack protocol zmieniają tylko activation/attack/window lub
+`used_interrupts_this_round`; nie rekonstruują wyników combat. Każdy accepted
+request zapisuje ciągły event range. Po każdym pełnym batchu declaration,
+interrupt, first pass, close i resolve obowiązuje:
+
+```text
+apply_events(initial_v3_state, complete_event_tail) == live_v3_checkpoint
+```
+
+Replay po `AttackResolved` nie ma attack override'u, lecz zachowuje niezależne
+activation-scoped `UnitBlob.ability_overrides` Rozkazu/Klątwy. Ani
+`AbilityOverridesCleared`, ani finalizacyjne czyszczenie aktywacji nie obsługuje
+attack scope.
+
+#### 5.4. Attack-scoped widok X
+
+`AttackAbilityOverride` nie jest polem `UnitBlob`. Combat otrzymuje immutable
+attack effect view związany z `attack_id` i `attacker_unit_id`; wspólny helper
+`effective_attack_passives(blob, attack_state)` zwraca
+`effective_passives(blob)` z dodanymi wyłącznie X bieżącego scope i tylko gdy
+`blob.id == intent.attacker_unit_id`. Bazowe pasywki oraz activation-scoped
+Rozkaz/Klątwa nadal są obliczane przez istniejący `effective_passives`.
+
+W `ChargeAction` scope żyje do końca atomowego outcome całej akcji, ale X jest
+widoczne tylko wtedy, gdy atakującym jest zadeklarowany
+`intent.attacker_unit_id`; kontratakujący obrońca nie dziedziczy X. Scope jest
+usuwany dopiero po wszystkich outcome eventach tej akcji, aby crash/replay nie
+tworzył pół-ataku. `AttackResolved` usuwa wyłącznie `ActivationState.attack`;
+nie może czyścić `UnitBlob.ability_overrides`, więc jeden atak nie usuwa
+Rozkazu ani Klątwy.
+
+#### 5.5. RNG, transakcja i failure semantics
+
+Declaration, attack interrupt i pass nie wykonują rzutów i checkpointują
+bitowo niezmieniony RNG. Resolve klonuje RNG z jednego spójnego checkpointu,
+rozwiązuje kanonicznie odtworzony action na prywatnym klonie, waliduje ciągłość
+outcome eventów i live/replay parity, a następnie stage'uje jeden guarded event
+batch oraz jeden checkpoint state+returned RNG.
+
+Każdy validation/domain/codec/handler/DB/unique/commit/race failure pozostawia
+trwały event head, checkpoint i RNG bez zmian. Błąd resolve po częściowym
+zużyciu prywatnego RNG pozostawia checkpoint w
+`ATTACK_RESOLUTION_READY`, więc legalny retry z aktualnymi guardami daje ten
+sam wynik. Nie istnieje trwały snapshot „atak w połowie rozstrzygania”.
+
+#### 5.6. Wire/API i no-oracle migration
+
+Nie powstaje nowa trasa ani scope. Protocol v3 używa istniejących:
+
+- `POST /battles/{id}/actions` z obecnym body action deklaruje
+  `ShootAction|ChargeAction` i zwraca **202** z pending `ATTACK_WINDOW`;
+- ten sam request dla maneuver/defend/special nadal rozstrzyga akcję i zwraca
+  **202**, jak v2;
+- `POST /battles/{id}/interrupts` dostaje ścisłą gałąź
+  `scope: "attack"` dla interrupt/pass;
+- `POST /battles/{id}/actions` dostaje ścisłą gałąź
+  `operation: "resolve_attack"` bez ponownego action body.
+
+Attack interrupt/pass zawiera `expected_sequence`, `activation_id`,
+`expected_activation_version`, `attack_id`, `expected_attack_version` i
+`expected_window_version`. Interrupt dodaje `source_unit_id`,
+`ability_slug="oznaczenie"` i exact payload `{"ability": X}`. Resolve zawiera
+`expected_sequence`, `activation_id`, `expected_activation_version`,
+`attack_id` i `expected_attack_version`. Guardy są strict int, nie bool.
+Jawny `scope` zapobiega omyłkowemu skierowaniu attack requestu do ogólnego
+`BEFORE_ACTION`; activation-scoped body bez `scope` zachowuje v2 wire.
+
+Klient rozpoznaje pending scope wyłącznie z participant-scoped state v3:
+`activation.phase`, `activation.attack.attack_id/version`,
+`activation.attack.window` i wersji okna. Intent pojawia się w odpowiedzi
+dopiero po accepted declaration w `ACTION_READY`; wcześniej nie istnieje w
+event logu, checkpointcie, response ani audit. Closing pass zwraca **200** i
+`ATTACK_RESOLUTION_READY`; resolve zwraca **202** oraz zwykły stan po
+`ActivationActionCommitted`. Attack interrupt zwraca **200**, pierwszy pass
+**202**, drugi pass **200**.
+
+`HttpClient.commit_activation_action` pozostaje metodą deklaracji/commit:
+dla ataku v3 caller musi sprawdzić zwrócony phase. C2c dodaje tylko jedną nową
+metodę `resolve_activation_attack`; istniejące `interrupt` i
+`pass_interrupt_priority` dostają addytywne attack guardy/scope bez GET,
+retry ani cache. Protocol v1 i v2 zachowują dotychczasowy wire, statusy i
+atomowe rozstrzyganie ataków; Oznaczenie pozostaje dla nich niewspierane.
+Tworzenie/invite v3 jest jawne, więc stary klient nie dostaje tej semantyki
+po cichu.
+
+Nowe stabilne kody to `attack_guard_required`, `stale_attack`,
+`attack_scope_required` i `illegal_attack_resolution`. Zachowane statusy:
+401 auth, 403 scope/ownership, wspólne 404 missing/foreign, 409 stale
+sequence/activation/attack/window, zła faza albo write race oraz 422 strict
+shape lub nielegalna domena. Przed pierwszym I/O wolno sprawdzić tylko
+source-independent exact shape, typy i bounds. Istnienie/ownership
+attacker/source/target, inventory, X, range i phase są sprawdzane dopiero po
+participant-scoped lookupie jednego checkpointu, aby preflight nie stał się
+oracle obcej bitwy. Error response i body-blind audit nie echo-ują
+raw intentu, weapon fields, X, source/target ani cudzych identyfikatorów;
+participant-scoped success state po legalnej deklaracji zawiera wyłącznie
+kanoniczny minimalny intent potrzebny do restartu. Publiczny
+`READY_INTERRUPT_HANDLERS` pozostaje dokładnie
+`rozkaz|klatwa|straznik` do C2c; activation scope nadal odrzuca
+`oznaczenie` bez zapisu.
+
+#### 5.7. Query/performance gate
+
+Każda przyszła mutacja declaration, attack interrupt/pass i resolve ma zachować
+obecny ceiling: 5 SELECT-ów w serwisie, 6 w pełnym request session i 7 dla
+bearera. Liczba oddziałów, profili, source, X, targetów i eventów nie może
+zwiększać liczby SELECT-ów. Jeden request zapisuje jeden guarded batch i jeden
+checkpoint; nie ma osobnego attack row ani SELECT/INSERT per override/event.
+
+Participant battle, event head i checkpoint są ładowane istniejącym O(1)
+seamem. Intent, source, target i inventory są rozwiązywane z jednego frozen
+`BattleState`; katalog `oznaczenie_tak` jest immutable i procesowo cache'owany.
+CPU może liniowo przeskanować już załadowane bloby/inventory, ale nie wykonuje
+I/O. C2c musi mierzyć pełne listy SELECT dla declaration, first/closing pass,
+Oznaczenia i resolve w małym oraz dużym stanie, a nie tylko ich liczbę.
+
+#### 5.8. Call-site impact audit
+
+| Aktualny call site | Zamrożony wpływ przyszłej migracji |
+|---|---|
+| `state.py` / `state_codec.py` | C2a1 dodaje v3-only immutable attack types, fazy, exact registry i reachable snapshots; v1/v2 payloady pozostają byte-for-byte kontraktem. |
+| `events.py` / `reducers.py` / `apply_events` | C2a2 dodaje siedem attack eventów i reducery; outcome reducery pozostają SSOT, registry kompletności i complete-tail parity obejmują każdy restart head. |
+| `activation_protocol.commit_activation_action` | W v3 dispatchuje nieatakujące akcje do istniejącego pathu, a ataki do declaration; osobny pure resolve reużywa `_validated_action_outcomes` i kończy istniejącym `ActivationActionCommitted`. V2 path pozostaje bez zmian. |
+| `actions.py` / `action_codec.py` | Publiczny `szop.action/v1` i limity historii pozostają; server canonicalizuje minimalny attack intent i nigdy nie persystuje client weapon stats. |
+| `interrupts.py` / combat / `effective_passives` | Legacy `_oznaczenie_handler` nie jest reużywany. C2b dodaje osobny `oznaczenie_tak`, exact handler i attack effect view; `UnitBlob.ability_overrides` oraz `AbilityOverridesCleared` nie obsługują tego scope. |
+| `battle_activations.py` | C2c rozdziela action declaration/resolve i activation/attack interrupt scope, ale zachowuje participant lookup, ownership, optimistic head, prywatny RNG, guarded batch i checkpoint SSOT. |
+| `battle_actions.py` | Historyczny v1 `prepare/stage_battle_action` nie zmienia się. |
+| `routers/battles.py` | Te same `/actions` i `/interrupts`, addytywne strict uniony v3, te same scope'y, commit/rollback, envelope, no-oracle i body-blind audit. |
+| `szop_client/http.py` | Decoder przyjmuje state v3, istniejące mutation methods zachowują one-POST; dochodzi tylko `resolve_activation_attack`. Legacy `take_action` i v1/v2 pozostają. |
+| Testy state/codec/event/protocol/service/transport/client | C2a1 rozszerza checkpoint golden; C2a2 restart/replay/RNG i exact ordering; C2b source/other-ally/12″/tag/one-attack/Charge-counterattack; C2c strict wire, auth/no-oracle/audit, same-owner/two-bearer, stale/race/rollback oraz pełne listy 5/6/7 SELECT. Istniejące testy v1/v2 są obowiązkową regresją. |
+| `LocalClient`, `GameClient`, MCP/UI i proposals | Poza C2; nie dostają automatycznego passu/resolve ani nowego write surface w tych slice'ach. |
+
 ## Wire / API
 
 ### Wspólny optimistic guard i odpowiedź
@@ -407,9 +724,11 @@ historyczny error contract ADR-0054.
 
 ## Persistence / concurrency
 
-1. `Battle.activation_protocol_version` jest trwałym `1 | 2`. Istniejące wiersze
-   dostają `1`; nowe sandboxy/invite'y wybierają v2 jawnie w wersjonowanym
-   create contract. Wartość musi zgadzać się z wersją checkpointu.
+1. `Battle.activation_protocol_version` jest obecnie trwałym `1 | 2`.
+   Istniejące wiersze dostają `1`; nowe sandboxy/invite'y wybierają v2 jawnie
+   w wersjonowanym create contract. C2c rozszerzy constraint do `1 | 2 | 3`
+   wyłącznie dla jawnego opt-inu z sekcji 5. Wartość zawsze musi zgadzać się
+   z wersją checkpointu.
 2. Event log pozostaje kanonem, a activation/window żyją w checkpoint v2. Nie
    powstaje drugi mutable `current_activation` row ani kolumny duplikujące phase.
 3. `expected_sequence` jest CAS-em całego strumienia. Każdy pass/interrupt/action
@@ -486,7 +805,7 @@ historyczny error contract ADR-0054.
 | Rozkaz(X) | Public-ready w pure engine i trwałym transporcie v2 od B4.4b.7/B4.4c.9. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
 | Klątwa(X) | Public-ready od B4.4d.C0; reużywa istniejący transport v2 i klienta. | Osobny validator `klatwa_tak`, pięć jawnych pasywek (`delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`), enemy target, 12″, oba kierunki strict bool, limit raz/rundę i wygaśnięcie przy finalizacji; nie reużywa `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
 | Strażnik | Public-ready od B4.4d.C1c przez istniejący activation protocol v2, durable service, FastAPI i `HttpClient.interrupt`. | Exact plan zawiera tylko `assignments[{weapon_slug,target_id}]`; private C1b rozwiązuje canonical inventory, legalny source/weapon/1–2 targets, pełny multi-profile Ostrzał z per-target pools, następnie Wyczerpany, bounded eventy, RNG/replay i no-nested. C1c dodaje strict preflight przed I/O, bezpośredni dispatch omijający legacy stub, atomowy event+RNG checkpoint, real-transport/auth/race/rollback/query gates i allowlistę dokładnie `rozkaz|klatwa|straznik` ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]). |
-| Oznaczenie(X) | Publicznie niewspierane w obecnej semantyce. | Osobny attack-declaration/attack-scope prerequisite po zamknięciu ogólnego `BEFORE_ACTION`: cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, efekt tylko do `AttackResolved`, nie do końca aktywacji ([pozycja 49][Z49]). To rozszerzenie nadal użyje `POST /interrupts`, ale nie może udawać zwykłego activation override. |
+| Oznaczenie(X) | C2a0 design DONE; implementacja i publikacja pozostają OPEN. | Protocol/checkpoint v3 z sekcji 5: deklaracja dopiero po zamknięciu ogólnego `BEFORE_ACTION`, osobny attack scope, cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, effect view tylko dla zadeklarowanego atakującego i usunięcie przez `AttackResolved` ([pozycja 49][Z49]). Przyszły handler użyje istniejącego `POST /interrupts`, ale nie `UnitBlob.ability_overrides`. |
 
 Registry może zawierać niegotowe handlery do testów engine; publiczna allowlista
 nie może ich eksportować.
@@ -544,8 +863,8 @@ rulesetu bez obu kanonicznych tagów nie jest legalnym X.
 - Checkpoint schema v2, nowe eventy/reducery i model protocol version wymagają
   świadomej migracji wszystkich konstruktorów `BattleState` oraz klientów.
 - Legacy v1 pozostaje osobnym, ograniczonym trybem do czasu jawnej migracji.
-- Oznaczenie i Strażnik potrzebują osobnych prereq; nie domykają pierwszego
-  API slice.
+- C2a0 zamraża prerequisite Oznaczenia, ale model/codec, lifecycle, handler i
+  transport pozostają osobnymi, niezaimplementowanymi slice'ami.
 
 ## Rejected alternatives
 
@@ -563,6 +882,14 @@ rulesetu bez obu kanonicznych tagów nie jest legalnym X.
 6. **Osobny mutable row `current_activation` jako drugi SSOT.** Odrzucone:
    checkpoint/event log już zapewniają atomowy, replayowalny stan; drugi head
    tworzyłby drift.
+7. **Zmiana semantyki istniejącego protocol/checkpoint v2 w miejscu.**
+   Odrzucone: obecny klient zakłada, że accepted attack jest już rozstrzygnięty,
+   a exact codec v2 nie ma attack state. Jawny v3 zachowuje v1/v2 i zapobiega
+   cichej zmianie zachowania.
+8. **Oznaczenie przez `UnitBlob.ability_overrides` i
+   `AbilityOverridesCleared`.** Odrzucone: scope aktywacji przeżywa jeden atak,
+   a wspólne czyszczenie mogłoby usunąć niezależny Rozkaz/Klątwę. Attack state
+   i `AttackResolved` mają dokładną własność lifecycle.
 
 ## Staged rollout / Definition of Done
 
@@ -826,7 +1153,8 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   service/session/bearer, bez N+1. Nie dodano trasy, scope'u, eventu/reducera,
   DB/schema, metody klienta ani zmian v1.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
-  pakowanie pozostają osobnymi slice'ami; C2/Oznaczenie pozostaje OPEN.
+  pakowanie pozostają osobnymi slice'ami; C2a0 design Oznaczenia jest DONE,
+  a implementacyjne C2a1/C2a2/C2b/C2c pozostają OPEN.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -877,9 +1205,39 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   `HttpClient` one-POST; same-owner/two-bearer, auth/no-oracle/audit,
   race/rollback/replay/finalize oraz 5/6/7 SELECT bez N+1.
 - **C1 Strażnik public-ready DONE 2026-07-29.**
-- **C2 Oznaczenie:** najpierw attack-declaration/attack-scope events i
-  wygaśnięcie po jednym ataku, potem handler; żadnego activation-scoped fallback;
-  własny commit i DoD.
+- **C2a0 attack-declaration/attack-scope design DONE 2026-07-30:** sekcja 5
+  zamraża jawny protocol/checkpoint v3, immutable minimal intent,
+  declaration/window/resolve state machine, ownership i guardy, event ordering,
+  attack-only override, replay/RNG/rollback/race/no-oracle/auth, kompatybilny
+  wire oraz pułapy 5/6/7 SELECT. Nie zmieniono kodu ani allowlisty.
+- **C2a1 model + codec OPEN:** dodać v3-only immutable
+  `ShootAttackIntent`/`ChargeAttackIntent`, `AttackState`,
+  `AttackAbilityOverride`, dwie fazy i exact codec v3. Warunek zakończenia:
+  konstrukcyjnie odrzucone nieosiągalne snapshoty, JSON round-trip wszystkich
+  headów i byte-for-byte niezmienione golden v1/v2; bez eventów, reducerów,
+  protocol transitions, DB i publicznego wire.
+- **C2a2 eventy + reducery + pure lifecycle OPEN:** dodać siedem eventów z
+  sekcji 5.3, reducery i pure declare/pass/close/resolve z canonical inventory,
+  prywatnym RNG oraz complete-tail equality na każdym restart headzie. Warunek
+  zakończenia: pass-only attack scope działa dla Shoot/Charge, nonattack v3 i
+  całe v2 nie dryfują, validation/outcome failure nie zmienia state/RNG; bez
+  metadata/handlera Oznaczenia, persistence/router/client i allowlisty.
+- **C2b source-correct metadata/private handler OPEN:** dodać immutable
+  `oznaczenie_tak`, strict katalog/payload, source/ally/other-attacker/target
+  edge-to-edge 12″/raz-rundę oraz attack effect view widoczny tylko dla
+  zadeklarowanego atakującego, także z kontratakiem Szarży. Warunek zakończenia:
+  exact `InterruptTriggered` + `AttackAbilityOverrideApplied`, combat/replay
+  parity i brak mutacji/czyszczenia `UnitBlob.ability_overrides`; bez I/O,
+  publicznej allowlisty i transportu.
+- **C2c durable/FastAPI/HttpClient OPEN:** rozszerzyć opt-in create/invite i DB
+  constraint do protocol v3, rozdzielić durable declaration/resolve oraz
+  activation/attack interrupt scope, dodać strict uniony na istniejących
+  `/actions` i `/interrupts`, decoder state v3 i jedną metodę klienta
+  `resolve_activation_attack`. Dopiero ten slice dodaje `oznaczenie` do
+  publicznej allowlisty. Warunek zakończenia: same-owner/two-bearer,
+  restart po każdym headzie, stale/duplicate/race/rollback, body-blind audit,
+  no-oracle, scope'y, v1/v2/nonattack parity, one-POST client i dokładne
+  5/6/7 SELECT bez N+1.
 
 ### D. HttpClient real-transport parity
 
@@ -899,7 +1257,7 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 
 - standalone install/export klienta v2, minimalne zależności, version metadata,
   smoke import bez ORM/serwera;
-- wheel/editable install test oraz przykład negocjacji protocol v1/v2;
+- wheel/editable install test oraz przykład negocjacji protocol v1/v2/v3;
 - dopiero po tym osobna decyzja może rozważyć zmianę domyślnej wersji create.
 
 [R8]: ../../app/static/docs/SZOP_Rozjemca.md "pkt 8.a"
@@ -922,4 +1280,4 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 [Z45]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 45 Klątwa(X)"
 [Z49]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 49 Oznaczenie(X)"
 [Z50]: ../../app/static/docs/SZOP_Zdolnosci.md "pozycja 50 Rozkaz(X)"
-[ZCONV]: ../../app/static/docs/SZOP_Zdolnosci.md "Konwencje tagów Rozkazu"
+[ZCONV]: ../../app/static/docs/SZOP_Zdolnosci.md "Konwencje tagów zdolności pasywnych"
