@@ -481,13 +481,30 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   [`SZOP_Rozjemca.md` pkt 14.c, 17 i 22.a](../app/static/docs/SZOP_Rozjemca.md)
   oraz [pozycją 31](../app/static/docs/SZOP_Zdolnosci.md). Prywatny RNG C1a
   przesuwa się tylko o wykonane rzuty; replay/restart/future-roll parity i
-  rollback po częściowym zużyciu są pokryte. C1/Strażnik pozostaje OPEN do
-  osobnego durable/public podpięcia oraz real-transport/auth/race/query gates:
-  allowlista nadal wynosi dokładnie `{"rozkaz", "klatwa"}`, a service,
-  FastAPI i `HttpClient` nadal odrzucają `straznik` bez zapisu i bez
-  request amplification.
-  **Niepuste source-correct recovery handlery, Strażnik, Oznaczenie,
-  LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
+  rollback po częściowym zużyciu są pokryte. Sam slice C1b nie tworzył
+  produkcyjnego call site'u ani nie zmieniał allowlisty; publiczne podpięcie
+  zamyka C1c poniżej.
+  **B4.4d.C1c durable/public source-correct Strażnik DONE 2026-07-29:**
+  `READY_INTERRUPT_HANDLERS` wynosi dokładnie
+  `{"rozkaz", "klatwa", "straznik"}`. Handler-specific preflight odrzuca przed
+  DB I/O wszystko poza exact payloadem
+  `{"assignments":[{"weapon_slug": <non-empty str>, "target_id": <strict int >= 0>}, ...]}`
+  z limitami C1b; caller nie podaje statystyk broni, sequence ani source/player
+  w payloadzie. Publiczny executor omija legacy stub i deleguje Strażnika
+  bezpośrednio do prywatnego activation-v2 outcome C1b z klonem RNG C1a.
+  Istniejący `stage_battle_activation_interrupt` zapisuje w jednym guarded
+  batchu ciągły delta od `ActivationInterruptTriggered` przez dokładnie jeden
+  `InterruptTriggered(straznik)`, pełny Ostrzał/alokację i końcowy
+  `StatusAdded(Wyczerpany)`, a zwrócony RNG trafia atomowo do tego samego
+  pojedynczego checkpointu. Ta sama trasa `POST /battles/{id}/interrupts`,
+  scope `battle:interrupt`, status 200, zamknięty state-v2/exact-event envelope,
+  no-oracle i body-blind audit pozostają bez zmian. Same-owner, dwaj ownerzy z
+  dwoma bearerami, replay/restart/finalize, strict payload, auth, stale/duplicate/
+  race i rollback są pokryte; `HttpClient.interrupt` używa istniejącej metody i
+  wykonuje dokładnie jeden POST. Pełne listy SELECT są takie same jak dla
+  Rozkazu/Klątwy: 5 w serwisie, 6 w request session i 7 dla bearera, bez N+1.
+  **C1/Strażnik jest public-ready DONE. C2/Oznaczenie pozostaje OPEN; niepuste
+  recovery, LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
   `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
   bounded rekonstrukcję `BattleState` z najwcześniejszego trwałego checkpointu

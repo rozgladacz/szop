@@ -103,6 +103,22 @@ def _seed_activation_transport_world(
             ap=0,
             armory=armory,
         )
+        guardian_rifle = models.Weapon(
+            name="Guardian rifle",
+            range='24"',
+            attacks=3,
+            ap=2,
+            tags="Niezawodny, Brutalny",
+            armory=armory,
+        )
+        guardian_cannon = models.Weapon(
+            name="Guardian cannon",
+            range='30"',
+            attacks=2,
+            ap=3,
+            tags="Precyzyjny",
+            armory=armory,
+        )
         unit = models.Unit(
             name="Activation infantry",
             quality=4,
@@ -122,6 +138,11 @@ def _seed_activation_transport_world(
             type="aktywna",
             description="Transport fixture",
         )
+        straznik = models.Ability(
+            name="Strażnik",
+            type="pasywna",
+            description="Transport fixture",
+        )
         session.add_all(
             [
                 p0,
@@ -131,9 +152,12 @@ def _seed_activation_transport_world(
                 armory,
                 army,
                 weapon,
+                guardian_rifle,
+                guardian_cannon,
                 unit,
                 rozkaz,
                 klatwa,
+                straznik,
             ]
         )
         session.flush()
@@ -146,8 +170,23 @@ def _seed_activation_transport_world(
                     default_count=1,
                     is_primary=True,
                 ),
+                models.UnitWeapon(
+                    unit=unit,
+                    weapon=guardian_rifle,
+                    is_default=True,
+                    default_count=1,
+                    is_primary=True,
+                ),
+                models.UnitWeapon(
+                    unit=unit,
+                    weapon=guardian_cannon,
+                    is_default=True,
+                    default_count=1,
+                    is_primary=False,
+                ),
                 models.UnitAbility(unit=unit, ability=rozkaz),
                 models.UnitAbility(unit=unit, ability=klatwa),
+                models.UnitAbility(unit=unit, ability=straznik),
             ]
         )
 
@@ -394,6 +433,38 @@ def _pass(world_client: TestClient, battle_id: int, previous_response):
         f"/battles/{battle_id}/interrupts",
         json={"operation": "pass", **_activation_guards(previous_response)},
     )
+
+
+def _straznik_interrupt_body(previous_response) -> dict[str, Any]:
+    state = _wire_state(previous_response)
+    activation = state.activation
+    assert activation is not None
+    assert activation.window is not None
+    priority_player = activation.window.priority_player
+    assert priority_player != activation.controlling_player
+    source_id = next(
+        blob.id
+        for blob in state.blobs
+        if blob.owner_player == priority_player and blob.models_alive > 0
+    )
+    target_ids = [
+        blob.id
+        for blob in state.blobs
+        if blob.owner_player != priority_player and blob.models_alive > 0
+    ]
+    assert len(target_ids) >= 2
+    return {
+        "operation": "interrupt",
+        **_activation_guards(previous_response),
+        "source_unit_id": source_id,
+        "ability_slug": "straznik",
+        "payload": {
+            "assignments": [
+                {"weapon_slug": "guardian rifle", "target_id": target_ids[0]},
+                {"weapon_slug": "guardian cannon", "target_id": target_ids[1]},
+            ]
+        },
+    }
 
 
 def _action(world_client: TestClient, battle_id: int, previous_response):
@@ -1010,7 +1081,7 @@ def test_interrupt_union_is_closed_strict_and_write_free(
     assert _stream_counts(world, battle["battle_id"]) == before
 
 
-def test_public_rozkaz_and_klatwa_succeed_and_nonready_slugs_fail_closed(
+def test_public_rozkaz_and_klatwa_succeed_and_unready_slugs_fail_closed(
     activation_transport_world: ActivationTransportWorld,
 ) -> None:
     world = activation_transport_world
@@ -1072,7 +1143,7 @@ def test_public_rozkaz_and_klatwa_succeed_and_nonready_slugs_fail_closed(
     assert cursed_target.ability_overrides == (("delikatny", True),)
     assert (2, "klatwa") in cursed_state.used_interrupts_this_round
 
-    for slug in ("oznaczenie", "straznik", "registry-only"):
+    for slug in ("oznaczenie", "registry-only"):
         before = _stream_counts(world, battle_id)
         rejected = world.p0.post(
             f"/battles/{battle_id}/interrupts",
@@ -1093,6 +1164,412 @@ def test_public_rozkaz_and_klatwa_succeed_and_nonready_slugs_fail_closed(
             "detail": {"code": "unsupported_interrupt"}
         }
         assert _stream_counts(world, battle_id) == before
+
+
+def test_public_same_owner_straznik_has_exact_delta_rng_restart_and_finalize(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=2)
+    battle_id = battle["battle_id"]
+    started = _start(world.p0, battle)
+    handed_off = _pass(world.p0, battle_id, started)
+    assert handed_off.status_code == 202
+    before = _stream_counts(world, battle_id)
+    body = _straznik_interrupt_body(handed_off)
+
+    interrupted = world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        json=body,
+    )
+
+    assert interrupted.status_code == 200, interrupted.text
+    _assert_exact_envelope(interrupted, battle_id)
+    after = _stream_counts(world, battle_id)
+    assert after[0] > before[0]
+    assert after[1] == before[1] + 1
+    assert after[2] == interrupted.json()["new_sequence"]
+    assert after[3] != before[3]
+    events = interrupted.json()["events"]
+    assert events[0]["event_type"] == "ActivationInterruptTriggered"
+    assert sum(event["event_type"] == "InterruptTriggered" for event in events) == 1
+    marker = next(
+        event["payload"]
+        for event in events
+        if event["event_type"] == "InterruptTriggered"
+    )
+    assert marker["slug"] == "straznik"
+    assert marker["payload"] == body["payload"]
+    shots = [
+        event["payload"]
+        for event in events
+        if event["event_type"] == "ShotResolved"
+    ]
+    assert [shot["weapon_slug"] for shot in shots] == [
+        "guardian rifle",
+        "guardian cannon",
+    ]
+    assert all(shot["wounds_dealt"] + shot["wounds_precise"] > 0 for shot in shots)
+    assert events[-1]["event_type"] == "StatusAdded"
+    assert events[-1]["payload"]["target_id"] == body["source_unit_id"]
+    assert events[-1]["payload"]["status"] == "Wyczerpany"
+    state = _wire_state(interrupted)
+    source = next(blob for blob in state.blobs if blob.id == body["source_unit_id"])
+    assert "Wyczerpany" in source.status_flags
+    assert state.activation.window.priority_player == 1
+    assert state.activation.window.passed_players == (0,)
+
+    restarted = world.p0.get(f"/battles/{battle_id}/state")
+    assert restarted.status_code == 200
+    assert restarted.json()["sequence_at"] == interrupted.json()["new_sequence"]
+    assert battle_state_from_json(
+        {
+            key: restarted.json()[key]
+            for key in ("schema", "version", "state")
+        }
+    ) == state
+
+    closed = _pass(world.p0, battle_id, interrupted)
+    assert closed.status_code == 200
+    action = _action(world.p0, battle_id, closed)
+    assert action.status_code == 202
+    finalized = _transition(
+        world.p0,
+        battle_id,
+        action,
+        operation="finalize",
+    )
+    assert finalized.status_code == 200
+    assert _wire_state(finalized).activation is None
+
+
+def test_http_client_real_transport_straznik_is_exactly_one_post(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=2)
+    battle_id = battle["battle_id"]
+    started = _start(world.p0, battle)
+    handed_off = _pass(world.p0, battle_id, started)
+    body = _straznik_interrupt_body(handed_off)
+    transport = CountingTestClientTransport(world.p0)
+    client = HttpClient("http://testserver", transport=transport)
+
+    result = client.interrupt(
+        battle_id,
+        expected_sequence=body["expected_sequence"],
+        activation_id=body["activation_id"],
+        expected_activation_version=body["expected_activation_version"],
+        expected_window_version=body["expected_window_version"],
+        source_unit_id=body["source_unit_id"],
+        ability_slug="straznik",
+        payload=body["payload"],
+    )
+
+    assert len(transport.requests) == 1
+    request = transport.requests[0]
+    assert request.method == "POST"
+    assert urlsplit(request.url).path == f"/battles/{battle_id}/interrupts"
+    assert json.loads(request.body.decode("utf-8")) == body
+    assert result.previous_sequence == handed_off.json()["new_sequence"]
+    assert result.new_sequence > result.previous_sequence
+    assert type(result.events[0]).__name__ == "ActivationInterruptTriggered"
+    assert sum(type(event).__name__ == "InterruptTriggered" for event in result.events) == 1
+    assert type(result.events[-1]).__name__ == "StatusAdded"
+    source = next(
+        blob for blob in result.state.blobs if blob.id == body["source_unit_id"]
+    )
+    assert "Wyczerpany" in source.status_flags
+
+
+def test_public_two_owner_straznik_uses_two_bearers_and_closed_errors(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_two_owner_battle(world)
+    battle_id = battle["battle_id"]
+    token_by_user_id = {
+        world.ids.p0_user_id: "straznik-p0",
+        world.ids.p1_user_id: "straznik-p1",
+    }
+    scopes = {
+        battles.BATTLE_ACT_SCOPE: True,
+        battles.BATTLE_INTERRUPT_SCOPE: True,
+    }
+    for user_id, raw_token in token_by_user_id.items():
+        _seed_token(
+            world,
+            owner_user_id=user_id,
+            raw_token=raw_token,
+            scopes=scopes,
+        )
+    token_by_player = {
+        0: token_by_user_id[battle["p1_user_id"]],
+        1: token_by_user_id[battle["p2_user_id"]],
+    }
+    state_response = world.p0.get(f"/battles/{battle_id}/state")
+    state_payload = state_response.json()
+    initial_state = battle_state_from_json(
+        {
+            key: state_payload[key]
+            for key in ("schema", "version", "state")
+        }
+    )
+    controlling_player = initial_state.active_player
+    selected_id = next(
+        blob.id
+        for blob in initial_state.blobs
+        if blob.owner_player == controlling_player and blob.models_alive > 0
+    )
+    world.outsider.cookies.clear()
+    started = world.outsider.post(
+        f"/battles/{battle_id}/activations",
+        headers=_bearer(token_by_player[controlling_player]),
+        json={
+            "expected_sequence": state_payload["sequence_at"],
+            "selected_unit_id": selected_id,
+        },
+    )
+    assert started.status_code == 201, started.text
+    current = started
+    current_state = _wire_state(current)
+    priority_player = current_state.activation.window.priority_player
+    if priority_player == controlling_player:
+        current = world.outsider.post(
+            f"/battles/{battle_id}/interrupts",
+            headers=_bearer(token_by_player[priority_player]),
+            json={"operation": "pass", **_activation_guards(current)},
+        )
+        assert current.status_code == 202
+        current_state = _wire_state(current)
+        priority_player = current_state.activation.window.priority_player
+    assert priority_player != controlling_player
+
+    body = _straznik_interrupt_body(current)
+    before = _stream_counts(world, battle_id)
+    foreign_source_id = next(
+        blob.id
+        for blob in current_state.blobs
+        if blob.owner_player != priority_player and blob.models_alive > 0
+    )
+    foreign_source = world.outsider.post(
+        f"/battles/{battle_id}/interrupts",
+        headers=_bearer(token_by_player[priority_player]),
+        json={**body, "source_unit_id": foreign_source_id},
+    )
+    assert foreign_source.status_code == 403
+    assert foreign_source.json() == {"detail": {"code": "forbidden"}}
+    missing_target_payload = {
+        "assignments": [
+            {**assignment, "target_id": 999999999}
+            if index == 0
+            else assignment
+            for index, assignment in enumerate(body["payload"]["assignments"])
+        ]
+    }
+    missing_target = world.outsider.post(
+        f"/battles/{battle_id}/interrupts",
+        headers=_bearer(token_by_player[priority_player]),
+        json={**body, "payload": missing_target_payload},
+    )
+    assert missing_target.status_code == 422
+    assert missing_target.json() == {"detail": {"code": "illegal_interrupt"}}
+    assert _stream_counts(world, battle_id) == before
+
+    interrupted = world.outsider.post(
+        f"/battles/{battle_id}/interrupts",
+        headers=_bearer(token_by_player[priority_player]),
+        json=body,
+    )
+    assert interrupted.status_code == 200, interrupted.text
+    _assert_exact_envelope(interrupted, battle_id)
+    after_success = _stream_counts(world, battle_id)
+    duplicate = world.outsider.post(
+        f"/battles/{battle_id}/interrupts",
+        headers=_bearer(token_by_player[priority_player]),
+        json=body,
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.json() == {"detail": {"code": "stale_sequence"}}
+    assert _stream_counts(world, battle_id) == after_success
+
+    with world.sessions() as session:
+        audits = session.execute(select(models.AgentAuditLog)).scalars().all()
+        serialized = "\n".join(audit.params_json for audit in audits)
+    assert "straznik-p0" not in serialized
+    assert "straznik-p1" not in serialized
+    assert "straznik" not in serialized
+    assert "assignments" not in serialized
+    assert "guardian rifle" not in serialized
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"assignments": []},
+        {"assignments": ()},
+        {
+            "assignments": [
+                {"weapon_slug": "guardian rifle", "target_id": True},
+            ]
+        },
+        {
+            "assignments": [
+                {
+                    "weapon_slug": "guardian rifle",
+                    "target_id": 1,
+                    "attacks": 999,
+                }
+            ]
+        },
+        {
+            "assignments": [
+                {"weapon_slug": "guardian rifle", "target_id": 1},
+                {"weapon_slug": "guardian rifle", "target_id": 2},
+            ]
+        },
+        {
+            "assignments": [
+                {"weapon_slug": f"profile-{index}", "target_id": 1}
+                for index in range(65)
+            ]
+        },
+    ],
+)
+def test_public_straznik_payload_is_strict_bounded_and_atomic(
+    activation_transport_world: ActivationTransportWorld,
+    payload: object,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=2)
+    battle_id = battle["battle_id"]
+    started = _start(world.p0, battle)
+    handed_off = _pass(world.p0, battle_id, started)
+    before = _stream_counts(world, battle_id)
+    valid_body = _straznik_interrupt_body(handed_off)
+
+    response = world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        json={**valid_body, "payload": payload},
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"code": "illegal_interrupt"}}
+    assert _stream_counts(world, battle_id) == before
+
+
+def test_public_straznik_v1_requires_upgrade_without_writes(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=1)
+    battle_id = battle["battle_id"]
+    before = _stream_counts(world, battle_id)
+
+    response = world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        json={
+            "operation": "interrupt",
+            "expected_sequence": battle["latest_sequence"],
+            "activation_id": 1,
+            "expected_activation_version": 1,
+            "expected_window_version": 1,
+            "source_unit_id": 0,
+            "ability_slug": "straznik",
+            "payload": {
+                "assignments": [
+                    {"weapon_slug": "guardian rifle", "target_id": 1}
+                ]
+            },
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": {"code": "battle_protocol_upgrade_required"}
+    }
+    assert _stream_counts(world, battle_id) == before
+
+
+@pytest.mark.parametrize(
+    "write_error",
+    [
+        IntegrityError("forced Strażnik commit failure", {}, RuntimeError()),
+        OperationalError("forced Strażnik sqlite lock", {}, RuntimeError()),
+    ],
+)
+def test_public_straznik_db_failure_rolls_back_events_state_and_rng(
+    activation_transport_world: ActivationTransportWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    write_error: Exception,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=2)
+    battle_id = battle["battle_id"]
+    started = _start(world.p0, battle)
+    handed_off = _pass(world.p0, battle_id, started)
+    body = _straznik_interrupt_body(handed_off)
+    before = _stream_counts(world, battle_id)
+
+    def fail_commit(self) -> None:
+        raise write_error
+
+    monkeypatch.setattr(Session, "commit", fail_commit)
+    response = world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        json=body,
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"detail": {"code": "write_conflict"}}
+    assert _stream_counts(world, battle_id) == before
+
+
+def test_two_independent_sessions_accept_exactly_one_straznik_winner(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=2)
+    battle_id = battle["battle_id"]
+    started = _start(world.p0, battle)
+    handed_off = _pass(world.p0, battle_id, started)
+    body = _straznik_interrupt_body(handed_off)
+    before_checkpoints = _stream_counts(world, battle_id)[1]
+    second_app = _activation_test_app(world.sessions)
+
+    with TestClient(second_app) as second_client:
+        assert (
+            second_client.post(
+                f"/_test/session/{world.ids.p0_user_id}"
+            ).status_code
+            == 200
+        )
+        first = world.p0.post(
+            f"/battles/{battle_id}/interrupts",
+            json=body,
+        )
+        second = second_client.post(
+            f"/battles/{battle_id}/interrupts",
+            json=body,
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json() == {"detail": {"code": "stale_sequence"}}
+    with world.sessions() as session:
+        checkpoints = int(
+            session.scalar(
+                select(func.count()).select_from(models.BattleCheckpoint).where(
+                    models.BattleCheckpoint.battle_id == battle_id
+                )
+            )
+            or 0
+        )
+        head = load_latest_checkpoint(session, battle_id)
+        assert head is not None
+        assert head.sequence_at == first.json()["new_sequence"]
+    assert checkpoints == before_checkpoints + 1
 
 
 @pytest.mark.parametrize(
@@ -1738,7 +2215,7 @@ def test_full_request_sql_counts_are_constant_for_session_bearer_and_v1_action(
     assert (v1_selects, v1_statements) == (6, 13)
 
 
-def test_klatwa_matches_rozkaz_full_request_sql_for_session_and_bearer(
+def test_ready_handlers_match_full_request_selects_for_session_and_bearer(
     activation_transport_world: ActivationTransportWorld,
 ) -> None:
     world = activation_transport_world
@@ -1763,15 +2240,15 @@ def test_klatwa_matches_rozkaz_full_request_sql_for_session_and_bearer(
         finally:
             event.remove(world.engine, "before_cursor_execute", capture)
         assert response.status_code == 200, response.text
-        return (
-            sum(
-                statement.lstrip().upper().startswith("SELECT")
-                for statement in statements
-            ),
-            len(statements),
+        return tuple(
+            " ".join(statement.split())
+            for statement in statements
+            if statement.lstrip().upper().startswith("SELECT")
         )
 
     def interrupt_body(started, slug: str) -> dict[str, Any]:
+        if slug == "straznik":
+            return _straznik_interrupt_body(started)
         is_klatwa = slug == "klatwa"
         state = _wire_state(started)
         priority_player = state.activation.window.priority_player
@@ -1797,10 +2274,12 @@ def test_klatwa_matches_rozkaz_full_request_sql_for_session_and_bearer(
             },
         }
 
-    session_metrics: dict[str, tuple[int, int]] = {}
-    for slug in ("rozkaz", "klatwa"):
+    session_metrics: dict[str, tuple[str, ...]] = {}
+    for slug in ("rozkaz", "klatwa", "straznik"):
         battle = _create_same_owner_battle(world, protocol_version=2)
         started = _start(world.p0, battle)
+        if slug == "straznik":
+            started = _pass(world.p0, battle["battle_id"], started)
         session_metrics[slug] = counted_request(
             lambda battle=battle, started=started, slug=slug: world.p0.post(
                 f"/battles/{battle['battle_id']}/interrupts",
@@ -1815,10 +2294,12 @@ def test_klatwa_matches_rozkaz_full_request_sql_for_session_and_bearer(
         scopes={battles.BATTLE_INTERRUPT_SCOPE: True},
     )
     world.outsider.cookies.clear()
-    bearer_metrics: dict[str, tuple[int, int]] = {}
-    for slug in ("rozkaz", "klatwa"):
+    bearer_metrics: dict[str, tuple[str, ...]] = {}
+    for slug in ("rozkaz", "klatwa", "straznik"):
         battle = _create_same_owner_battle(world, protocol_version=2)
         started = _start(world.p0, battle)
+        if slug == "straznik":
+            started = _pass(world.p0, battle["battle_id"], started)
         bearer_metrics[slug] = counted_request(
             lambda battle=battle, started=started, slug=slug: world.outsider.post(
                 f"/battles/{battle['battle_id']}/interrupts",
@@ -1827,10 +2308,18 @@ def test_klatwa_matches_rozkaz_full_request_sql_for_session_and_bearer(
             )
         )
 
-    assert session_metrics["klatwa"] == session_metrics["rozkaz"]
-    assert bearer_metrics["klatwa"] == bearer_metrics["rozkaz"]
-    assert session_metrics["klatwa"][0] == 6
-    assert bearer_metrics["klatwa"][0] == 7
+    assert (
+        session_metrics["rozkaz"]
+        == session_metrics["klatwa"]
+        == session_metrics["straznik"]
+    )
+    assert (
+        bearer_metrics["rozkaz"]
+        == bearer_metrics["klatwa"]
+        == bearer_metrics["straznik"]
+    )
+    assert len(session_metrics["straznik"]) == 6
+    assert len(bearer_metrics["straznik"]) == 7
 
 
 def test_each_v2_session_mutation_has_constant_six_select_ceiling(

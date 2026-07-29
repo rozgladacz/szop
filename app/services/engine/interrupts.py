@@ -40,9 +40,9 @@ Zawartość:
 - `get_eligible_interrupts(state, point)` — lista (blob, slug) which CAN trigger
 - `trigger_interrupt(...)` — wywołuje konkretny handler
 - Handlery registry: kompatybilny stub Strażnika, source-correct Rozkaz/Klątwa
-  (id 50/45) oraz historyczne uproszczenie Oznaczenia (id 49). B4.4d.C1b ma
-  osobny prywatny activation-v2 outcome pełnego Ostrzału + Wyczerpany; nie jest
-  podpięty do publicznego adaptera ani allowlisty.
+  (id 50/45) oraz historyczne uproszczenie Oznaczenia (id 49). Publiczny adapter
+  activation-v2 wywołuje bezpośrednio prywatny outcome C1b pełnego Ostrzału
+  + Wyczerpany, z pominięciem legacy stubu.
 
 Auto-orkiestracja przerwań w pętli aktywacji (`phases.activation_phase` woła
 handlery sama) wciąż czeka na integrację (H2/B4); dziś handlery wywoływane jawnie.
@@ -122,7 +122,7 @@ InterruptHandlerFn = Callable[
 _INTERRUPT_HANDLERS: dict[tuple[InterruptPoint, str], InterruptHandlerFn] = {}
 
 # Public readiness is deliberately narrower than the internal registry.
-READY_INTERRUPT_HANDLERS = frozenset({"rozkaz", "klatwa"})
+READY_INTERRUPT_HANDLERS = frozenset({"rozkaz", "klatwa", "straznik"})
 
 
 def register_interrupt_handler(
@@ -212,9 +212,9 @@ def _straznik_handler(
 
     Wyzwalany w `BEFORE_ACTION` (pkt 11.b.i) — przed akcją aktywowanego wroga.
 
-    Kompatybilny legacy stub: emituje tylko `InterruptTriggered`. Prywatny,
-    source-correct activation-v2 outcome C1b żyje osobno i nie zmienia tego
-    historycznego call site'u ani publicznego allowlistu.
+    Kompatybilny legacy stub: emituje tylko `InterruptTriggered`. Publiczny
+    adapter C1c omija ten historyczny call site i wywołuje bezpośrednio prywatny,
+    source-correct activation-v2 outcome C1b.
     """
     event = InterruptTriggered(
         sequence=payload.get("sequence", 0),
@@ -352,6 +352,39 @@ def _validated_straznik_plan(
     source: UnitBlob,
     payload: Mapping[str, Any],
 ) -> _StraznikShootPlan:
+    raw_assignments, target_ids = _validated_straznik_request_payload(payload)
+    if len(raw_assignments) > len(source.ranged_weapons):
+        raise InvalidInterruptError(
+            "straznik: assignments list has an invalid size"
+        )
+
+    inventory = _canonical_straznik_inventory(source)
+    assignments: list[_StraznikProfileAssignment] = []
+    for weapon_slug, target_id in raw_assignments:
+        canonical = inventory.get(weapon_slug)
+        if canonical is None:
+            raise InvalidInterruptError(
+                f"straznik: profile {weapon_slug!r} is not in source inventory"
+            )
+        assignments.append(
+            _StraznikProfileAssignment(
+                weapon=canonical[0],
+                weapon_count=canonical[1],
+                target_id=target_id,
+            )
+        )
+
+    return _StraznikShootPlan(
+        assignments=tuple(assignments),
+        target_ids=target_ids,
+    )
+
+
+def _validated_straznik_request_payload(
+    payload: Mapping[str, Any],
+) -> tuple[tuple[tuple[str, int], ...], tuple[int, ...]]:
+    """Decode the source-independent strict public Strażnik plan."""
+
     if type(payload) is not dict or frozenset(payload) != _STRAZNIK_PAYLOAD_FIELDS:
         raise InvalidInterruptError(
             "straznik: payload requires exactly assignments"
@@ -361,14 +394,12 @@ def _validated_straznik_plan(
         type(raw_assignments) is not list
         or not raw_assignments
         or len(raw_assignments) > _STRAZNIK_MAX_ASSIGNMENTS
-        or len(raw_assignments) > len(source.ranged_weapons)
     ):
         raise InvalidInterruptError(
             "straznik: assignments list has an invalid size"
         )
 
-    inventory = _canonical_straznik_inventory(source)
-    assignments: list[_StraznikProfileAssignment] = []
+    assignments: list[tuple[str, int]] = []
     assigned_slugs: set[str] = set()
     target_ids: list[int] = []
     for raw_assignment in raw_assignments:
@@ -394,30 +425,16 @@ def _validated_straznik_plan(
             raise InvalidInterruptError(
                 "straznik: one profile cannot be assigned more than once"
             )
-        canonical = inventory.get(weapon_slug)
-        if canonical is None:
-            raise InvalidInterruptError(
-                f"straznik: profile {weapon_slug!r} is not in source inventory"
-            )
         assigned_slugs.add(weapon_slug)
         if target_id not in target_ids:
             target_ids.append(target_id)
-        assignments.append(
-            _StraznikProfileAssignment(
-                weapon=canonical[0],
-                weapon_count=canonical[1],
-                target_id=target_id,
-            )
-        )
+        assignments.append((weapon_slug, target_id))
 
     if not 1 <= len(target_ids) <= 2:
         raise InvalidInterruptError(
             "straznik: Ostrzal requires one or two distinct targets"
         )
-    return _StraznikShootPlan(
-        assignments=tuple(assignments),
-        target_ids=tuple(target_ids),
-    )
+    return tuple(assignments), tuple(target_ids)
 
 
 def _unique_blob(state: BattleState, unit_id: int, label: str) -> UnitBlob:
@@ -833,6 +850,16 @@ def validate_ready_activation_interrupt_request(
         _validated_rozkaz_payload(dispatch_payload)
     elif ability_slug == "klatwa":
         _validated_klatwa_payload(dispatch_payload)
+    elif ability_slug == "straznik":
+        assignments, _target_ids = _validated_straznik_request_payload(
+            dispatch_payload
+        )
+        return {
+            "assignments": [
+                {"weapon_slug": weapon_slug, "target_id": target_id}
+                for weapon_slug, target_id in assignments
+            ]
+        }
     return dispatch_payload
 
 
@@ -1163,6 +1190,15 @@ def execute_ready_activation_interrupt_outcomes(
     ):
         raise InvalidInterruptError("ready interrupt source or active unit is invalid")
 
+    if ability_slug == "straznik":
+        return _execute_straznik_activation_interrupt_outcomes(
+            state=state,
+            source=current_source,
+            ability_slug=ability_slug,
+            payload=dispatch_payload,
+            dice=dice,
+            sequence=sequence,
+        )
     context = InterruptContext(
         state=state,
         point=InterruptPoint.BEFORE_ACTION,

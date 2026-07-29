@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app import models
 from app.db import Base
 from app.services import battle_activations as activation_service
+from app.services.engine import interrupts as interrupts_module
 from app.services.battle_activations import (
     BattleActivationActionForbidden,
     BattleActivationActionInvalid,
@@ -87,6 +88,7 @@ from app.services.engine.events import (
     InterruptWindowOpened,
     MeleeBalanceReset,
     MoveExecuted,
+    ShotResolved,
     StatusAdded,
     StatusRemoved,
 )
@@ -106,12 +108,14 @@ from app.services.engine.state import (
     Lokalizacja,
     Position,
     UnitBlob,
+    WeaponProfile,
     apply_events,
     effective_passives,
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYGOTOWANY,
+    STATUS_WYCZERPANY,
 )
 
 
@@ -3814,6 +3818,85 @@ def _rozkaz_payload(
     }
 
 
+_STRAZNIK_RIFLE = WeaponProfile(
+    slug="guardian_rifle",
+    name="Guardian rifle",
+    range_inches=24,
+    attacks=3,
+    ap=2,
+    weapon_abilities=("niezawodny", "brutalny"),
+)
+_STRAZNIK_CANNON = WeaponProfile(
+    slug="guardian_cannon",
+    name="Guardian cannon",
+    range_inches=30,
+    attacks=2,
+    ap=3,
+    weapon_abilities=("precyzyjny",),
+)
+
+
+def _straznik_window_state(
+    *,
+    extra_units_per_player: int = 0,
+) -> tuple[BattleState, int, tuple[int, int]]:
+    source = replace(
+        _unit(
+            12,
+            0,
+            models_alive=2,
+            passives=("straznik",),
+            position=Position(0.0, 0.0),
+        ),
+        quality=4,
+        ranged_weapons=(_STRAZNIK_RIFLE, _STRAZNIK_CANNON),
+    )
+    active = replace(
+        _unit(21, 1, models_alive=6, position=Position(10.0, 0.0)),
+        toughness_per_model=10,
+        defense=9,
+    )
+    secondary = replace(
+        _unit(22, 1, models_alive=6, position=Position(16.0, 0.0)),
+        toughness_per_model=10,
+        defense=9,
+    )
+    extras = tuple(
+        _unit(100 + offset, 0, position=Position(30.0 + offset, 10.0))
+        for offset in range(extra_units_per_player)
+    ) + tuple(
+        _unit(200 + offset, 1, position=Position(30.0 + offset, -10.0))
+        for offset in range(extra_units_per_player)
+    )
+    return (
+        BattleState(
+            round=1,
+            active_player=1,
+            activations_remaining=(1 + extra_units_per_player,) * 2,
+            blobs=(source, active, secondary, *extras),
+            terrain=(),
+            initiative_player=0,
+        ),
+        source.id,
+        (active.id, secondary.id),
+    )
+
+
+def _straznik_payload(target_ids: tuple[int, int]) -> dict[str, object]:
+    return {
+        "assignments": [
+            {
+                "weapon_slug": _STRAZNIK_RIFLE.slug,
+                "target_id": target_ids[0],
+            },
+            {
+                "weapon_slug": _STRAZNIK_CANNON.slug,
+                "target_id": target_ids[1],
+            },
+        ]
+    }
+
+
 def _rng_consuming_ready_interrupt_executor(
     *,
     state,
@@ -3889,6 +3972,63 @@ def test_interrupt_success_uses_durable_priority_for_both_owners_and_same_owner(
         assert checkpoint is not None
         assert checkpoint.state == staged.state
         assert checkpoint.dice.to_checkpoint() == before_rng
+        assert tuple(
+            load_events(restarted, battle_id, since=started.new_sequence)
+        ) == staged.events
+
+
+@pytest.mark.parametrize("same_owner", [False, True], ids=["two-owner", "same-owner"])
+def test_straznik_service_persists_full_multi_target_delta_and_advanced_rng(
+    activation_world: ActivationWorld,
+    same_owner: bool,
+) -> None:
+    initial, source_id, target_ids = _straznik_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+        p2_id=activation_world.p1_id if same_owner else activation_world.p2_id,
+    )
+    with activation_world.sessions() as session:
+        before = load_latest_checkpoint(session, battle_id)
+        assert before is not None
+        input_rng = before.dice.to_checkpoint()
+        staged = stage_battle_activation_interrupt(
+            session,
+            battle_id=battle_id,
+            caller_user_id=activation_world.p1_id,
+            expected_sequence=started.new_sequence,
+            source_unit_id=source_id,
+            ability_slug="straznik",
+            payload=_straznik_payload(target_ids),
+            **_interrupt_guards(started.state),
+        )
+        session.commit()
+
+    assert staged.dice.to_checkpoint() != input_rng
+    assert staged.state == apply_events(started.state, staged.events)
+    assert [event.sequence for event in staged.events] == list(
+        range(started.new_sequence + 1, staged.new_sequence + 1)
+    )
+    assert type(staged.events[0]) is ActivationInterruptTriggered
+    assert sum(type(event) is InterruptTriggered for event in staged.events) == 1
+    marker = next(event for event in staged.events if type(event) is InterruptTriggered)
+    assert marker.slug == "straznik"
+    assert marker.payload == _straznik_payload(target_ids)
+    shots = [event for event in staged.events if type(event) is ShotResolved]
+    assert [shot.weapon_slug for shot in shots] == [
+        _STRAZNIK_RIFLE.slug,
+        _STRAZNIK_CANNON.slug,
+    ]
+    assert all(shot.wounds_dealt + shot.wounds_precise > 0 for shot in shots)
+    assert type(staged.events[-1]) is StatusAdded
+    assert staged.events[-1].target_id == source_id
+    assert staged.events[-1].status == STATUS_WYCZERPANY
+
+    with activation_world.sessions() as restarted:
+        checkpoint = load_latest_checkpoint(restarted, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == staged.state
+        assert checkpoint.dice.to_checkpoint() == staged.dice.to_checkpoint()
         assert tuple(
             load_events(restarted, battle_id, since=started.new_sequence)
         ) == staged.events
@@ -4360,6 +4500,81 @@ def test_klatwa_payload_fails_closed_before_database_io(
 
 
 @pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"assignments": []},
+        {"assignments": ()},
+        {
+            "assignments": [
+                {"weapon_slug": _STRAZNIK_RIFLE.slug, "target_id": True}
+            ]
+        },
+        {
+            "assignments": [
+                {"weapon_slug": "", "target_id": 21},
+            ]
+        },
+        {
+            "assignments": [
+                {
+                    "weapon_slug": _STRAZNIK_RIFLE.slug,
+                    "target_id": 21,
+                    "attacks": 999,
+                }
+            ]
+        },
+        {
+            "assignments": [
+                {"weapon_slug": _STRAZNIK_RIFLE.slug, "target_id": 21},
+                {"weapon_slug": _STRAZNIK_RIFLE.slug, "target_id": 22},
+            ]
+        },
+        {
+            "assignments": [
+                {"weapon_slug": "a", "target_id": 21},
+                {"weapon_slug": "b", "target_id": 22},
+                {"weapon_slug": "c", "target_id": 23},
+            ]
+        },
+    ],
+)
+def test_straznik_payload_fails_closed_before_database_io(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: object,
+) -> None:
+    initial, source_id, _target_ids = _straznik_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+
+    def forbidden_lookup(*args, **kwargs):
+        raise AssertionError("invalid Strażnik payload reached persistence")
+
+    monkeypatch.setattr(
+        activation_service,
+        "_get_participant_battle",
+        forbidden_lookup,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="straznik",
+                payload=payload,
+                **_interrupt_guards(started.state),
+            )
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+
+
+@pytest.mark.parametrize(
     ("field", "value", "reason"),
     [
         ("expected_sequence", True, None),
@@ -4433,7 +4648,7 @@ def test_interrupt_strict_top_level_guards_reject_bool_and_coercion_before_io(
     assert exc_info.value.reason is reason
 
 
-@pytest.mark.parametrize("slug", ["oznaczenie", "straznik"])
+@pytest.mark.parametrize("slug", ["oznaczenie", "registry-only"])
 def test_interrupt_rejects_registered_but_not_ready_slugs_without_writes(
     activation_world: ActivationWorld,
     slug: str,
@@ -4462,6 +4677,57 @@ def test_interrupt_rejects_registered_but_not_ready_slugs_without_writes(
 
     assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
     assert _stream_snapshot(activation_world, battle_id) == before
+
+
+def test_straznik_private_rng_failure_does_not_stage_state_events_or_rng(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial, source_id, target_ids = _straznik_window_state()
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+    before_stream = _stream_snapshot(activation_world, battle_id)
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        rng_before = checkpoint.dice.to_checkpoint()
+    real_resolve = interrupts_module._resolve_ranged_volley
+    consumed: list[dict[str, object]] = []
+
+    def fail_after_rolls(*args, **kwargs):
+        result = real_resolve(*args, **kwargs)
+        consumed.append(kwargs.get("dice", args[3]).to_checkpoint())
+        raise RuntimeError("forced failure after Strażnik combat RNG")
+
+    monkeypatch.setattr(
+        interrupts_module,
+        "_resolve_ranged_volley",
+        fail_after_rolls,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="straznik",
+                payload=_straznik_payload(target_ids),
+                **_interrupt_guards(started.state),
+            )
+        session.rollback()
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert consumed and consumed[0] != rng_before
+    assert _stream_snapshot(activation_world, battle_id) == before_stream
+    with activation_world.sessions() as session:
+        checkpoint = load_latest_checkpoint(session, battle_id)
+        assert checkpoint is not None
+        assert checkpoint.state == started.state
+        assert checkpoint.dice.to_checkpoint() == rng_before
 
 
 def test_interrupt_rejects_second_rozkaz_in_round_without_partial_delta(
@@ -5019,7 +5285,7 @@ def test_interrupt_success_is_one_batch_one_checkpoint_and_five_selects(
     assert all(type(sequence) is int for sequence in guarded_heads)
 
 
-def test_klatwa_matches_rozkaz_service_query_and_statement_cost(
+def test_ready_handlers_match_service_query_and_statement_cost(
     activation_world: ActivationWorld,
 ) -> None:
     rozkaz_state, rozkaz_source, rozkaz_target = _rozkaz_window_state()
@@ -5035,6 +5301,14 @@ def test_klatwa_matches_rozkaz_service_query_and_statement_cost(
     klatwa_id, klatwa_started = _persist_started_battle(
         activation_world,
         state=klatwa_state,
+    )
+    straznik_state, straznik_source, straznik_targets = _straznik_window_state(
+        extra_units_per_player=30
+    )
+    straznik_id, straznik_started = _persist_started_battle(
+        activation_world,
+        state=straznik_state,
+        extra_units_per_player=30,
     )
     cases = (
         (
@@ -5055,9 +5329,16 @@ def test_klatwa_matches_rozkaz_service_query_and_statement_cost(
                 granted=True,
             ),
         ),
+        (
+            "straznik",
+            straznik_id,
+            straznik_started,
+            straznik_source,
+            _straznik_payload(straznik_targets),
+        ),
     )
     statements: list[str] = []
-    metrics: dict[str, tuple[int, int]] = {}
+    select_statements: dict[str, tuple[str, ...]] = {}
 
     def capture_statement(
         _conn,
@@ -5088,12 +5369,10 @@ def test_klatwa_matches_rozkaz_service_query_and_statement_cost(
                     payload=payload,
                     **_interrupt_guards(started.state),
                 )
-                metrics[slug] = (
-                    sum(
-                        statement.lstrip().upper().startswith("SELECT")
-                        for statement in statements
-                    ),
-                    len(statements),
+                select_statements[slug] = tuple(
+                    " ".join(statement.split())
+                    for statement in statements
+                    if statement.lstrip().upper().startswith("SELECT")
                 )
                 session.rollback()
     finally:
@@ -5103,5 +5382,9 @@ def test_klatwa_matches_rozkaz_service_query_and_statement_cost(
             capture_statement,
         )
 
-    assert metrics["rozkaz"] == metrics["klatwa"]
-    assert metrics["klatwa"][0] == 5
+    assert (
+        select_statements["rozkaz"]
+        == select_statements["klatwa"]
+        == select_statements["straznik"]
+    )
+    assert len(select_statements["straznik"]) == 5

@@ -485,7 +485,7 @@ historyczny error contract ADR-0054.
 |---|---|---|
 | Rozkaz(X) | Public-ready w pure engine i trwałym transporcie v2 od B4.4b.7/B4.4c.9. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
 | Klątwa(X) | Public-ready od B4.4d.C0; reużywa istniejący transport v2 i klienta. | Osobny validator `klatwa_tak`, pięć jawnych pasywek (`delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`), enemy target, 12″, oba kierunki strict bool, limit raz/rundę i wygaśnięcie przy finalizacji; nie reużywa `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
-| Strażnik | Publicznie niewspierany; C1b dostarcza prywatny pure fundament bez produkcyjnego call site'u. | Private activation-v2 outcome ma strict canonical-inventory plan, legalny source/weapon/1–2 targets, pełny multi-profile Ostrzał z per-target pools, następnie Wyczerpany, bounded eventy, RNG/replay i no-nested. Nadal potrzebuje osobnego durable/public wiring oraz real-transport/auth/race/query gates przed zmianą allowlisty ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]). |
+| Strażnik | Public-ready od B4.4d.C1c przez istniejący activation protocol v2, durable service, FastAPI i `HttpClient.interrupt`. | Exact plan zawiera tylko `assignments[{weapon_slug,target_id}]`; private C1b rozwiązuje canonical inventory, legalny source/weapon/1–2 targets, pełny multi-profile Ostrzał z per-target pools, następnie Wyczerpany, bounded eventy, RNG/replay i no-nested. C1c dodaje strict preflight przed I/O, bezpośredni dispatch omijający legacy stub, atomowy event+RNG checkpoint, real-transport/auth/race/rollback/query gates i allowlistę dokładnie `rozkaz|klatwa|straznik` ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]). |
 | Oznaczenie(X) | Publicznie niewspierane w obecnej semantyce. | Osobny attack-declaration/attack-scope prerequisite po zamknięciu ogólnego `BEFORE_ACTION`: cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, efekt tylko do `AttackResolved`, nie do końca aktywacji ([pozycja 49][Z49]). To rozszerzenie nadal użyje `POST /interrupts`, ale nie może udawać zwykłego activation override. |
 
 Registry może zawierać niegotowe handlery do testów engine; publiczna allowlista
@@ -512,8 +512,11 @@ rulesetu bez obu kanonicznych tagów nie jest legalnym X.
   5/6/7 SELECT-ów dla service/session/bearer.
 - B4.4d.C1b nie ma I/O ani produkcyjnego durable call site'u. Pure validator
   skanuje już załadowane frozen bloby/inventory, combat wykonuje tylko CPU/RNG,
-  a publiczny reject `straznik` nadal kończy się przed zapisem przy istniejących
-  pułapach; delta SELECT = 0 i brak N+1.
+  a C1c reużywa ten fundament bez zapytań per assignment/profile/target/event.
+- B4.4d.C1c mierzy pełne listy SELECT identyczne z Rozkazem/Klątwą: 5 w
+  serwisie, 6 w pełnym request session i 7 dla bearera, również dla dużego
+  stanu. Jeden request zapisuje jeden guarded event batch i jeden checkpoint
+  state+returned RNG; `HttpClient` wykonuje jeden POST bez GET/retry/cache.
 - Hot concurrency path używa istniejących indeksów/constraintów:
   `battle_events(battle_id, sequence) UNIQUE`, indeksu `battle_id`,
   `battle_checkpoints(battle_id, sequence_at) UNIQUE` i PK `battles.id`.
@@ -805,13 +808,25 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   `StatusAdded(Wyczerpany)` ([pozycja 31][Z31], [pkt 22.a][R22A]).
   Sukces przesuwa wyłącznie returned RNG o realne rzuty, a executor/replay/
   protocol failure po częściowym zużyciu nie mutuje wejść. C1b nie publikuje
-  sluga: allowlista pozostaje `{"rozkaz", "klatwa"}`, service/FastAPI/HttpClient
-  nadal odrzucają Strażnika bez zapisu/request amplification. C1/Strażnik
-  pozostaje OPEN do osobnego durable/public wiring oraz pełnych
-  real-transport/auth/race/query gates.
+  sluga samodzielnie; trwałe i publiczne podpięcie zamyka C1c.
+- **B4.4d.C1c DONE 2026-07-29:** allowlista wynosi dokładnie
+  `{"rozkaz", "klatwa", "straznik"}`. Handler-specific strict preflight
+  akceptuje tylko exact `assignments[{weapon_slug,target_id}]` bez statystyk,
+  client sequence, coercion lub extra pól i z limitami C1b, zanim service
+  wykona I/O. Publiczny executor omija legacy stub i deleguje bezpośrednio do
+  private C1b z klonem RNG. Istniejący durable service zapisuje jeden ciągły
+  delta `ActivationInterruptTriggered` + dokładnie jeden
+  `InterruptTriggered(straznik)` + pełny Ostrzał/alokację + końcowy
+  `StatusAdded(Wyczerpany)` wraz ze zwróconym RNG w jednym checkpointcie.
+  Istniejąca trasa, status 200, scope `battle:interrupt`, state-v2/exact-event
+  envelope, no-oracle i body-blind audit są zachowane; `HttpClient.interrupt`
+  wykonuje jeden POST. Same-owner i dwa niezależne bearery, replay/restart/
+  finalize, auth, stale/duplicate/race oraz validation/domain/DB rollback są
+  pokryte. Pełne listy SELECT są identyczne z Rozkazem/Klątwą: 5/6/7 dla
+  service/session/bearer, bez N+1. Nie dodano trasy, scope'u, eventu/reducera,
+  DB/schema, metody klienta ani zmian v1.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
-  pakowanie pozostają osobnymi slice'ami; public-ready Oznaczenie i Strażnik
-  wymagają własnych C1/C2.
+  pakowanie pozostają osobnymi slice'ami; C2/Oznaczenie pozostaje OPEN.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -856,9 +871,12 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   plan/decoder, pełny multi-profile/multi-target Ostrzał, per-target pools,
   późniejszy Wyczerpany, bounded outcome i RNG/replay/no-nested gate
   ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]).
-- **C1 Strażnik nadal OPEN:** durable/public wiring, real transport, auth,
-  race/rollback/query gates i świadoma zmiana allowlisty pozostają osobnym
-  etapem; C1b nie tworzy produkcyjnego call site'u.
+- **C1c durable/public Strażnik DONE 2026-07-29:** exact assignments payload,
+  allowlista `Rozkaz|Klątwa|Strażnik`, bezpośredni private-C1b dispatch,
+  atomowy event+RNG checkpoint, istniejąca trasa/scope/envelope i realny
+  `HttpClient` one-POST; same-owner/two-bearer, auth/no-oracle/audit,
+  race/rollback/replay/finalize oraz 5/6/7 SELECT bez N+1.
+- **C1 Strażnik public-ready DONE 2026-07-29.**
 - **C2 Oznaczenie:** najpierw attack-declaration/attack-scope events i
   wygaśnięcie po jednym ataku, potem handler; żadnego activation-scoped fallback;
   własny commit i DoD.

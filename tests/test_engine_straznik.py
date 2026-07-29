@@ -26,6 +26,7 @@ from app.services.engine.interrupts import (
     READY_INTERRUPT_HANDLERS,
     _StraznikShootPlan,
     _execute_straznik_activation_interrupt_outcomes,
+    execute_ready_activation_interrupt_outcomes,
 )
 from app.services.engine.state import (
     BattleState,
@@ -179,11 +180,59 @@ def _blob(state: BattleState, unit_id: int) -> UnitBlob:
     return next(blob for blob in state.blobs if blob.id == unit_id)
 
 
-def test_private_plan_contract_is_frozen() -> None:
-    assert READY_INTERRUPT_HANDLERS == frozenset({"rozkaz", "klatwa"})
+def test_public_ready_plan_contract_is_frozen() -> None:
+    assert READY_INTERRUPT_HANDLERS == frozenset(
+        {"rozkaz", "klatwa", "straznik"}
+    )
     plan = _StraznikShootPlan(assignments=(), target_ids=())
     with pytest.raises(FrozenInstanceError):
         plan.target_ids = (20,)  # type: ignore[misc]
+
+
+def test_public_ready_dispatch_matches_private_executor_and_bypasses_legacy_stub(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    started = _started()
+    payload = {
+        "assignments": [
+            {"weapon_slug": "rifle", "target_id": 20},
+            {"weapon_slug": "cannon", "target_id": 21},
+        ]
+    }
+    private_dice = DeterministicDice(73)
+    public_dice = DeterministicDice(73)
+    source = _blob(started.state, 10)
+
+    private_state, private_events = _execute_straznik_activation_interrupt_outcomes(
+        state=started.state,
+        source=source,
+        ability_slug="straznik",
+        payload=payload,
+        dice=private_dice,
+        sequence=started.next_sequence + 1,
+    )
+
+    def forbidden_legacy_stub(context, legacy_payload):
+        del context, legacy_payload
+        raise AssertionError("public Strażnik dispatched through legacy stub")
+
+    monkeypatch.setitem(
+        interrupts_module._INTERRUPT_HANDLERS,
+        (interrupts_module.InterruptPoint.BEFORE_ACTION, "straznik"),
+        forbidden_legacy_stub,
+    )
+    public_state, public_events = execute_ready_activation_interrupt_outcomes(
+        state=started.state,
+        source=source,
+        ability_slug="straznik",
+        payload=payload,
+        dice=public_dice,
+        sequence=started.next_sequence + 1,
+    )
+
+    assert public_state == private_state
+    assert public_events == private_events
+    assert public_dice.to_checkpoint() == private_dice.to_checkpoint()
 
 
 def test_straznik_resolves_all_profiles_targets_then_exhausts_with_replay_rng() -> None:

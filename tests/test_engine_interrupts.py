@@ -332,15 +332,15 @@ def _execute_klatwa(state: BattleState, *, granted: bool = True):
 
 
 def test_ready_interrupt_allowlist_is_immutable_and_narrower_than_registry():
-    assert READY_INTERRUPT_HANDLERS == frozenset({"rozkaz", "klatwa"})
+    assert READY_INTERRUPT_HANDLERS == frozenset(
+        {"rozkaz", "klatwa", "straznik"}
+    )
     assert {"rozkaz", "klatwa", "oznaczenie", "straznik"} <= {
         slug for _, slug in _INTERRUPT_HANDLERS
     }
 
 
-@pytest.mark.parametrize("slug", ["oznaczenie", "straznik"])
 def test_ready_adapter_rejects_registered_unready_handler_before_dispatch(
-    slug,
     monkeypatch,
 ):
     state = _started_rozkaz_state()
@@ -353,11 +353,11 @@ def test_ready_adapter_rejects_registered_unready_handler_before_dispatch(
 
     monkeypatch.setitem(
         _INTERRUPT_HANDLERS,
-        (InterruptPoint.BEFORE_ACTION, slug),
+        (InterruptPoint.BEFORE_ACTION, "oznaczenie"),
         forbidden_dispatch,
     )
     with pytest.raises(InvalidInterruptError, match="not ready"):
-        _execute_rozkaz(state, ability_slug=slug)
+        _execute_rozkaz(state, ability_slug="oznaczenie")
     assert called is False
 
 

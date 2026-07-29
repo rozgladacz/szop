@@ -305,10 +305,29 @@ końcu istniejący `StatusAdded(Wyczerpany)`
 ([`SZOP_Zdolnosci.md` pozycja 31](../app/static/docs/SZOP_Zdolnosci.md),
 [`SZOP_Rozjemca.md` pkt 22.a](../app/static/docs/SZOP_Rozjemca.md)).
 Outcome korzysta z izolowanego RNG C1a i jest live/replay/restart zgodny.
-Nie ma call site'u produkcyjnego: durable service/router/auth/public wire,
-klienty i DB są bez zmian, `READY_INTERRUPT_HANDLERS` pozostaje dokładnie
-`{"rozkaz", "klatwa"}`, a C1/Strażnik pozostaje OPEN do osobnego publicznego
-podpięcia i pełnych real-transport/auth/race/query gates.
+Sam slice C1b nie miał call site'u produkcyjnego ani nie zmieniał
+durable service/router/auth/public wire, klientów lub DB; publikację zamyka C1c.
+**B4.4d.C1c** rozszerza immutable publiczny allowlist dokładnie do
+`READY_INTERRUPT_HANDLERS={"rozkaz", "klatwa", "straznik"}`. Source-independent
+preflight Strażnika akceptuje wyłącznie exact
+`{"assignments":[{"weapon_slug": <non-empty str>, "target_id": <strict int >= 0>}, ...]}`
+z limitami C1b i odrzuca coercion, extra/statystyki broni, client sequence,
+duplikaty profilu, pusty/oversized plan oraz więcej niż dwa cele przed DB I/O.
+Built-in executor omija legacy registry stub i wywołuje bezpośrednio prywatny
+outcome C1b z klonem RNG C1a; combat, canonical inventory i walidacja domenowa
+nie są duplikowane. Istniejący `stage_battle_activation_interrupt` pozostaje
+jedynym durable ownerem participant/priority, optimistic guardów, jednego
+guarded event batcha i pojedynczego checkpointu state+returned RNG.
+`POST /battles/{id}/interrupts`, scope `battle:interrupt`, status 200,
+state-v2/exact-event envelope, no-oracle, body-blind audit oraz wspólny
+`HttpClient.interrupt` pozostają tym samym kontraktem; klient wykonuje jeden
+POST. Success checkpointuje atomowo pełny marker+Ostrzał+Wyczerpany delta i
+zaawansowany RNG, a validation/domain/DB/race failure rollbackuje całość.
+Gate same-owner/two-owner, replay/restart/finalize/auth/race/rollback i strict
+wire mierzy identyczne listy SELECT jak Rozkaz/Klątwa: service 5, session 6,
+bearer 7 bez N+1. Nie dodano trasy, scope'u, eventu, reducera, schema DB,
+metody klienta ani zmian v1; C1/Strażnik jest public-ready DONE, C2/Oznaczenie
+pozostaje OPEN.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.
@@ -460,7 +479,7 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `prediction.py` | ~210 | Analytic binomial bez RNG (ADR-0044), `expected_damage(...) → DamageDistribution`, `would_see` hipotetyczny LoS. **Monte Carlo parity** ±3σ z combat.resolve_ranged_attack |
 | `combat.py` | ~700 | `CombatResult` + `ChargeResult` + wspólny single-/multi-profile ranged SSOT: wszystkie testy przed per-target alokacją pul pkt 17; legacy `resolve_ranged_attack` deleguje do tego samego core. Dalej `resolve_melee_attack` (damage_balance pkt 20.c) + `resolve_charge_attack` (pkt 14.d + reactive kontratak ADR-0015a). **B3.9.b fix #4**: `circle_edge_distance` w `min_gap`. **B3.9.d**: `StatusAdded(Wyczerpany)` po kontrataku. **B3.9.e fix #7**: counter bierze inventory obrońcy. Ranged core honoruje AP/Brutalny/Precyzyjny/Niezawodny/Podwójny, target Delikatny/Niewrażliwy/Przygotowany i Namierzanie. |
 | `effects.py` | ~340 | Per-hook passive registry (3 kategorie: defense/attack/weapon modifiers; morale-modifier usunięty 2026-06 — drift pkt 20.e, Nieustraszony binarny w `phases._regroup_test`) + **`_ACTIVE_ABILITY_REGISTRY`** (B3.9.e/ADR-0047) z `register_active_ability(slug)` dekoratorem + `get_active_ability(slug)` lookup. MVP passive: Cierpliwy/Tarcza (defense). Built-in active: pełen `discard_exhausted` + 6 stubów (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik). |
-| `interrupts.py` | ~1050 | `InterruptManager` z jednym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. Publiczny `READY_INTERRUPT_HANDLERS={"rozkaz", "klatwa"}` jest węższy od registry. Built-in public adapter ma osobne strict, source-correct validatory Rozkazu i Klątwy. B4.4d.C1b dodaje osobny prywatny frozen plan/decoder i pure activation-v2 outcome Strażnika z canonical ranged inventory, multi-target Ostrzałem, Wyczerpanym, bounded eventami i fail-closed unsupported mechanics; legacy registry stub i publiczne odrzucenie pozostają kompatybilne. Oznaczenie nadal jest historycznym uproszczeniem niedostępnym publicznie. |
+| `interrupts.py` | ~1100 | `InterruptManager` z jednym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. Publiczny `READY_INTERRUPT_HANDLERS={"rozkaz", "klatwa", "straznik"}` jest węższy od registry. Built-in adapter ma osobne strict preflighty Rozkazu, Klątwy i planu Strażnika. C1b private outcome rozwiązuje canonical ranged inventory, multi-target Ostrzał, Wyczerpany, bounded eventy i unsupported mechanics; C1c dispatchuje do niego bezpośrednio z RNG, omijając kompatybilny legacy registry stub. Oznaczenie nadal jest historycznym uproszczeniem niedostępnym publicznie. |
 | `actions.py` | ~145 | 6 Action types frozen (`DeploymentAction/ManeuverAction/DefendAction/ShootAction/ChargeAction/SpecialAction`) + `Action` Union alias, kanoniczne discriminators oraz współdzielona walidacja trwałej historii follow-up |
 | `phases.py` | ~1030 | `setup_phase`, `deployment_round` oraz split aktywacji: `_begin_activation` raz, `_apply_single_action` = akcja + Przegrupowanie, `_finalize_activation` = Odzyskiwanie ran placeholder + Aktywowany + clear override'ów ([`SZOP_Rozjemca.md` pkt 11.b.i–vi](../app/static/docs/SZOP_Rozjemca.md)). **B3.9.c**: `ActivationContext` frozen dataclass + `_build_activation_context` (delta `wounds_received_this_activation` per blob + `melee_combatants` frozenset). **B3.9.d**: emit Status* + MeleeBalanceReset. **B3.9.e**: `_apply_special` deleguje do `effects.get_active_ability`. |
 | `resolver.py` | ~360 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` zamyka legacy jednoakcyjną aktywację; `apply_activation(..., continuation)` wykonuje do dwóch akcji, ale `actions_taken` jest tylko procesowe. `should_end_round` / `is_battle_over`. Trwałe przerwanie między krokami wymaga event-sourced activation/window z ADR-0056; obecny resolver nie jest restart-safe seam dla osobnego interrupt requestu. |
