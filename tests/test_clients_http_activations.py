@@ -106,11 +106,11 @@ def test_activation_v2_methods_freeze_exact_single_post_wire() -> None:
             expected_activation_version=1,
             expected_window_version=1,
             source_unit_id=2,
-            ability_slug="rozkaz",
+            ability_slug="klatwa",
             payload={
                 "target_id": 2,
-                "ability": "nieustraszony",
-                "granted": False,
+                "ability": "delikatny",
+                "granted": True,
             },
         ),
         client.pass_interrupt_priority(
@@ -163,11 +163,11 @@ def test_activation_v2_methods_freeze_exact_single_post_wire() -> None:
             "expected_activation_version": 1,
             "expected_window_version": 1,
             "source_unit_id": 2,
-            "ability_slug": "rozkaz",
+            "ability_slug": "klatwa",
             "payload": {
                 "target_id": 2,
-                "ability": "nieustraszony",
-                "granted": False,
+                "ability": "delikatny",
+                "granted": True,
             },
         },
         {

@@ -1542,6 +1542,112 @@ def test_builtin_rozkaz_full_v2_flow_replay_restart_limit_and_finalization() -> 
     assert finalized.state == apply_events(initial, complete_tail)
 
 
+def test_builtin_klatwa_full_v2_flow_replay_restart_limit_and_finalization() -> None:
+    base = _action_idle_state()
+    source = replace(base.blobs[0], passives=("klatwa",))
+    target = replace(base.blobs[1], passives=("delikatny",))
+    initial = replace(base, blobs=(source, target))
+    started = start_activation(initial, selected_unit_id=11, sequence=760)
+    payload = {
+        "target_id": target.id,
+        "ability": "delikatny",
+        "granted": False,
+    }
+
+    def trigger(current):
+        activation = current.activation
+        return trigger_activation_interrupt(
+            current,
+            caller_player=0,
+            activation_id=activation.activation_id,
+            expected_activation_version=activation.version,
+            expected_window_version=activation.window.version,
+            source_unit_id=source.id,
+            ability_slug="klatwa",
+            payload=payload,
+            sequence=started.next_sequence,
+            outcome_executor=execute_ready_activation_interrupt_outcomes,
+        )
+
+    interrupted = trigger(started.state)
+    restarted = trigger(_restart(started.state))
+    assert [event_to_json(event) for event in restarted.events] == [
+        event_to_json(event) for event in interrupted.events
+    ]
+    assert restarted.state == interrupted.state
+    assert restarted.next_sequence == interrupted.next_sequence
+    assert [type(event) for event in interrupted.events] == [
+        ActivationInterruptTriggered,
+        InterruptTriggered,
+        AbilityOverrideApplied,
+    ]
+    interrupted_target = next(
+        blob for blob in interrupted.state.blobs if blob.id == target.id
+    )
+    assert "delikatny" not in effective_passives(interrupted_target)
+    assert interrupted.state.used_interrupts_this_round == ((source.id, "klatwa"),)
+
+    with pytest.raises(ActivationProtocolError) as exc_info:
+        trigger_activation_interrupt(
+            interrupted.state,
+            caller_player=0,
+            activation_id=interrupted.state.activation.activation_id,
+            expected_activation_version=interrupted.state.activation.version,
+            expected_window_version=interrupted.state.activation.window.version,
+            source_unit_id=source.id,
+            ability_slug="klatwa",
+            payload=payload,
+            sequence=interrupted.next_sequence,
+            outcome_executor=execute_ready_activation_interrupt_outcomes,
+        )
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+
+    first_pass = pass_interrupt_priority(
+        interrupted.state,
+        caller_player=0,
+        activation_id=interrupted.state.activation.activation_id,
+        expected_activation_version=interrupted.state.activation.version,
+        expected_window_version=interrupted.state.activation.window.version,
+        sequence=interrupted.next_sequence,
+    )
+    ready = pass_interrupt_priority(
+        first_pass.state,
+        caller_player=1,
+        activation_id=first_pass.state.activation.activation_id,
+        expected_activation_version=first_pass.state.activation.version,
+        expected_window_version=first_pass.state.activation.window.version,
+        sequence=first_pass.next_sequence,
+    )
+    committed = _commit(
+        ready.state,
+        DefendAction(11),
+        DeterministicDice(79),
+        sequence=ready.next_sequence,
+    )
+    finalized = _finalize(
+        committed.state,
+        sequence=committed.next_sequence,
+    )
+    terminal_target = next(
+        blob for blob in finalized.state.blobs if blob.id == target.id
+    )
+    assert terminal_target.ability_overrides == ()
+    assert "delikatny" in effective_passives(terminal_target)
+    complete_tail = tuple(
+        event
+        for transition in (
+            started,
+            interrupted,
+            first_pass,
+            ready,
+            committed,
+            finalized,
+        )
+        for event in transition.events
+    )
+    assert finalized.state == apply_events(initial, complete_tail)
+
+
 def test_first_action_bridge_commits_after_outcomes_without_finalizing() -> None:
     ready = _ready_for_action(
         state=_action_idle_state(actor_overrides=(("ordered", True),)),

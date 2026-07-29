@@ -32,6 +32,7 @@ if str(ROOT_DIR) not in sys.path:
 from app import config
 from app.services.costs import quote as quote_module
 from app.services.costs.errors import RulesetParityError
+from app.services.rulesets import load_ruleset
 
 
 @pytest.fixture(autouse=True)
@@ -445,3 +446,19 @@ def test_manual_parity(name: str) -> None:
 def test_unit_none_parity() -> None:
     """Edge case — `calculate_roster_unit_quote(None)` musi przejść parity."""
     _assert_parity(None, count=1)
+
+
+def test_klatwa_catalog_matches_source_correct_passive_variants() -> None:
+    ruleset = load_ruleset("v1")
+
+    assert {
+        ability.slug
+        for ability in ruleset.abilities
+        if ability.type == "passive" and ability.klatwa_tak is True
+    } == {
+        "delikatny",
+        "instynkt",
+        "nieruchomy",
+        "niezgrabny",
+        "wolny",
+    }

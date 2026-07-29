@@ -296,14 +296,46 @@ def _execute_rozkaz(
     )
 
 
+def _started_klatwa_state() -> BattleState:
+    state = make_state(
+        (
+            make_blob(
+                blob_id=10,
+                owner=0,
+                passives=("klatwa",),
+                pos=(0.0, 0.0),
+            ),
+            make_blob(blob_id=20, owner=0, pos=(2.0, 0.0)),
+            make_blob(blob_id=30, owner=1, pos=(5.0, 0.0)),
+        ),
+        initiative_player=0,
+    )
+    return start_activation(state, selected_unit_id=20, sequence=10).state
+
+
+def _execute_klatwa(state: BattleState, *, granted: bool = True):
+    source = next(blob for blob in state.blobs if blob.id == 10)
+    return execute_ready_activation_interrupt_outcomes(
+        state=state,
+        source=source,
+        ability_slug="klatwa",
+        payload={
+            "target_id": 30,
+            "ability": "delikatny",
+            "granted": granted,
+        },
+        sequence=20,
+    )
+
+
 def test_ready_interrupt_allowlist_is_immutable_and_narrower_than_registry():
-    assert READY_INTERRUPT_HANDLERS == frozenset({"rozkaz"})
+    assert READY_INTERRUPT_HANDLERS == frozenset({"rozkaz", "klatwa"})
     assert {"rozkaz", "klatwa", "oznaczenie", "straznik"} <= {
         slug for _, slug in _INTERRUPT_HANDLERS
     }
 
 
-@pytest.mark.parametrize("slug", ["klatwa", "oznaczenie", "straznik"])
+@pytest.mark.parametrize("slug", ["oznaczenie", "straznik"])
 def test_ready_adapter_rejects_registered_unready_handler_before_dispatch(
     slug,
     monkeypatch,
@@ -324,6 +356,19 @@ def test_ready_adapter_rejects_registered_unready_handler_before_dispatch(
     with pytest.raises(InvalidInterruptError, match="not ready"):
         _execute_rozkaz(state, ability_slug=slug)
     assert called is False
+
+
+@pytest.mark.parametrize("granted", [True, False])
+def test_ready_klatwa_uses_internal_sequence_and_replays_exactly(granted):
+    state = _started_klatwa_state()
+    outcome_state, events = _execute_klatwa(state, granted=granted)
+
+    assert [event.sequence for event in events] == [20, 21]
+    assert outcome_state == apply_events(state, events)
+    assert events[0].payload == {"ability": "delikatny", "granted": granted}
+    target = next(blob for blob in outcome_state.blobs if blob.id == 30)
+    assert target.ability_overrides == (("delikatny", granted),)
+    assert outcome_state.used_interrupts_this_round == ((10, "klatwa"),)
 
 
 @pytest.mark.parametrize(

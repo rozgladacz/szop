@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field, RootModel, StrictBool
 
 # Frozen-model konfiguracja: immutable + szybkie odczyty w hot path.
 _FrozenConfig = ConfigDict(frozen=True, extra="forbid", strict=False)
@@ -148,10 +148,11 @@ class RulesetAbility(BaseModel):
     Pola opcjonalne (`value_label`, `value_type`, `value_choices`) zachowują
     None gdy abilities nie wymagają parametru (jak procedural).
 
-    `rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X)/Klątwa(X)/
-    Oznaczenie(X). `rozkaz_kierunek` zachowuje kanoniczny znacznik efektu:
-    "+" nadaje korzystną zdolność, "−" odbiera niekorzystną. Tylko passive
-    abilities mają te pola. None = nieznane/false.
+    `rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X).
+    `rozkaz_kierunek` zachowuje kanoniczny znacznik efektu: "+" nadaje
+    korzystną zdolność, "−" odbiera niekorzystną. `klatwa_tak` określa osobny
+    katalog X dla Klątwy(X). Tylko passive abilities mogą być legalnym X;
+    None = brak jawnego tagu/false.
     """
 
     model_config = _FrozenConfig
@@ -165,6 +166,7 @@ class RulesetAbility(BaseModel):
     value_choices: tuple[str, ...] | None = None
     rozkaz_tak: bool | None = None
     rozkaz_kierunek: Literal["+", "−"] | None = None
+    klatwa_tak: StrictBool | None = None
 
 
 class RulesetAbilitiesDocument(BaseModel):

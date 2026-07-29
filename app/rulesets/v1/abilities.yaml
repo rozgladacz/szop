@@ -37,6 +37,7 @@ abilities:
   type: passive
   description: Porusza się o -2”.
   rozkaz_tak: true
+  klatwa_tak: true
 - slug: harcownik
   name: Harcownik
   type: passive
@@ -49,11 +50,13 @@ abilities:
   description: Rusza się zawsze w stronę najbliższego wroga i zawsze atakuje najbliższego wroga.
   rozkaz_tak: true
   rozkaz_kierunek: "+"
+  klatwa_tak: true
 - slug: nieruchomy
   name: Nieruchomy
   type: passive
   description: Po rozstawieniu nie może się przemieszczać i nie może zostać przyszpilony. Podczas szarży może atakować odziały w zasięgu 3”.
   rozkaz_tak: true
+  klatwa_tak: true
 - slug: zwinny
   name: Zwinny
   type: passive
@@ -66,6 +69,7 @@ abilities:
   description: Na trudnym i niebezpiecznym terenie wykonuje dodatkowy test trudnego terenu.
   rozkaz_tak: true
   rozkaz_kierunek: "+"
+  klatwa_tak: true
 - slug: latajacy
   name: Latający
   type: passive
@@ -148,6 +152,7 @@ abilities:
   description: Podczas testów obrony naturalna 6 nie oznacza automatycznego sukcesu.
   rozkaz_tak: true
   rozkaz_kierunek: "−"
+  klatwa_tak: true
 - slug: niewrazliwy
   name: Niewrażliwy
   type: passive

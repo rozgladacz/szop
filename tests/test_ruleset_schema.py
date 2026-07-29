@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from app.services.rulesets.models import (
     AbilityCosts,
+    RulesetAbility,
     RulesetAbilitiesDocument,
     RulesetDocument,
     RulesetTablesDocument,
@@ -205,6 +206,27 @@ def test_abilities_document_rejects_wrong_abilities_type() -> None:
     payload["abilities"] = {"not": "a list"}
     with pytest.raises(ValidationError):
         RulesetAbilitiesDocument.model_validate(payload)
+
+
+@pytest.mark.parametrize("invalid_tag", ["not-a-bool", "true", 1])
+def test_klatwa_tag_is_optional_strict_boolean_and_frozen(invalid_tag) -> None:
+    ability = RulesetAbility(
+        slug="test",
+        name="Test",
+        type="passive",
+        description="Test",
+        klatwa_tak=False,
+    )
+
+    assert ability.klatwa_tak is False
+    with pytest.raises(ValidationError):
+        RulesetAbility(
+            slug="test",
+            name="Test",
+            type="passive",
+            description="Test",
+            klatwa_tak=invalid_tag,
+        )
 
 
 def test_tables_document_rejects_unknown_top_level_field() -> None:

@@ -264,6 +264,22 @@ wygaśnięcie override'u, auth/no-oracle, stale/race/rollback i stałe 5 SELECT-
 bez N+1 są pokryte testami. Nie dodano routera, publicznego schema/scope'u,
 transportu, envelope ani klienta; Klątwa, Oznaczenie i Strażnik pozostają
 publicznie niedostępne.
+**B4.4d.C0** rozszerza bieżący publiczny allowlist do
+`READY_INTERRUPT_HANDLERS={"rozkaz", "klatwa"}` bez nowej trasy, scope'u,
+eventu, codeca, schematu DB ani metody klienta. `RulesetAbility.klatwa_tak`
+jest addytywnym immutable tagiem, a cache'owany katalog dopuszcza dokładnie
+pięć pasywek: `delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`
+([`SZOP_Zdolnosci.md` pozycje 4, 9, 15, 18 i 33](../app/static/docs/SZOP_Zdolnosci.md)).
+Strict payload Klątwy ma dokładnie `{target_id, ability, granted}` i oba
+kierunki bool; source-correct executor reużywa trwałe okno, eventy
+`InterruptTriggered`/`AbilityOverrideApplied`, `ability_overrides`, limit
+raz/rundę i finalizacyjne czyszczenie. Source naprawdę ma Klątwę, source i cel
+są żywe oraz na Froncie, cel jest wrogi i w edge-to-edge 12″ zgodnie z
+[`SZOP_Zdolnosci.md` pozycją 45](../app/static/docs/SZOP_Zdolnosci.md) oraz
+[`SZOP_Rozjemca.md` pkt 11.b.i/iv i 12.a–c](../app/static/docs/SZOP_Rozjemca.md).
+Walidacja działa na jednym załadowanym state i cache'owanym rulesecie: 5
+SELECT-ów w serwisie, 6 w pełnym request session i 7 dla bearera, dokładnie
+jak Rozkaz. Oznaczenie i Strażnik pozostają publicznie niedostępne.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.
@@ -415,7 +431,7 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `prediction.py` | ~210 | Analytic binomial bez RNG (ADR-0044), `expected_damage(...) → DamageDistribution`, `would_see` hipotetyczny LoS. **Monte Carlo parity** ±3σ z combat.resolve_ranged_attack |
 | `combat.py` | ~580 | `CombatResult` + `ChargeResult` + `resolve_ranged_attack` (3 fazy pkt 17 + osłona pkt 19) + `resolve_melee_attack` (z damage_balance pkt 20.c) + `resolve_charge_attack` (pkt 14.d + reactive kontratak ADR-0015a). **B3.9.b fix #4**: `circle_edge_distance` w `min_gap` (uwzględnia charger.radius). **B3.9.d**: emit `StatusAdded(Wyczerpany)` po kontrataku. **B3.9.e fix #7**: counter używa `defender.melee_weapons[0]` z fallback. Weapon abilities MVP: AP/Brutalny/Precyzyjny/Niezawodny/Podwójny |
 | `effects.py` | ~340 | Per-hook passive registry (3 kategorie: defense/attack/weapon modifiers; morale-modifier usunięty 2026-06 — drift pkt 20.e, Nieustraszony binarny w `phases._regroup_test`) + **`_ACTIVE_ABILITY_REGISTRY`** (B3.9.e/ADR-0047) z `register_active_ability(slug)` dekoratorem + `get_active_ability(slug)` lookup. MVP passive: Cierpliwy/Tarcza (defense). Built-in active: pełen `discard_exhausted` + 6 stubów (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik). |
-| `interrupts.py` | ~600 | `InterruptManager` z jednym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. B4.4b.7 dodaje osobną `READY_INTERRUPT_HANDLERS={"rozkaz"}`, built-in adapter trwałego protokołu oraz ścisły, source-correct Rozkaz z kierunkiem z rulesetu; legacy Klątwa/Oznaczenie pozostają uproszczone, a Strażnik stubem. B4.4c.9 wystawia publicznie wyłącznie allowlistowany Rozkaz. |
+| `interrupts.py` | ~700 | `InterruptManager` z jednym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. Publiczny `READY_INTERRUPT_HANDLERS={"rozkaz", "klatwa"}` jest węższy od registry. Built-in adapter trwałego protokołu ma osobne strict, source-correct validatory Rozkazu (`rozkaz_tak` + kierunek) i Klątwy (`klatwa_tak`, oba boole); Oznaczenie pozostaje historycznym uproszczeniem niedostępnym publicznie, a Strażnik stubem. |
 | `actions.py` | ~145 | 6 Action types frozen (`DeploymentAction/ManeuverAction/DefendAction/ShootAction/ChargeAction/SpecialAction`) + `Action` Union alias, kanoniczne discriminators oraz współdzielona walidacja trwałej historii follow-up |
 | `phases.py` | ~1030 | `setup_phase`, `deployment_round` oraz split aktywacji: `_begin_activation` raz, `_apply_single_action` = akcja + Przegrupowanie, `_finalize_activation` = Odzyskiwanie ran placeholder + Aktywowany + clear override'ów ([`SZOP_Rozjemca.md` pkt 11.b.i–vi](../app/static/docs/SZOP_Rozjemca.md)). **B3.9.c**: `ActivationContext` frozen dataclass + `_build_activation_context` (delta `wounds_received_this_activation` per blob + `melee_combatants` frozenset). **B3.9.d**: emit Status* + MeleeBalanceReset. **B3.9.e**: `_apply_special` deleguje do `effects.get_active_ability`. |
 | `resolver.py` | ~360 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` zamyka legacy jednoakcyjną aktywację; `apply_activation(..., continuation)` wykonuje do dwóch akcji, ale `actions_taken` jest tylko procesowe. `should_end_round` / `is_battle_over`. Trwałe przerwanie między krokami wymaga event-sourced activation/window z ADR-0056; obecny resolver nie jest restart-safe seam dla osobnego interrupt requestu. |

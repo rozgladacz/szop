@@ -277,11 +277,23 @@
     },
     "RulesetAbility": {
       "additionalProperties": false,
-      "description": "Mirror `app.data.abilities.AbilityDefinition`.\n\nPola opcjonalne (`value_label`, `value_type`, `value_choices`) zachowują\nNone gdy abilities nie wymagają parametru (jak procedural).\n\n`rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X)/Klątwa(X)/\nOznaczenie(X). `rozkaz_kierunek` zachowuje kanoniczny znacznik efektu:\n\"+\" nadaje korzystną zdolność, \"−\" odbiera niekorzystną. Tylko passive\nabilities mają te pola. None = nieznane/false.",
+      "description": "Mirror `app.data.abilities.AbilityDefinition`.\n\nPola opcjonalne (`value_label`, `value_type`, `value_choices`) zachowują\nNone gdy abilities nie wymagają parametru (jak procedural).\n\n`rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X).\n`rozkaz_kierunek` zachowuje kanoniczny znacznik efektu: \"+\" nadaje\nkorzystną zdolność, \"−\" odbiera niekorzystną. `klatwa_tak` określa osobny\nkatalog X dla Klątwy(X). Tylko passive abilities mogą być legalnym X;\nNone = brak jawnego tagu/false.",
       "properties": {
         "description": {
           "title": "Description",
           "type": "string"
+        },
+        "klatwa_tak": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Klatwa Tak"
         },
         "name": {
           "title": "Name",

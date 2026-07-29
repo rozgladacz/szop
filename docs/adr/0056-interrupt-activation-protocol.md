@@ -483,8 +483,8 @@ historyczny error contract ADR-0054.
 
 | Handler | Publiczna gotowość | Prerequisite |
 |---|---|---|
-| Rozkaz(X) | Gotowy w pure engine od B4.4b.7; transport nadal niewystawiony. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
-| Klątwa(X) | Może wejść po tych samych gate'ach, ale jako osobny slice po Rozkazie. | Osobny validator `klatwa_tak`, enemy target, 12″ i limit raz/rundę; nie może reużyć `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
+| Rozkaz(X) | Public-ready w pure engine i trwałym transporcie v2 od B4.4b.7/B4.4c.9. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
+| Klątwa(X) | Public-ready od B4.4d.C0; reużywa istniejący transport v2 i klienta. | Osobny validator `klatwa_tak`, pięć jawnych pasywek (`delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`), enemy target, 12″, oba kierunki strict bool, limit raz/rundę i wygaśnięcie przy finalizacji; nie reużywa `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
 | Strażnik | Publicznie niewspierany, dopóki jest stubem. | Pełny interrupt-action primitive: legalny source/weapon/targets, rzeczywisty Ostrzał, następnie Wyczerpany, outcome eventy, replay/RNG i no-nested ([pozycja 31][Z31], [pkt 17][R17]). |
 | Oznaczenie(X) | Publicznie niewspierane w obecnej semantyce. | Osobny attack-declaration/attack-scope prerequisite po zamknięciu ogólnego `BEFORE_ACTION`: cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, efekt tylko do `AttackResolved`, nie do końca aktywacji ([pozycja 49][Z49]). To rozszerzenie nadal użyje `POST /interrupts`, ale nie może udawać zwykłego activation override. |
 
@@ -505,6 +505,8 @@ rulesetu bez obu kanonicznych tagów nie jest legalnym X.
 - Source/target/ability validation działa na jednym załadowanym `BattleState` i
   procesowo cache'owanym rulesecie. Żadnego SELECT per oddział, ability, target
   ani event; `get_eligible_interrupts` nie może powodować N+1.
+- B4.4d.C0 zamraża pomiar Klątwy równy Rozkazowi: 5 SELECT-ów w serwisie,
+  6 w pełnym request session i 7 dla bearera.
 - Hot concurrency path używa istniejących indeksów/constraintów:
   `battle_events(battle_id, sequence) UNIQUE`, indeksu `battle_id`,
   `battle_checkpoints(battle_id, sequence_at) UNIQUE` i PK `battles.id`.
@@ -763,8 +765,22 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   zwycięzcy, restart z checkpointu, dwie akcje i puste recovery. Każda mutacja
   klienta ma jeden transport request; session flow potwierdza istniejący ceiling
   6 SELECT-ów per request.
+- **B4.4d.C0 DONE 2026-07-29:** publiczny allowlist wynosi dokładnie
+  `{"rozkaz", "klatwa"}`. Addytywny immutable `klatwa_tak` zamraża pięć
+  source-correct X: `delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`,
+  `wolny`. Klątwa ma osobny exact payload `{target_id, ability, granted}` bez
+  kierunku Rozkazu; oba boole są legalne, a brak jawnego true, false,
+  nie-pasywka i nieznany slug failują zamknięcie. Istniejący pure/durable/FastAPI
+  flow egzekwuje żywy frontowy source z Klątwą, wrogi żywy frontowy target,
+  edge-to-edge 12″, limit raz/rundę, replay/restart i wygaśnięcie przy
+  finalizacji ([pozycja 45][Z45], [pkt 11.b.i–vi][R11], [pkt 12.a–c][R12]).
+  Same-owner, two-owner, stale/race/rollback/no-oracle/scope/audit i realny
+  `HttpClient.interrupt` są pokryte bez zmian API/DB/klienta; klient wykonuje
+  jeden POST. Query gate pozostał równy Rozkazowi: 5 SELECT-ów w serwisie,
+  6 session i 7 bearer.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
-  pakowanie pozostają osobnymi slice'ami.
+  pakowanie pozostają osobnymi slice'ami; public-ready Oznaczenie i Strażnik
+  wymagają własnych C1/C2.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -799,12 +815,15 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
 
 ### C. Source-correct handlers
 
+- **C0 Klątwa DONE 2026-07-29:** osobny immutable tag i validator, pięć
+  source-correct X, enemy/12″/raz-rundę/finalize, publiczny allowlist
+  `Rozkaz|Klątwa`, pełny pure/durable/FastAPI/HttpClient/replay/query gate;
+  bez nowych eventów, API, DB ani kodu klienta.
 - **C1 Strażnik:** pełny Ostrzał + Wyczerpany, RNG/replay, source/weapon/target,
   no-nested; własny commit i DoD.
 - **C2 Oznaczenie:** najpierw attack-declaration/attack-scope events i
   wygaśnięcie po jednym ataku, potem handler; żadnego activation-scoped fallback;
   własny commit i DoD.
-- Klątwa może być małym C0 po Rozkazie, jeśli nie weszła w B; każdy slug osobno.
 
 ### D. HttpClient real-transport parity
 

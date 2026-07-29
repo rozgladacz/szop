@@ -40,8 +40,8 @@ Zawartość:
 - `get_eligible_interrupts(state, point)` — lista (blob, slug) which CAN trigger
 - `trigger_interrupt(...)` — wywołuje konkretny handler
 - Handlery: Strażnik (id 31) stub (emit `InterruptTriggered` tylko — faktyczny
-  Ostrzał + Wyczerpany czeka na osobny slice), source-correct Rozkaz (id 50)
-  oraz historyczne uproszczenia Klątwy/Oznaczenia (id 45/49).
+  Ostrzał + Wyczerpany czeka na osobny slice), source-correct Rozkaz/Klątwa
+  (id 50/45) oraz historyczne uproszczenie Oznaczenia (id 49).
 
 Auto-orkiestracja przerwań w pętli aktywacji (`phases.activation_phase` woła
 handlery sama) wciąż czeka na integrację (H2/B4); dziś handlery wywoływane jawnie.
@@ -110,7 +110,7 @@ InterruptHandlerFn = Callable[
 _INTERRUPT_HANDLERS: dict[tuple[InterruptPoint, str], InterruptHandlerFn] = {}
 
 # Public readiness is deliberately narrower than the internal registry.
-READY_INTERRUPT_HANDLERS = frozenset({"rozkaz"})
+READY_INTERRUPT_HANDLERS = frozenset({"rozkaz", "klatwa"})
 
 
 def register_interrupt_handler(
@@ -225,17 +225,20 @@ def _straznik_handler(
 # ---------------------------------------------------------------------------
 #
 # Policy (user, autor reguł, 2026-06-09): wyzwalane w `BEFORE_ACTION` (pkt 11.b.i),
-# raz na rundę, efekt do końca aktywacji, X = pasywka z `rozkaz_tak: true`.
+# raz na rundę i efekt do końca aktywacji.
 # - Rozkaz(X) — sojuszniczy oddział w 12″ (nie)ma X (pkt 50).
-# - Klątwa(X) — wrogi oddział w 12″ (nie)ma X (pkt 45).
+#   X = pasywka z `rozkaz_tak: true` i kanonicznym `rozkaz_kierunek`.
+# - Klątwa(X) — wrogi oddział w 12″ (nie)ma X (pkt 45);
+#   X = pasywka z jawnym `klatwa_tak: true`.
 # - Oznaczenie(X) — sojuszniczy oddział atakujący cel w 12″ od nosiciela (pkt 49).
 #
 # Mechanika: emit `AbilityOverrideApplied(target, X, granted)` → substrat
 # `UnitBlob.ability_overrides` (Faza 1) → `effective_passives` aplikuje X do
 # końca aktywacji (`activation_phase` emituje `AbilityOverridesCleared`).
 # Dla source-correct Rozkazu `granted` jest wymaganym strict bool i musi zgadzać
-# się z `rozkaz_kierunek`; historyczne Klątwa/Oznaczenie zachowują coercion do
-# czasu własnych source-correct slice'ów.
+# się z `rozkaz_kierunek`; source-correct Klątwa dopuszcza oba kierunki
+# deklarowane przez gracza. Historyczne Oznaczenie zachowuje coercion do czasu
+# własnego source-correct slice'a.
 
 ORDER_RANGE_INCHES = 12.0
 # Sluggi przerwań z limitem „raz na rundę" (pkt 12). Strażnik NIE jest tu —
@@ -245,10 +248,11 @@ ONCE_PER_ROUND_INTERRUPTS = frozenset({"rozkaz", "klatwa", "oznaczenie"})
 
 class InvalidInterruptError(ValueError):
     """Niedozwolone wywołanie przerwania (zasięg / cel ally-enemy / X bez
-    `rozkaz_tak` / limit raz-na-rundę)."""
+    source-correct tagu / limit raz-na-rundę)."""
 
 
 _ROZKAZ_PAYLOAD_FIELDS = frozenset({"target_id", "ability", "granted"})
+_KLATWA_PAYLOAD_FIELDS = frozenset({"target_id", "ability", "granted"})
 
 
 def _validated_rozkaz_payload(
@@ -286,6 +290,35 @@ def _validated_rozkaz_payload(
     return target_id, ability, granted
 
 
+def _validated_klatwa_payload(
+    payload: Mapping[str, Any],
+) -> tuple[int, str, bool]:
+    try:
+        payload_fields = frozenset(payload)
+    except Exception as exc:
+        raise InvalidInterruptError("klatwa: malformed payload") from exc
+    if payload_fields != _KLATWA_PAYLOAD_FIELDS:
+        raise InvalidInterruptError(
+            "klatwa: payload requires exactly target_id, ability and granted"
+        )
+    target_id = payload["target_id"]
+    ability = payload["ability"]
+    granted = payload["granted"]
+    if (
+        type(target_id) is not int
+        or target_id < 0
+        or type(ability) is not str
+        or not ability
+        or type(granted) is not bool
+    ):
+        raise InvalidInterruptError("klatwa: payload types are invalid")
+    if ability not in _klatwa_capable_slugs():
+        raise InvalidInterruptError(
+            f"klatwa: ability {ability!r} lacks canonical klatwa_tak tag"
+        )
+    return target_id, ability, granted
+
+
 def validate_ready_activation_interrupt_request(
     *,
     ability_slug: str,
@@ -306,6 +339,8 @@ def validate_ready_activation_interrupt_request(
         raise InvalidInterruptError("ready interrupt payload is malformed") from exc
     if ability_slug == "rozkaz":
         _validated_rozkaz_payload(dispatch_payload)
+    elif ability_slug == "klatwa":
+        _validated_klatwa_payload(dispatch_payload)
     return dispatch_payload
 
 
@@ -317,6 +352,19 @@ def _rozkaz_capable_slugs(ruleset_version: str = "v1") -> frozenset[str]:
 
     ruleset = load_ruleset(ruleset_version)
     return frozenset(a.slug for a in ruleset.abilities if a.rozkaz_tak)
+
+
+@lru_cache(maxsize=4)
+def _klatwa_capable_slugs(ruleset_version: str = "v1") -> frozenset[str]:
+    """Immutable source-correct Klątwa catalog from explicit ruleset tags."""
+    from app.services.rulesets.loader import load_ruleset
+
+    ruleset = load_ruleset(ruleset_version)
+    return frozenset(
+        ability.slug
+        for ability in ruleset.abilities
+        if ability.type == "passive" and ability.klatwa_tak is True
+    )
 
 
 @lru_cache(maxsize=4)
@@ -443,7 +491,7 @@ def _apply_order_like(
     slug: str,
     require_enemy: bool,
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
-    """Historyczna wspólna logika niegotowych Klątwy/Oznaczenia.
+    """Historyczna wspólna logika niegotowego Oznaczenia.
 
     Payload: `target_id` (oddział-cel), `ability` (X — pasywka `rozkaz_tak:true`),
     `granted` (bool, default True — nadaj/odbierz), `sequence`.
@@ -512,6 +560,34 @@ def _apply_rozkaz(
     )
 
 
+def _apply_klatwa(
+    context: InterruptContext,
+    payload: Mapping[str, Any],
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Strict source-correct Klątwa(X) outcome from canonical ruleset metadata."""
+    target_id, ability, granted = _validated_klatwa_payload(payload)
+    if type(context.sequence) is not int or context.sequence < 0:
+        raise InvalidInterruptError("klatwa: context sequence is invalid")
+
+    source, target = _order_like_participants(
+        context,
+        slug="klatwa",
+        target_id=target_id,
+        require_enemy=True,
+        require_front=True,
+        require_source_slug=True,
+    )
+    return _apply_order_like_outcome(
+        context,
+        source=source,
+        target=target,
+        slug="klatwa",
+        ability=ability,
+        granted=granted,
+        sequence=context.sequence,
+    )
+
+
 @register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "rozkaz")
 def _rozkaz_handler(
     context: InterruptContext, payload: dict[str, Any]
@@ -525,7 +601,7 @@ def _klatwa_handler(
     context: InterruptContext, payload: dict[str, Any]
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Klątwa(X) (id 45): wrogi oddział w 12″ (nie)ma X do końca aktywacji."""
-    return _apply_order_like(context, payload, slug="klatwa", require_enemy=True)
+    return _apply_klatwa(context, payload)
 
 
 @register_interrupt_handler(InterruptPoint.BEFORE_ACTION, "oznaczenie")

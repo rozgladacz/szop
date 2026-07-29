@@ -116,6 +116,11 @@ def _seed_activation_transport_world(
             type="aktywna",
             description="Transport fixture",
         )
+        klatwa = models.Ability(
+            name="Klątwa",
+            type="aktywna",
+            description="Transport fixture",
+        )
         session.add_all(
             [
                 p0,
@@ -127,6 +132,7 @@ def _seed_activation_transport_world(
                 weapon,
                 unit,
                 rozkaz,
+                klatwa,
             ]
         )
         session.flush()
@@ -140,6 +146,7 @@ def _seed_activation_transport_world(
                     is_primary=True,
                 ),
                 models.UnitAbility(unit=unit, ability=rozkaz),
+                models.UnitAbility(unit=unit, ability=klatwa),
             ]
         )
 
@@ -1002,7 +1009,7 @@ def test_interrupt_union_is_closed_strict_and_write_free(
     assert _stream_counts(world, battle["battle_id"]) == before
 
 
-def test_public_rozkaz_succeeds_and_nonready_slugs_fail_closed(
+def test_public_rozkaz_and_klatwa_succeed_and_nonready_slugs_fail_closed(
     activation_transport_world: ActivationTransportWorld,
 ) -> None:
     world = activation_transport_world
@@ -1029,13 +1036,41 @@ def test_public_rozkaz_succeeds_and_nonready_slugs_fail_closed(
     accepted_state = _wire_state(accepted)
     assert accepted_state.activation.window.priority_player == 0
 
-    for slug in ("klatwa", "oznaczenie", "straznik", "registry-only"):
+    enemy_target_id = next(
+        blob.id
+        for blob in accepted_state.blobs
+        if blob.owner_player != 0 and blob.id >= 1
+    )
+    cursed = world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        json={
+            "operation": "interrupt",
+            **_activation_guards(accepted),
+            "source_unit_id": 2,
+            "ability_slug": "klatwa",
+            "payload": {
+                "target_id": enemy_target_id,
+                "ability": "delikatny",
+                "granted": True,
+            },
+        },
+    )
+    assert cursed.status_code == 200, cursed.text
+    _assert_exact_envelope(cursed, battle_id)
+    cursed_state = _wire_state(cursed)
+    cursed_target = next(
+        blob for blob in cursed_state.blobs if blob.id == enemy_target_id
+    )
+    assert cursed_target.ability_overrides == (("delikatny", True),)
+    assert (2, "klatwa") in cursed_state.used_interrupts_this_round
+
+    for slug in ("oznaczenie", "straznik", "registry-only"):
         before = _stream_counts(world, battle_id)
         rejected = world.p0.post(
             f"/battles/{battle_id}/interrupts",
             json={
                 "operation": "interrupt",
-                **_activation_guards(accepted),
+                **_activation_guards(cursed),
                 "source_unit_id": 2,
                 "ability_slug": slug,
                 "payload": {
@@ -1083,6 +1118,47 @@ def test_public_rozkaz_payload_is_strict_and_atomic(
             **_activation_guards(started),
             "source_unit_id": 2,
             "ability_slug": "rozkaz",
+            "payload": payload,
+        },
+    )
+    assert response.status_code == 422
+    assert response.json() == {"detail": {"code": "illegal_interrupt"}}
+    assert _stream_counts(world, battle["battle_id"]) == before
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"target_id": True, "ability": "delikatny", "granted": True},
+        {"target_id": "3", "ability": "delikatny", "granted": True},
+        {"target_id": 3, "ability": 1, "granted": True},
+        {"target_id": 3, "ability": "", "granted": True},
+        {"target_id": 3, "ability": "delikatny", "granted": 1},
+        {
+            "target_id": 3,
+            "ability": "delikatny",
+            "granted": True,
+            "extra": 1,
+        },
+        {"target_id": 3, "ability": "niewrazliwy", "granted": True},
+    ],
+)
+def test_public_klatwa_payload_is_strict_and_atomic(
+    activation_transport_world: ActivationTransportWorld,
+    payload: dict[str, Any],
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=2)
+    started = _start(world.p0, battle)
+    before = _stream_counts(world, battle["battle_id"])
+    response = world.p0.post(
+        f"/battles/{battle['battle_id']}/interrupts",
+        json={
+            "operation": "interrupt",
+            **_activation_guards(started),
+            "source_unit_id": 2,
+            "ability_slug": "klatwa",
             "payload": payload,
         },
     )
@@ -1303,17 +1379,46 @@ def test_agent_scopes_wildcard_and_body_blind_audit(
         },
     )
     assert started.status_code == 201
+    started_state = _wire_state(started)
+    priority_player = started_state.activation.window.priority_player
+    source_unit_id = next(
+        blob.id
+        for blob in started_state.blobs
+        if blob.owner_player == priority_player and blob.id >= 1
+    )
+    target_unit_id = next(
+        blob.id
+        for blob in started_state.blobs
+        if blob.owner_player != priority_player and blob.id >= 1
+    )
+    interrupt_body = {
+        "operation": "interrupt",
+        **_activation_guards(started),
+        "source_unit_id": source_unit_id,
+        "ability_slug": "klatwa",
+        "payload": {
+            "target_id": target_unit_id,
+            "ability": "delikatny",
+            "granted": True,
+        },
+    }
     wrong_scope = world.p0.post(
         f"/battles/{battle_id}/interrupts",
         headers=_bearer("act-only"),
-        json={"operation": "pass", **_activation_guards(started)},
+        json=interrupt_body,
     )
     assert wrong_scope.status_code == 403
     assert wrong_scope.json() == {"detail": {"code": "forbidden"}}
+    bearer_interrupt = world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        headers=_bearer("interrupt-only"),
+        json=interrupt_body,
+    )
+    assert bearer_interrupt.status_code == 200
     bearer_pass = world.p0.post(
         f"/battles/{battle_id}/interrupts",
         headers=_bearer("interrupt-only"),
-        json={"operation": "pass", **_activation_guards(started)},
+        json={"operation": "pass", **_activation_guards(bearer_interrupt)},
     )
     assert bearer_pass.status_code == 202
     second_bearer_pass = world.p0.post(
@@ -1362,6 +1467,7 @@ def test_agent_scopes_wildcard_and_body_blind_audit(
         assert "wildcard" not in serialized
         assert "selected_unit_id" not in serialized
         assert "operation" not in serialized
+        assert "klatwa" not in serialized
         assert all(audit.route.startswith("/battles/") for audit in audits)
         for audit in audits:
             payload = json.loads(audit.params_json)
@@ -1385,7 +1491,7 @@ def test_v2_missing_auth_uses_closed_unauthorized_envelope(
     assert response.json() == {"detail": {"code": "unauthorized"}}
 
 
-def test_interrupt_foreign_source_is_forbidden_but_missing_or_enemy_target_is_generic(
+def test_klatwa_foreign_source_is_forbidden_but_missing_or_ally_target_is_generic(
     activation_transport_world: ActivationTransportWorld,
 ) -> None:
     world = activation_transport_world
@@ -1443,9 +1549,9 @@ def test_interrupt_foreign_source_is_forbidden_but_missing_or_enemy_target_is_ge
     )
     guards = _activation_guards(started)
     base_payload = {
-        "target_id": selected_id,
-        "ability": "nieustraszony",
-        "granted": False,
+        "target_id": enemy_target_id,
+        "ability": "delikatny",
+        "granted": True,
     }
     before = _stream_counts(world, battle_id)
     stale_foreign_source = priority_client.post(
@@ -1454,7 +1560,7 @@ def test_interrupt_foreign_source_is_forbidden_but_missing_or_enemy_target_is_ge
             "operation": "interrupt",
             **{**guards, "activation_id": guards["activation_id"] + 1},
             "source_unit_id": foreign_source_id,
-            "ability_slug": "rozkaz",
+            "ability_slug": "klatwa",
             "payload": base_payload,
         },
     )
@@ -1468,7 +1574,7 @@ def test_interrupt_foreign_source_is_forbidden_but_missing_or_enemy_target_is_ge
             "operation": "interrupt",
             **guards,
             "source_unit_id": foreign_source_id,
-            "ability_slug": "rozkaz",
+            "ability_slug": "klatwa",
             "payload": base_payload,
         },
     )
@@ -1480,7 +1586,7 @@ def test_interrupt_foreign_source_is_forbidden_but_missing_or_enemy_target_is_ge
             "operation": "interrupt",
             **guards,
             "source_unit_id": 999999999,
-            "ability_slug": "rozkaz",
+            "ability_slug": "klatwa",
             "payload": base_payload,
         },
     )
@@ -1488,21 +1594,21 @@ def test_interrupt_foreign_source_is_forbidden_but_missing_or_enemy_target_is_ge
     assert missing_source.json() == {
         "detail": {"code": "illegal_interrupt"}
     }
-    enemy_target = priority_client.post(
+    ally_target = priority_client.post(
         f"/battles/{battle_id}/interrupts",
         json={
             "operation": "interrupt",
             **guards,
             "source_unit_id": own_source_id,
-            "ability_slug": "rozkaz",
+            "ability_slug": "klatwa",
             "payload": {
                 **base_payload,
-                "target_id": enemy_target_id,
+                "target_id": own_source_id,
             },
         },
     )
-    assert enemy_target.status_code == 422
-    assert enemy_target.json() == {
+    assert ally_target.status_code == 422
+    assert ally_target.json() == {
         "detail": {"code": "illegal_interrupt"}
     }
     assert _stream_counts(world, battle_id) == before
@@ -1622,6 +1728,101 @@ def test_full_request_sql_counts_are_constant_for_session_bearer_and_v1_action(
     assert (session_selects, session_statements) == (6, 10)
     assert (bearer_selects, bearer_statements) == (7, 13)
     assert (v1_selects, v1_statements) == (6, 13)
+
+
+def test_klatwa_matches_rozkaz_full_request_sql_for_session_and_bearer(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+
+    def counted_request(request):
+        statements: list[str] = []
+
+        def capture(
+            conn,
+            cursor,
+            statement,
+            parameters,
+            context,
+            executemany,
+        ) -> None:
+            del conn, cursor, parameters, context, executemany
+            statements.append(statement)
+
+        event.listen(world.engine, "before_cursor_execute", capture)
+        try:
+            response = request()
+        finally:
+            event.remove(world.engine, "before_cursor_execute", capture)
+        assert response.status_code == 200, response.text
+        return (
+            sum(
+                statement.lstrip().upper().startswith("SELECT")
+                for statement in statements
+            ),
+            len(statements),
+        )
+
+    def interrupt_body(started, slug: str) -> dict[str, Any]:
+        is_klatwa = slug == "klatwa"
+        state = _wire_state(started)
+        priority_player = state.activation.window.priority_player
+        own_units = [
+            blob.id
+            for blob in state.blobs
+            if blob.owner_player == priority_player and blob.id >= 1
+        ]
+        enemy_units = [
+            blob.id
+            for blob in state.blobs
+            if blob.owner_player != priority_player and blob.id >= 1
+        ]
+        return {
+            "operation": "interrupt",
+            **_activation_guards(started),
+            "source_unit_id": own_units[-1],
+            "ability_slug": slug,
+            "payload": {
+                "target_id": enemy_units[0] if is_klatwa else own_units[0],
+                "ability": "delikatny" if is_klatwa else "nieustraszony",
+                "granted": True if is_klatwa else False,
+            },
+        }
+
+    session_metrics: dict[str, tuple[int, int]] = {}
+    for slug in ("rozkaz", "klatwa"):
+        battle = _create_same_owner_battle(world, protocol_version=2)
+        started = _start(world.p0, battle)
+        session_metrics[slug] = counted_request(
+            lambda battle=battle, started=started, slug=slug: world.p0.post(
+                f"/battles/{battle['battle_id']}/interrupts",
+                json=interrupt_body(started, slug),
+            )
+        )
+
+    _seed_token(
+        world,
+        owner_user_id=world.ids.p0_user_id,
+        raw_token="sql-interrupt-bearer",
+        scopes={battles.BATTLE_INTERRUPT_SCOPE: True},
+    )
+    world.outsider.cookies.clear()
+    bearer_metrics: dict[str, tuple[int, int]] = {}
+    for slug in ("rozkaz", "klatwa"):
+        battle = _create_same_owner_battle(world, protocol_version=2)
+        started = _start(world.p0, battle)
+        bearer_metrics[slug] = counted_request(
+            lambda battle=battle, started=started, slug=slug: world.outsider.post(
+                f"/battles/{battle['battle_id']}/interrupts",
+                headers=_bearer("sql-interrupt-bearer"),
+                json=interrupt_body(started, slug),
+            )
+        )
+
+    assert session_metrics["klatwa"] == session_metrics["rozkaz"]
+    assert bearer_metrics["klatwa"] == bearer_metrics["rozkaz"]
+    assert session_metrics["klatwa"][0] == 6
+    assert bearer_metrics["klatwa"][0] == 7
 
 
 def test_each_v2_session_mutation_has_constant_six_select_ceiling(
@@ -1917,17 +2118,22 @@ def test_http_client_two_owner_tokens_restart_races_and_second_action(
         for blob in started.state.blobs
         if blob.owner_player == priority_player and blob.id >= 1
     ]
+    enemy_units = [
+        blob.id
+        for blob in started.state.blobs
+        if blob.owner_player != priority_player and blob.id >= 1
+    ]
     interrupted = one_post(
         priority_transport,
         lambda: priority_client.interrupt(
             battle_id,
             **_client_activation_guards(started),
             source_unit_id=priority_units[-1],
-            ability_slug="rozkaz",
+            ability_slug="klatwa",
             payload={
-                "target_id": priority_units[0],
-                "ability": "nieustraszony",
-                "granted": False,
+                "target_id": enemy_units[0],
+                "ability": "delikatny",
+                "granted": True,
             },
         ),
     )

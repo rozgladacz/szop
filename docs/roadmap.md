@@ -434,8 +434,26 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   restart, stale/race/rollback i replay/RNG parity. Pełny request ma stały
   ceiling 6 SELECT-ów dla sesji i 7 dla bearera; v1 action pozostaje przy
   6 SELECT-ach i historycznym 200.
-  **Niepuste source-correct recovery handlery pozostają OPEN. HttpClient,
-  LocalClient, Protocol, MCP i UI pozostają osobnym kolejnym slice'em.**
+  **B4.4d.C0 source-correct publiczna Klątwa(X) DONE 2026-07-29:** addytywny
+  immutable `RulesetAbility.klatwa_tak` i schema rulesetu zamrażają pięć
+  source-correct X: `delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`,
+  `wolny` ([`SZOP_Zdolnosci.md` pozycje 4, 9, 15, 18 i 33](../app/static/docs/SZOP_Zdolnosci.md)).
+  Osobny strict validator nie reużywa tagów ani kierunku Rozkazu; payload ma
+  dokładnie `{target_id, ability, granted}`, oba boole są legalne, a brak
+  jawnego `klatwa_tak: true`, nie-pasywka i nieznany slug failują zamknięcie.
+  Istniejący activation protocol v2 egzekwuje żywy/frontowy source z Klątwą,
+  wrogi żywy/frontowy cel w edge-to-edge 12″, limit `(source_id, "klatwa")`
+  raz/rundę i wygaśnięcie override'u przy finalizacji zgodnie z
+  [pozycją 45](../app/static/docs/SZOP_Zdolnosci.md) oraz
+  [`SZOP_Rozjemca.md` pkt 11.b.i/iv i 12.a–c](../app/static/docs/SZOP_Rozjemca.md).
+  Publiczny allowlist wynosi teraz dokładnie `{"rozkaz", "klatwa"}`;
+  Oznaczenie i Strażnik pozostają niedostępne. Walidacja używa załadowanego
+  state i cache'owanego rulesetu bez N+1; zmierzony sukces ma taki sam koszt
+  jak Rozkaz: 5 SELECT-ów w serwisie, 6 w pełnym request session i 7 dla
+  bearera. `HttpClient.interrupt(..., ability_slug="klatwa", ...)` reużywa
+  istniejące API i wykonuje dokładnie jeden POST bez GET/retry/cache.
+  **Niepuste source-correct recovery handlery, Strażnik, Oznaczenie,
+  LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
   `POST /battles/{id}/replay` **DONE
   2026-07-19 (B4.3)**: participant lub agent z `battle:read` wykonuje read-only,
   bounded rekonstrukcję `BattleState` z najwcześniejszego trwałego checkpointu

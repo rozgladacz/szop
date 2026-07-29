@@ -429,3 +429,15 @@ def test_rozkaz_tak_klatwa_is_true():
     ruleset = load_ruleset("v1")
     klatwa = next(a for a in ruleset.abilities if a.slug == "klatwa")
     assert klatwa.rozkaz_tak is True
+
+
+def test_klatwa_tak_is_explicit_only_for_passive_catalog_entries():
+    from app.services.rulesets import load_ruleset
+
+    ruleset = load_ruleset("v1")
+    tagged = tuple(a for a in ruleset.abilities if a.klatwa_tak is True)
+
+    assert tagged
+    assert all(a.type == "passive" for a in tagged)
+    assert next(a for a in ruleset.abilities if a.slug == "wolny").klatwa_tak is True
+    assert next(a for a in ruleset.abilities if a.slug == "klatwa").klatwa_tak is None

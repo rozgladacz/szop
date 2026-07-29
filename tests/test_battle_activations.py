@@ -4239,6 +4239,59 @@ def test_interrupt_payload_shape_and_direction_fail_before_database_io(
 
 
 @pytest.mark.parametrize(
+    "payload",
+    [
+        {"target_id": True, "ability": "delikatny", "granted": True},
+        {"target_id": 13, "ability": "delikatny", "granted": 1},
+        {
+            "target_id": 13,
+            "ability": "delikatny",
+            "granted": True,
+            "extra": "transport",
+        },
+        {"target_id": 13, "ability": "niewrazliwy", "granted": True},
+    ],
+)
+def test_klatwa_payload_fails_closed_before_database_io(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, object],
+) -> None:
+    initial, source_id, _ = _rozkaz_window_state(
+        source_passives=("klatwa",),
+        target_id=13,
+        target_owner=1,
+    )
+    battle_id, started = _persist_started_battle(
+        activation_world,
+        state=initial,
+    )
+
+    def forbidden_lookup(*args, **kwargs):
+        raise AssertionError("invalid Klątwa payload reached persistence")
+
+    monkeypatch.setattr(
+        activation_service,
+        "_get_participant_battle",
+        forbidden_lookup,
+    )
+    with activation_world.sessions() as session:
+        with pytest.raises(BattleActivationInterruptInvalid) as exc_info:
+            stage_battle_activation_interrupt(
+                session,
+                battle_id=battle_id,
+                caller_user_id=activation_world.p1_id,
+                expected_sequence=started.new_sequence,
+                source_unit_id=source_id,
+                ability_slug="klatwa",
+                payload=payload,
+                **_interrupt_guards(started.state),
+            )
+
+    assert exc_info.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+
+
+@pytest.mark.parametrize(
     ("field", "value", "reason"),
     [
         ("expected_sequence", True, None),
@@ -4312,7 +4365,7 @@ def test_interrupt_strict_top_level_guards_reject_bool_and_coercion_before_io(
     assert exc_info.value.reason is reason
 
 
-@pytest.mark.parametrize("slug", ["klatwa", "oznaczenie", "straznik"])
+@pytest.mark.parametrize("slug", ["oznaczenie", "straznik"])
 def test_interrupt_rejects_registered_but_not_ready_slugs_without_writes(
     activation_world: ActivationWorld,
     slug: str,
@@ -4651,10 +4704,27 @@ def test_interrupt_concurrent_head_change_reports_sequence_conflict_only(
         ) == 2
 
 
+@pytest.mark.parametrize(
+    ("ability_slug", "target_id", "target_owner", "ability", "granted"),
+    [
+        ("rozkaz", 11, 0, "niewrazliwy", True),
+        ("klatwa", 13, 1, "delikatny", False),
+    ],
+)
 def test_interrupt_restart_replay_then_pass_action_finalize_clears_override(
     activation_world: ActivationWorld,
+    ability_slug: str,
+    target_id: int,
+    target_owner: int,
+    ability: str,
+    granted: bool,
 ) -> None:
-    initial, source_id, target_id = _rozkaz_window_state()
+    initial, source_id, target_id = _rozkaz_window_state(
+        source_passives=(ability_slug,),
+        target_id=target_id,
+        target_owner=target_owner,
+        target_passives=((ability,) if not granted else ()),
+    )
     battle_id, started = _persist_started_battle(
         activation_world,
         state=initial,
@@ -4669,8 +4739,12 @@ def test_interrupt_restart_replay_then_pass_action_finalize_clears_override(
             caller_user_id=activation_world.p1_id,
             expected_sequence=started.new_sequence,
             source_unit_id=source_id,
-            ability_slug="rozkaz",
-            payload=_rozkaz_payload(target_id),
+            ability_slug=ability_slug,
+            payload=_rozkaz_payload(
+                target_id,
+                ability=ability,
+                granted=granted,
+            ),
             **_interrupt_guards(started.state),
         )
         session.commit()
@@ -4729,6 +4803,7 @@ def test_interrupt_restart_replay_then_pass_action_finalize_clears_override(
 
     target = next(blob for blob in finalized.state.blobs if blob.id == target_id)
     assert target.ability_overrides == ()
+    assert (ability in effective_passives(target)) is (not granted)
     assert any(type(item) is AbilityOverridesCleared for item in finalized.events)
     assert finalized.state.activation is None
     with activation_world.sessions() as restarted:
@@ -4840,3 +4915,91 @@ def test_interrupt_success_is_one_batch_one_checkpoint_and_five_selects(
     assert save_event_calls == 2
     assert save_checkpoint_calls == 2
     assert all(type(sequence) is int for sequence in guarded_heads)
+
+
+def test_klatwa_matches_rozkaz_service_query_and_statement_cost(
+    activation_world: ActivationWorld,
+) -> None:
+    rozkaz_state, rozkaz_source, rozkaz_target = _rozkaz_window_state()
+    klatwa_state, klatwa_source, klatwa_target = _rozkaz_window_state(
+        source_passives=("klatwa",),
+        target_id=13,
+        target_owner=1,
+    )
+    rozkaz_id, rozkaz_started = _persist_started_battle(
+        activation_world,
+        state=rozkaz_state,
+    )
+    klatwa_id, klatwa_started = _persist_started_battle(
+        activation_world,
+        state=klatwa_state,
+    )
+    cases = (
+        (
+            "rozkaz",
+            rozkaz_id,
+            rozkaz_started,
+            rozkaz_source,
+            _rozkaz_payload(rozkaz_target),
+        ),
+        (
+            "klatwa",
+            klatwa_id,
+            klatwa_started,
+            klatwa_source,
+            _rozkaz_payload(
+                klatwa_target,
+                ability="delikatny",
+                granted=True,
+            ),
+        ),
+    )
+    statements: list[str] = []
+    metrics: dict[str, tuple[int, int]] = {}
+
+    def capture_statement(
+        _conn,
+        _cursor,
+        statement,
+        _parameters,
+        _context,
+        _executemany,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(
+        activation_world.engine,
+        "before_cursor_execute",
+        capture_statement,
+    )
+    try:
+        for slug, battle_id, started, source_id, payload in cases:
+            statements.clear()
+            with activation_world.sessions() as session:
+                stage_battle_activation_interrupt(
+                    session,
+                    battle_id=battle_id,
+                    caller_user_id=activation_world.p1_id,
+                    expected_sequence=started.new_sequence,
+                    source_unit_id=source_id,
+                    ability_slug=slug,
+                    payload=payload,
+                    **_interrupt_guards(started.state),
+                )
+                metrics[slug] = (
+                    sum(
+                        statement.lstrip().upper().startswith("SELECT")
+                        for statement in statements
+                    ),
+                    len(statements),
+                )
+                session.rollback()
+    finally:
+        event.remove(
+            activation_world.engine,
+            "before_cursor_execute",
+            capture_statement,
+        )
+
+    assert metrics["rozkaz"] == metrics["klatwa"]
+    assert metrics["klatwa"][0] == 5

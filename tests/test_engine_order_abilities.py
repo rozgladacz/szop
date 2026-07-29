@@ -7,6 +7,8 @@ agregatorami effects).
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from app.services.engine.events import (
@@ -22,6 +24,7 @@ from app.services.engine.interrupts import (
 )
 from app.services.engine.state import (
     BattleState,
+    Lokalizacja,
     Position,
     UnitBlob,
     apply_events,
@@ -105,7 +108,8 @@ def test_rozkaz_suppress_variant_removes_ability():
     assert effective_passives(target) == ()
 
 
-def test_klatwa_targets_enemy():
+@pytest.mark.parametrize("granted", [True, False])
+def test_klatwa_targets_enemy_in_both_declared_directions(granted):
     """Klątwa działa na wroga w 12″."""
     source = _blob(blob_id=1, passives=("klatwa",), owner=0, pos=(0.0, 0.0))
     enemy = _blob(blob_id=2, owner=1, pos=(4.0, 0.0))
@@ -113,10 +117,10 @@ def test_klatwa_targets_enemy():
     new_state, _ = trigger_interrupt(
         _ctx(state, 1),
         slug="klatwa",
-        payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
+        payload={"target_id": 2, "ability": "delikatny", "granted": granted},
     )
     target = next(b for b in new_state.blobs if b.id == 2)
-    assert target.ability_overrides == (("nieustraszony", False),)
+    assert target.ability_overrides == (("delikatny", granted),)
 
 
 def test_klatwa_rejects_ally():
@@ -127,7 +131,95 @@ def test_klatwa_rejects_ally():
         trigger_interrupt(
             _ctx(state, 1),
             slug="klatwa",
-            payload={"target_id": 2, "ability": "nieustraszony", "granted": False},
+            payload={"target_id": 2, "ability": "delikatny", "granted": False},
+        )
+
+
+def test_klatwa_rejects_missing_dead_off_field_or_out_of_range_target():
+    source = _blob(blob_id=1, passives=("klatwa",), owner=0)
+    enemy = _blob(blob_id=2, owner=1, pos=(3.0, 0.0))
+    invalid_targets = (
+        None,
+        replace(enemy, models_alive=0),
+        replace(enemy, location=Lokalizacja.ZAPLECZE),
+        replace(enemy, position=Position(20.0, 0.0)),
+    )
+
+    for target in invalid_targets:
+        state = _state(source) if target is None else _state(source, target)
+        with pytest.raises(InvalidInterruptError):
+            trigger_interrupt(
+                _ctx(state, 1),
+                slug="klatwa",
+                payload={
+                    "target_id": enemy.id,
+                    "ability": "delikatny",
+                    "granted": True,
+                },
+            )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"target_id": True, "ability": "delikatny", "granted": True},
+        {"target_id": "2", "ability": "delikatny", "granted": True},
+        {"target_id": 2, "ability": 1, "granted": True},
+        {"target_id": 2, "ability": "", "granted": True},
+        {"target_id": 2, "ability": "delikatny", "granted": 1},
+        {"target_id": 2, "ability": "delikatny", "granted": "true"},
+        {
+            "target_id": 2,
+            "ability": "delikatny",
+            "granted": True,
+            "extra": "transport",
+        },
+        {
+            "target_id": 2,
+            "ability": "delikatny",
+            "granted": True,
+            "sequence": 999,
+        },
+    ],
+)
+def test_klatwa_payload_is_exact_and_rejects_coercion(payload):
+    source = _blob(blob_id=1, passives=("klatwa",), owner=0)
+    enemy = _blob(blob_id=2, owner=1, pos=(3.0, 0.0))
+    with pytest.raises(InvalidInterruptError):
+        trigger_interrupt(
+            _ctx(_state(source, enemy), 1),
+            slug="klatwa",
+            payload=payload,
+        )
+
+
+@pytest.mark.parametrize("ability", ["niewrazliwy", "klatwa", "unknown"])
+def test_klatwa_rejects_missing_tag_non_passive_and_unknown_x(ability):
+    source = _blob(blob_id=1, passives=("klatwa",), owner=0)
+    enemy = _blob(blob_id=2, owner=1, pos=(3.0, 0.0))
+    with pytest.raises(InvalidInterruptError, match="klatwa_tak"):
+        trigger_interrupt(
+            _ctx(_state(source, enemy), 1),
+            slug="klatwa",
+            payload={"target_id": 2, "ability": ability, "granted": True},
+        )
+
+
+def test_klatwa_conditional_wolny_tag_is_legal_and_once_per_round():
+    source = _blob(blob_id=1, passives=("klatwa",), owner=0)
+    enemy = _blob(blob_id=2, owner=1, pos=(3.0, 0.0))
+    state, _ = trigger_interrupt(
+        _ctx(_state(source, enemy), 1),
+        slug="klatwa",
+        payload={"target_id": 2, "ability": "wolny", "granted": True},
+    )
+    assert state.used_interrupts_this_round == ((1, "klatwa"),)
+    with pytest.raises(InvalidInterruptError, match="raz na rundę"):
+        trigger_interrupt(
+            _ctx(state, 1),
+            slug="klatwa",
+            payload={"target_id": 2, "ability": "wolny", "granted": False},
         )
 
 
