@@ -471,12 +471,12 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `expected_sequence` w `POST /actions`; precondition i DB race mapowane na 409,
   cała transakcja rollbackowana (ADR-0054)
 
-### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **LocalClient slice DONE 2026-06-14 + DB-backed DONE 2026-06-19 + HttpClient read-only DONE 2026-07-02/03 + real-transport parity gate DONE 2026-07-18 + HttpClient invite create/accept DONE 2026-07-19 (B5.2) + HttpClient verified replay DONE 2026-07-19 (B5.3) + typowany activation protocol v2 DONE 2026-07-29 (B5.4)** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016/0056)
+### B5. Klient gry `szop_client` (równolegle z B4, 2 tyg) — **DONE 2026-07-29: LocalClient + DB-backed + pełny HttpClient + lokalna instalacja editable (B5.5)** (wątki `faza-b-5-client`/`faza-b-5-db-client`, ADR-0016/0056)
 
 > Slice engine-dict: `GameClient` Protocol + `LocalClient` in-process. 13 testów (`tests/test_clients_local.py`): determinizm batcha, parity z runnerem (`simulate_from_rosters`) i z D2 (`simulate_balance`), wierność single-step (`take_action == apply_activation`), walidacja błędów. **Odblokowuje C3 `simulate_engagement`.** **DB-backed slice 2026-06-19** (wątek `faza-b-5-db-client`): `LocalClient(session, user_id)` + `simulate_roster_ids`/`create_battle_from_roster_ids` wczytują `Roster` po id (read-only) i adaptują przez `roster_to_engine_roster` (most ORM→engine, `faza-d-roster-adapter`); `simulate` zyskał passthrough `deployment_zones` (D5). Scoping własności (`owner_id==user_id`, `RosterNotFoundError` wspólny dla braku/cudzego → brak oracle). +7 testów (seeded in-memory SQLite). **HttpClient slices 2026-07-02/10/15:** metadata/events/state/create/simulate oraz `take_action` (ADR-0054). Klient akcji pobiera świeży checkpoint sequence, POST-uje wspólny wire `Action`, dekoduje state + deltę bez GET po sukcesie i odrzuca continuation przed transportem. **Parity gate B5.1 2026-07-18:** realny FastAPI auth/router/serialization oraz decoder `HttpClient` dają dokładnie te same wyniki co DB-backed `LocalClient` dla publicznych simulate i create/read/single-action flow. **B5.2 2026-07-19:** publiczne `create_battle_invite` i `accept_battle_invite` obsługują istniejące B4.1/B4.2 jednym POST-em, typują pending create jako `BattleInviteMetadata`, a accept reużywa `BattleMetadata`; realny gate obejmuje direct/open i idempotentny retry bez drugiego grafu bitwy. **B5.3 2026-07-19:** publiczne `replay_battle` wykonuje jeden bezbody POST do B4.3 i fail-closed dekoduje wersjonowany stan oraz metadane weryfikacji do frozen `BattleReplayResult`; realny gate obejmuje trwały ogon eventów, zero-tail i brak zapisów domenowych. **B5.4 2026-07-29:** `HttpClient` publikuje pełny jawny flow mutacji activation v2 (`start_activation`, `interrupt`, `pass_interrupt_priority`, `commit_activation_action`, `continue_activation`, `finalize_activation`) z frozen `ActivationMutationResult`, strict guardami i dokładnie jednym POST-em per krok; realny gate obejmuje same-owner, dwa niezależne bearery, handoff, race, restart, dwie akcje i puste recovery.
 
 - [x] `szop_client/protocol.py` — `class GameClient(Protocol)` z metodami: `create_battle`, `get_state`, `take_action`, `get_events`, `simulate` (`SimulationSummary` wydzielony do lekkiego `types.py` i re-eksportowany; `simulate` ma `deployment_zones` D5). `szop_client.__init__` ładuje eksporty leniwie, żeby klient HTTP/MCP nie importował ścieżki LocalClient/ORM. `subscribe_events` realizowany jako pull `get_events(battle_id, since)`; SSE → B6.
-- [~] `szop_client/http.py` — metadata/events/state/create/simulate oraz
+- [x] `szop_client/http.py` — metadata/events/state/create/simulate oraz
   `take_action` DONE 2026-07-15: świeży GET sequence → optimistic POST jednej
   akcji, wspólny codec, domenowy `(BattleState, tuple[BattleEvent, ...])`, brak
   cache i brak GET po sukcesie; `continuation != None` jawnie niedostępne.
@@ -489,9 +489,15 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `commit_activation_action`, wspólny exact-delta decoder state v2, typowany
   zamknięty błąd z HTTP status + `detail.code` i zero ukrytych GET/retry/cache.
   Historyczne `take_action` zachowuje wire v1 i dla v2 kieruje do nowych metod.
-  Pozostałą luką pełnego klienta jest pakowanie.
+  Ostatnia jawna luka pełnego klienta, lokalne pakowanie editable, została
+  domknięta w B5.5.
 - [x] `szop_client/local.py` — `LocalClient` in-process. Ścieżka **engine-dict** (rostery dict 1:1 z `build_initial_state`) + **ścieżka DB** (`LocalClient(session, user_id)` + `*_roster_ids`, most ORM→engine przez `roster_adapter`, read-only, ownership-scoped). DONE 2026-06-19.
-- [ ] `szop_client/setup.py` — `pip install -e` odłożone (sens dopiero z pełnym `HttpClient`; `LocalClient` z natury in-process z `app`).
+- [x] `szop_client/pyproject.toml` — PEP 517/660, dystrybucja
+  `szop-client==0.1.0` dla Pythona 3.13; `python -m pip install -e
+  .\szop_client` mapuje ten sam checkout monorepo, dzięki czemu `app` pozostaje
+  SSOT codeców i in-process `LocalClient`. To kontrakt lokalnego editable
+  install, nie publikowalny wheel/sdist ani bundling serwera. Offline smoke z
+  CWD poza repo: `tests/test_szop_client_packaging.py`. DONE 2026-07-29 (B5.5).
 - [x] `tests/test_clients_parity.py` — realny transport FastAPI potwierdza dokładne parity `HttpClient` ↔ `LocalClient` dla macierzy simulate oraz create/read/single-action, w tym sequence/event/state, powtarzalność, read-only simulate i no-oracle. DONE 2026-07-18.
 - [x] ADR-0016: szop_client jako wydzielony moduł (Accepted)
 

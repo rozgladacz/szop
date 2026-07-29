@@ -169,6 +169,21 @@ fail-closed JSON, zachowanie statusów 401/403/404/409/422 i lazy import.
 .\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_clients_http.py tests/test_clients_http_invites.py tests/test_clients_parity.py tests/test_battle_invites_router.py tests/test_battle_invite_accept_router.py tests/test_agent_token_security.py
 ```
 
+## B5.5 — lokalna instalacja editable `szop-client`
+
+`tests/test_szop_client_packaging.py` tworzy świeży tymczasowy venv, udostępnia
+mu wyłącznie już zainstalowane lokalne zależności i uruchamia dokładne
+`python -m pip install -e .\szop_client`. Zmienne `PIP_NO_INDEX`,
+`PIP_NO_DEPS` i `PIP_NO_BUILD_ISOLATION` wymuszają w teście brak sieci oraz
+reuse lokalnego środowiska. Następnie z CWD poza repo sprawdza publiczne lazy
+eksporty, konstrukcję `HttpClient` bez I/O, brak ORM/DB/FastAPI oraz referencję
+`szop_client` i `app` do tego samego checkoutu. Test usuwa tylko własne,
+wcześniej nieistniejące `egg-info`, `build` i `dist`.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_szop_client_packaging.py
+```
+
 ## B4.1 — create direct/open battle invite
 
 `tests/test_battle_invites_router.py` używa osobnego seeded SQLite in-memory

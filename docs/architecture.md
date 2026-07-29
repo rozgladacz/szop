@@ -515,7 +515,7 @@ Czysta warstwa decyzji botów **nad** publicznym API silnika — zero zmian w rd
 
 **Konsumenci (planowane):** D2 `balance_simulate` (agreguje N `simulate_from_rosters` do win-rate), D3 `exploit_hunt` (przez `roster_adapter` + `roster_points`), D4 `minimax_player` (DONE). `run_match` to rdzeń **B5 `LocalClient.simulate`** (zob. niżej). Boty + runner testowalne headless w izolacji (95 testów: 26 graczy + 8 minimax D4 + 5 runner + 25 deployment D5 + 17 roster-adapter + 14 factory netto).
 
-## Klient gry — `szop_client/` (Strumień B5, LocalClient 2026-06-14 + DB-backed 2026-06-19 + HttpClient read-only 2026-07-02/03 + activation v2 2026-07-29, ADR-0016/0056)
+## Klient gry — `szop_client/` (Strumień B5, LocalClient 2026-06-14 + DB-backed 2026-06-19 + HttpClient read-only 2026-07-02/03 + activation v2 i editable install 2026-07-29, ADR-0016/0056)
 
 Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsumentami (C3 `simulate_engagement` MCP, D-stream, UI) a wewnętrznym silnikiem/runnerem. Konsument programuje wobec Protocolu, nie wobec modułów `engine/`/`agents/`.
 
@@ -530,7 +530,33 @@ Top-level pakiet (importowany jak `app`) — **stabilny seam** między konsument
 `szop_client.__init__` ładuje publiczne symbole leniwie, więc konsument
 HTTP-only nie uruchamia importów `LocalClient`, kosztów, ORM ani konfiguracji DB.
 
-**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, invite create/accept, zweryfikowanego replay, `lookup_rule`, `search_rules`, `explain_ability`, `validate_loadout`, `score_list`, `find_exploit_candidates`, legacy `take_action`, jawnego activation v2 oraz `propose_battle_action`). `create_battle` i `create_battle_invite` zachowują historyczne body przy defaultowym v1 oraz dodają `activation_protocol_version` dla jawnego v2. Invite create i accept wykonują po jednym POST bez follow-up GET/cache; create zwraca ścisły `BattleInviteMetadata`, a accept używa wspólnego ścisłego decodera `BattleMetadata`; oba metadata typują wersję protokołu. `search_rules` używa jednego POST i lokalnego timeoutu co najmniej 30 s; `score_list` oraz `find_exploit_candidates` używają po jednym POST i lokalnego timeoutu 120 s dla limitowanego workloadu do 50 gier; `validate_loadout` używa globalnego timeoutu. Historyczne `take_action` nadal pobiera świeży checkpoint i wykonuje v1 POST bez cache, natomiast v2 wymaga osobnych `start_activation`/`interrupt`/`pass_interrupt_priority`/`commit_activation_action`/`continue_activation`/`finalize_activation`. Każda z nich waliduje wszystkie guardy przed I/O, wykonuje jeden POST i fail-closed dekoduje dokładny battle id, state schema v2, ciągły niepusty event delta oraz new sequence. `HttpClientActivationError` zachowuje wyłącznie bezpieczny HTTP status i kod zamkniętego envelope; malformed/unknown envelope nie jest akceptowany. Propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. **Odłożone:** pakowanie `pip install -e`; `GameClient`/`LocalClient`/MCP nie zostały rozszerzone w B5.4.
+**Pakowanie lokalne (B5.5):** `szop_client/pyproject.toml` definiuje
+dystrybucję `szop-client==0.1.0`, Python `>=3.13,<3.14` i PEP 517/660 przez
+setuptools. Komenda z roota repo:
+
+```powershell
+python -m pip install -e .\szop_client
+```
+
+Jawne `packages = ["szop_client"]` oraz `package-dir = {"" = ".."}` powodują,
+że leniwy editable mapping wskazuje root **tego samego checkoutu**. Dzięki temu
+`szop_client` importuje istniejące `app.battle_protocol` i codeki
+action/state/event bez kopii oraz bez drugiego SSOT. Mapping udostępnia checkout
+na `sys.path`, ale nie deklaruje `app` jako pakiet dystrybucji. Instalacja jest
+więc sprzężona z położeniem monorepo i po jego przeniesieniu wymaga ponownego
+install. Nie jest to obietnica działającego samodzielnie wheel/sdist ani
+publikacji serwera.
+
+Minimalny runtime graph publicznych ścieżek wymaga `pydantic>=2,<3`,
+`PyYAML>=6,<7` i `SQLAlchemy>=2,<3`: `HttpClient`/codeki ładują pierwsze dwie
+zależności, a lazy in-process `LocalClient` także ORM. Sam top-level
+`import szop_client` pozostaje stdlib-only i nie ładuje `app`, ORM, DB ani
+FastAPI. `tests/test_szop_client_packaging.py` instaluje klienta offline
+(ograniczenia przez `PIP_NO_BUILD_ISOLATION`, `PIP_NO_DEPS` i `PIP_NO_INDEX`)
+do tymczasowego venv, następnie sprawdza import i konstrukcję z CWD poza repo
+oraz sprząta własne artefakty.
+
+**Ścieżki:** (1) **engine-dict** (rostery jako dict 1:1 z `build_initial_state`); (2) **DB** (`LocalClient(session, user_id)` → `Roster` po id, read-only, adaptowane przez `roster_to_engine_roster`; `user_id` wymusza `owner_id==user_id`, wspólny `RosterNotFoundError` dla braku/cudzego → brak oracle); (3) **HTTP** (`HttpClient` dla metadata/events/state/create/simulate, invite create/accept, zweryfikowanego replay, `lookup_rule`, `search_rules`, `explain_ability`, `validate_loadout`, `score_list`, `find_exploit_candidates`, legacy `take_action`, jawnego activation v2 oraz `propose_battle_action`). `create_battle` i `create_battle_invite` zachowują historyczne body przy defaultowym v1 oraz dodają `activation_protocol_version` dla jawnego v2. Invite create i accept wykonują po jednym POST bez follow-up GET/cache; create zwraca ścisły `BattleInviteMetadata`, a accept używa wspólnego ścisłego decodera `BattleMetadata`; oba metadata typują wersję protokołu. `search_rules` używa jednego POST i lokalnego timeoutu co najmniej 30 s; `score_list` oraz `find_exploit_candidates` używają po jednym POST i lokalnego timeoutu 120 s dla limitowanego workloadu do 50 gier; `validate_loadout` używa globalnego timeoutu. Historyczne `take_action` nadal pobiera świeży checkpoint i wykonuje v1 POST bez cache, natomiast v2 wymaga osobnych `start_activation`/`interrupt`/`pass_interrupt_priority`/`commit_activation_action`/`continue_activation`/`finalize_activation`. Każda z nich waliduje wszystkie guardy przed I/O, wykonuje jeden POST i fail-closed dekoduje dokładny battle id, state schema v2, ciągły niepusty event delta oraz new sequence. `HttpClientActivationError` zachowuje wyłącznie bezpieczny HTTP status i kod zamkniętego envelope; malformed/unknown envelope nie jest akceptowany. Propozycja przyjmuje jawny zamrożony sequence i nie wykonuje GET ani zapisu bitwy. B5.5 dodało wyłącznie lokalne metadata editable i test instalacji; `GameClient`/`LocalClient`/MCP nie zostały rozszerzone.
 
 Invite create/accept oraz trwałe mutacje activation v2 pozostają celowo
 **persistence-specific API `HttpClient` poza

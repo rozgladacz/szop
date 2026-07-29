@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=77,<84"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "szop-client"
+version = "0.1.0"
+description = "Local editable client seam for the SZOP monorepo"
+readme = "README.md"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    "pydantic>=2,<3",
+    "PyYAML>=6,<7",
+    "SQLAlchemy>=2,<3",
+]
+
+[tool.setuptools]
+packages = ["szop_client"]
+package-dir = {"" = ".."}
