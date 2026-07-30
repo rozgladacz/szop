@@ -505,8 +505,11 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   Rozkazu/Klątwy: 5 w serwisie, 6 w request session i 7 dla bearera, bez N+1.
   **C1/Strażnik jest public-ready DONE.**
   **B4.4d.C2a0 attack-declaration/attack-scope design DONE 2026-07-30:**
-  [ADR-0056 sekcja 5](adr/0056-interrupt-activation-protocol.md) zamraża bez
-  implementacji jawny protocol/checkpoint v3. V1/v2 pozostają niezmienione;
+  [ADR-0056 sekcja 5](adr/0056-interrupt-activation-protocol.md) zamroziła
+  jawny protocol/checkpoint v3. **C2a1 model + codec DONE 2026-07-30:** dodaje
+  wyłącznie immutable pending-attack model i prywatny exact checkpoint codec
+  v3; V1/v2 pozostają byte-for-byte niezmienione, a persistence/publiczny wire
+  nadal akceptują wyłącznie v1/v2.
   v3 zachowuje maneuver/defend/special jak v2, natomiast dopiero po zamknięciu
   ogólnego `BEFORE_ACTION` accepted `ShootAction|ChargeAction` utrwala minimalny
   frozen intent `{attacker,target,weapon_slug[,counter_attack_declared]}` i
@@ -534,8 +537,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   C2a0 nadal wynosi dokładnie `{"rozkaz", "klatwa", "straznik"}`;
   `oznaczenie` nadal jest odrzucane bez zapisu.
 
-  Dalszy podział pozostaje OPEN i każdy slice wymaga osobnego commitu/DoD:
-  **C2a1** immutable model + exact codec v3 z golden v1/v2;
+  Dalsze slice'y pozostają OPEN i każdy wymaga osobnego commitu/DoD:
   **C2a2** siedem eventów, reducery i pure declare/pass/close/resolve z
   restart/RNG parity; **C2b** immutable `oznaczenie_tak`, strict private handler
   i attack effect view bez I/O/allowlisty; **C2c** durable service, opt-in/DB

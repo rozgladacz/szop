@@ -2,8 +2,9 @@
 
 - **Status:** Accepted
 - **Data:** 2026-07-19
-- **Rozszerzenie:** B4.4d.C2a0, 2026-07-30 — frozen design trwałej
-  deklaracji i zakresu jednego ataku; bez implementacji
+- **Rozszerzenie:** B4.4d.C2a0/C2a1, 2026-07-30 — frozen design oraz immutable
+  model/exact checkpoint codec v3 trwałej deklaracji i zakresu jednego ataku;
+  bez runtime/publicznego wire v3
 - **Kontekst:** B4.4a; projekt przed implementacją
   `POST /battles/{id}/interrupts`
 - **Rozszerza:** ADR-0010, ADR-0015, ADR-0015a, ADR-0049, ADR-0051 i
@@ -244,8 +245,9 @@ same następne operacje i zachować pozycję RNG.
 
 ### 5. B4.4d.C2a0 — trwała deklaracja i zakres jednego ataku
 
-Ta sekcja jest normatywnym projektem przyszłego protocol/checkpoint v3.
-Nie zmienia istniejącego runtime v2. Powodem nowej wersji jest zmiana znaczenia
+Ta sekcja jest normatywnym kontraktem protocol/checkpoint v3. C2a1 implementuje
+wyłącznie immutable model i prywatny exact codec; nie zmienia istniejącego
+runtime v2. Powodem nowej wersji jest zmiana znaczenia
 zaakceptowanego `ShootAction`/`ChargeAction`: v2 rozstrzyga go od razu, natomiast
 v3 najpierw utrwala deklarację i dopiero po osobnym attack-scope window pozwala
 go rozstrzygnąć. Historyczne checkpointy i requesty v1/v2 nie są przepisywane
@@ -1154,7 +1156,7 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   DB/schema, metody klienta ani zmian v1.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
   pakowanie pozostają osobnymi slice'ami; C2a0 design Oznaczenia jest DONE,
-  a implementacyjne C2a1/C2a2/C2b/C2c pozostają OPEN.
+  C2a1 model+codec jest DONE, a C2a2/C2b/C2c pozostają OPEN.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -1210,12 +1212,13 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   declaration/window/resolve state machine, ownership i guardy, event ordering,
   attack-only override, replay/RNG/rollback/race/no-oracle/auth, kompatybilny
   wire oraz pułapy 5/6/7 SELECT. Nie zmieniono kodu ani allowlisty.
-- **C2a1 model + codec OPEN:** dodać v3-only immutable
+- **C2a1 model + codec DONE 2026-07-30:** v3-only immutable
   `ShootAttackIntent`/`ChargeAttackIntent`, `AttackState`,
-  `AttackAbilityOverride`, dwie fazy i exact codec v3. Warunek zakończenia:
-  konstrukcyjnie odrzucone nieosiągalne snapshoty, JSON round-trip wszystkich
-  headów i byte-for-byte niezmienione golden v1/v2; bez eventów, reducerów,
-  protocol transitions, DB i publicznego wire.
+  `AttackAbilityOverride`, dwie fazy i osobne exact registry v1/v2/v3.
+  Konstrukcyjnie odrzucane są nieosiągalne snapshoty; JSON round-trip zachowuje
+  typ każdego headu i tuple override'ów, a golden bajty v1/v2 są niezmienione.
+  Runtime persistence/DB/service/publiczny wire/klient i allowlista pozostają
+  na v1/v2; nie dodano eventów, reducerów ani protocol transitions.
 - **C2a2 eventy + reducery + pure lifecycle OPEN:** dodać siedem eventów z
   sekcji 5.3, reducery i pure declare/pass/close/resolve z canonical inventory,
   prywatnym RNG oraz complete-tail equality na każdym restart headzie. Warunek

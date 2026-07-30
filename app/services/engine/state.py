@@ -43,10 +43,12 @@ class Lokalizacja(str, Enum):
 
 
 class ActivationPhase(str, Enum):
-    """Durable structural phase of an activation protocol v2 checkpoint."""
+    """Durable structural phase of an activation protocol checkpoint."""
 
     BEFORE_ACTION = "BEFORE_ACTION"
     ACTION_READY = "ACTION_READY"
+    ATTACK_WINDOW = "ATTACK_WINDOW"
+    ATTACK_RESOLUTION_READY = "ATTACK_RESOLUTION_READY"
     AWAITING_CONTINUATION = "AWAITING_CONTINUATION"
     AWAITING_FINALIZATION = "AWAITING_FINALIZATION"
 
@@ -217,6 +219,64 @@ def _require_player(value: object, field_name: str) -> int:
     return player
 
 
+def _require_unit_id(value: object, field_name: str) -> int:
+    unit_id = _require_strict_int(value, field_name)
+    if unit_id < 0:
+        raise ValueError(f"{field_name} must be non-negative")
+    return unit_id
+
+
+def _require_slug(value: object, field_name: str) -> str:
+    if type(value) is not str:
+        raise TypeError(f"{field_name} must be a string")
+    if not value or len(value) > 128:
+        raise ValueError(f"{field_name} must contain between 1 and 128 characters")
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class ShootAttackIntent:
+    """Minimal immutable reference needed to resume a pending shoot attack."""
+
+    attacker_unit_id: int
+    target_unit_id: int
+    weapon_slug: str
+
+    def __post_init__(self) -> None:
+        _require_unit_id(self.attacker_unit_id, "attacker_unit_id")
+        _require_unit_id(self.target_unit_id, "target_unit_id")
+        _require_slug(self.weapon_slug, "weapon_slug")
+
+
+@dataclass(frozen=True, slots=True)
+class ChargeAttackIntent:
+    """Minimal immutable reference needed to resume a pending charge attack."""
+
+    attacker_unit_id: int
+    target_unit_id: int
+    weapon_slug: str
+    counter_attack_declared: bool
+
+    def __post_init__(self) -> None:
+        _require_unit_id(self.attacker_unit_id, "attacker_unit_id")
+        _require_unit_id(self.target_unit_id, "target_unit_id")
+        _require_slug(self.weapon_slug, "weapon_slug")
+        if type(self.counter_attack_declared) is not bool:
+            raise TypeError("counter_attack_declared must be a boolean")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackAbilityOverride:
+    """One source-scoped passive granted only for the pending attack."""
+
+    source_unit_id: int
+    ability_slug: str
+
+    def __post_init__(self) -> None:
+        _require_unit_id(self.source_unit_id, "source_unit_id")
+        _require_slug(self.ability_slug, "ability_slug")
+
+
 @dataclass(frozen=True, slots=True)
 class InterruptWindowState:
     """Durable, open interrupt window in activation protocol v2."""
@@ -261,8 +321,66 @@ class InterruptWindowState:
 
 
 @dataclass(frozen=True, slots=True)
+class AttackState:
+    """Immutable pending attack head used only by checkpoint protocol v3."""
+
+    attack_id: int
+    version: int
+    ordinal: int
+    intent: ShootAttackIntent | ChargeAttackIntent
+    window: InterruptWindowState | None
+    ability_overrides: tuple[AttackAbilityOverride, ...]
+
+    def __post_init__(self) -> None:
+        attack_id = _require_strict_int(self.attack_id, "attack_id")
+        if attack_id < 1:
+            raise ValueError("attack_id must be positive")
+        version = _require_strict_int(self.version, "version")
+        if version < 1:
+            raise ValueError("attack version must be >= 1")
+        ordinal = _require_strict_int(self.ordinal, "ordinal")
+        if ordinal not in (1, 2):
+            raise ValueError("attack ordinal must be 1 or 2")
+        if type(self.intent) not in (ShootAttackIntent, ChargeAttackIntent):
+            raise TypeError("intent must be a shoot or charge attack intent")
+        if self.window is not None:
+            if type(self.window) is not InterruptWindowState:
+                raise TypeError("attack window must be an InterruptWindowState or None")
+            if self.window.ordinal != ordinal:
+                raise ValueError("attack window ordinal must match attack ordinal")
+            if self.window.version != version:
+                raise ValueError("open attack and window versions must match")
+        elif version < 3:
+            raise ValueError("closed attack window requires at least two passes")
+        if type(self.ability_overrides) is not tuple:
+            raise TypeError("ability_overrides must be a tuple")
+        if len(self.ability_overrides) > 64:
+            raise ValueError("ability_overrides cannot contain more than 64 items")
+        if any(
+            type(override) is not AttackAbilityOverride
+            for override in self.ability_overrides
+        ):
+            raise TypeError(
+                "ability_overrides must contain AttackAbilityOverride items"
+            )
+        override_keys = tuple(
+            (override.source_unit_id, override.ability_slug)
+            for override in self.ability_overrides
+        )
+        if len(override_keys) != len(set(override_keys)):
+            raise ValueError("ability_overrides must not contain duplicate pairs")
+        accepted_operation_floor = (
+            self.window.interrupt_count
+            if self.window is not None
+            else version - 3
+        )
+        if len(self.ability_overrides) > accepted_operation_floor:
+            raise ValueError("ability_overrides exceed accepted attack interrupts")
+
+
+@dataclass(frozen=True, slots=True)
 class ActivationState:
-    """Durable activation head for activation protocol v2."""
+    """Durable activation head for activation checkpoint protocols v2/v3."""
 
     activation_id: int
     version: int
@@ -273,6 +391,7 @@ class ActivationState:
     action_types: tuple[str, ...]
     phase: ActivationPhase
     window: InterruptWindowState | None
+    attack: AttackState | None = None
 
     def __post_init__(self) -> None:
         for field_name in ("activation_id", "version"):
@@ -312,8 +431,12 @@ class ActivationState:
             raise TypeError("phase must be an ActivationPhase")
         if self.window is not None and type(self.window) is not InterruptWindowState:
             raise TypeError("window must be an InterruptWindowState or None")
+        if self.attack is not None and type(self.attack) is not AttackState:
+            raise TypeError("attack must be an AttackState or None")
 
         if self.phase is ActivationPhase.BEFORE_ACTION:
+            if self.attack is not None:
+                raise ValueError("BEFORE_ACTION cannot contain a pending attack")
             if self.window is None:
                 raise ValueError("BEFORE_ACTION requires an open window")
             if self.window.ordinal != action_count + 1:
@@ -342,6 +465,40 @@ class ActivationState:
 
         if self.window is not None:
             raise ValueError("only BEFORE_ACTION can contain a window")
+        if self.phase in (
+            ActivationPhase.ATTACK_WINDOW,
+            ActivationPhase.ATTACK_RESOLUTION_READY,
+        ):
+            if self.attack is None:
+                raise ValueError("attack phases require a pending attack")
+            if self.attack.ordinal != action_count + 1:
+                raise ValueError(
+                    "attack ordinal must follow the committed action count"
+                )
+            if self.attack.intent.attacker_unit_id != self.selected_unit_id:
+                raise ValueError("pending attack must belong to the selected unit")
+            base_version = 3 if self.attack.ordinal == 1 else 7
+            if self.version < self.attack.version + base_version:
+                raise ValueError("attack activation version is unreachable")
+            if self.phase is ActivationPhase.ATTACK_WINDOW:
+                if self.attack.window is None:
+                    raise ValueError("ATTACK_WINDOW requires an open attack window")
+                expected_passes = (
+                    ()
+                    if self.attack.window.priority_player == initiative_player
+                    else (initiative_player,)
+                )
+                if self.attack.window.passed_players != expected_passes:
+                    raise ValueError(
+                        "attack priority/passes must start from activation initiative"
+                    )
+            elif self.attack.window is not None:
+                raise ValueError(
+                    "ATTACK_RESOLUTION_READY requires a closed attack window"
+                )
+            return
+        if self.attack is not None:
+            raise ValueError("only attack phases can contain a pending attack")
         if self.phase is ActivationPhase.ACTION_READY:
             minimum_version = 3 if action_count == 0 else 7
             if action_count not in (0, 1) or self.version < minimum_version:

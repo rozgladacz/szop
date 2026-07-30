@@ -329,10 +329,13 @@ wire mierzy identyczne listy SELECT jak Rozkaz/Klątwa: service 5, session 6,
 bearer 7 bez N+1. Nie dodano trasy, scope'u, eventu, reducera, schema DB,
 metody klienta ani zmian v1; C1/Strażnik jest public-ready DONE, C2/Oznaczenie
 pozostaje OPEN.
-**B4.4d.C2a0 design DONE 2026-07-30** zamraża bez implementacji addytywny
-protocol/checkpoint v3 dla source-correct Oznaczenia. Istniejące v1 i v2
-pozostają dokładnie dekodowalne; v2 nadal atomowo rozstrzyga ataki, aby nie
-zmienić po cichu kontraktu obecnego klienta. Jawny opt-in v3 zachowuje
+**B4.4d.C2a0 design DONE 2026-07-30** zamraża addytywny protocol/checkpoint v3
+dla source-correct Oznaczenia. **C2a1 model + codec DONE 2026-07-30** implementuje
+wyłącznie immutable pending-attack model oraz prywatny exact codec v3.
+Istniejące v1 i v2 pozostają dokładnie dekodowalne i byte-for-byte kodowane;
+persistence, DB, serwis, publiczny wire i klient nadal dopuszczają wyłącznie
+v1/v2. V2 nadal atomowo rozstrzyga ataki, aby nie zmienić po cichu kontraktu
+obecnego klienta. Jawny przyszły runtime opt-in v3 zachowuje
 nieatakujące maneuver/defend/special jak v2, lecz po zamknięciu ogólnego
 `BEFORE_ACTION` przyjęcie `ShootAction`/`ChargeAction` tylko deklaruje attack,
 utrwala minimalny immutable intent i otwiera osobny no-nested attack scope.
@@ -389,11 +392,12 @@ checkpointu; każdy validation/domain/DB/race failure zachowuje poprzedni RNG
 i head. Pułapy pozostają dokładnie 5 SELECT-ów service, 6 session i 7 bearer,
 bez I/O per source/X/target/event.
 
-Implementacja pozostaje podzielona i OPEN: C2a1 model+exact codec v3, C2a2
-eventy/reducery/pure declare-pass-close-resolve, C2b source-correct
-`oznaczenie_tak`/private handler/combat effect view, C2c durable service,
-constraint opt-in v3, FastAPI i HttpClient. Dopiero C2c może rozszerzyć
-allowlistę; po C2a0 nadal wynosi ona dokładnie
+Implementacja pozostaje podzielona: C2a1 model+exact codec v3 jest DONE;
+OPEN pozostają C2a2 eventy/reducery/pure declare-pass-close-resolve, C2b
+source-correct `oznaczenie_tak`/private handler/combat effect view oraz C2c
+durable service, constraint opt-in v3, FastAPI i HttpClient. Dopiero C2c może
+rozszerzyć
+allowlistę; po C2a1 nadal wynosi ona dokładnie
 `{"rozkaz", "klatwa", "straznik"}` i `oznaczenie` jest odrzucane bez zapisu.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
@@ -536,8 +540,8 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 |---|---|---|
 | `status.py` **(B3.9.a)** | ~95 | `StatusFlag(str, Enum)` (Aktywowany/Wyczerpany/Przyszpilony/Ufortyfikowany) + module-level `STATUS_*` aliasy + idempotentne `add_status(blob, flag)`/`remove_status(blob, flag)`. Konsolidacja 3 kopii STATUS_* z effects/phases/combat. |
 | `geometry.py` **(B3.9.b)** | ~175 | Pure prymityki: `distance` (math.hypot), `point_in_circle`, `segment_intersects_circle`, `segments_intersect`, **`circle_edge_distance`** (fix bug #4), `UNIT_CIRCLE_16` precomputed. Konsolidacja 4 kopii `_distance` z los/phases/combat. |
-| `state.py` | ~660 | `UnitBlob` (4 kategorie ran per ADR-0014 + **`wounds_eliminating` licznik Zguby [ADR-0048]**, B3.9.e `melee_weapons`/`ranged_weapons` inventory), **`Lokalizacja` enum + `UnitBlob.location` [ADR-0048, pkt 26]**, `BattleState` (B3.9.c `initial_toughness_snapshot` frozen; B4.4b.1 nullable `initiative_player`/`activation`), frozen `ActivationState` / `InterruptWindowState` + `ActivationPhase` z konstrukcyjną walidacją osiągalności, `Position`, `TerrainCircle/Line`, `Objective`, `WeaponProfile`, `apply_events` + `register_reducer`, `initial_toughness_for`, `build_initial_state` |
-| `state_codec.py` **(B4.4b.1)** | ~410 | Whitelist-based checkpoint codec z osobnymi exact-fields rejestrami v1/v2. Publiczny no-arg encoder pozostaje v1; jawny `version=2` wymaga dowodu inicjatywy, koduje frozen activation/window i pomija legacy `pending_interrupts`. Decoder nie auto-upgrade'uje v1. Persistence/router/client nadal wywołują domyślny v1. |
+| `state.py` | ~820 | `UnitBlob` (4 kategorie ran per ADR-0014 + **`wounds_eliminating` licznik Zguby [ADR-0048]**, B3.9.e `melee_weapons`/`ranged_weapons` inventory), **`Lokalizacja` enum + `UnitBlob.location` [ADR-0048, pkt 26]**, `BattleState` (B3.9.c `initial_toughness_snapshot` frozen; B4.4b.1 nullable `initiative_player`/`activation`), frozen `ActivationState` / `InterruptWindowState` oraz B4.4d.C2a1 `ShootAttackIntent`/`ChargeAttackIntent`/`AttackAbilityOverride`/`AttackState` + `ActivationPhase` z konstrukcyjną walidacją osiągalności, `Position`, `TerrainCircle/Line`, `Objective`, `WeaponProfile`, `apply_events` + `register_reducer`, `initial_toughness_for`, `build_initial_state` |
+| `state_codec.py` **(B4.4b.1 + B4.4d.C2a1)** | ~600 | Whitelist-based checkpoint codec z osobnymi zamkniętymi rejestrami typów, enumów i exact fields dla v1/v2/v3. Publiczny no-arg encoder pozostaje v1; v2 zachowuje dotychczasowy activation/window payload bez `attack`, a prywatny v3 koduje immutable pending attack i limituje głębokość do 64. Decoder nie auto-upgrade'uje starszych wersji. Persistence/router/client pozostają na allowliście v1/v2. |
 | `events.py` | ~650 | **26 event types**: 16 historycznych eventów mechanicznych oraz B4.4b.2 `ActivationStarted/InterruptWindowOpened/ActivationInterruptTriggered/InterruptPriorityPassed/InterruptWindowClosed/ActivationActionCommitted/ActivationContinuationChosen/ActivationFinalized/InitiativeTransferred/ActivePlayerChanged`. Nowe tagi mają ścisłe payloady v1; historyczne zachowują istniejące tagi/payloady i ogólną kompatybilność `event_to_json` / `json_to_event`. `ActivationActionCommitted` reużywa SSOT discriminatorów `Action`. |
 | `reducers.py` **(B3.9.d + B4.4b.2)** | ~650 | `@register_reducer` dla wszystkich 26 event types. Historyczne outcome reducerry pozostają SSOT skutków mechanicznych; 10 reducerów protokołu zmienia wyłącznie activation/window albo top-level initiative/active player i pozwala ręcznemu tailowi odtworzyć każdy checkpoint v2. Auto-rejestracja przez side-effect import w `__init__.py`; gate kompletności porównuje registry eventów i reducerów. |
 | `activation_protocol.py` **(B4.4b.3–6, B4.4d.C1a)** | ~880 | Pure transition core dla `start_activation`, pass/handoff/close, `continue_activation`, accepted interrupt, `commit_activation_action` i `finalize_activation`. Action oraz interrupt bridge klonują wejściowy RNG i zwracają niezależnie checkpointowalną pozycję; błędy outcome nie mutują oryginału. Finalizacja przyjmuje tylko jawnie puste recovery, wymaga exact no-op od prywatnego recovery seam, reużywa `_finalize_activation`, emituje trzy eventy terminalne i wraca do `IDLE`. Outcome seams sprawdzają ciągłość/no-nested/live-replay; durable `activation.action_types` jest SSOT ograniczeń follow-up. Bez built-in wiring/allowlisty, recovery handlerów, I/O i persistence. |
