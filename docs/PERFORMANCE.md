@@ -17,34 +17,39 @@ Wymagania:
 
 ## Aktualny baseline
 
-**Data:** 2026-07-06
-**Commit:** *(uzupełnij po commit'cie)*
+**Data:** 2026-08-01
+**Commit:** `Rozwoj` (working tree po synchronizacji SZOP)
 **Roster:** 10 (10 oddziałów; mierzone `python scripts/profile_quote.py 10`)
 
 | ru | Nazwa | wpns | abil | full(ms) | badge(ms) |
 |---:|---|---:|---:|---:|---:|
-| 70 | Leman Russ | 10 | 0 | 30.3 | 1.8 |
-| 137 | Chmiera | 6 | 0 | 42.1 | 2.3 |
-| 116 | Sentinel | 8 | 1 | 18.6 | 1.5 |
-| 71 | Oficer | 4 | 2 | 11.8 | 0.9 |
-| 72 | Piechota | 11 | 3 | 9.7 | 0.9 |
-| 74 | Oficer szturmowy | 4 | 2 | 10.9 | 0.8 |
-| 75 | Szturmowcy | 4 | 1 | 6.1 | 0.5 |
-| 138 | Starszy Szczurak | 2 | 2 | 24.1 | 1.4 |
-| 117 | Szczuracy | 2 | 3 | 27.2 | 1.3 |
-| 139 | Weterani | 11 | 2 | 14.9 | 1.0 |
-| **TOTAL** | | | | **~196** | **~12** |
+| 70 | Leman Russ | 10 | 0 | 42.9 | 2.6 |
+| 137 | Chmiera | 6 | 0 | 50.8 | 2.4 |
+| 116 | Sentinel | 8 | 1 | 28.3 | 2.2 |
+| 71 | Oficer | 4 | 2 | 19.4 | 1.4 |
+| 72 | Piechota | 11 | 3 | 15.7 | 1.5 |
+| 74 | Oficer szturmowy | 4 | 2 | 13.4 | 1.2 |
+| 75 | Szturmowcy | 4 | 1 | 8.0 | 1.0 |
+| 138 | Starszy Szczurak | 2 | 2 | 32.1 | 1.9 |
+| 117 | Szczuracy | 2 | 3 | 30.3 | 1.8 |
+| 139 | Weterani | 11 | 2 | 18.7 | 1.3 |
+| **TOTAL** | | | | **259.5** | **17.3** |
 
 Cały zapis rostera (`/update`) z odświeżeniem badge'y mieści się w **<250 ms**
 (backend) + opóźnienie sieci. Badge-only refresh per-oddział: ~0.5-2.5 ms.
 
 > **Uwaga:** liczby są wrażliwe na konkretną zawartość rostera. Worst-case
-> (Chmiera) ~42 ms wynika z liczby pasywek dynamicznych (transport).
+> (Chmiera) ~51 ms wynika z liczby pasywek dynamicznych (transport).
 > Przy regresji > 20% — uruchom `make profile` i porównaj sekcję cProfile.
 
 ---
 
 ## Historia (najnowsze na górze)
+
+### 2026-08-01 — Dwufazowa wycena trafienia z nowego SZOP
+- `_weapon_cost` rozdziela modyfikatory szansy trafienia przed i po clampie; bez nowych zapytań i lookupów.
+- Roster 10: **259,5 ms full / 17,3 ms badge**. Roster 13: **237,2 ms full / 16,6 ms badge**.
+- Historyczny baseline z 2026-07-06 nie był porównywalny z aktualnym środowiskiem i zawartością produkcyjnej bazy. Kontrola A/B w jednym procesie, na tych samych danych (10 przebiegów na oddział): algorytm z `HEAD` 259,6/18,4 ms, nowy 264,3/18,8 ms, czyli **+1,8% full / +2,2% badge** — poniżej progu 20%.
 
 ### 2026-07-06 — Cache `_inherited_value` + eliminacja podwójnych wywołań
 - `Weapon._inherited_value` buforuje wyniki w `self.__dict__["_iv_cache"]`

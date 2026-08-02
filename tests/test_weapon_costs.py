@@ -113,6 +113,64 @@ def test_podwojny_increases_weapon_cost():
     assert double_cost > base_cost
 
 
+def test_hit_chance_minimum_is_applied_before_podwojny_bonus() -> None:
+    result = costs._weapon_cost(6, 24, 1, 0, ["Podwójny"], [])
+
+    # clamp(7 - 6 - 0.6, 0.9, 5) + 1 = 1.9
+    assert result == pytest.approx(2 * 1.25 * 1.9)
+
+
+def test_hit_chance_maximum_is_applied_before_post_clamp_bonuses() -> None:
+    result = costs._weapon_cost(
+        2,
+        36,
+        1,
+        0,
+        ["Namierzanie", "Podwójny"],
+        ["Ostrożny", "Przygotowanie"],
+    )
+
+    # clamp(7 - 2 + 0.9 + 0.65, 0.9, 5) + 1 = 6;
+    # Namierzanie zachowuje swój niezależny mnożnik ×1.1.
+    assert result == pytest.approx(2 * 1.55 * 6 * 1.1)
+
+
+def test_planowanie_bonus_is_capped_with_base_hit_chance() -> None:
+    without_planowanie = costs._weapon_cost(2, 24, 1, 0, ["Namierzanie"], [])
+    with_planowanie = costs._weapon_cost(
+        2,
+        24,
+        1,
+        0,
+        ["Namierzanie"],
+        ["Przygotowanie"],
+    )
+
+    assert with_planowanie == pytest.approx(without_planowanie)
+
+
+def test_furia_and_szpica_are_added_after_minimum_clamp() -> None:
+    result = costs._weapon_cost(6, 0, 1, 0, [], ["Furia", "Szpica"])
+
+    # clamp(7 - 6 - 0.3, 0.9, 5) + 0.65 + 0.5 = 2.05
+    assert result == pytest.approx(2 * 0.6 * 2.05)
+
+
+def test_dezintegracja_is_added_after_minimum_clamp() -> None:
+    result = costs._weapon_cost(6, 24, 1, 0, ["Dezintegracja"], [])
+
+    # AP 0 => 2.9 / 1 - 1 = 1.9; 0.9 + 1.9 = 2.8.
+    assert result == pytest.approx(2 * 1.25 * 2.8)
+
+
+def test_dobrze_and_zle_strzela_apply_distinct_ranged_qualities() -> None:
+    dobrze = costs._weapon_cost(2, 24, 1, 0, [], ["Dobrze strzela"])
+    zle = costs._weapon_cost(2, 24, 1, 0, [], ["Źle strzela"])
+
+    assert dobrze == pytest.approx(2 * 1.25 * 2.4)
+    assert zle == pytest.approx(2 * 1.25 * 1.4)
+
+
 @pytest.mark.parametrize("quality", [2, 3, 4, 5, 6])
 def test_finezja_uses_quality_scaled_hit_chance_bonus(quality: int) -> None:
     base_weapon = _weapon('24"', attacks=2, ap=1)

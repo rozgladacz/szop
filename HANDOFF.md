@@ -48,6 +48,10 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Starsze wpisy w [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).)*
 
+### 2026-08-01 — szop-hit-chance-sync (archived)
+- Zsynchronizowano Zasadzkę i osobne Dobrze/Źle strzela w katalogu oraz Markdown, a wycenę trafienia rozdzielono na clamp szansy bazowej i premie post-clamp bez zmiany API. Produkcyjną `data/szop.db` odświeżono funkcjami SSOT po kopii bezpieczeństwa; cache 275 broni i 84 jednostek zweryfikowano bez rozbieżności.
+- Weryfikacja: pytest 329/329, frontend parity 110/110, `/simplify`, `/review`, call-site audit i profile rosterów 10/13; kontrola A/B wykazała +1,8% full / +2,2% badge, poniżej progu 20%.
+
 ### 2026-07-14 — kolekcja (archived)
 - Kolekcja fizycznych modeli użytkownika: **Faza 1** (CRUD modeli per oddział + magnetyzacja broni i zdolności + „Kopiuj") oraz **Faza 2** — integracja z rozpiską. „Tryb modeli" komponuje oddział z posiadanych egzemplarzy + proxy (broń i zdolności); derywacja suma→modele z budżetem montowania (`mount_need`, liczony z najwyżej `count` modeli). **Koszt modelu w Kolekcji** i **pełny koszt modelu w Rozpisce** liczone silnikiem (`calculate_roster_unit_quote.item_costs`) — SSOT, te same wartości co widok klasyczny. **Stan Bitewny** (2c/2d): eliminacja/wycofanie egzemplarzy, tryb „Modele", indywidualne nazwy zdolności, przekreślanie zdolności po eliminacji, czerwone ostrzeżenia zdrowia grupy.
 - Pliki: `app/models.py` (+`CollectionModel`/`CollectionModelSlot` + kolumny slotu zdolności), `app/db.py` (migracje), `app/routers/{collections,rosters,export}.py`, `app/services/collection_match.py` (NEW), `app/templates/{collections_list,collection_unit_detail,roster_edit,roster_battle_state}.html`, `app/static/js/{battle_state.js, modules/roster_collection_models.js}`, `tests/test_collection_match.py`.

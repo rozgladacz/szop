@@ -26,6 +26,14 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
 - **Koszt Klątwy** = `bazowy(X) × 6` („jak X dla 6 wytrzymałości"; tylko gdy `klatwa_tak: true`).
 - **Koszt Oznaczenia** = `bazowy(X) × 6` („jak X dla 6 wytrzymałości"; tylko gdy `oznaczenie_tak: true`).
 
+### Wycena szansy trafienia broni (formuła)
+
+- Najpierw ustal jakość `Q`, uwzględniając Dobrze strzela, Źle strzela lub Niezawodny.
+- **Szansa bazowa** = `clamp(7 − Q + Ostrożny + Planowanie − kara za brak Namierzania, 0,9, 5)`.
+- Ostrożny wnosi wartość z tabeli zasięgu. Planowanie wnosi `+0,65` albo `+0,2`, jeżeli oddział ma również Niestrudzony. Kara za brak Namierzania wynosi `−0,6` dla broni dystansowej albo `−0,3` dla broni wręcz.
+- **Szansa końcowa** = `szansa bazowa + Podwójny + Furia + Szpica + Finezja + Dezintegracja`. Te premie są dodawane dopiero po ograniczeniu szansy bazowej do przedziału `0,9–5`.
+- Podwójny wnosi `+1`; Furia dla broni wręcz `+0,65`; Szpica `+0,5`; Finezja `(7−Q)·(6−Q)²/50`; Dezintegracja `2,9 / modyfikator AP − 1`.
+
 ### Tagi dla zdolności pasywnych
 
 - **aura_tak** — `true | false`. Czy zdolność może być podstawą wersji Aury (kolumna „Aura" w tabeli SZOP s.5).
@@ -130,7 +138,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
 - koszt:
     bazowy: patrz tabela „Modyfikator obrony" w SZOP s.5 (obniża koszt obrony); bazowy 0,5 / pkt wytrzymałości
 
-### 5. Dobrze/źle strzela
+### 5. Dobrze strzela
 
 - typ: pasywna
 - aura_tak: false
@@ -138,14 +146,13 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
 - klatwa_tak: false
 - oznaczenie_tak: false
 - zakres: model
-- parametr: wariant — `dobrze` (jakość 4) lub `źle` (jakość 5) dla ataków dystansowych
-- opis: "Atakuje na dystans z jakością 4/5."
+- opis: "Atakuje na dystans z jakością 4."
 - efekty:
     - kiedy: test trafienia bronią dystansową (pkt 17.a)
       warunek: —
-      co: jakość użyta w teście = 4 (wariant „dobrze") lub 5 (wariant „źle"), niezależnie od jakości modelu
+      co: jakość użyta w teście = 4, niezależnie od jakości modelu
 - koszt:
-    bazowy: patrz koszt broni (modyfikator szansy trafienia)
+    bazowy: patrz koszt broni; jakość Q = 4 przed obliczeniem i ograniczeniem szansy bazowej
 
 ### 6. Dywersant
 
@@ -179,7 +186,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: wynik kostki = 6
       co: dodatkowe trafienie tej samej broni przeciw temu samemu celowi (poza zwykłym sukcesem)
 - koszt:
-    bazowy: patrz koszt broni; bazowy 3 / pkt wytrzymałości (szansa trafienia +0,65)
+    bazowy: patrz koszt broni; bazowy 3 / pkt wytrzymałości (szansa trafienia +0,65 po ograniczeniu szansy bazowej)
 
 ### 8. Harcownik
 
@@ -462,7 +469,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: żaden wrogi oddział nie jest w zasięgu 12″ od oddziału strzelającego
       co: +1 do testu trafienia
 - koszt:
-    bazowy: patrz koszt broni (modyfikator zasięgu „Ostrożny (traf)"); bazowy 4,25 / pkt wytrzymałości
+    bazowy: patrz koszt broni (modyfikator zasięgu „Ostrożny (traf)" przed ograniczeniem szansy bazowej); bazowy 4,25 / pkt wytrzymałości
 
 ### 24. Parowanie
 
@@ -496,7 +503,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: oddział ma stan Przygotowany (pkt 22.c)
       co: +1 do testu trafienia
 - koszt:
-    bazowy: patrz koszt broni; bazowy 3,5 / pkt wytrzymałości (szansa trafienia +0,65; +0,2 jeśli także Niestrudzony)
+    bazowy: patrz koszt broni; bazowy 3,5 / pkt wytrzymałości (przed ograniczeniem szansy bazowej: +0,65; +0,2 jeśli także Niestrudzony)
 
 ### 26. Regeneracja
 
@@ -622,7 +629,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: cel nie rozpoczął jeszcze Aktywacji w bieżącej rundzie ORAZ wynik kostki = 6
       co: dodatkowe normalne trafienie tej samej broni przeciw temu samemu celowi
 - koszt:
-    bazowy: patrz koszt broni (szansa trafienia +0,5)
+    bazowy: patrz koszt broni (szansa trafienia +0,5 po ograniczeniu szansy bazowej)
 
 ### 33. Szybki / Wolny
 
@@ -739,14 +746,14 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
 - klatwa_tak: false
 - oznaczenie_tak: false
 - zakres: pozytywna
-- opis: "Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej aktywacji rozstaw w dowolnym miejscu. Nie kontroluje celów w pierwszej rundzie."
+- opis: "Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej aktywacji rozstaw w dowolnym miejscu więcej niż 2” od wroga. Nie kontroluje celów w pierwszej rundzie."
 - efekty:
     - kiedy: Runda rozstawienia (pkt 9)
       warunek: —
       co: oddział nie rozstawia się; pozostaje w lokalizacji Zaplecze (pkt 26.a)
     - kiedy: Aktywacja oddziału w lokalizacji Zaplecze (pkt 11.a, pkt 13)
       warunek: —
-      co: rozstaw w dowolnym dozwolonym miejscu na planszy (znosi wymóg strefy rozstawienia z pkt 13.a)
+      co: rozstaw w dowolnym miejscu na planszy więcej niż 2″ od wrogich modeli (znosi wymóg strefy rozstawienia z pkt 13.a)
     - kiedy: sprawdzanie kontroli celów (pkt 5.e)
       warunek: bieżąca runda = pierwsza po rozstawieniu z Zasadzki
       co: oddział nie kontroluje celów
@@ -851,6 +858,22 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       co: co najmniej 50% broni musi być przypisana do konkretnej strefy i atakować tylko cele w pełni w niej; pozostałe muszą atakować jeden oddział
 - koszt:
     bazowy: −1 / pkt wytrzymałości
+
+### 78. Źle strzela
+
+- typ: pasywna
+- aura_tak: false
+- rozkaz_tak: false
+- klatwa_tak: false
+- oznaczenie_tak: false
+- zakres: model
+- opis: "Atakuje na dystans z jakością 5."
+- efekty:
+    - kiedy: test trafienia bronią dystansową (pkt 17.a)
+      warunek: —
+      co: jakość użyta w teście = 5, niezależnie od jakości modelu
+- koszt:
+    bazowy: patrz koszt broni; jakość Q = 5 przed obliczeniem i ograniczeniem szansy bazowej
 
 ---
 
@@ -1076,7 +1099,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: wynik kostki = 6
       co: trafienie automatycznie zadaje ranę (test obrony pominięty); rana trafia do puli zgodnie z pkt 17.d (naturalna 1 obrońcy nie zachodzi → pula obrońcy)
 - koszt:
-    bazowy: + (2,9 / modyfikator AP − 1) do szansy trafienia w wycenie broni
+    bazowy: + (2,9 / modyfikator AP − 1) do szansy trafienia po ograniczeniu szansy bazowej
 
 ### 59. Finezja
 
@@ -1089,7 +1112,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: gracz wybiera
       co: zamiast rzucać, użyj wartości udanego testu trafienia jako wyniku testu obrony
 - koszt:
-    bazowy: + (7−jakość)·(6−jakość)² / 50 do szansy trafienia w wycenie broni
+    bazowy: + (7−jakość)·(6−jakość)² / 50 do szansy trafienia po ograniczeniu szansy bazowej
 
 ### 60. Impet
 
@@ -1126,7 +1149,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: —
       co: ujemne modyfikatory zasięgu (np. -12″ w Samolot) nie są stosowane
 - koszt:
-    bazowy: koszt broni ×1,1 (ponadto wpływa na szansę trafienia, patrz wzór SZOP s.5)
+    bazowy: koszt broni ×1,1; brak kary `−0,6`/`−0,3` przed ograniczeniem szansy bazowej
 
 ### 62. Niebezpośredni
 
@@ -1155,7 +1178,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: —
       co: jakość użyta w teście trafienia = 2 (niezależnie od jakości modelu)
 - koszt:
-    bazowy: w wycenie szansy trafienia: jakość = 2
+    bazowy: w wycenie szansy trafienia: jakość Q = 2 przed obliczeniem i ograniczeniem szansy bazowej
 
 ### 64. Nieporęczny
 
@@ -1194,7 +1217,7 @@ Plik zbiorczy wszystkich zdolności opisanych w SZOP. Numeracja globalna i stał
       warunek: wynik kostki = 6
       co: dodatkowe normalne trafienie (oprócz zwykłego sukcesu)
 - koszt:
-    bazowy: +1 do szansy trafienia w wycenie broni
+    bazowy: +1 do szansy trafienia po ograniczeniu szansy bazowej
 
 ### 67. Porażenie
 

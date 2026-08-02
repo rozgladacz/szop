@@ -56,7 +56,8 @@ def _weapon_cost(
     unit_traits: Sequence[str],
     allow_assault_extra: bool = True,
 ) -> float:
-    chance = 7.0
+    base_hit_bonus = 0.0
+    post_clamp_hit_bonus = 0.0
     attacks = float(attacks if attacks is not None else 1.0)
     attacks = max(attacks, 0.0)
     base_ap = int(ap or 0)
@@ -79,9 +80,9 @@ def _weapon_cost(
         waagh_penalty = lookup_with_nearest(WAAGH_AP_MODIFIER, base_ap)
 
     if melee and "furia" in unit_set:
-        chance += 0.65
+        post_clamp_hit_bonus += 0.65
     if "przygotowanie" in unit_set and "samolot" not in unit_set:
-        chance += 0.2 if "niestrudzony" in unit_set else 0.65
+        base_hit_bonus += 0.2 if "niestrudzony" in unit_set else 0.65
     if "niestrudzony" in unit_set and "samolot" not in unit_set:
         mult *= 1.5
     if "straznik" in unit_set and not melee:
@@ -91,9 +92,9 @@ def _weapon_cost(
     if "dywersant" in unit_set:
         mult *= 1.2
     if "szpica" in unit_set:
-        chance += 0.5
+        post_clamp_hit_bonus += 0.5
     if "ostrozny" in unit_set:
-        chance += lookup_with_nearest(CAUTIOUS_HIT_BONUS, range_value)
+        base_hit_bonus += lookup_with_nearest(CAUTIOUS_HIT_BONUS, range_value)
     if not melee and "wojownik" in unit_set:
         mult *= 0.5
     if melee and "strzelec" in unit_set:
@@ -142,9 +143,9 @@ def _weapon_cost(
             "podwojna",
             "rending",
         }:
-            chance += 1.0
+            post_clamp_hit_bonus += 1.0
         elif norm in {"lanca", "lance"}:
-            chance += 0.65
+            post_clamp_hit_bonus += 0.65
         elif norm in {"namierzanie", "lock on"}:
             has_namierzanie = True
             mult *= 1.1
@@ -165,7 +166,7 @@ def _weapon_cost(
         }:
             mult *= 1.05
         elif norm in {"dezintegracja", "disintegration"}:
-            chance += 2.9 / ap_mod - 1
+            post_clamp_hit_bonus += 2.9 / ap_mod - 1
         elif norm in {"niebezposredni", "indirect"}:
             mult *= 1.2
         elif norm in {"zuzywalny", "limited"}:
@@ -195,11 +196,12 @@ def _weapon_cost(
         ap_mod = max(ap_mod - waagh_penalty, 0.0)
 
     if not has_namierzanie:
-        chance -= 0.6 if not melee else 0.3
+        base_hit_bonus -= 0.6 if not melee else 0.3
     range_mod = max(range_mod + range_bonus - range_penalty, 0.0)
-    chance = max(chance - q, 0.9)
+    base_hit_chance = min(max(7.0 - q + base_hit_bonus, 0.9), 5.0)
     if finezja:
-        chance += ((7 - q) * (6 - q) ** 2) / 50.0
+        post_clamp_hit_bonus += ((7 - q) * (6 - q) ** 2) / 50.0
+    chance = base_hit_chance + post_clamp_hit_bonus
     cost = attacks * 2.0 * range_mod * chance * ap_mod * mult
 
     if overcharge and (not assault or range_value != 0):

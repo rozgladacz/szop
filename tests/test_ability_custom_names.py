@@ -11,6 +11,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app import models
+from app.data import abilities as ability_catalog
 from app.services import ability_registry, costs, utils
 
 if not hasattr(utils, "HIDDEN_TRAIT_SLUGS"):
@@ -52,6 +53,22 @@ def _make_unit() -> models.Unit:
     unit.weapon_links = []
     return unit
 
+
+def test_szop_catalog_has_updated_zasadzka_and_separate_shooting_traits() -> None:
+    zasadzka = ability_catalog.find_definition("zasadzka")
+    dobrze = ability_catalog.find_definition("dobrze_strzela")
+    zle = ability_catalog.find_definition("zle_strzela")
+
+    assert zasadzka is not None
+    assert zasadzka.description == (
+        "Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej "
+        "aktywacji rozstaw w dowolnym miejscu więcej niż 2” od wroga. "
+        "Nie kontroluje celów w pierwszej rundzie."
+    )
+    assert dobrze is not None and dobrze.name == "Dobrze strzela"
+    assert dobrze.description == "Atakuje na dystans z jakością 4."
+    assert zle is not None and zle.name == "Źle strzela"
+    assert zle.description == "Atakuje na dystans z jakością 5."
 
 
 def test_unit_ability_payload_includes_custom_name():
@@ -240,4 +257,3 @@ def test_expand_ability_ids_parallel_to_labels() -> None:
     assert len(labels) == len(ids)
     assert ids == [60, 60, 50, 70]
     assert labels == ["Aura: Kontra", "Aura: Kontra", "Medyk", "Sztandar [Aura: Furia]"]
-

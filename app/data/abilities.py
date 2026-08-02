@@ -74,7 +74,8 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         name="Zasadzka",
         type="passive",
         description=(
-            "Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej aktywacji rozstaw w dowolnym dozwolonym miejscu."
+            "Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej "
+            "aktywacji rozstaw w dowolnym miejscu więcej niż 2” od wroga. "
             "Nie kontroluje celów w pierwszej rundzie."
         ),
     ),
