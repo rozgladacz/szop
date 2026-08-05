@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B0 (`docs/handoffs/HANDOFF_faza-b-engine-mvp.md`). GATE przed startem B3 (Rule Executor + dice). Faza B3 implementuje **actual game logic** opartą o reguły z `SZOP_Rozjemca.md`. Jeśli reguły zmienią się w trakcie B3, wszystkie testy i wcześniejsze decyzje stają się unstable.
+- **Kontekst:** Strumień B, Faza B0. GATE przed startem B3 (Rule Executor + dice). Faza B3 implementuje **actual game logic** opartą o reguły z `SZOP_Rozjemca.md`. Jeśli reguły zmienią się w trakcie B3, wszystkie testy i wcześniejsze decyzje stają się unstable.
 
 ## Decyzja
 

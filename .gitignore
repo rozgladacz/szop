@@ -20,5 +20,7 @@ app/routers/__pycache__/
 # A4 pipeline output (rules_extract / rules_drift / rules_classify_geometry)
 build/
 
-# Documentation
-app/static/docs/
+# Dokumenty zasad: publikujemy OPOS, historyczne/robocze dokumenty pozostają lokalne.
+app/static/docs/*
+!app/static/docs/OPOS.docx
+!app/static/docs/OPOS.pdf

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-26 (Proposed) → 2026-05-29 (Accepted, po A4.1–A4.6)
-- **Kontekst:** Strumień A, Faza A4 (`docs/handoffs/HANDOFF_faza-a-4-drift.md`). Wątek startuje po zamknięciu A0–A3+A5, gdzie YAML ruleset (`app/rulesets/v1/abilities.yaml`, `tables.yaml`, `ability_costs.yaml`) został wygenerowany ze stanu `app/data/abilities.py` — **nie z DOCX**. Inwariant `docs/roadmap.md`: *„Reguły gry (`app/static/docs/`) = source of truth. Niedopuszczalna dywergencja kod ↔ DOCX."*
+- **Kontekst:** Strumień A, Faza A4. Wątek startuje po zamknięciu A0–A3+A5, gdzie YAML ruleset (`app/rulesets/v1/abilities.yaml`, `tables.yaml`, `ability_costs.yaml`) został wygenerowany ze stanu `app/data/abilities.py` — **nie z DOCX**. Inwariant `docs/roadmap.md`: *„Reguły gry (`app/static/docs/`) = source of truth. Niedopuszczalna dywergencja kod ↔ DOCX."*
 
 ## Decyzja
 
@@ -111,7 +111,7 @@ MD parser (`rules_extract_md.py`) jest prostszy — struktura `## Pasywne / ### 
 ## Artefakty i metryki
 
 **Komponenty (commits):**
-- A4.0 `2298d03` — ADR-0006 Proposed + HANDOFF bootstrap
+- A4.0 `2298d03` — ADR-0006 Proposed + bootstrap planu A4
 - A4.1 `2298d03` (sub-archive `5f34ec7`) — `rules_extract.py` (29 testów)
 - A4.2 `6205c1e` — `rules_drift.py` (27 testów) + `drift_allowlist.yaml`
 - A4.2+ `594f323` — `rules_extract_md.py` (15 testów)

@@ -46,38 +46,20 @@ def _load_or_create_secret(env_name: str, file_name: str) -> str:
 
 
 SECRET_KEY = _load_or_create_secret("SECRET_KEY", ".secret_key")
-DB_URL = os.getenv("DB_URL", "sqlite:///./data/szop.db")
-DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes"}
-LOCAL_COST_ENGINE_ENABLED = os.getenv("LOCAL_COST_ENGINE_ENABLED", "false").lower() in {
-    "1",
-    "true",
-    "yes",
-}
-
-# --- Strumień A: feature toggle silnika reguł ---
-# procedural  -> aktualny kod w app/services/costs/ (SSOT, oracle)
-# yaml        -> deklaratywny silnik z app/rulesets/v1/ (Strumień A, A2+)
-# both_assert -> wywołuje oba, porównuje delty (CI gate, dev only)
-RULES_BACKEND_PROCEDURAL = "procedural"
-RULES_BACKEND_YAML = "yaml"
-RULES_BACKEND_BOTH_ASSERT = "both_assert"
-RULES_BACKEND_CHOICES = frozenset(
-    {RULES_BACKEND_PROCEDURAL, RULES_BACKEND_YAML, RULES_BACKEND_BOTH_ASSERT}
+INITIAL_ADMIN_PASSWORD = _load_or_create_secret(
+    "INITIAL_ADMIN_PASSWORD", ".initial_admin_password"
 )
-_raw_rules_backend = os.getenv("OPR_RULES_BACKEND", RULES_BACKEND_PROCEDURAL).strip().lower()
-if _raw_rules_backend not in RULES_BACKEND_CHOICES:
-    raise ValueError(
-        f"OPR_RULES_BACKEND='{_raw_rules_backend}' is not one of {sorted(RULES_BACKEND_CHOICES)}"
-    )
-OPR_RULES_BACKEND = _raw_rules_backend
-UPDATE_REPO_URL = os.getenv("UPDATE_REPO_URL", "https://github.com/rozgladacz/szop")
+DB_URL = os.getenv("DB_URL", "sqlite:///./data/opos.db")
+DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes"}
+OPOS_RULESET_VERSION = os.getenv("OPOS_RULESET_VERSION", "v1")
+UPDATE_REPO_URL = os.getenv("UPDATE_REPO_URL", "https://github.com/rozgladacz/opos")
 UPDATE_BRANCH = os.getenv("UPDATE_BRANCH", "main")
 UPDATE_REPO_PATH = os.getenv("UPDATE_REPO_PATH", ".")
 UPDATE_REF = os.getenv("UPDATE_REF", "")
 UPDATE_DOCKERFILE = os.getenv("UPDATE_DOCKERFILE", "Dockerfile")
 UPDATE_COMPOSE_FILE = os.getenv("UPDATE_COMPOSE_FILE", "docker-compose.yml")
-UPDATE_SERVICE_NAME = os.getenv("UPDATE_SERVICE_NAME", "szop-app")
-UPDATE_IMAGE = os.getenv("UPDATE_IMAGE", "ghcr.io/rozgladacz/szop:latest")
+UPDATE_SERVICE_NAME = os.getenv("UPDATE_SERVICE_NAME", "opos-app")
+UPDATE_IMAGE = os.getenv("UPDATE_IMAGE", "ghcr.io/rozgladacz/opos:latest")
 UPDATE_WEBHOOK_TOKEN = _load_or_create_secret("UPDATE_WEBHOOK_TOKEN", ".webhook_token")
 APP_VERSION = os.getenv("APP_VERSION", "dev")
 

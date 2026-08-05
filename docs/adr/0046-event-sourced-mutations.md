@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-06-02
-- **Kontekst:** Strumień B, Faza B3.9.d (`docs/handoffs/HANDOFF_faza-b-3-hardening.md`). Post-B3 code review wykrył **dziurę architektoniczną B + bug #6** — engine deklarował ADR-0010 ("event-sourced battle log: `apply_events(initial, events)` rekonstruuje state"), ale w praktyce:
+- **Kontekst:** Strumień B, Faza B3.9.d. Post-B3 code review wykrył **dziurę architektoniczną B + bug #6** — engine deklarował ADR-0010 ("event-sourced battle log: `apply_events(initial, events)` rekonstruuje state"), ale w praktyce:
 
   1. **Brak production reducerów.** `_EVENT_REDUCERS` dispatcher z `register_reducer` był pusty w realnym engine — tylko test fixtures rejestrowały reducery dla pojedynczych typów. `apply_events` w production path zawsze rzucał `NotImplementedError`.
   2. **Silent status mutations.** `combat.resolve_charge_attack` mutował `defender.status_flags` przez `replace(status_flags=...)` po kontrataku (dodanie `Wyczerpany`) bez emit `BattleEvent`. Replay state nie miał tego statusu — **ADR-0010 invariant niezweryfikowalny** dla scenariuszy z Szarżą.

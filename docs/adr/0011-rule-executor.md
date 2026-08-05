@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (refreshed 2026-06-02 po B3.9 hardening)
 - **Data:** 2026-05-30 (Proposed) → 2026-05-30 (Accepted, po B3.7) → 2026-06-02 (refresh po B3.9.a-f — dodane moduły status/geometry/reducers + ActivationContext + weapons inventory + ACTIVE_ABILITY_REGISTRY)
-- **Kontekst:** Strumień B, Faza B3 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`) + Faza B3.9 (`docs/handoffs/HANDOFF_faza-b-3-hardening.md`). Rule executor (`app/services/engine/{status,geometry,dice,los,prediction,combat,effects,interrupts,phases,resolver,reducers}.py`) implementuje mechaniki SZOP. Pytanie projektowe: czy zasady są **hardcoded w Pythonie** (klasy / funkcje per akcja / efekt), czy **deklaratywne w YAML** z generic executor (jak `app/services/rulesets/` dla kosztów)?
+- **Kontekst:** Strumień B, Faza B3 + Faza B3.9. Rule executor (`app/services/engine/{status,geometry,dice,los,prediction,combat,effects,interrupts,phases,resolver,reducers}.py`) implementuje mechaniki SZOP. Pytanie projektowe: czy zasady są **hardcoded w Pythonie** (klasy / funkcje per akcja / efekt), czy **deklaratywne w YAML** z generic executor (jak `app/services/rulesets/` dla kosztów)?
 
 ## Decyzja
 

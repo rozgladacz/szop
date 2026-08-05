@@ -1,124 +1,36 @@
-# Testing
+# Testowanie OPOS
 
-## Reguła ogólna
+## Pełna bramka
 
-**Po każdej zmianie kodu uruchom testy. Nawet jednolinijkowej.**
-
-PostToolUse hook wymusza pytest po edycjach `.py` — **nie suppressuj jego output**. Zignorowanie tej reguły = top friction category (11 hits, "tests skipped before declaring done").
-
-## Kolejność uruchamiania — zawsze ta sama
-
-### 1. Natychmiast po zmianie — tylko dotknięty plik lub moduł
-
-```bash
-python -m pytest tests/test_roster_classification.py -x --tb=short -q
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q
+.\.venv\Scripts\python.exe -X utf8 scripts\opos_rules_check.py
 ```
 
-Szybki feedback zanim pójdziesz dalej. Jeśli tu nie przejdzie — nie ma sensu uruchamiać reszty.
+Na systemie z `make`: `make check`.
 
-### 2. Przed deklaracją "gotowe" — filtruj po obszarze
+## Zakres suite
 
-```bash
-python -m pytest -k "roster or cost or classification" -x --tb=short
-```
+- `test_opos_ruleset.py`, `test_opos_quote.py` — kompletność YAML, golden cases, wszystkie zdolności, Aura, rounding, proste punkty, mała bitwa i custom stats.
+- `test_opos_models.py`, `test_opos_snapshots.py`, `test_opos_backup.py` — schemat, kopiowanie snapshotów, własność i świeża baza.
+- `test_opos_api.py`, `test_opos_csrf.py` — kontrakty endpointów, server-side recalc, IDOR i CSRF.
+- `test_opos_cards.py`, `test_opos_pdf_security.py` — liczba kart, kontynuacje, brak liczebności i bezpieczne zasoby.
+- `test_opos_drift.py` — DOCX↔PDF↔YAML↔SVG.
+- `test_opos_api.py` — budżety zapytań i scenariusz 12 profili z wieloma kopiami.
 
-### 3. Przed commitem — pełna suita, obowiązkowo
+## Smoke UI
 
-```bash
-python -m pytest --tb=short -q
-```
+Po zmianach frontendowych uruchom serwer i ręcznie sprawdź desktop oraz szerokość mobilną:
 
-## Środowisko Windows
+1. logowanie i nawigację klawiaturą,
+2. utworzenie Armii oraz szablonu,
+3. utworzenie rozpiski i bezpośrednie dodanie oddziału,
+4. dodanie z Armii, quote, zapis, duplikowanie i reorder,
+5. przełączenie „Dowolne statystyki”, „Proste punkty”, „Zwiń opisy” i „Mała bitwa”,
+6. karty HTML i PDF, w tym zwarty wariant bez pełnych opisów, długie nazwy oraz profile bez zdolności.
 
-`make` może być poza PATH (znany problem — `.venv\Scripts\python` wskazuje WindowsApps Python z odmową dostępu). Używaj bezpośrednio:
+Sprawdź konsolę przeglądarki oraz składnię `opos.js` i `opos_editor.js` przez `node --check`.
 
-```bash
-python -m pytest -x --tb=short -q          # szybki, stop na pierwszym błędzie
-python -m pytest -x --tb=short -q <plik>   # fokusowany na jeden plik
-```
+## Kontrola PDF
 
-## Przydatne flagi pytest
-
-| Flaga | Kiedy użyć |
-|---|---|
-| `-x` | Zawsze — stop na pierwszym błędzie, nie czekaj na resztę |
-| `--tb=short` | Domyślnie — czytelny traceback bez szumu |
-| `-q` | Szybki przebieg — jedna linia per test, podsumowanie na końcu |
-| `-v` | Debugging — pełna nazwa każdego testu + status |
-| `-k "słowo"` | Filtruj testy po nazwie funkcji lub pliku (np. `-k "classification"`) |
-| `--lf` | Uruchom ponownie tylko ostatnio nieudane — przy poprawianiu |
-| `-s` | Pokaż `print()` w testach — tylko do debugowania, nie zostawiaj w commicie |
-
-## Co jeszcze sprawdzić po zmianie
-
-- **Po zmianie logiki** — uruchom testy związane z dotkniętym obszarem.
-- **Po zmianie UI** — sprawdź stan pusty, błędny i podstawowy scenariusz.
-- **Jeśli testów brakuje** — dodaj minimalny test regresji.
-- **Nie uznawaj zadania za zakończone bez krótkiej weryfikacji diffu.**
-- **Call-site check przed zamknięciem:** znajdź wszystkie call sites zmodyfikowanego kodu, wyjaśnij wpływ na każdy.
-
-## Kiedy testy dezaktualizują się
-
-Jeśli zmieniasz zachowanie funkcji — **najpierw** sprawdź czy istniejące testy testują stare zachowanie. Jeśli tak: **popraw testy jako pierwszy krok**, zanim zmienisz kod produkcyjny. Stare testy blokują dalszą pracę i generują fałszywe błędy.
-
-## Testy frontendu — payload parity
-
-Pliki `tests/test_frontend_*.py` weryfikują payload parity (JS ↔ backend). Uruchom je **po każdej zmianie** w:
-
-- `app/routers/rosters.py`
-- `app/services/costs/*` (cokolwiek SSOT)
-- `app/static/js/payload_adapters.js`
-- `app/routers/export.py`
-
-**Backend unit tests NIE pokrywają inicjalizacji JS** — smoke test manualny wymagany po zmianie `app.js`.
-
-## Smoke test po zmianie `app/static/js/app.js`
-
-Po każdej zmianie `app.js` uruchom aplikację (`make dev`) i **ręcznie** sprawdź:
-
-1. **Zbrojownia** → czy lista broni jest widoczna?
-2. **Edytor Armii** → czy przy dodaniu oddziału widoczne są bronie?
-3. **Rozpiski** → czy można zaznaczyć oddział i czy otwiera się panel edytora?
-
-Testy backendowe nie pokrywają inicjalizacji JS — te trzy scenariusze **muszą być sprawdzone ręcznie**. Bezpieczeństwo dla dużych plików: przed usunięciem funkcji z `app.js` zrób `grep -n "nazwaFunkcji" app/static/js/app.js` i zweryfikuj brak wywołań. W szczególności sprawdź łańcuch DOMContentLoaded (`docs/app-js-guide.md`).
-
-## Diagnoza bugów UI
-
-Przed analizą backendu **ustal pełną ścieżkę wywołania:** JS event → fetch → endpoint → render. Sprawdź czy wynik nie jest nadpisywany przez inny fetch po załadowaniu strony (np. batch `/quote` po renderowaniu SSR).
-
-## Komendy projektu
-
-- Test (wszystkie): `make test`
-- Test (szybki, stop na pierwszym błędzie): `make test-fast`
-- Lint: `make lint`
-- Windows fallback: `python -m pytest -x --tb=short -q`
-
-## A4 drift pipeline — `make rules-check`
-
-Orchestrator pipeline'u drift detection (ADR-0006). Uruchamia 5 skryptów sekwencyjnie z fail-fast:
-
-```bash
-make rules-check                # full pipeline
-make rules-sources-check        # SHA256 dla SZOP.docx/pdf/md×2
-make rules-extract              # DOCX → build/rules_extracted.yaml
-make rules-extract-md           # MD → build/rules_md.yaml
-make rules-classify             # abilities.yaml → build/geometry_classification.md
-make rules-drift                # DOCX vs YAML → build/drift_report.md
-```
-
-**Kolejność `rules-check`:** sources-check → extract → extract-md → classify → drift (drift LAST bo może wyjść z exit 2 WARN i zatrzymać chain — wszystkie inne artefakty wcześniej już zapisane).
-
-**Exit codes:**
-- `0` — clean (wszystko match, brak drift)
-- `1` — ERROR (R1/R4 w drift, mismatch w sources, parse error w extract/classify)
-- `2` — WARN-only (R2/R3 w drift, missing source files)
-
-**Kiedy uruchamiać:**
-- Po edycji `app/static/docs/SZOP.*` (DOCX, PDF, MD) — wykryje silent edits.
-- Po edycji `app/rulesets/v1/*.yaml` — wykryje drift od source-of-truth.
-- Po edycji `app/data/abilities.py` — pośrednio sprawdza spójność YAML mirror.
-- W CI (planowane A4.6 GHA workflow `rules_drift.yml`).
-
-Po świadomej edycji source files: `python scripts/rules_sources_check.py --update` regeneruje `app/rulesets/v1/source_hashes.yaml`.
-
-Detale: [scripts/README.md](../scripts/README.md), [docs/adr/0006-pipeline-drift.md](adr/0006-pipeline-drift.md).
+Wymagany jest rzeczywisty WeasyPrint 69.0. Wyrenderuj każdą stronę PDF do PNG i obejrzyj w skali 100%: format A4 poziomo, siatkę 2×2, linie cięcia, symbole, przepełnienia i karty kontynuacyjne.

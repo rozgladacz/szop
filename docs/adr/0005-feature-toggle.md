@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-21
-- **Kontekst:** Strumień A, Faza A0 (`docs/handoffs/HANDOFF_faza-a.md`).
+- **Kontekst:** Strumień A, Faza A0.
 
 ## Decyzja
 

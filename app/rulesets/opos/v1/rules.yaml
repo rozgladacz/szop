@@ -1,0 +1,258 @@
+version: "1.1.0"
+game: OPOS
+sources:
+  normative: app/static/docs/OPOS.docx
+  published: app/static/docs/OPOS.pdf
+
+standard_stats:
+  defense: [3, 4, 5]
+  toughness: [1, 2, 3, 6, 9, 12]
+  strength: [0, 1, 2]
+
+stat_descriptions:
+  defense: [Lekka zbroja, Ciężka zbroja, Pancerz]
+  toughness: [Lekka piechota, Ciężka piechota, Małe potwory lub kawaleria, Małe pojazdy, Pojazdy, Duże pojazdy]
+  strength: [Lekka, Ciężka, Przeciwpancerna]
+
+formula:
+  base_constant: 6
+  defense_quadratic: 0.09
+  defense_linear: -0.19
+  defense_constant: 1
+  weapon_factor: 12
+  strength_quadratic: -0.04
+  strength_linear: 0.5
+  strength_constant: 1
+  toughness_modifier_per_point: 0.01
+  aura_minimum_ability_cost: 1
+
+ranges:
+  melee:
+    name: Wręcz
+    multiplier: 0.6
+    icon: range-melee
+  short:
+    name: Krótki
+    multiplier: 1
+    icon: range-short
+  long:
+    name: Daleki
+    multiplier: 0.6
+    icon: range-long
+
+stat_icons:
+  defense: defense
+  toughness: toughness
+  strength: strength
+  dice: dice
+  activation: activation
+
+abilities:
+  - slug: hero
+    name: Bohater
+    category: passive
+    icon: hero
+    description: Może być zaatakowany tylko, jeżeli atakujący nie może zaatakować innego celu, albo sam jest bohaterem.
+    aura_eligible: false
+    effects:
+      toughness_multiplier: 2
+  - slug: ambush
+    name: Zasadzka
+    category: passive
+    icon: ambush
+    description: Nie rozstawia się przed grą. Podczas pierwszej rundy, zamiast normalnej aktywacji rozstaw w dowolnym miejscu dalej niż wręcz od wroga.
+    aura_eligible: false
+    effects:
+      ability_cost_delta: 3
+  - slug: scout
+    name: Zwiadowca
+    category: passive
+    icon: scout
+    description: Po rozstawieniu przesuń go o miarkę.
+    aura_eligible: false
+    effects:
+      ability_cost_delta: 1
+  - slug: agile
+    name: Zwinny
+    category: passive
+    icon: agile
+    description: Może się ruszać nawet gdy ma wroga wręcz.
+    aura_eligible: true
+    effects:
+      ability_cost_delta: 1
+  - slug: fast
+    name: Szybki
+    category: passive
+    icon: fast
+    description: Zamiast atakować może wykonać dodatkowy ruch.
+    aura_eligible: true
+    effects:
+      ability_cost_delta: 1
+  - slug: immobile
+    name: Nieruchomy
+    category: passive
+    icon: immobile
+    description: Nie może się ruszać.
+    aura_eligible: false
+    effects:
+      ability_cost_delta: -3
+  - slug: jump
+    name: Skok
+    category: passive
+    icon: jump
+    description: Ignoruje teren i jednostki podczas ruchu.
+    aura_eligible: true
+    effects:
+      ability_cost_delta: 1
+  - slug: dodge
+    name: Unik
+    category: passive
+    icon: dodge
+    description: Wrogowie atakujący cię nie będąc w zasięgu wręcz muszą przerzucić wszystkie 6.
+    aura_eligible: true
+    effects:
+      defense_bonus: 0.25
+  - slug: parry
+    name: Parowanie
+    category: passive
+    icon: parry
+    description: Wrogowie atakujący cię będąc w zasięgu wręcz muszą przerzucić wszystkie 6.
+    aura_eligible: true
+    effects:
+      defense_bonus: 0.25
+  - slug: steadfast
+    name: Wytrwały
+    category: passive
+    icon: steadfast
+    description: +1 do obrony za każdy znacznik aktywacji.
+    aura_eligible: true
+    effects:
+      defense_bonus: 1
+  - slug: patient
+    name: Cierpliwy
+    category: passive
+    icon: patient
+    description: +1 do ataku za każdy znacznik aktywacji na celu.
+    aura_eligible: true
+    effects:
+      strength_bonus: 1
+  - slug: breakthrough
+    name: Przełamanie
+    category: passive
+    icon: breakthrough
+    description: Jeżeli cel ataku jest w zasięgu wręcz od celu misji, możesz przerzucić wszystkie 1.
+    aura_eligible: true
+    effects:
+      strength_bonus: 0.25
+  - slug: guardian
+    name: Strażnik
+    category: passive
+    icon: guardian
+    description: Jeżeli jesteś w zasięgu wręcz od celu misji, możesz przerzucić wszystkie 1.
+    aura_eligible: true
+    effects:
+      strength_bonus: 0.25
+  - slug: counterattack
+    name: Kontratak
+    category: passive
+    icon: counterattack
+    description: Atakujący wręcz otrzymuje 1 ranę za każdą porażkę.
+    aura_eligible: true
+    effects:
+      ability_cost_delta: 1
+  - slug: airplane
+    name: Samolot
+    category: passive
+    icon: airplane
+    description: Ma nieograniczony ruch, jest w dalekim zasięgu od wszystkiego, można przez niego patrzeć i przemieszczać się.
+    aura_eligible: false
+    effects:
+      ability_cost_delta: -1
+
+  - slug: patching
+    name: Łatanie
+    category: special
+    icon: patching
+    description: Na koniec aktywacji ten oddział lub inny w zasięgu wręcz leczy ranę.
+    effects:
+      toughness_flat_bonus: 3
+  - slug: aura
+    name: Aura
+    category: special
+    icon: aura
+    description: Przyjazne oddziały w zasięgu jednej miarki lub ich profile ataku mają wskazaną zdolność.
+    requires_target: true
+  - slug: order
+    name: Rozkaz
+    category: special
+    icon: order
+    description: Po twojej aktywacji możesz aktywować następny oddział bez tej zdolności, nawet jeżeli ma już znacznik aktywacji. Dostaje znacznik aktywacji.
+    effects:
+      base_cost_fraction: 0.1
+  - slug: transport
+    name: Transport
+    category: special
+    icon: transport
+    description: Zanim wykona ruch przyjazne oddziały wręcz od niego mogą zostać zdjęte z planszy i rozstawione ponownie wręcz od niego, gdy zakończy ruch.
+    effects:
+      ability_cost_delta: 2
+
+  - slug: area
+    name: Obszarowa
+    category: weapon
+    icon: area
+    description: Masz dodatkową kość ataku za każdy model, który jest wręcz od celu.
+    aura_eligible: true
+    effects:
+      weapon_multiplier: 2.5
+  - slug: deadly
+    name: Zabójczy
+    category: weapon
+    icon: deadly
+    description: Za każdy sukces pokonaj model, jeżeli ma 6 lub mniej wytrzymałości, a jeżeli więcej zadaj 6 ran.
+    aura_eligible: true
+    effects:
+      weapon_multiplier: 4
+  - slug: double
+    name: Podwójny
+    category: weapon
+    icon: double
+    description: Każdy sukces liczy się również jako remis.
+    aura_eligible: true
+    effects:
+      weapon_multiplier: 1.5
+  - slug: reload
+    name: Przeładowanie
+    category: weapon
+    icon: reload
+    description: Otrzymujesz znacznik aktywacji po ataku.
+    aura_eligible: true
+    effects:
+      weapon_multiplier: 0.5
+  - slug: artillery
+    name: Artyleria
+    category: weapon
+    icon: artillery
+    description: Może sprawdzać linię wzroku do wroga od dowolnego przyjaznego modelu.
+    aura_eligible: true
+    allowed_ranges: [short, long]
+    effects:
+      weapon_multiplier: 1.2
+  - slug: charge
+    name: Szarża
+    category: weapon
+    icon: charge
+    description: Możesz przerzucić dowolne kości, jeżeli ruszyłeś się w tej aktywacji. Tylko wręcz.
+    aura_eligible: true
+    allowed_ranges: [melee]
+    effects:
+      weapon_multiplier: 1.4
+  - slug: prepared
+    name: Przygotowanie
+    category: weapon
+    icon: prepared
+    description: Możesz zrezygnować z ruchu, aby przerzucić dowolne kości. Nie wręcz.
+    aura_eligible: true
+    allowed_ranges: [short, long]
+    effects:
+      weapon_multiplier: 1.4

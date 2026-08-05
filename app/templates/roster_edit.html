@@ -1,492 +1,82 @@
 {% extends "base.html" %}
-{% block title %}Rozpiska {{ roster.name }} - SZOP{% endblock %}
-{% block container_class %}container-fluid{% endblock %}
+{% from "partials/icon.html" import icon with context %}
+{% block title %}{{ roster.name }} — OPOS{% endblock %}
+{% block body_class %}editor-page{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-  <div class="d-flex align-items-center gap-2">
-    <h2 class="mb-0">Rozpiska: {{ roster.name }}</h2>
-    <button
-      class="btn btn-outline-primary btn-sm"
-      type="button"
-      data-bs-toggle="collapse"
-      data-bs-target="#roster-settings"
-      aria-expanded="false"
-      aria-controls="roster-settings"
-    >
-      Edycja
-    </button>
-  </div>
-  <div class="d-flex align-items-center gap-2 flex-wrap">
-    <a class="btn btn-success" href="/rosters/{{ roster.id }}/battle-state" target="_blank">Stan bitewny</a>
-    <a class="btn btn-outline-secondary" href="/rosters/{{ roster.id }}/print" target="_blank">Widok statyczny</a>
-    <a class="btn btn-outline-secondary" href="/rosters/{{ roster.id }}/export/lista" target="_blank">Widok listy</a>
-    <a class="btn btn-outline-secondary" href="/rosters/{{ roster.id }}/pdf">Pobierz PDF</a>
-    <a class="btn btn-outline-secondary" href="/export/xlsx/{{ roster.id }}">Eksport XLSX</a>
-    <a class="btn btn-outline-secondary" href="/rosters/{{ roster.id }}/strategic-cards">Karty Strategiczne</a>
-    <a class="btn btn-outline-secondary" href="/rosters">Wróć</a>
-  </div>
+<div class="page-heading roster-heading">
+  <div><p class="eyebrow">Rozpiska</p><h1>{{ roster.name }}</h1><p><span id="profile-count">{{ units|length }}</span> wspólnych profili · <strong id="roster-total">{{ units|sum(attribute='entry_cost') }} pkt</strong>{% if roster.points_limit %} / {{ roster.points_limit }}{% endif %}</p></div>
 </div>
 
-<div class="collapse mb-4" id="roster-settings">
-  <div class="card">
-    <div class="card-body">
-      <h5 class="card-title">Informacje o rozpisce</h5>
-      <form method="post" action="/rosters/{{ roster.id }}/update" class="row g-3 align-items-end">
-        <div class="col-md-5">
-          <label class="form-label" for="name">Nazwa</label>
-          <input class="form-control" id="name" name="name" value="{{ roster.name }}" required {% if not can_edit %}disabled{% endif %} />
+<details class="panel settings-panel"><summary>Ustawienia rozpiski</summary>
+  <form method="post" action="/rosters/{{ roster.id }}/settings" class="settings-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Nazwa<input name="name" value="{{ roster.name }}" maxlength="120" required></label>
+    <label>Limit punktów<input name="points_limit" type="number" min="1" value="{{ roster.points_limit or '' }}"></label>
+    <label class="toggle-row"><input name="custom_stats_enabled" type="checkbox" value="true" {% if roster.custom_stats_enabled %}checked{% endif %}><span><strong>Dowolne statystyki</strong><small>Włącz pola liczbowe zamiast standardowych list.</small></span></label>
+    <label class="toggle-row"><input name="simple_points_enabled" type="checkbox" value="true" {% if roster.simple_points_enabled %}checked{% endif %}><span><strong>Proste punkty</strong><small>Podziel ceny przez 10 i zaokrąglaj half-up do całości.</small></span></label>
+    <label class="toggle-row"><input name="collapse_descriptions" type="checkbox" value="true" {% if roster.collapse_descriptions %}checked{% endif %}><span><strong>Zwiń opisy</strong><small>Pokazuj symbole i nazwy zdolności bez pełnych opisów.</small></span></label>
+    <label class="toggle-row"><input name="small_battle_enabled" type="checkbox" value="true" {% if roster.small_battle_enabled %}checked{% endif %}><span><strong>Mała bitwa</strong><small>Podwój standardowe wartości Wytrzymałości.</small></span></label>
+    <button class="button" type="submit">Zapisz ustawienia</button>
+  </form>
+</details>
+
+<div class="editor-layout" id="opos-editor" data-roster-id="{{ roster.id }}" data-army-id="{{ roster.army_id or '' }}" data-custom-stats="{{ 'true' if roster.custom_stats_enabled else 'false' }}" data-simple-points="{{ 'true' if roster.simple_points_enabled else 'false' }}" data-collapse-descriptions="{{ 'true' if roster.collapse_descriptions else 'false' }}" data-small-battle="{{ 'true' if roster.small_battle_enabled else 'false' }}">
+  <section class="roster-column" aria-labelledby="units-title">
+    <div class="section-heading"><h2 id="units-title">Oddziały w rozpisce</h2></div>
+    <div id="unit-list" class="unit-list">
+    {% for row in unit_rows %}{% set unit = row.unit %}
+      <article class="unit-row" data-unit-id="{{ unit.id }}">
+        <div class="unit-row-main">
+          <h3>{{ unit.name }}</h3>
+          <div class="stat-line">{{ icon('defense','Obrona ' ~ row.defense,row.defense) }}{{ icon('toughness','Wytrzymałość ' ~ row.toughness,row.toughness) }}<span>{{ unit.models_per_unit }} modeli × {{ unit.unit_copies }} oddz.</span></div>
         </div>
-        <div class="col-md-3">
-          <label class="form-label">Armia</label>
-          <input class="form-control" value="{{ roster.army.name }}" disabled />
+        <div class="cost-stack"><strong>{{ unit.unit_cost }} pkt</strong><small>łącznie {{ unit.entry_cost }}</small></div>
+        {% if row.abilities %}<div class="unit-abilities" aria-label="Zdolności oddziału">{% for ability in row.abilities %}<span>{{ icon(ability.icon,ability.name) }}<strong>{{ ability.name }}</strong></span>{% endfor %}</div>{% endif %}
+        <div class="unit-profiles" aria-label="Profile ataku">
+          {% for profile in row.profiles %}<div class="unit-profile{% if not profile.active %} is-inactive{% endif %}" data-range="{{ profile.range }}">
+            <span class="unit-profile-name">{{ icon(profile.icon,profile.name) }}<strong>{{ profile.name }}</strong></span>
+            <span>{{ icon('dice','Kości ataku ' ~ profile.dice,profile.dice) }}{{ icon('strength','Siła ' ~ profile.strength,profile.strength) }}</span>
+            {% if profile.abilities %}<small>{% for ability in profile.abilities %}<span>{{ icon(ability.icon,ability.name) }}{{ ability.name }}</span>{% endfor %}</small>{% endif %}
+          </div>{% endfor %}
         </div>
-        <div class="col-md-2">
-          <label class="form-label" for="points_limit">Limit</label>
-          <input class="form-control" id="points_limit" name="points_limit" type="number" value="{{ roster.points_limit }}" {% if not can_edit %}disabled{% endif %} />
+        <div class="unit-actions">
+          <button class="drag-handle" type="button" aria-label="Przeciągnij, aby zmienić kolejność. Klawiatura: strzałka w górę lub w dół." title="Przeciągnij, aby zmienić kolejność">⠿</button>
+          <button class="button js-edit-unit" type="button">Edytuj</button><button class="button js-duplicate-unit" type="button">Duplikuj</button>
+          {% if roster.army_id %}<button class="button js-save-template" type="button">{% if unit.source_template_id %}Zapisz jako nowy{% else %}Zapisz do Armii{% endif %}</button>{% endif %}
+          {% if unit.source_template_id %}<button class="button js-update-template" type="button">Aktualizuj szablon</button>{% endif %}
+          <button class="button button-danger js-delete-unit" type="button">Usuń</button>
         </div>
-        <div class="col-md-2">
-          <button class="btn btn-primary" type="submit" {% if not can_edit %}disabled{% endif %}>Zapisz</button>
-        </div>
-      </form>
-      <div class="mt-3">
-        <form method="post" action="/rosters/{{ roster.id }}/duplicate">
-          <button class="btn btn-outline-primary" type="submit">Utwórz kopię rozpiski</button>
-        </form>
-      </div>
-      {% if can_delete %}
-      <hr class="my-4" />
-      <form method="post" action="/rosters/{{ roster.id }}/delete" onsubmit="return confirm('Usunąć rozpiskę? Tej operacji nie można cofnąć.');">
-        <button class="btn btn-outline-danger" type="submit">Usuń rozpiskę</button>
-      </form>
-      {% endif %}
-      {% if not can_edit %}
-      <div class="alert alert-info mt-3">
-        Jest to rozpiska globalna. Modyfikacje są dostępne jedynie dla administratora.
-      </div>
-      {% endif %}
+      </article>
+    {% else %}<div class="empty-state" id="units-empty">Dodaj pierwszy oddział bezpośrednio albo wybierz szablon z Armii.</div>{% endfor %}
     </div>
-  </div>
+  </section>
+
+  <aside class="library-column" aria-labelledby="library-title">
+    <div class="library-tools"><strong><span id="sticky-roster-total">{{ units|sum(attribute='entry_cost') }}</span> pkt{% if roster.points_limit %} / {{ roster.points_limit }}{% endif %}</strong><div class="row-actions"><button class="button button-primary" id="add-unit" type="button">Dodaj oddział</button><a class="button" href="/rosters/{{ roster.id }}/cards">Karty</a><a class="button" href="/rosters/{{ roster.id }}/cards.pdf">PDF</a></div></div>
+    <div class="section-heading"><h2 id="library-title">Dodaj z Armii</h2>{% if roster.army %}<a href="/armies/{{ roster.army.id }}">{{ roster.army.name }}</a>{% endif %}</div>
+    {% if army_templates %}<div class="library-templates">{% for template in army_templates %}<button class="template-pick js-add-template" type="button" data-template-id="{{ template.id }}"><strong>{{ template.name }}</strong><span>{{ template.models_per_unit }} modeli · O {{ template.defense|stat }} · W {{ template.toughness|stat }}</span></button>{% endfor %}</div>
+    {% elif roster.army %}<p class="empty-state">Ta Armia nie ma jeszcze szablonów.</p>{% else %}<p class="empty-state">Przypisz Armię przy tworzeniu rozpiski, aby używać biblioteki.</p>{% endif %}
+  </aside>
 </div>
 
-<div
-  class="row g-4"
-  data-roster-root
-  data-roster-id="{{ roster.id }}"
-  data-selected-id="{{ selected_id or '' }}"
-  data-roster-unit-datasets='{{ unit_payloads | tojson | e }}'
-  data-roster-attachable-units='{{ attachable_units | tojson | e }}'
-  data-local-cost-engine-enabled="{{ 'true' if local_cost_engine_enabled else 'false' }}"
->
-  {% if can_edit %}
-  <div class="col-12 d-xl-none">
-    <button
-      class="btn btn-outline-primary w-100"
-      type="button"
-      data-bs-toggle="collapse"
-      data-bs-target="#roster-add-unit"
-      aria-expanded="false"
-      aria-controls="roster-add-unit"
-    >
-      Dodaj jednostkę
-    </button>
-  </div>
-  {% endif %}
-
-  {% if can_edit %}
-  <div class="col-12 col-xl-4 col-xxl-4">
-    <div class="collapse show d-xl-block h-100" id="roster-add-unit">
-      <div class="card h-100">
-        <div class="card-body d-flex flex-column">
-          <h5 class="card-title">Jednostki w armii</h5>
-          <div class="flex-grow-1 overflow-auto roster-army-unit-list">
-            {% if available_units %}
-            {% set show_avail_headers = available_groups | length > 1 or (available_groups | length == 1 and available_groups[0].group is not none) %}
-            {% macro unit_card(entry) %}
-              {% set unit = entry.unit %}
-              <form method="post" action="/rosters/{{ roster.id }}/units/add" class="list-group-item p-0 border-0">
-                <input type="hidden" name="unit_id" value="{{ unit.id }}" />
-                <input type="hidden" name="count" value="{{ entry.typical_models }}" />
-                <div
-                  class="position-relative roster-card p-3 border rounded h-100"
-                  data-roster-add-trigger
-                  role="button"
-                  tabindex="0"
-                  aria-label="Dodaj jednostkę {{ unit.name }}"
-                  data-unit-id="{{ unit.id }}"
-                >
-                  <span class="badge text-bg-light text-dark roster-cost-badge">
-                    {{ '{:g}'.format(entry.unit_cost_total) }} pkt ({{ entry.typical_models }}x {{ '{:g}'.format(entry.unit_cost_per_model) }} pkt/model)
-                  </span>
-                  <div class="fw-semibold">{{ unit.name }}</div>
-                  <div class="text-muted small">
-                    Jakość {{ unit.quality }} / Obrona {{ unit.defense }} / Wytrzymałość {{ unit.toughness }}
-                  </div>
-                  {% set passive_defaults = entry.passive_items | selectattr('default_count') | list %}
-                  {% set active_defaults = entry.active_items | selectattr('default_count') | list %}
-                  {% set aura_defaults = entry.aura_items | selectattr('default_count') | list %}
-                  <div class="d-flex flex-wrap gap-1 mt-2">
-                    {% for ability in passive_defaults %}
-                    <span class="badge text-bg-secondary" title="{{ ability.description }}">{{ ability.label }}</span>
-                    {% endfor %}
-                    {% for ability in active_defaults %}
-                    <span class="badge text-bg-info text-dark" title="{{ ability.description }}">{{ ability.label }}</span>
-                    {% endfor %}
-                    {% for ability in aura_defaults %}
-                    <span class="badge text-bg-warning text-dark" title="{{ ability.description }}">{{ ability.label }}</span>
-                    {% endfor %}
-                    {% if not passive_defaults and not active_defaults and not aura_defaults %}
-                    <span class="text-muted small">Brak dodatkowych zdolności</span>
-                    {% endif %}
-                  </div>
-                  <div class="text-muted small mt-2">Domyślne uzbrojenie: {{ entry.default_summary }}</div>
-                </div>
-              </form>
-            {% endmacro %}
-            {% if show_avail_headers %}
-              {% for section in available_groups %}
-              <div class="avail-group mb-2">
-                <button
-                  class="btn btn-sm btn-outline-secondary w-100 text-start d-flex justify-content-between align-items-center avail-group-toggle"
-                  type="button"
-                  data-bs-toggle="collapse"
-                  data-bs-target="#avail-group-{{ loop.index }}"
-                  aria-expanded="{{ 'false' if section.group and section.group.collapsed else 'true' }}"
-                >
-                  <span class="fw-semibold">{% if section.group %}{{ section.group.name }}{% else %}Bez grupy{% endif %}</span>
-                  <span class="badge text-bg-secondary ms-2">{{ section.units | length }}</span>
-                </button>
-                <div class="collapse {% if not section.group or not section.group.collapsed %}show{% endif %}" id="avail-group-{{ loop.index }}">
-                  <div class="list-group mt-1">
-                    {% for entry in section.units %}{{ unit_card(entry) }}{% endfor %}
-                  </div>
-                </div>
-              </div>
-              {% endfor %}
-            {% else %}
-              <div class="list-group">
-                {% for section in available_groups %}
-                {% for entry in section.units %}{{ unit_card(entry) }}{% endfor %}
-                {% endfor %}
-              </div>
-            {% endif %}
-            {% else %}
-            <div class="alert alert-info mb-0">Brak jednostek w wybranej armii.</div>
-            {% endif %}
-          </div>
-        </div>
-      </div>
+<dialog id="unit-dialog" class="unit-dialog" aria-labelledby="unit-dialog-title">
+  <form id="unit-form" method="dialog">
+    <header class="dialog-header"><div><p class="eyebrow">Wspólny profil</p><h2 id="unit-dialog-title">Dodaj oddział</h2></div><button class="icon-button" id="close-unit-dialog" type="button" aria-label="Zamknij">×</button></header>
+    <div class="unit-form-grid">
+      <label class="span-2">Nazwa<input id="unit-name" maxlength="120" required></label>
+      <label>Modele / oddział<input id="models-per-unit" type="number" min="1" max="999" value="1" required></label>
+      <label>Liczba kopii<input id="unit-copies" type="number" min="1" max="999" value="1" required></label>
+      <label>Obrona<div id="defense-field"></div></label>
+      <label>Wytrzymałość<div id="toughness-field"></div></label>
     </div>
-  </div>
-  {% endif %}
+    <details class="editor-section ability-section" open><summary>Zdolności pasywne</summary><div id="passive-options" class="ability-grid"></div></details>
+    <details class="editor-section ability-section" open><summary>Zdolności specjalne</summary><div id="special-options" class="ability-grid"></div><label id="aura-target-field" class="aura-target" hidden>Cel Aury<select id="aura-target"></select></label></details>
+    <details class="editor-section profiles-section" open><summary>Profile ataku</summary><div id="profile-editors" class="profile-editors"></div></details>
+    <section class="quote-panel" aria-live="polite"><div><span>Koszt oddziału</span><strong id="quote-unit-cost">—</strong></div><div><span>Koszt wpisu</span><strong id="quote-entry-cost">—</strong></div><details><summary>Rozbicie ceny</summary><dl id="quote-breakdown"></dl></details><p id="quote-error" class="form-error" hidden></p></section>
+    <footer class="dialog-actions"><button class="button button-quiet" id="cancel-unit" type="button">Anuluj</button><button class="button button-primary" id="save-unit" type="submit">Dodaj oddział</button></footer>
+  </form>
+</dialog>
 
-  <div class="col-12 {% if can_edit %}col-xl-4 col-xxl-4{% else %}col-xl-7 col-xxl-8{% endif %}">
-    <div class="card h-100">
-      <div class="card-body d-flex flex-column" data-roster-items-container>
-        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
-          <h5 class="mb-0 d-flex align-items-center gap-2 flex-wrap">
-            <span>Oddziały w rozpisce (<span data-roster-frames-count>{{ frames_count }}</span>, bohaterów <span data-roster-hero-count>{{ hero_models_count }}</span>)</span>
-            <span class="roster-warnings-indicator d-none"
-                  data-roster-warnings
-                  data-bs-toggle="tooltip"
-                  data-bs-placement="bottom"
-                  data-bs-html="true"
-                  data-bs-title=""
-                  role="button"
-                  tabindex="0"
-                  aria-label="Ostrzeżenia rozpiski">
-              <span class="badge text-bg-warning"><span aria-hidden="true">⚠</span> <span data-roster-warnings-count>0</span></span>
-            </span>
-          </h5>
-          <div
-            class="text-muted small"
-            data-roster-total-container
-            {% if roster.points_limit %}data-limit="{{ roster.points_limit }}"{% endif %}
-          >
-            Suma punktów: <strong data-roster-total>{{ total_cost }}</strong>{% if roster.points_limit %}
-            / <span data-roster-limit>{{ roster.points_limit }}</span>{% endif %}
-          </div>
-        </div>
-        {% macro roster_unit_card(item, ru, is_attached=False) %}
-              <div
-                class="roster-unit-item roster-card text-start position-relative flex-grow-1 border rounded p-3 bg-body{% if is_attached %} roster-attached-hero{% endif %}"
-                data-roster-item
-                {% if is_attached %}data-roster-attached-hero data-parent-roster-unit-id="{{ ru.parent_roster_unit_id }}"{% endif %}
-                data-roster-unit-id="{{ ru.id }}"
-                data-unit-cache-id="{{ ru.unit.id }}"
-                data-unit-name="{{ ru.unit.name }}"
-                data-unit-count="{{ ru.count }}"
-                data-unit-cost="{{ ru.cached_cost }}"
-                data-base-cost-per-model="{{ item.base_cost_per_model }}"
-                data-unit-quality="{{ ru.unit.quality }}"
-                data-unit-defense="{{ ru.unit.defense }}"
-                data-unit-toughness="{{ ru.unit.toughness }}"
-                data-unit-weapon-cost="{{ item.weapon_cost }}"
-                data-unit-custom-name="{{ ru.custom_name or '' }}"
-                data-unit-flags='{{ item.unit_flags | default('', true) | e }}'
-                data-is-hero="{{ 'true' if item.is_hero else 'false' }}"
-                data-selected-passives='{{ item.selected_passive_items | tojson | e }}'
-                data-selected-actives='{{ item.selected_active_items | tojson | e }}'
-                data-selected-auras='{{ item.selected_aura_items | tojson | e }}'
-                data-loadout='{{ item.loadout | tojson | e }}'
-                role="button"
-                tabindex="0"
-              >
-                <span class="badge text-bg-primary roster-cost-badge" data-roster-unit-cost>{{ ru.cached_cost }} pkt</span>
-                <div class="fw-semibold" data-roster-unit-title>{{ ru.count }}x {{ ru.unit.name }}</div>
-                <div class="text-muted small {% if not ru.custom_name %}d-none{% endif %}" data-roster-unit-custom>
-                  {{ ru.custom_name }}
-                </div>
-                <div class="text-muted small">
-                  Jakość {{ ru.unit.quality }} / Obrona {{ ru.unit.defense }} / Wytrzymałość {{ ru.unit.toughness }}
-                </div>
-                {% set selected_passives = item.selected_passive_items or [] %}
-                {% set selected_actives = item.selected_active_items or [] %}
-                {% set selected_auras = item.selected_aura_items or [] %}
-                <div class="d-flex flex-wrap gap-1 mt-2" data-roster-unit-abilities>
-                {% for ability in selected_passives if not ability.get('is_army_rule') %}
-                {% set base_label = ability.label or ability.raw or ability.slug %}
-                  {% if ability.custom_name %}
-                  {% set display_label = ability.custom_name ~ (base_label and ' [' ~ base_label ~ ']' or '') %}
-                  {% else %}
-                  {% set display_label = base_label %}
-                  {% endif %}
-                  <span class="badge text-bg-secondary" title="{{ ability.description }}">{{ display_label }}</span>
-                  {% endfor %}
-                  {% for ability in selected_actives %}
-                  {% set base_label = ability.label or ability.raw or ability.slug %}
-                  {% if ability.custom_name %}
-                  {% set display_label = ability.custom_name ~ (base_label and ' [' ~ base_label ~ ']' or '') %}
-                  {% else %}
-                  {% set display_label = base_label %}
-                  {% endif %}
-                  <span class="badge text-bg-info text-dark" title="{{ ability.description }}">{{ display_label }}{% if ability.count and ability.count|int > 1 %} ×{{ ability.count }}{% endif %}</span>
-                  {% endfor %}
-                  {% for ability in selected_auras %}
-                  {% set base_label = ability.label or ability.raw or ability.slug %}
-                  {% if ability.custom_name %}
-                  {% set display_label = ability.custom_name ~ (base_label and ' [' ~ base_label ~ ']' or '') %}
-                  {% else %}
-                  {% set display_label = base_label %}
-                  {% endif %}
-                  <span class="badge text-bg-warning text-dark" title="{{ ability.description }}">{{ display_label }}{% if ability.count and ability.count|int > 1 %} ×{{ ability.count }}{% endif %}</span>
-                  {% endfor %}
-                  {% if not selected_passives and not selected_actives and not selected_auras %}
-                  <span class="text-muted small">Brak dodatkowych zdolności</span>
-                  {% endif %}
-                </div>
-                <div class="text-muted small mt-2" data-roster-unit-loadout>
-                  Uzbrojenie:
-                  {% if item.loadout_summary %}
-                  {{ item.loadout_summary }}
-                  {% else %}
-                  {{ item.default_summary }}
-                  {% endif %}
-                </div>
-              </div>
-        {% endmacro %}
-        {% if roster_frames %}
-          <div class="list-group roster-unit-list" data-roster-list data-roster-id="{{ roster.id }}">
-          {% for item in roster_frames %}
-            {% set ru = item.instance %}
-            {% set is_first = loop.first %}
-            {% set is_last = loop.last %}
-            {% set attached = item.attached_heroes or [] %}
-          <div class="list-group-item border-0 px-0 py-2" data-roster-entry>
-            <div class="roster-unit-entry{% if attached %} roster-unit-entry-grouped{% endif %}">
-              {% if can_edit %}
-              <div class="roster-drag-handle drag-handle" aria-hidden="true">⋮⋮</div>
-              <div class="roster-unit-reorder">
-                <form
-                  method="post"
-                  action="/rosters/{{ roster.id }}/units/{{ ru.id }}/move"
-                  data-roster-move-form
-                >
-                  <input type="hidden" name="direction" value="up" />
-                  <button
-                    class="btn btn-outline-secondary btn-sm"
-                    type="submit"
-                    data-roster-move
-                    aria-label="Przesuń jednostkę w górę"
-                    {% if is_first %}disabled{% endif %}
-                  >
-                    ↑
-                  </button>
-                </form>
-                <form
-                  method="post"
-                  action="/rosters/{{ roster.id }}/units/{{ ru.id }}/move"
-                  data-roster-move-form
-                >
-                  <input type="hidden" name="direction" value="down" />
-                  <button
-                    class="btn btn-outline-secondary btn-sm"
-                    type="submit"
-                    data-roster-move
-                    aria-label="Przesuń jednostkę w dół"
-                    {% if is_last %}disabled{% endif %}
-                  >
-                    ↓
-                  </button>
-                </form>
-              </div>
-              {% endif %}
-              <div class="roster-unit-stack flex-grow-1 d-flex flex-column gap-2">
-                {% for hero_item in attached %}
-                  {% set hero_ru = hero_item.instance %}
-                  {{ roster_unit_card(hero_item, hero_ru, is_attached=True) }}
-                {% endfor %}
-                {{ roster_unit_card(item, ru, is_attached=False) }}
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-        {% else %}
-        <div class="text-muted" data-roster-empty>Dodaj jednostki aby rozpocząć budowę rozpiski.</div>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-
-  <div class="col-12 {% if can_edit %}col-xl-4 col-xxl-4{% else %}col-xl-5 col-xxl-4{% endif %}">
-    <div class="card h-100">
-      <div class="card-body d-flex flex-column">
-        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
-          <h5 class="card-title mb-0">Dostosuj oddział</h5>
-          {% if can_edit %}
-          <div class="d-none d-flex flex-wrap gap-2" data-roster-editor-actions>
-            <form method="post" data-roster-editor-duplicate>
-              <button class="btn btn-outline-secondary btn-sm" type="submit">Duplikuj oddział</button>
-            </form>
-            <form method="post" data-roster-editor-delete>
-              <button class="btn btn-outline-danger btn-sm" type="submit">Usuń oddział</button>
-            </form>
-          </div>
-          {% endif %}
-        </div>
-        <div class="text-muted" data-roster-editor-empty>
-          Wybierz oddział z listy, aby zobaczyć szczegóły i opcje dostosowania.
-        </div>
-        <div class="d-none flex-grow-1 d-flex flex-column" data-roster-editor>
-          <div class="mb-3 d-flex justify-content-between align-items-start gap-3 flex-wrap">
-            <div class="d-flex flex-column gap-1">
-              <h6 class="mb-0" data-roster-editor-name></h6>
-              <div
-                class="text-muted small"
-                data-roster-editor-custom-label
-                data-placeholder="Kliknij, aby nazwać oddział"
-                role="button"
-                tabindex="0"
-              ></div>
-              <div class="text-muted small" data-roster-editor-stats></div>
-              <div class="text-muted small d-none" data-roster-editor-role></div>
-            </div>
-            <span class="badge text-bg-primary" data-roster-editor-cost-badge>
-              <span data-roster-editor-cost></span> pkt
-            </span>
-          </div>
-          {% if can_edit %}
-          <form method="post" class="d-flex flex-column flex-grow-1" data-roster-editor-form>
-            <input type="hidden" name="custom_name" data-roster-editor-custom-name />
-            <div class="mb-3">
-              <label class="form-label" for="roster-editor-count">Modele</label>
-              <input
-                class="form-control"
-                id="roster-editor-count"
-                name="count"
-                type="number"
-                min="1"
-                required
-                data-roster-editor-count
-              />
-            </div>
-            <div class="flex-grow-1 d-flex flex-column gap-3">
-              <div class="mb-0" data-roster-section>
-                <div class="fw-semibold small text-uppercase text-muted">Zdolności pasywne</div>
-                <div class="roster-ability-list" data-roster-editor-passives></div>
-              </div>
-              <div class="mb-0" data-roster-section>
-                <div class="fw-semibold small text-uppercase text-muted">Zdolności aktywne</div>
-                <div class="roster-ability-list" data-roster-editor-actives></div>
-              </div>
-              <div class="mb-0" data-roster-section>
-                <div class="fw-semibold small text-uppercase text-muted">Aury</div>
-                <div class="roster-ability-list" data-roster-editor-auras></div>
-              </div>
-              <div class="mb-0" data-roster-section>
-                <div class="fw-semibold small text-uppercase text-muted">Wyposażenie oddziału</div>
-                <div class="roster-ability-list" data-roster-editor-loadout></div>
-              </div>
-            </div>
-            <input type="hidden" name="loadout_json" data-roster-editor-loadout-input />
-            <div class="mt-3 d-flex justify-content-end align-items-center flex-wrap gap-2">
-              <div class="text-muted small" data-roster-editor-save-state></div>
-            </div>
-          </form>
-          {% else %}
-          <div class="flex-grow-1 d-flex flex-column gap-3">
-            <div data-roster-section>
-              <div class="fw-semibold small text-uppercase text-muted">Zdolności pasywne</div>
-              <div class="roster-ability-list" data-roster-editor-passives></div>
-            </div>
-            <div data-roster-section>
-              <div class="fw-semibold small text-uppercase text-muted">Zdolności aktywne</div>
-              <div class="roster-ability-list" data-roster-editor-actives></div>
-            </div>
-            <div data-roster-section>
-              <div class="fw-semibold small text-uppercase text-muted">Aury</div>
-              <div class="roster-ability-list" data-roster-editor-auras></div>
-            </div>
-            <div data-roster-section>
-              <div class="fw-semibold small text-uppercase text-muted">Wyposażenie oddziału</div>
-              <div class="roster-ability-list" data-roster-editor-loadout></div>
-            </div>
-          </div>
-          <div class="alert alert-info mt-auto mb-0">Tylko podgląd – brak dostępu do edycji.</div>
-          {% endif %}
-        </div>
-      </div>
-    </div>
-  </div>
-</div>
-{% if can_edit %}
-<script src="/static/vendor/sortable.min.js"></script>
-<script>
-(function () {
-  const list = document.querySelector('[data-roster-list]');
-  if (!list || typeof Sortable === 'undefined') return;
-  const rosterId = list.dataset.rosterId;
-  list.classList.add('dnd-active');
-  Sortable.create(list, {
-    handle: '.roster-drag-handle',
-    animation: 150,
-    draggable: '[data-roster-entry]',
-    ghostClass: 'roster-entry-ghost',
-    chosenClass: 'roster-entry-chosen',
-    onEnd(evt) {
-      if (evt.oldIndex === evt.newIndex) return;
-      const entries = Array.from(list.querySelectorAll('[data-roster-entry]'));
-      const order = entries
-        .map((el) => {
-          // Prefer the non-attached unit (parent in a grouped entry). Attached
-          // hero cards have data-roster-attached-hero and come first in DOM
-          // order, so a plain querySelector would return the hero's ID instead
-          // of the parent's.
-          const item =
-            el.querySelector('[data-roster-unit-id]:not([data-roster-attached-hero])') ||
-            el.querySelector('[data-roster-unit-id]');
-          return item ? parseInt(item.dataset.rosterUnitId, 10) : null;
-        })
-        .filter((id) => id);
-      if (!order.length) return;
-      fetch(`/rosters/${rosterId}/units/reorder`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ order }),
-      }).catch(() => { location.reload(); });
-    },
-  });
-}());
-</script>
-{% endif %}
+<script id="units-data" type="application/json">{{ units_payload|tojson }}</script>
 {% endblock %}
+{% block scripts %}<script src="{{ url_for('static', path='js/opos_editor.js') }}?v=opos-v1.4" defer></script>{% endblock %}

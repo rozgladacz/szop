@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B3.5 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`). `SZOP_Rozjemca.md pkt 12` definiuje "przerwania" jako mechanizm gdzie gracze wywołują efekty zdolności poza normalnym przepływem aktywacji. Bez jasnej semantyki "gdzie wolno przerywać" ryzyko: pętle, nondeterminizm, ambiguity inicjatywy.
+- **Kontekst:** Strumień B, Faza B3.5. `SZOP_Rozjemca.md pkt 12` definiuje "przerwania" jako mechanizm gdzie gracze wywołują efekty zdolności poza normalnym przepływem aktywacji. Bez jasnej semantyki "gdzie wolno przerywać" ryzyko: pętle, nondeterminizm, ambiguity inicjatywy.
 
 ## Decyzja
 

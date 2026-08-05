@@ -1,0 +1,36 @@
+"""Idempotent normalization of snapshots saved under earlier OPOS v1 rules."""
+
+from __future__ import annotations
+
+from copy import deepcopy
+from typing import Any
+
+
+_MOVED_WEAPON_ABILITIES: dict[str, tuple[str, ...]] = {
+    "charge": ("melee",),
+    "prepared": ("short", "long"),
+}
+
+
+def normalize_snapshot_abilities(
+    passive_abilities: list[str], profiles: dict[str, Any]
+) -> tuple[list[str], dict[str, Any], bool]:
+    """Move legacy Szarża/Przygotowanie passives onto compatible profiles."""
+    normalized_passives = [
+        slug for slug in passive_abilities if slug not in _MOVED_WEAPON_ABILITIES
+    ]
+    moved = [slug for slug in passive_abilities if slug in _MOVED_WEAPON_ABILITIES]
+    if not moved:
+        return normalized_passives, profiles, False
+
+    normalized_profiles = deepcopy(profiles)
+    for slug in moved:
+        for range_slug in _MOVED_WEAPON_ABILITIES[slug]:
+            profile = normalized_profiles.get(range_slug)
+            if not isinstance(profile, dict):
+                continue
+            abilities = list(profile.get("abilities", []))
+            if slug not in abilities:
+                abilities.append(slug)
+            profile["abilities"] = abilities
+    return normalized_passives, normalized_profiles, True

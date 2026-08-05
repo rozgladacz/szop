@@ -20,6 +20,7 @@ from app.routers import users as users_router  # noqa: E402
 from app.security import hash_password  # noqa: E402
 from app.services.settings import get_registration_open, set_registration_open  # noqa: E402
 
+CSRF_TOKEN = "test-csrf-token"
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -46,7 +47,7 @@ def _seed_user(session: Session, username: str = "gracz") -> models.User:
 
 
 def _fake_request() -> SimpleNamespace:
-    return SimpleNamespace(query_params={}, session={})
+    return SimpleNamespace(query_params={}, session={"csrf_token": CSRF_TOKEN})
 
 
 @pytest.fixture(autouse=True)
@@ -90,7 +91,9 @@ class TestRegistrationToggleEndpoint:
         admin = _seed_admin(session)
         set_registration_open(True)
 
-        resp = users_router.toggle_registration(current_user=admin)
+        resp = users_router.toggle_registration(
+            request=_fake_request(), csrf_token=CSRF_TOKEN, current_user=admin
+        )
 
         assert resp.status_code == 303
         assert not get_registration_open()
@@ -101,7 +104,9 @@ class TestRegistrationToggleEndpoint:
         admin = _seed_admin(session)
         set_registration_open(False)
 
-        resp = users_router.toggle_registration(current_user=admin)
+        resp = users_router.toggle_registration(
+            request=_fake_request(), csrf_token=CSRF_TOKEN, current_user=admin
+        )
 
         assert resp.status_code == 303
         assert get_registration_open()
@@ -113,7 +118,9 @@ class TestRegistrationToggleEndpoint:
 
         from fastapi import HTTPException
         with pytest.raises(HTTPException) as exc_info:
-            users_router.toggle_registration(current_user=regular)
+            users_router.toggle_registration(
+                request=_fake_request(), csrf_token=CSRF_TOKEN, current_user=regular
+            )
         assert exc_info.value.status_code == 403
 
 
@@ -126,6 +133,7 @@ class TestAdminCreateUser:
 
         resp = users_router.create_user(
             request=_fake_request(),
+            csrf_token=CSRF_TOKEN,
             username="nowak",
             password="haslo123",
             db=session,
@@ -147,6 +155,7 @@ class TestAdminCreateUser:
 
         users_router.create_user(
             request=_fake_request(),
+            csrf_token=CSRF_TOKEN,
             username="koadmin",
             password="tajne123",
             db=session,
@@ -170,6 +179,7 @@ class TestAdminCreateUser:
         try:
             users_router.create_user(
                 request=_fake_request(),
+                csrf_token=CSRF_TOKEN,
                 username="duplikat",
                 password="haslo123",
                 db=session,
@@ -189,6 +199,7 @@ class TestAdminCreateUser:
         try:
             users_router.create_user(
                 request=_fake_request(),
+                csrf_token=CSRF_TOKEN,
                 username="ktos",
                 password="ab",
                 db=session,
@@ -209,6 +220,7 @@ class TestAdminCreateUser:
         try:
             users_router.create_user(
                 request=_fake_request(),
+                csrf_token=CSRF_TOKEN,
                 username="   ",
                 password="haslo123",
                 db=session,
@@ -228,6 +240,7 @@ class TestAdminCreateUser:
         with pytest.raises(HTTPException) as exc_info:
             users_router.create_user(
                 request=_fake_request(),
+                csrf_token=CSRF_TOKEN,
                 username="haker",
                 password="haslo123",
                 db=session,
@@ -244,6 +257,7 @@ class TestAdminCreateUser:
         try:
             users_router.create_user(
                 request=_fake_request(),
+                csrf_token=CSRF_TOKEN,
                 username=payload,
                 password="haslo123",
                 db=session,

@@ -5,13 +5,19 @@ from urllib.parse import quote_plus
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
-from ..security import get_current_user, hash_password, is_valid_username
+from ..security import (
+    get_csrf_token,
+    get_current_user,
+    hash_password,
+    is_valid_username,
+    validate_csrf,
+)
 from ..services import backup as backup_service
 from ..services import db_restore
 from ..services.settings import get_registration_open, set_registration_open
@@ -42,6 +48,7 @@ def _render_user_list(
         .all()
     )
     return templates.TemplateResponse(
+        request,
         "users_list.html",
         {
             "request": request,
@@ -52,18 +59,10 @@ def _render_user_list(
             "error_user_id": error_user_id,
             "create_error": create_error,
             "registration_open": get_registration_open(),
+            "csrf_token": get_csrf_token(request),
         },
         status_code=status_code,
     )
-
-
-def _release_owned_resources(db: Session, user_id: int) -> None:
-    for model in (models.Army, models.Roster, models.Weapon, models.Unit, models.Ability):
-        db.execute(
-            update(model)
-            .where(model.owner_id == user_id)
-            .values(owner_id=None)
-        )
 
 
 @router.get("", response_class=HTMLResponse)
@@ -106,9 +105,14 @@ def list_users(
     )
 
 
-@router.get("/backup")
-def download_backup(current_user: models.User = Depends(get_current_user())) -> FileResponse:
+@router.post("/backup")
+def download_backup(
+    request: Request,
+    csrf_token: str = Form(...),
+    current_user: models.User = Depends(get_current_user()),
+) -> FileResponse:
     _require_admin(current_user)
+    validate_csrf(request, csrf_token)
     try:
         backup_path = backup_service.create_backup()
     except db_restore.DBRestoreError as exc:  # pragma: no cover - guarded by config
@@ -128,10 +132,12 @@ def change_password(
     user_id: int,
     request: Request,
     new_password: str = Form(...),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
     _require_admin(current_user)
+    validate_csrf(request, csrf_token)
     target_user = db.get(models.User, user_id)
     if not target_user:
         raise HTTPException(status_code=404)
@@ -156,10 +162,12 @@ def change_password(
 def delete_user(
     user_id: int,
     request: Request,
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
     _require_admin(current_user)
+    validate_csrf(request, csrf_token)
     target_user = db.get(models.User, user_id)
     if not target_user:
         raise HTTPException(status_code=404)
@@ -170,7 +178,6 @@ def delete_user(
             status_code=303,
         )
 
-    _release_owned_resources(db, target_user.id)
     db.delete(target_user)
     db.commit()
     return RedirectResponse(url="/users?status=deleted", status_code=303)
@@ -181,10 +188,12 @@ def create_user(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
 ):
     _require_admin(current_user)
+    validate_csrf(request, csrf_token)
 
     username = username.strip()
     password = password.strip()
@@ -230,9 +239,12 @@ def create_user(
 
 @router.post("/registration-toggle")
 def toggle_registration(
+    request: Request,
+    csrf_token: str = Form(...),
     current_user: models.User = Depends(get_current_user()),
 ):
     _require_admin(current_user)
+    validate_csrf(request, csrf_token)
     new_state = not get_registration_open()
     set_registration_open(new_state)
     status = "registration-opened" if new_state else "registration-closed"
@@ -243,9 +255,11 @@ def toggle_registration(
 async def restore_database(
     request: Request,
     file: UploadFile = File(...),
+    csrf_token: str = Form(...),
     current_user: models.User = Depends(get_current_user(close_session=True)),
 ) -> RedirectResponse:
     _require_admin(current_user)
+    validate_csrf(request, csrf_token)
 
     try:
         await file.seek(0)

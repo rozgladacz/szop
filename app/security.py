@@ -1,8 +1,9 @@
 import re
+import secrets
 from typing import Optional
 
 import bcrypt
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, Header, HTTPException, Request, status
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
@@ -20,6 +21,7 @@ pwd_context = CryptContext(
 # mogłyby wyłamać się z kontekstu HTML/JS przy renderowaniu nazwy.
 USERNAME_MAX_LENGTH = 64
 _USERNAME_RE = re.compile(r"^[\w][\w .\-]{0,%d}$" % (USERNAME_MAX_LENGTH - 1), re.UNICODE)
+_CSRF_SESSION_KEY = "csrf_token"
 
 
 def is_valid_username(username: str) -> bool:
@@ -43,6 +45,31 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
             hashed_password.encode("utf-8"),
         )
     return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_csrf_token(request: Request) -> str:
+    token = request.session.get(_CSRF_SESSION_KEY)
+    if not isinstance(token, str) or not token:
+        token = secrets.token_urlsafe(32)
+        request.session[_CSRF_SESSION_KEY] = token
+    return token
+
+
+def validate_csrf(request: Request, submitted_token: str | None) -> None:
+    expected = request.session.get(_CSRF_SESSION_KEY)
+    if (
+        not isinstance(expected, str)
+        or not submitted_token
+        or not secrets.compare_digest(expected, submitted_token)
+    ):
+        raise HTTPException(status_code=403, detail="Nieprawidłowy token CSRF")
+
+
+def require_csrf(
+    request: Request,
+    x_csrf_token: str | None = Header(default=None, alias="X-CSRF-Token"),
+) -> None:
+    validate_csrf(request, x_csrf_token)
 
 
 def get_current_user(optional: bool = False, *, close_session: bool = False):

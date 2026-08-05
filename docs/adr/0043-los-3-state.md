@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B3.2 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`). Line of Sight to fundamentalna mechanika dla Ostrzału (pkt 14.c), modyfikatorów Osłony (pkt 19), oraz LoS-based zdolności (Niebezpośredni id 62, Strażnik id 31, etc.). SZOP_Rozjemca.md pkt 6 definiuje **3-stanowy** LoS: WIDZI / NIE_WIDZI / OSŁONA — wpływ na rolls trafienia (pkt 19).
+- **Kontekst:** Strumień B, Faza B3.2. Line of Sight to fundamentalna mechanika dla Ostrzału (pkt 14.c), modyfikatorów Osłony (pkt 19), oraz LoS-based zdolności (Niebezpośredni id 62, Strażnik id 31, etc.). SZOP_Rozjemca.md pkt 6 definiuje **3-stanowy** LoS: WIDZI / NIE_WIDZI / OSŁONA — wpływ na rolls trafienia (pkt 19).
 
 ## Decyzja
 

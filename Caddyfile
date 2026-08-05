@@ -1,11 +1,11 @@
-# Caddyfile — reverse proxy dla SZOP
+# Caddyfile — reverse proxy dla OPOS
 #
 # Zastąp "twoja-domena.duckdns.org" swoją subdomeną.
 # Caddy automatycznie uzyska certyfikat Let's Encrypt (port 80 musi być osiągalny).
 
 twoja-domena.duckdns.org {
 
-    reverse_proxy szop-app:8000
+    reverse_proxy opos-app:8000
 
     # Nagłówki bezpieczeństwa
     header {

@@ -5,14 +5,20 @@ import secrets
 from uuid import uuid4
 from urllib.parse import quote_plus
 
-from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from .. import config, models
 from ..paths import TEMPLATES_DIR
-from ..security import get_current_user, verify_password
+from ..security import (
+    get_csrf_token,
+    get_current_user,
+    require_csrf,
+    validate_csrf,
+    verify_password,
+)
 from ..services import update_service
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -35,7 +41,7 @@ def _require_webhook_token(request: Request) -> None:
     expected_token = config.UPDATE_WEBHOOK_TOKEN
     if not expected_token:
         raise HTTPException(status_code=500, detail="Brak konfiguracji tokenu webhooka.")
-    provided_token = request.headers.get("x-webhook-token") or request.query_params.get("token")
+    provided_token = request.headers.get("x-webhook-token")
     if not provided_token or not secrets.compare_digest(provided_token, expected_token):
         raise HTTPException(status_code=401, detail="Nieprawidłowy token webhooka.")
 
@@ -69,6 +75,7 @@ def admin_dashboard(
     message, error = _status_messages(status_key, detail)
 
     return templates.TemplateResponse(
+        request,
         "admin_dashboard.html",
         {
             "request": request,
@@ -77,15 +84,19 @@ def admin_dashboard(
             "error": error,
             "warn_default_password": _is_default_admin_password(current_user),
             "app_version": config.APP_VERSION,
+            "csrf_token": get_csrf_token(request),
         },
     )
 
 
 @router.post("/update")
 def trigger_update(
-    request: Request, current_user: models.User = Depends(current_user_dep)
+    request: Request,
+    csrf_token: str = Form(...),
+    current_user: models.User = Depends(current_user_dep),
 ) -> RedirectResponse:
     _require_admin(current_user)
+    validate_csrf(request, csrf_token)
     task_id = uuid4().hex
     logger.info(
         "Aktualizacja usługi uruchomiona przez użytkownika %s",
@@ -129,7 +140,7 @@ def _queue_update_service_sequence(background_tasks: BackgroundTasks) -> update_
     return status_payload
 
 
-@router.post("/update-job")
+@router.post("/update-job", dependencies=[Depends(require_csrf)])
 def trigger_update_job(
     background_tasks: BackgroundTasks,
     payload: UpdatePayload | None = Body(default=None),
@@ -153,7 +164,7 @@ def trigger_update_job(
     }
 
 
-@router.post("/update-start")
+@router.post("/update-start", dependencies=[Depends(require_csrf)])
 def trigger_update_start(
     background_tasks: BackgroundTasks,
     payload: UpdatePayload | None = Body(default=None),

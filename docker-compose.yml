@@ -11,14 +11,15 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
-      szop-app:
+      opos-app:
         condition: service_healthy
 
-  szop-app:
-    image: ghcr.io/rozgladacz/szop:latest
+  opos-app:
+    build: .
+    image: ${OPOS_IMAGE:-opos:local}
     restart: unless-stopped
-    # Brak sekcji "ports" — szop-app dostępny tylko wewnątrz sieci Docker.
-    # Caddy proxy do szop-app:8000 przez sieć wewnętrzną.
+    # Brak sekcji "ports" — opos-app dostępny tylko wewnątrz sieci Docker.
+    # Caddy proxy do opos-app:8000 przez sieć wewnętrzną.
     # Aby testować lokalnie bez Caddy: odkomentuj poniższe:
     # ports:
     #   - "127.0.0.1:8000:8000"
@@ -28,8 +29,8 @@ services:
       # Usuń jeśli nie chcesz możliwości aktualizacji przez UI.
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
-      UPDATE_COMPOSE_FILE: /srv/szop/docker-compose.yml
-      UPDATE_SERVICE_NAME: szop-app
+      UPDATE_COMPOSE_FILE: /srv/opos/docker-compose.yml
+      UPDATE_SERVICE_NAME: opos-app
     env_file:
       - path: .env
         required: false   # .env jest opcjonalny — wszystko ma rozsądne defaulty
@@ -41,8 +42,9 @@ services:
       start_period: 20s
       retries: 3
 
-  szop-backup:
-    image: ghcr.io/rozgladacz/szop:latest
+  opos-backup:
+    build: .
+    image: ${OPOS_IMAGE:-opos:local}
     restart: unless-stopped
     entrypoint: ["python", "-m", "app.scripts.backup_loop"]
     volumes:
@@ -51,7 +53,7 @@ services:
       - path: .env
         required: false
     depends_on:
-      szop-app:
+      opos-app:
         condition: service_healthy
 
 volumes:

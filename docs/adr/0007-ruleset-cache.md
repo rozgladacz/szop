@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-24
-- **Kontekst:** Strumień A, Faza A5 (`docs/handoffs/HANDOFF_faza-a.md`).
+- **Kontekst:** Strumień A, Faza A5.
   Reaguje na ADR-0003 (YAML + Pydantic) i ADR-0004 (Cost DSL).
 
 ## Decyzja

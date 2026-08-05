@@ -1,34 +1,19 @@
 {% extends "base.html" %}
-{% block title %}Rejestracja - SZOP{% endblock %}
+{% block title %}Rejestracja — OPOS{% endblock %}
+{% block body_class %}auth-page{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-6 col-lg-4">
-    <div class="card">
-      <div class="card-body">
-        <h5 class="card-title mb-3">Rejestracja</h5>
-        {% if not registration_open %}
-        <div class="alert alert-warning mb-3">
-          Rejestracja jest obecnie wyłączona.<br>
-          Skontaktuj się z administratorem, aby uzyskać dostęp.
-        </div>
-        {% else %}
-        {% if error %}
-        <div class="alert alert-danger">{{ error }}</div>
-        {% endif %}
-        <form method="post">
-          <div class="mb-3">
-            <label class="form-label" for="username">Nazwa użytkownika</label>
-            <input class="form-control" id="username" name="username" required />
-          </div>
-          <div class="mb-3">
-            <label class="form-label" for="password">Hasło</label>
-            <input class="form-control" id="password" name="password" type="password" required />
-          </div>
-          <button class="btn btn-success" type="submit">Utwórz konto</button>
-        </form>
-        {% endif %}
-      </div>
-    </div>
-  </div>
-</div>
+<section class="auth-card">
+  <p class="eyebrow">OPOS</p><h1>Utwórz konto</h1>
+  {% if not registration_open %}<p class="form-error" role="alert">Rejestracja jest obecnie wyłączona.</p>{% endif %}
+  {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+  {% if registration_open %}
+  <form method="post" action="/auth/register" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Nazwa użytkownika<input name="username" autocomplete="username" required autofocus></label>
+    <label>Hasło<input name="password" type="password" autocomplete="new-password" minlength="4" required></label>
+    <button class="button button-primary" type="submit">Utwórz konto</button>
+  </form>
+  {% endif %}
+  <a href="/auth/login">Wróć do logowania</a>
+</section>
 {% endblock %}

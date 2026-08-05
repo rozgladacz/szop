@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-06-02
-- **Kontekst:** Strumień B, Faza B3.9.e (`docs/handoffs/HANDOFF_faza-b-3-hardening.md`). Post-B3 code review zaadresował **dwie powiązane dziury**:
+- **Kontekst:** Strumień B, Faza B3.9.e. Post-B3 code review zaadresował **dwie powiązane dziury**:
 
   - **Dziura C — bug #7 brak weapon inventory na `UnitBlob`.** `combat.resolve_charge_attack` używał broni atakującego (`weapon` argument) dla kontrataku defendera, z komentarzem przyznającym bug: *"Defender używa SWOJEJ broni — w MVP zakładamy że ma tę samą broń (weapon argument). Faktyczna lista broni obrońcy → przyszła iteracja gdy roster→engine ma broń per unit."*
   - **Dziura E — brak `ACTIVE_ABILITY_REGISTRY`.** `phases._apply_special` używał hardcoded `if slug == "discard_exhausted"` z no-op fallback dla pozostałych. Nie skalowało się na 6 aktywnych zdolności z B3.0.1 audit (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik) ani na przyszłe.

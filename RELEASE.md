@@ -1,116 +1,30 @@
-# Instrukcja wydania nowej wersji — maintainer
+# Wydawanie OPOS
 
-Dokument opisuje co jest wymagane przy każdym release i jak go wykonać.
+Projekt używa SemVer (`vMAJOR.MINOR.PATCH`). Przyszły kanał obrazu to `ghcr.io/rozgladacz/opos`; utworzenie repozytorium, pakietu i zmiana `origin` są osobną operacją administracyjną.
 
----
-
-## Schemat wersji
-
-Stosujemy **SemVer** (`vMAJOR.MINOR.PATCH`):
-
-| Zmiana | Przykład |
-|---|---|
-| Nowe funkcjonalności niekompatybilne wstecz | `v2.0.0` |
-| Nowe funkcjonalności kompatybilne wstecz | `v1.3.0` |
-| Bugfixy, poprawki bezpieczeństwa | `v1.2.5` |
-
----
-
-## Jak wydać release
+## Bramka przed wydaniem
 
 ```bash
-# 1. Upewnij się że jesteś na gałęzi main z zemerge'owanymi zmianami
-git checkout main
-git pull
-
-# 2. Uruchom testy lokalnie
-pytest -q
-
-# 3. Dodaj tag i wypchnij — reszta dzieje się automatycznie
-git tag v1.2.3
-git push origin v1.2.3
+python -m pytest -q
+python scripts/opos_rules_check.py
+python -m compileall -q app scripts tests alembic
 ```
 
-**Co się dzieje automatycznie** (GitHub Actions `.github/workflows/release.yml`):
-1. Uruchamia testy (`pytest`) — release nie przejdzie gdy testy nie zdają
-2. Buduje obraz Docker z `APP_VERSION=1.2.3`
-3. Publikuje do GHCR jako `ghcr.io/rozgladacz/szop:1.2.3`, `ghcr.io/rozgladacz/szop:1.2`, `ghcr.io/rozgladacz/szop:latest`
-4. Tworzy GitHub Release z auto-generowanymi notatkami z commitów
+Ponadto wykonaj smoke desktop/mobile, wygeneruj PDF przez WeasyPrint 69.0 i obejrzyj PNG każdej strony w skali 100%.
 
----
+Każda zmiana schematu wymaga migracji Alembic. OPOS v1 nie migruje danych SZOP; wdrożenie cut-over musi użyć świeżej `opos.db`.
 
-## Co MUSI być spełnione przed każdym release
+## Tag
 
-### 1. Testy zdają
+Po utworzeniu docelowego repozytorium i sprawdzeniu workflow:
 
 ```bash
-pytest -q --tb=short
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-Żaden release nie powinien wychodzić gdy testy nie przechodzą.
+Workflow uruchamia testy, buduje `ghcr.io/rozgladacz/opos` i tworzy GitHub Release. Obraz powinien otrzymać tag pełnej wersji, `major.minor` i `latest`.
 
-### 2. Migracje schemy DB są idempotentne
+## Breaking changes
 
-Każda zmiana struktury bazy danych (nowa kolumna, tabela, indeks) musi być zaimplementowana jako **funkcja idempotentna** w `app/db.py:_migrate_schema()`. Przy każdym starcie aplikacji `_migrate_schema()` jest wywoływana — musi działać zarówno na świeżej bazie jak i na istniejącej.
-
-**Zasada:** admin robi update → nowy kontener startuje → `_migrate_schema()` bezpiecznie aktualizuje schemat → dane są nienaruszone.
-
-**Nie używaj** nieodwracalnych operacji (`DROP TABLE`) bez wcześniejszej migracji danych.
-
-### 3. Breaking changes — dokumentacja
-
-Jeśli release zawiera breaking changes (zmiana API, inne zachowanie UI, wymagana ręczna akcja admina):
-- Dodaj je na górze sekcji w notatce release (edytuj po auto-generowaniu)
-- Oznacz w README lub DEPLOY.md jeśli wymaga akcji admina
-
-### 4. Widoczność pakietu GHCR (jednorazowo)
-
-Po pierwszym release należy ręcznie ustawić widoczność pakietu na **publiczną**:
-
-1. GitHub → Profil → Packages → `szop`
-2. Package settings → **Change visibility** → Public
-
-Bez tego `docker compose pull` na serwerze wymaga logowania do GHCR.
-
----
-
-## Struktura notatek release
-
-Auto-generowane notatki z commitów są wystarczające dla większości release'ów. Dla major/minor z breaking changes dodaj ręcznie sekcję na górze:
-
-```markdown
-## ⚠️ Breaking changes
-
-- **Wymagana akcja admina:** [opis co trzeba zrobić]
-- Zmieniony endpoint `/stary` → `/nowy`
-
-## Instalacja / aktualizacja
-
-cd /srv/szop && docker compose pull && docker compose up -d
-```
-
----
-
-## Cofnięcie release (rollback tagu)
-
-```bash
-# Usuń tag lokalnie i zdalnie
-git tag -d v1.2.3
-git push origin :refs/tags/v1.2.3
-```
-
-> **Uwaga:** GitHub Release i obraz Docker w GHCR muszą być usunięte ręcznie przez UI GitHub.
-
----
-
-## Hotfix dla konkretnej wersji
-
-```bash
-# Utwórz branch od tagu
-git checkout -b hotfix/v1.2.4 v1.2.3
-# ... zrób poprawkę ...
-git commit -m "Hotfix: opis poprawki"
-git tag v1.2.4
-git push origin v1.2.4
-git push origin hotfix/v1.2.4
-```
+Notatka wydania musi wyróżnić zmianę API, schematu, konfiguracji albo ręczną akcję administratora. Rollback wykonuj przez przypięcie poprzedniego tagu obrazu i zgodnej kopii bazy; nie używaj starszego kodu z nowszym schematem bez potwierdzonej zgodności.

@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B3.1 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`). Game engine wymaga RNG dla wszystkich testów (jakość, obrona, k3 rany przy Łataniu/Regeneracji, k6 ran przy Trudny). Event-sourced architektura (ADR-0010) wymaga replay-by-default — każda bitwa odtwarzalna z eventów + initial state + seed.
+- **Kontekst:** Strumień B, Faza B3.1. Game engine wymaga RNG dla wszystkich testów (jakość, obrona, k3 rany przy Łataniu/Regeneracji, k6 ran przy Trudny). Event-sourced architektura (ADR-0010) wymaga replay-by-default — każda bitwa odtwarzalna z eventów + initial state + seed.
 
 ## Decyzja
 

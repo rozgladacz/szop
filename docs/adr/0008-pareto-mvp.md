@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B0 (`docs/handoffs/HANDOFF_faza-b-engine-mvp.md`). Bootstrap game engine MVP po zamknięciu Strumienia A (YAML SSOT + drift pipeline A4).
+- **Kontekst:** Strumień B, Faza B0. Bootstrap game engine MVP po zamknięciu Strumienia A (YAML SSOT + drift pipeline A4).
 
 ## Decyzja
 

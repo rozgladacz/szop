@@ -9,7 +9,7 @@ git remote -v
 git branch
 ```
 
-Friction category #4 (14 hits) to "git command errors or ambiguity" — głównie pomylenie repo (OPR vs OPR_Prod) i nieświadome wykonanie destrukcyjnej komendy. Repo identity print jest tani, błąd kosztuje stracony commit.
+Najczęstsze ryzyko to pomylenie repozytorium lub worktree i nieświadome wykonanie destrukcyjnej komendy. Kontrola tożsamości repo jest tania, a błąd może kosztować utracone zmiany.
 
 ## Destrukcyjne komendy — kiedy wymagają potwierdzenia
 
@@ -45,7 +45,3 @@ PostToolUse hook (pytest) jest aktywny — nie suppressuj jego output.
 - Tytuł — krótko, < 70 chars. Detale w body.
 - Body — sekcja "## Summary" (1-3 bullets) + "## Test plan" (markdown checklist).
 - Format: HEREDOC żeby zachować formatowanie (PowerShell: single-quoted here-string `@'...'@`).
-
-## Konflikt plików HANDOFF po merge
-
-Po `git merge` / `git pull` / `git checkout` uruchom `/handoff-sync` — wykrywa pliki osierocone (`docs/handoffs/HANDOFF_*.md` bez wpisu w tabeli HANDOFF.md) i wpisy osierocone (tabela ↔ brak pliku). Detale: `docs/handoffs/README.md`.

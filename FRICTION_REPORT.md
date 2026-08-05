@@ -1,4 +1,7 @@
 # Friction Analysis Report — 2026-04-30
+
+> Raport archiwalny. Dawne zalecenie utrzymywania osobnych plików przekazania kontekstu zostało wycofane 2026-08-03 i nie jest procedurą projektu.
+
 _Sessions analyzed: 10_
 
 ## 1. Friction Pattern Counts
@@ -12,7 +15,7 @@ _Sessions analyzed: 10_
 | Regressions introduced | 42 | Layer Checklist in AGENTS.md and call-site search before closing. |
 | User corrections (wrong direction) | 6 | Stop-and-revert rule when user corrects direction. |
 | Layer miss (backend OK, JS/CSS not updated) | 1 | Layer Checklist protocol covers this. |
-| Session context lost (handoff needed) | 41 | HANDOFF.md protocol covers this. |
+| Session context lost | 41 | Utrzymuj stabilną wiedzę w dokumentacji projektu i bieżący plan w zadaniu. |
 
 ## 2. Example Snippets per Category
 
@@ -49,7 +52,7 @@ _Sessions analyzed: 10_
 ### Layer miss (backend OK, JS/CSS not updated)
 - `{"file_path": "D:\\OneDrive - KBJ S.A\\Dokumenty\\GitHub\\OPR\\scripts\\reflect_and_improve.py", "content": "\"\"\"\nreflect_and_improve.py — analyzes Claude Code session transcripts for friction patt`
 
-### Session context lost (handoff needed)
+### Session context lost
 - `Następne dobre praktyki do dodania do AGENTS.md:  Before writing any code, list every layer this change touches (data model, backend payload, JS render, CSS, tests). Then implement each layer and run `
 - `Następne dobre praktyki do dodania do AGENTS.md:  Before writing any code, list every layer this change touches (data model, backend payload, JS render, CSS, tests). Then implement each layer and run `
 - `{"replace_all": false, "file_path": "D:\\OneDrive - KBJ S.A\\Dokumenty\\GitHub\\OPR\\AGENTS.md", "old_string": "## Zasady pracy\n- Najpierw czytaj istniejący kod, potem edytuj.\n- Dla zadań wieloetapo`
@@ -74,9 +77,6 @@ _Sessions analyzed: 10_
   3. JS rendering (`app.js` section)
   4. CSS / template
   5. Tests
-
-### ## Handoff Protocol (new)
-- For any task spanning >1 reply, maintain `HANDOFF.md` with: current goal, files changed, hypotheses tested, what's pending, how to verify. Update after every significant step.
 
 ### ## Zasady pracy (reinforced)
 - If the user says 'nie', 'wrong', 'cofnij', or equivalent: **stop, revert last change, ask for clarification** before attempting a new approach.

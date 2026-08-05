@@ -1,414 +1,176 @@
-# ============================================================
-# SECTION: IMPORTS & UTILITY HELPERS
-# _parse_bool, _unit_cache_value, _unit_eager_options,
-# _unit_payload_cached, _unit_army_flags, _json_safe, itp.
-# ============================================================
+"""Rozpiski OPOS i CRUD wspólnych profili oddziałów."""
+
 from __future__ import annotations
 
 import json
-import logging
-import math
-from collections.abc import Mapping, Sequence, Set as AbstractSet
 from decimal import Decimal
-from types import SimpleNamespace
-from typing import Any, Callable
 
-from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, or_, select, update
-from sqlalchemy.orm import Session, selectinload
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import func, select, update
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from .. import config, models
-from ..data.strategic_cards import (
-    STRATEGIC_SUPPORTS,
-    STRATEGIC_TASKS,
-    SUPPORTS_BY_SLUG,
-    TASKS_BY_SLUG,
-)
+from .. import models
+from ..config import OPOS_RULESET_VERSION
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
-from ..security import get_current_user
-from ..services import ability_registry, costs, utils
-from ..services.roster_grouping import group_available_units, group_roster_items
-from ..services.rules import unit_is_hero
+from ..security import get_csrf_token, get_current_user, require_csrf, validate_csrf
+from ..services.cards import (
+    build_ability_payloads,
+    build_profile_payloads,
+    display_number,
+)
+from ..services.opos_rules import (
+    QuoteValidationError,
+    UnitQuoteInput,
+    calculate_unit_quote,
+    normalize_snapshot_abilities,
+    rescale_points_limit,
+)
+from ..services.opos_units import (
+    apply_request_to_roster_unit,
+    create_template_from_roster_unit,
+    request_from_snapshot,
+    template_requires_custom_stats,
+    update_template_from_roster_unit,
+)
 
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/rosters", tags=["rosters"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-ABILITY_NAME_MAX_LENGTH = 60
-
-
-def _parse_bool(value: str | None) -> bool:
-    if value is None:
-        return False
-    return value.strip().lower() in {"1", "true", "on", "yes"}
+templates.env.filters["stat"] = display_number
+current_user_dep = get_current_user()
 
 
-def _unit_cache_value(
-    unit: models.Unit, unit_data_cache: dict[int, dict[str, Any]], key: str, factory: Callable[[], Any]
-) -> Any:
-    store = unit_data_cache.setdefault(unit.id, {})
-    if key in store:
-        logger.debug("Reusing cached value for unit_id=%s key=%s", unit.id, key)
-        return store[key]
-    value = factory()
-    store[key] = value
-    logger.debug("Caching value for unit_id=%s key=%s", unit.id, key)
-    return value
+class TemplateCopyPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    template_id: int
+    enable_custom_stats: bool = False
+    unit_copies: int = Field(default=1, ge=1, le=999)
 
 
-def _unit_eager_options() -> tuple:
-    return (
-        selectinload(models.Unit.weapon_links)
-        .selectinload(models.UnitWeapon.weapon)
-        .selectinload(models.Weapon.parent)
-        .selectinload(models.Weapon.parent),
-        selectinload(models.Unit.default_weapon)
-        .selectinload(models.Weapon.parent)
-        .selectinload(models.Weapon.parent),
-        selectinload(models.Unit.abilities).selectinload(models.UnitAbility.ability),
-        selectinload(models.Unit.army),
-    )
+class SaveTemplatePayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    army_id: int
 
 
-def _unit_payload_cached(
-    unit: models.Unit,
-    unit_data_cache: dict[int, dict[str, Any]],
-    unit_payloads: dict[int, dict[str, Any]],
-) -> dict[str, Any]:
-    if unit.id in unit_payloads:
-        return unit_payloads[unit.id]
-    weapon_options = _unit_cache_value(
-        unit, unit_data_cache, "weapon_options", lambda: _unit_weapon_options(unit)
-    )
-    passive_items = _unit_cache_value(
-        unit, unit_data_cache, "passive_entries", lambda: _passive_entries(unit)
-    )
-    active_items = _unit_cache_value(
-        unit, unit_data_cache, "ability_active", lambda: _ability_entries(unit, "active")
-    )
-    aura_items = _unit_cache_value(
-        unit, unit_data_cache, "ability_aura", lambda: _ability_entries(unit, "aura")
-    )
-    default_summary = _unit_cache_value(
-        unit, unit_data_cache, "default_summary", lambda: _default_loadout_summary(unit)
-    )
-    payload = {
-        "weapon_options": weapon_options,
-        "passive_items": passive_items,
-        "active_items": active_items,
-        "aura_items": aura_items,
-        "default_summary": default_summary,
-        "unit_flags": _unit_flag_string_with_army(unit),
-    }
-    unit_payloads[unit.id] = payload
-    return payload
+class ReorderPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    unit_ids: list[int]
 
 
-def _unit_army_flags(unit: models.Unit | None) -> dict:
-    flags = utils.parse_flags(getattr(unit, "flags", None))
-    if unit is None:
-        return flags
-    army = getattr(unit, "army", None)
+def _owned_roster(db: Session, roster_id: int, user_id: int) -> models.Roster:
+    roster = db.execute(
+        select(models.Roster).where(
+            models.Roster.id == roster_id,
+            models.Roster.owner_id == user_id,
+        )
+    ).scalar_one_or_none()
+    if roster is None:
+        raise HTTPException(status_code=404, detail="Rozpiska nie istnieje")
+    return roster
+
+
+def _owned_unit_and_roster(
+    db: Session, roster_id: int, unit_id: int, user_id: int
+) -> tuple[models.RosterUnit, models.Roster]:
+    result = db.execute(
+        select(models.RosterUnit, models.Roster)
+        .join(models.Roster, models.RosterUnit.roster_id == models.Roster.id)
+        .where(
+            models.RosterUnit.id == unit_id,
+            models.RosterUnit.roster_id == roster_id,
+            models.Roster.owner_id == user_id,
+        )
+    ).one_or_none()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Oddział nie istnieje")
+    return result
+
+
+def _owned_army(db: Session, army_id: int, user_id: int) -> models.Army:
+    army = db.execute(
+        select(models.Army).where(
+            models.Army.id == army_id,
+            models.Army.owner_id == user_id,
+        )
+    ).scalar_one_or_none()
     if army is None:
-        return flags
-    army_flags = utils.parse_flags(getattr(army, "passive_rules", None))
-    for key, value in army_flags.items():
-        if key is None or key in flags:
-            continue
-        flags[key] = value
-    return flags
+        raise HTTPException(status_code=404, detail="Armia nie istnieje")
+    return army
 
 
-def _unit_flag_string_with_army(unit: models.Unit | None) -> str:
-    parts: list[str] = []
-    for source in (
-        getattr(unit, "flags", None),
-        getattr(getattr(unit, "army", None), "passive_rules", None),
-    ):
-        if not source:
-            continue
-        text = str(source).strip()
-        if text:
-            parts.append(text)
-    return ", ".join(parts)
+def _clean_name(value: str, label: str) -> str:
+    name = value.strip()
+    if not name or len(name) > 120:
+        raise HTTPException(status_code=422, detail=f"{label} musi mieć 1-120 znaków")
+    return name
 
 
-def _normalized_trait_identifier(slug: str | None) -> str | None:
-    if slug is None:
-        return None
-    identifier = costs.ability_identifier(slug)
-    if identifier:
-        return identifier
-    text = str(slug).strip()
-    if not text:
-        return None
-    return text.casefold()
-
-
-def _is_hidden_trait(slug: str | None) -> bool:
-    normalized = _normalized_trait_identifier(slug)
-    return bool(normalized and normalized in utils.HIDDEN_TRAIT_SLUGS)
-
-
-def _json_safe(value: Any) -> Any:
-    if isinstance(value, (str, bool)) or value is None:
-        return value
-    if isinstance(value, (int, float)):
-        if isinstance(value, float) and not math.isfinite(value):
-            return 0.0
-        return value
-    if isinstance(value, Decimal):
-        numeric = float(value)
-        if not math.isfinite(numeric):
-            return 0.0
-        return numeric
-    if isinstance(value, Mapping):
-        return {str(key): _json_safe(val) for key, val in value.items()}
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_json_safe(item) for item in value]
-    if isinstance(value, AbstractSet):
-        return [_json_safe(item) for item in value]
-    return None
-
-
-# ============================================================
-# SECTION: ACCESS CONTROL & ROSTER ORDERING
-# _ensure_roster_view_access, _ensure_roster_edit_access,
-# _ordered_roster_units, _apply_roster_order
-# ============================================================
-def _ensure_roster_view_access(roster: models.Roster, user: models.User) -> None:
-    if user.is_admin:
-        return
-    if roster.owner_id not in (None, user.id):
-        raise HTTPException(status_code=403, detail="Brak dostępu do rozpiski")
-
-
-def _ensure_roster_edit_access(roster: models.Roster, user: models.User) -> None:
-    if user.is_admin:
-        return
-    if roster.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="Brak dostępu do rozpiski")
-
-
-def _ordered_roster_units(db: Session, roster: models.Roster) -> list[models.RosterUnit]:
-    return (
-        db.execute(
-            select(models.RosterUnit)
-            .where(models.RosterUnit.roster_id == roster.id)
-            .order_by(models.RosterUnit.position, models.RosterUnit.id)
-        )
-        .scalars()
-        .all()
-    )
-
-
-def _apply_roster_order(
-    roster_units: list[models.RosterUnit], order: Sequence[int | str]
-) -> bool:
-    """Apply a new roster order in-place.
-
-    Returns ``True`` when any position changed. Raises ``ValueError`` if the
-    provided ``order`` is invalid (missing IDs or duplicates).
-    """
-
-    id_map: dict[int, models.RosterUnit] = {
-        unit.id: unit for unit in roster_units if unit.id is not None
-    }
-    normalized: list[int] = []
-    seen: set[int] = set()
-
-    for value in order:
-        try:
-            unit_id = int(value)
-        except (TypeError, ValueError):
-            continue
-        if unit_id in seen:
-            continue
-        if unit_id not in id_map:
-            raise ValueError("Invalid roster unit ID")
-        seen.add(unit_id)
-        normalized.append(unit_id)
-
-    if len(normalized) != len(id_map):
-        raise ValueError("Order does not match roster units")
-
-    changed = False
-    for position, unit_id in enumerate(normalized):
-        unit = id_map[unit_id]
-        if unit.position != position:
-            changed = True
-        unit.position = position
-    return changed
-
-
-def _available_role_slugs(unit: models.Unit | None) -> set[str]:
-    if unit is None:
-        return set()
-    flags = _unit_army_flags(unit)
-    traits = costs.flags_to_ability_list(flags)
-    return {costs.ability_identifier(trait) for trait in traits}
-
-
-def _classification_map(
-    roster_units: list[models.RosterUnit],
-    loadouts: Mapping[int, dict[str, Any] | None],
-) -> tuple[dict[int, dict[str, Any] | None], dict[int, dict[str, float]]]:
-    units_by_id: dict[int, models.RosterUnit] = {
-        ru.id: ru for ru in roster_units if ru.id is not None
-    }
-    totals_by_id: dict[int, dict[str, float]] = {}
-    classifications: dict[int, dict[str, Any] | None] = {}
-
-    # Phase 1: independent per-unit role totals (no cross-unit influence yet).
-    for unit_id, roster_unit in units_by_id.items():
-        loadout_payload = loadouts.get(unit_id)
-        quote = _internal_roster_unit_quote(roster_unit, loadout_payload)
-        totals_by_id[unit_id] = {
-            "wojownik": float(quote.get("warrior_total") or 0.0),
-            "strzelec": float(quote.get("shooter_total") or 0.0),
+def _calculate_for_roster(
+    payload: UnitQuoteInput, roster: models.Roster
+) -> tuple[UnitQuoteInput, object]:
+    request = payload.model_copy(
+        update={
+            "custom_stats_enabled": roster.custom_stats_enabled,
+            "simple_points_enabled": roster.simple_points_enabled,
+            "small_battle_enabled": roster.small_battle_enabled,
         }
-
-    # Phase 2: join heroes with their parent unit and decide the Wojownik /
-    # Strzelec classification once per group from the *summed* role totals.
-    # This is the sole documented exception to the rule that the cost of one
-    # roster unit must not depend on another (joined hero + unit share the
-    # role decision, even though individual role totals stay independent).
-    group_members: dict[int, list[int]] = {}
-    for unit_id, roster_unit in units_by_id.items():
-        parent_id = getattr(roster_unit, "parent_roster_unit_id", None)
-        anchor = unit_id
-        if parent_id is not None and parent_id in units_by_id:
-            anchor = parent_id
-        group_members.setdefault(anchor, []).append(unit_id)
-
-    for anchor_id, member_ids in group_members.items():
-        warrior_sum = sum(
-            float(totals_by_id.get(mid, {}).get("wojownik") or 0.0)
-            for mid in member_ids
-        )
-        shooter_sum = sum(
-            float(totals_by_id.get(mid, {}).get("strzelec") or 0.0)
-            for mid in member_ids
-        )
-        anchor_unit = units_by_id.get(anchor_id)
-        anchor_loadout = loadouts.get(anchor_id) if anchor_unit is not None else None
-        fallback_slug = _classification_fallback_slug(
-            anchor_loadout if isinstance(anchor_loadout, dict) else None
-        )
-        group_classification = _classification_from_totals(
-            warrior_sum,
-            shooter_sum,
-            fallback=fallback_slug,
-        )
-        for mid in member_ids:
-            if group_classification is None:
-                # Fall back to per-unit classification when the group has no
-                # role-bearing cost at all (rare; preserves prior behaviour).
-                loadout_payload = loadouts.get(mid)
-                classifications[mid] = _roster_unit_classification(
-                    units_by_id[mid], loadout_payload, totals=totals_by_id.get(mid)
-                )
-            else:
-                classifications[mid] = dict(group_classification)
-
-    return classifications, totals_by_id
-
-
-def _hero_group_partner_ids(
-    db: Session,
-    roster_unit: models.RosterUnit,
-) -> set[int]:
-    """Return the set of partner roster_unit IDs that share a classification
-    with the given unit. For a parent unit: its attached heroes. For an
-    attached hero: its parent and that parent's other attached heroes.
-    Lone units (no attachments either way) return an empty set."""
-    partners: set[int] = set()
-    if roster_unit is None or roster_unit.id is None:
-        return partners
-
-    parent_id = getattr(roster_unit, "parent_roster_unit_id", None)
-    if parent_id is not None:
-        anchor_id = parent_id
-    else:
-        anchor_id = roster_unit.id
-
-    sibling_ids = (
-        db.execute(
-            select(models.RosterUnit.id).where(
-                models.RosterUnit.parent_roster_unit_id == anchor_id,
-            )
-        )
-        .scalars()
-        .all()
     )
-    for sid in sibling_ids:
-        if sid != roster_unit.id:
-            partners.add(int(sid))
-    if anchor_id != roster_unit.id:
-        partners.add(int(anchor_id))
-    return partners
+    try:
+        quote = calculate_unit_quote(request, ruleset_version=roster.ruleset_version)
+    except QuoteValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return request, quote
 
 
-def _internal_roster_unit_quote(
-    roster_unit: models.RosterUnit,
-    loadout: dict[str, Any] | None = None,
-    include_item_costs: bool = False,
-) -> dict[str, Any]:
-    """Internal adapter that routes all roster-unit quote calculations via costs.py."""
-    normalized_count = costs.normalize_roster_unit_count(
-        getattr(roster_unit, "count", 1), default=1
+def _unit_payload(unit: models.RosterUnit) -> dict[str, object]:
+    passive_abilities, profiles, _ = normalize_snapshot_abilities(
+        json.loads(unit.passive_abilities_json),
+        json.loads(unit.profiles_json),
     )
-    return costs.calculate_roster_unit_quote(
-        getattr(roster_unit, "unit", None),
-        loadout,
-        normalized_count,
-        include_item_costs=include_item_costs,
-    )
+    return {
+        "id": unit.id,
+        "source_template_id": unit.source_template_id,
+        "name": unit.name,
+        "models_per_unit": unit.models_per_unit,
+        "unit_copies": unit.unit_copies,
+        "defense": str(unit.defense),
+        "toughness": str(unit.toughness),
+        "passive_abilities": passive_abilities,
+        "special_abilities": json.loads(unit.special_abilities_json),
+        "profiles": profiles,
+        "position": unit.position,
+        "unit_cost": unit.unit_cost,
+        "entry_cost": unit.entry_cost,
+    }
 
 
-# ============================================================
-# SECTION: ROSTER VIEWS & CRUD
-# list_rosters, new_roster_form, create_roster, edit_roster,
-# update_roster, duplicate_roster, delete_roster
-# ============================================================
 @router.get("", response_class=HTMLResponse)
 def list_rosters(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: models.User | None = Depends(get_current_user(optional=True)),
+    user: models.User = Depends(current_user_dep),
 ):
-    if not current_user:
-        return RedirectResponse(url="/auth/login", status_code=303)
-
-    query = (
+    rosters = db.execute(
         select(models.Roster)
-        .options(
-            selectinload(models.Roster.army),
-            selectinload(models.Roster.owner),
-        )
-        .order_by(models.Roster.created_at.desc())
-    )
-    if not current_user.is_admin:
-        query = query.where(
-            or_(
-                models.Roster.owner_id == current_user.id,
-                models.Roster.owner_id.is_(None),
-            )
-        )
-    rosters = db.execute(query).scalars().all()
-    mine, global_items, others = utils.split_owned(rosters, current_user)
+        .options(selectinload(models.Roster.roster_units))
+        .where(models.Roster.owner_id == user.id)
+        .order_by(models.Roster.updated_at.desc(), models.Roster.id.desc())
+    ).scalars().all()
     return templates.TemplateResponse(
+        request,
         "rosters_list.html",
         {
             "request": request,
-            "user": current_user,
-            "mine": mine,
-            "global_items": global_items,
-            "others": others,
+            "user": user,
+            "rosters": rosters,
+            "csrf_token": get_csrf_token(request),
         },
     )
 
@@ -417,61 +179,57 @@ def list_rosters(
 def new_roster_form(
     request: Request,
     db: Session = Depends(get_db),
-    current_user: models.User | None = Depends(get_current_user(optional=True)),
+    user: models.User = Depends(current_user_dep),
 ):
-    if not current_user:
-        return RedirectResponse(url="/auth/login", status_code=303)
-    query = select(models.Army).order_by(models.Army.name)
-    if not current_user.is_admin:
-        query = query.where(
-            or_(
-                models.Army.owner_id == current_user.id,
-                models.Army.owner_id.is_(None),
-            )
-        )
-    armies = db.execute(query).scalars().all()
+    armies = db.execute(
+        select(models.Army)
+        .where(models.Army.owner_id == user.id)
+        .order_by(models.Army.name)
+    ).scalars().all()
     return templates.TemplateResponse(
+        request,
         "roster_form.html",
         {
             "request": request,
-            "user": current_user,
+            "user": user,
             "armies": armies,
-            "error": None,
+            "csrf_token": get_csrf_token(request),
         },
     )
 
 
-@router.post("/new")
+@router.post("")
 def create_roster(
     request: Request,
     name: str = Form(...),
-    army_id: int = Form(...),
-    points_limit: str | None = Form(None),
-    is_global: str | None = Form(None),
+    csrf_token: str = Form(...),
+    army_id: int | None = Form(default=None),
+    points_limit: int | None = Form(default=None),
+    custom_stats_enabled: bool = Form(default=False),
+    simple_points_enabled: bool = Form(default=False),
+    collapse_descriptions: bool = Form(default=False),
+    small_battle_enabled: bool = Form(default=False),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    army = db.get(models.Army, army_id)
-    if not army:
-        raise HTTPException(status_code=404)
-    if not current_user.is_admin and army.owner_id not in (None, current_user.id):
-        raise HTTPException(status_code=403, detail="Brak dostępu do armii")
-    if points_limit is None:
-        limit_value = 1000
-    else:
-        stripped_limit = points_limit.strip()
-        limit_value = int(stripped_limit) if stripped_limit else 1000
-    is_global_flag = _parse_bool(is_global)
-    if is_global_flag and not current_user.is_admin:
-        raise HTTPException(
-            status_code=403,
-            detail="Tylko administrator może tworzyć globalne rozpiski",
-        )
+    user: models.User = Depends(current_user_dep),
+) -> RedirectResponse:
+    validate_csrf(request, csrf_token)
+    if points_limit is not None and points_limit <= 0:
+        raise HTTPException(status_code=422, detail="Limit punktów musi być dodatni")
+    if army_id is not None:
+        _owned_army(db, army_id, user.id)
+    scaled_limit = rescale_points_limit(
+        points_limit, from_simple=False, to_simple=simple_points_enabled
+    )
     roster = models.Roster(
-        name=name,
-        army=army,
-        points_limit=limit_value,
-        owner_id=None if is_global_flag else current_user.id,
+        name=_clean_name(name, "Nazwa rozpiski"),
+        owner_id=user.id,
+        army_id=army_id,
+        points_limit=scaled_limit,
+        ruleset_version=OPOS_RULESET_VERSION,
+        custom_stats_enabled=custom_stats_enabled,
+        simple_points_enabled=simple_points_enabled,
+        collapse_descriptions=collapse_descriptions,
+        small_battle_enabled=small_battle_enabled,
     )
     db.add(roster)
     db.commit()
@@ -479,272 +237,113 @@ def create_roster(
 
 
 @router.get("/{roster_id}", response_class=HTMLResponse)
-def edit_roster(
+def roster_detail(
     roster_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: models.User | None = Depends(get_current_user(optional=True)),
+    user: models.User = Depends(current_user_dep),
 ):
-    if not current_user:
-        return RedirectResponse(url="/auth/login", status_code=303)
-    roster_stmt = (
+    roster = db.execute(
         select(models.Roster)
-        .options(
-            selectinload(models.Roster.army).selectinload(models.Army.unit_groups),
-            selectinload(models.Roster.roster_units).options(
-                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
-            )
-        )
-        .where(models.Roster.id == roster_id)
-    )
-    roster = (
-        db.execute(roster_stmt)
-        .scalars()
-        .unique()
-        .one_or_none()
-    )
-    if not roster:
+        .options(joinedload(models.Roster.army).joinedload(models.Army.templates))
+        .where(models.Roster.id == roster_id, models.Roster.owner_id == user.id)
+    ).unique().scalar_one_or_none()
+    if roster is None:
         raise HTTPException(status_code=404)
-    _ensure_roster_view_access(roster, current_user)
-
-    selected_id = request.query_params.get("selected")
-
-    costs.ensure_cached_costs(roster.roster_units)
-    available_units_stmt = (
-        select(models.Unit)
-        .where(models.Unit.army_id == roster.army_id)
-        .options(*_unit_eager_options())
-        .order_by(models.Unit.position, models.Unit.id)
-    )
-    available_units = (
-        db.execute(available_units_stmt)
-        .scalars()
-        .unique()
-        .all()
-    )
-    unit_data_cache: dict[int, dict[str, Any]] = {}
-    unit_payloads: dict[int, dict[str, Any]] = {}
-
-    def _unit_payload(unit: models.Unit) -> dict[str, Any]:
-        return _unit_payload_cached(unit, unit_data_cache, unit_payloads)
-
-    available_unit_options = []
-    for unit in available_units:
-        payload = _unit_payload(unit)
-        weapon_options = payload["weapon_options"]
-        passive_items = payload["passive_items"]
-        active_items = payload["active_items"]
-        aura_items = payload["aura_items"]
-        default_summary = payload["default_summary"]
-        typical_models = unit.typical_model_count
-        cost_per_model = costs.unit_total_cost(unit)
-        available_unit_options.append(
-            {
-                "unit": unit,
-                "weapon_options": weapon_options,
-                "default_summary": default_summary,
-                "passive_items": passive_items,
-                "active_items": active_items,
-                "aura_items": aura_items,
-                "unit_cost_per_model": cost_per_model,
-                "unit_cost_total": costs.unit_typical_total_cost(
-                    unit,
-                    typical_models,
-                    per_model=cost_per_model,
-                ),
-                "typical_models": typical_models,
-            }
-        )
-
-    roster_items: list[dict[str, Any]] = []
-    sanitized_loadouts: dict[int, dict[str, Any]] = {}
-    payload_cache: dict[int | None, dict[str, Any]] = {}
-
-    for roster_unit in roster.roster_units:
-        unit = roster_unit.unit
-        payload = _unit_payload(unit)
-        payload_cache[roster_unit.id] = payload
-        loadout = _roster_unit_loadout(
-            roster_unit,
-            weapon_options=payload["weapon_options"],
-            active_items=payload["active_items"],
-            aura_items=payload["aura_items"],
-            passive_items=payload["passive_items"],
-        )
-        if roster_unit.id is not None:
-            sanitized_loadouts[roster_unit.id] = loadout
-
-    classifications, totals_by_id = _classification_map(
-        roster.roster_units, sanitized_loadouts
-    )
-    # Avoids the second full recalculate_roster_costs call by deriving costs from
-    # the classification map that was already computed above.
-    total_cost = 0.0
-    for roster_unit in roster.roster_units:
-        ru_id = roster_unit.id
-        role_slug = (classifications.get(ru_id) or {}).get("slug", "wojownik")
-        cost_value = round(float(totals_by_id.get(ru_id, {}).get(role_slug, 0.0)), 2)
-        roster_unit.cached_cost = cost_value
-        total_cost += cost_value
-    total_cost = round(total_cost, 2)
-
-    for roster_unit in roster.roster_units:
-        unit = roster_unit.unit
-        payload = payload_cache.get(roster_unit.id) or _unit_payload(unit)
-        weapon_options = payload["weapon_options"]
-        passive_items = payload["passive_items"]
-        active_items = payload["active_items"]
-        aura_items = payload["aura_items"]
-        default_summary = payload["default_summary"]
-        loadout = sanitized_loadouts.get(roster_unit.id) or _roster_unit_loadout(
-            roster_unit,
-            weapon_options=weapon_options,
-            active_items=active_items,
-            aura_items=aura_items,
-            passive_items=passive_items,
-        )
-        classification = classifications.get(roster_unit.id)
-        applied_loadout = (
-            _apply_classification_to_loadout(
-                loadout, classification, role_slug_map=_role_slug_map(unit)
-            )
-            or loadout
-        )
-        if roster_unit.id is not None:
-            sanitized_loadouts[roster_unit.id] = applied_loadout
-        class_slug = (
-            str(classification.get("slug") or "").strip().casefold()
-            if classification
-            else "none"
-        )
-        is_hero = unit_is_hero(unit, roster_unit, applied_loadout)
-        selected_passives = _selected_passive_entries(
-            roster_unit, applied_loadout, passive_items, classification
-        )
-        selected_actives = _selected_ability_entries(
-            applied_loadout, active_items, "active"
-        )
-        selected_auras = _selected_ability_entries(applied_loadout, aura_items, "aura")
-        roster_items.append(
-            {
-                "instance": roster_unit,
-                "passive_items": passive_items,
-                "active_items": active_items,
-                "aura_items": aura_items,
-                "selected_passive_items": selected_passives,
-                "selected_active_items": selected_actives,
-                "selected_aura_items": selected_auras,
-                "default_summary": default_summary,
-                "weapon_options": weapon_options,
-                "loadout": applied_loadout,
-                "loadout_summary": _loadout_display_summary(
-                    roster_unit, applied_loadout, weapon_options
-                ),
-                "base_cost_per_model": _unit_cache_value(
-                    unit,
-                    unit_data_cache,
-                    f"base_cost::{class_slug}",
-                    lambda: _base_cost_per_model(unit, classification),
-                ),
-                "classification": classification,
-                "is_hero": is_hero,
-                "unit_flags": _unit_flag_string_with_army(unit),
-                "weapon_cost": _roster_unit_classification_weapon_cost(
-                    roster_unit, applied_loadout
-                ),
-            }
-        )
-    # Build hero-attachment frames: heroes attached to a parent are absorbed
-    # into that parent's frame and excluded from the standalone list so the
-    # template renders them above the parent inside one drag-frame.
-    heroes_by_parent: dict[int, list[dict[str, Any]]] = {}
-    frame_items: list[dict[str, Any]] = []
-    for item in roster_items:
-        ru = item.get("instance")
-        parent_id = getattr(ru, "parent_roster_unit_id", None) if ru is not None else None
-        if parent_id is not None:
-            heroes_by_parent.setdefault(int(parent_id), []).append(item)
-            item["is_attached_hero"] = True
-        else:
-            item["is_attached_hero"] = False
-
-    for item in roster_items:
-        if item.get("is_attached_hero"):
-            continue
-        ru = item.get("instance")
-        ru_id = getattr(ru, "id", None) if ru is not None else None
-        attached = heroes_by_parent.get(int(ru_id), []) if ru_id is not None else []
-        attached.sort(key=lambda h: getattr(h.get("instance"), "position", 0) or 0)
-        item["attached_heroes"] = attached
-        frame_items.append(item)
-
-    frames_count = len(frame_items)
-    hero_models_count = sum(
-        int(getattr(item.get("instance"), "count", 0) or 0)
-        for item in roster_items
-        if item.get("is_hero", False)
-    )
-
-    # JSON list shown in the "Dołącz do:" picker — non-hero roster units only.
-    attachable_units = [
+    units = db.execute(
+        select(models.RosterUnit)
+        .where(models.RosterUnit.roster_id == roster.id)
+        .order_by(models.RosterUnit.position, models.RosterUnit.id)
+    ).scalars().all()
+    unit_rows = [
         {
-            "id": getattr(item.get("instance"), "id", None),
-            "label": (
-                getattr(item.get("instance"), "custom_name", None)
-                or getattr(getattr(item.get("instance"), "unit", None), "name", "Oddział")
+            "unit": item,
+            "defense": display_number(item.defense),
+            "toughness": display_number(item.toughness),
+            "profiles": build_profile_payloads(
+                item, ruleset_version=roster.ruleset_version
+            ),
+            "abilities": build_ability_payloads(
+                item, ruleset_version=roster.ruleset_version
             ),
         }
-        for item in roster_items
-        if not item.get("is_hero", False)
-        and getattr(item.get("instance"), "id", None) is not None
+        for item in units
     ]
-
-    can_edit = current_user.is_admin or roster.owner_id == current_user.id
-    can_delete = can_edit
-
-    roster_groups = group_roster_items(frame_items, roster.army)
-    available_groups = group_available_units(available_unit_options, roster.army)
-
     return templates.TemplateResponse(
+        request,
         "roster_edit.html",
         {
             "request": request,
-            "user": current_user,
+            "user": user,
             "roster": roster,
-            "available_units": available_unit_options,
-            "available_groups": available_groups,
-            "roster_items": roster_items,
-            "roster_frames": frame_items,
-            "roster_groups": roster_groups,
-            "frames_count": frames_count,
-            "hero_models_count": hero_models_count,
-            "attachable_units": attachable_units,
-            "total_cost": total_cost,
-            "error": None,
-            "can_edit": can_edit,
-            "can_delete": can_delete,
-            "warnings": [],
-            "selected_id": selected_id,
-            "unit_payloads": unit_payloads,
-            "local_cost_engine_enabled": config.LOCAL_COST_ENGINE_ENABLED,
+            "units": units,
+            "unit_rows": unit_rows,
+            "units_payload": [_unit_payload(item) for item in units],
+            "army_templates": roster.army.templates if roster.army else [],
+            "csrf_token": get_csrf_token(request),
         },
     )
 
 
-@router.post("/{roster_id}/update")
-def update_roster(
+@router.post("/{roster_id}/settings")
+def update_roster_settings(
     roster_id: int,
+    request: Request,
     name: str = Form(...),
-    points_limit: str | None = Form(None),
+    csrf_token: str = Form(...),
+    points_limit: int | None = Form(default=None),
+    custom_stats_enabled: bool = Form(default=False),
+    simple_points_enabled: bool = Form(default=False),
+    collapse_descriptions: bool = Form(default=False),
+    small_battle_enabled: bool = Form(default=False),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    if not roster:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-    roster.name = name
-    roster.points_limit = int(points_limit) if points_limit else None
+    user: models.User = Depends(current_user_dep),
+) -> RedirectResponse:
+    validate_csrf(request, csrf_token)
+    roster = _owned_roster(db, roster_id, user.id)
+    if points_limit is not None and points_limit <= 0:
+        raise HTTPException(status_code=422, detail="Limit punktów musi być dodatni")
+    roster.name = _clean_name(name, "Nazwa rozpiski")
+    roster.points_limit = rescale_points_limit(
+        points_limit,
+        from_simple=roster.simple_points_enabled,
+        to_simple=simple_points_enabled,
+    )
+    units = db.execute(
+        select(models.RosterUnit).where(models.RosterUnit.roster_id == roster.id)
+    ).scalars().all()
+    scale_standard_toughness = (
+        roster.small_battle_enabled != small_battle_enabled
+        and not roster.custom_stats_enabled
+        and not custom_stats_enabled
+    )
+    for unit in units:
+        quote_request = request_from_snapshot(
+            unit,
+            unit_copies=unit.unit_copies,
+            custom_stats_enabled=custom_stats_enabled,
+            simple_points_enabled=simple_points_enabled,
+            small_battle_enabled=small_battle_enabled,
+        )
+        if scale_standard_toughness:
+            factor = Decimal("2") if small_battle_enabled else Decimal("0.5")
+            quote_request = quote_request.model_copy(
+                update={"toughness": quote_request.toughness * factor}
+            )
+        try:
+            quote = calculate_unit_quote(
+                quote_request, ruleset_version=roster.ruleset_version
+            )
+        except QuoteValidationError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail="Ustawienia nie pasują do statystyk zapisanych oddziałów.",
+            ) from exc
+        apply_request_to_roster_unit(unit, quote_request, quote)
+    roster.custom_stats_enabled = custom_stats_enabled
+    roster.simple_points_enabled = simple_points_enabled
+    roster.collapse_descriptions = collapse_descriptions
+    roster.small_battle_enabled = small_battle_enabled
     db.commit()
     return RedirectResponse(url=f"/rosters/{roster.id}", status_code=303)
 
@@ -752,2787 +351,323 @@ def update_roster(
 @router.post("/{roster_id}/duplicate")
 def duplicate_roster(
     roster_id: int,
+    request: Request,
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster_stmt = (
+    user: models.User = Depends(current_user_dep),
+) -> RedirectResponse:
+    validate_csrf(request, csrf_token)
+    source = db.execute(
         select(models.Roster)
-        .options(
-            selectinload(models.Roster.roster_units),
-        )
-        .where(models.Roster.id == roster_id)
-    )
-    roster = db.execute(roster_stmt).scalars().unique().one_or_none()
-    if not roster:
+        .options(selectinload(models.Roster.roster_units))
+        .where(models.Roster.id == roster_id, models.Roster.owner_id == user.id)
+    ).scalar_one_or_none()
+    if source is None:
         raise HTTPException(status_code=404)
-    _ensure_roster_view_access(roster, current_user)
-
-    copy_name = f"{roster.name} (kopia)"
-    roster_copy = models.Roster(
-        name=copy_name,
-        army_id=roster.army_id,
-        owner_id=current_user.id,
-        points_limit=roster.points_limit,
+    clone = models.Roster(
+        name=f"{source.name} — kopia"[:120],
+        owner_id=user.id,
+        army_id=source.army_id,
+        points_limit=source.points_limit,
+        ruleset_version=source.ruleset_version,
+        custom_stats_enabled=source.custom_stats_enabled,
+        simple_points_enabled=source.simple_points_enabled,
+        collapse_descriptions=source.collapse_descriptions,
+        small_battle_enabled=source.small_battle_enabled,
     )
-    db.add(roster_copy)
-    db.flush()
-
-    unit_id_map: dict[int, int] = {}
-    clone_by_old_id: dict[int, models.RosterUnit] = {}
-    for roster_unit in roster.roster_units:
-        clone = models.RosterUnit(
-            roster_id=roster_copy.id,
-            unit_id=roster_unit.unit_id,
-            count=roster_unit.count,
-            extra_weapons_json=roster_unit.extra_weapons_json,
-            cached_cost=roster_unit.cached_cost,
-            custom_name=roster_unit.custom_name,
-            position=roster_unit.position,
+    for item in source.roster_units:
+        clone.roster_units.append(
+            models.RosterUnit(
+                source_template_id=item.source_template_id,
+                name=item.name,
+                models_per_unit=item.models_per_unit,
+                unit_copies=item.unit_copies,
+                defense=item.defense,
+                toughness=item.toughness,
+                passive_abilities_json=item.passive_abilities_json,
+                special_abilities_json=item.special_abilities_json,
+                profiles_json=item.profiles_json,
+                position=item.position,
+                unit_cost=item.unit_cost,
+            )
         )
-        db.add(clone)
-        db.flush()
-        if roster_unit.id is not None and clone.id is not None:
-            unit_id_map[roster_unit.id] = clone.id
-            clone_by_old_id[roster_unit.id] = clone
-
-    for roster_unit in roster.roster_units:
-        if roster_unit.parent_roster_unit_id is None:
-            continue
-        if roster_unit.id is None:
-            continue
-        new_parent_id = unit_id_map.get(roster_unit.parent_roster_unit_id)
-        clone = clone_by_old_id.get(roster_unit.id)
-        if new_parent_id is None or clone is None:
-            continue
-        clone.parent_roster_unit_id = new_parent_id
-
+    db.add(clone)
     db.commit()
-    return RedirectResponse(url=f"/rosters/{roster_copy.id}", status_code=303)
+    return RedirectResponse(url=f"/rosters/{clone.id}", status_code=303)
 
 
 @router.post("/{roster_id}/delete")
 def delete_roster(
     roster_id: int,
+    request: Request,
+    csrf_token: str = Form(...),
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    if not roster:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    db.delete(roster)
+    user: models.User = Depends(current_user_dep),
+) -> RedirectResponse:
+    validate_csrf(request, csrf_token)
+    db.delete(_owned_roster(db, roster_id, user.id))
     db.commit()
     return RedirectResponse(url="/rosters", status_code=303)
 
 
-# ============================================================
-# SECTION: ROSTER UNIT MANAGEMENT
-# add_roster_unit, move_roster_unit, reorder_roster_units
-# ============================================================
-@router.post("/{roster_id}/units/add")
-def add_roster_unit(
+@router.post("/{roster_id}/units", dependencies=[Depends(require_csrf)])
+def create_roster_unit(
     roster_id: int,
-    request: Request,
-    unit_id: int = Form(...),
-    count: int = Form(1),
+    payload: UnitQuoteInput,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    unit = (
-        db.execute(
-            select(models.Unit)
-            .options(*_unit_eager_options())
-            .where(models.Unit.id == unit_id)
+    user: models.User = Depends(current_user_dep),
+) -> dict[str, object]:
+    roster = _owned_roster(db, roster_id, user.id)
+    request, quote = _calculate_for_roster(payload, roster)
+    position = db.execute(
+        select(func.coalesce(func.max(models.RosterUnit.position), -1)).where(
+            models.RosterUnit.roster_id == roster.id
         )
-        .scalars()
-        .first()
+    ).scalar_one() + 1
+    unit = models.RosterUnit(
+        roster_id=roster.id,
+        name="",
+        models_per_unit=1,
+        unit_copies=1,
+        defense=1,
+        toughness=1,
+        profiles_json="{}",
+        position=position,
+        unit_cost=0,
     )
-    if not roster or unit is None or unit.army_id != roster.army_id:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    count = max(int(count), 1)
-    weapon_options = _unit_weapon_options(unit)
-    active_items = _ability_entries(unit, "active")
-    aura_items = _ability_entries(unit, "aura")
-    passive_items = _passive_entries(unit)
-    role_slug_map = _role_slug_map(unit)
-    loadout = _default_loadout_payload(
-        unit,
-        weapon_options=weapon_options,
-        active_items=active_items,
-        aura_items=aura_items,
-        passive_items=passive_items,
-    )
-    roster_unit = models.RosterUnit(
-        roster=roster,
-        unit=unit,
-        count=count,
-    )
-
-    max_position = (
-        db.execute(
-            select(func.max(models.RosterUnit.position)).where(
-                models.RosterUnit.roster_id == roster.id
-            )
-        ).scalar_one_or_none()
-        or -1
-    )
-    roster_unit.position = max_position + 1
-
-    quote = _internal_roster_unit_quote(roster_unit, loadout)
-    warrior_total = float(quote.get("warrior_total") or 0.0)
-    shooter_total = float(quote.get("shooter_total") or 0.0)
-    selected_total = float(quote.get("selected_total") or 0.0)
-    classification = _roster_unit_classification(
-        roster_unit,
-        loadout,
-        totals={"wojownik": warrior_total, "strzelec": shooter_total},
-    )
-    loadout = (
-        _apply_classification_to_loadout(
-            loadout, classification, role_slug_map=role_slug_map
-        )
-        or loadout
-    )
-
-    roster_unit.extra_weapons_json = json.dumps(loadout, ensure_ascii=False)
-    roster_unit.cached_cost = selected_total
-    db.add(roster_unit)
-    db.flush()
+    apply_request_to_roster_unit(unit, request, quote)
+    db.add(unit)
     db.commit()
-
-    accept_header = (request.headers.get("accept") or "").lower()
-    if "application/json" in accept_header:
-        loadout_payload = _roster_unit_loadout(
-            roster_unit,
-            weapon_options=weapon_options,
-            active_items=active_items,
-            aura_items=aura_items,
-            passive_items=passive_items,
-        )
-        selected_passives = _selected_passive_entries(
-            roster_unit, loadout_payload, passive_items, classification
-        )
-        selected_actives = _selected_ability_entries(
-            loadout_payload, active_items, "active"
-        )
-        selected_auras = _selected_ability_entries(loadout_payload, aura_items, "aura")
-        total_cost = sum(
-            float(getattr(ru, "cached_cost", None) or 0.0)
-            for ru in getattr(roster, "roster_units", []) or []
-        )
-        total_cost = round(total_cost, 2)
-        loadout_json = json.dumps(loadout_payload, ensure_ascii=False)
-        default_summary = _default_loadout_summary(unit)
-        loadout_summary = _loadout_display_summary(
-            roster_unit,
-            loadout_payload,
-            weapon_options,
-        )
-        base_cost_per_model = _base_cost_per_model(unit, classification)
-        weapon_cost_classification = _roster_unit_classification_weapon_cost(
-            roster_unit, loadout_payload
-        )
-        roster_item = {
-            "id": roster_unit.id,
-            "count": roster_unit.count,
-            "cached_cost": roster_unit.cached_cost,
-            "custom_name": roster_unit.custom_name or "",
-            "unit_id": unit.id,
-            "unit_name": unit.name,
-            "unit_quality": unit.quality,
-            "unit_defense": unit.defense,
-            "unit_toughness": unit.toughness,
-            "is_hero": unit_is_hero(unit, roster_unit),
-            "unit_flags": _unit_flag_string_with_army(unit),
-            "default_summary": default_summary,
-            "loadout_summary": loadout_summary,
-            "weapon_options": weapon_options,
-            "passive_items": passive_items,
-            "active_items": active_items,
-            "aura_items": aura_items,
-            "selected_passive_items": selected_passives,
-            "selected_active_items": selected_actives,
-            "selected_aura_items": selected_auras,
-            "loadout": loadout_payload,
-            "classification": classification,
-            "base_cost_per_model": base_cost_per_model,
-            "weapon_cost": weapon_cost_classification,
-        }
-        payload = {
-            "unit": {
-                "id": roster_unit.id,
-                "count": roster_unit.count,
-                "custom_name": roster_unit.custom_name or "",
-                "cached_cost": roster_unit.cached_cost,
-                "loadout_json": loadout_json,
-                "loadout_summary": loadout_summary,
-                "default_summary": default_summary,
-                "base_cost_per_model": base_cost_per_model,
-                "classification": classification,
-                "selected_passive_items": selected_passives,
-                "selected_active_items": selected_actives,
-                "selected_aura_items": selected_auras,
-                "unit_cache_id": unit.id,
-            },
-            "roster_item": roster_item,
-            "warnings": [],
-            "total_cost": total_cost,
-        }
-        return JSONResponse(_json_safe(payload))
-    return RedirectResponse(
-        url=f"/rosters/{roster.id}?selected={roster_unit.id}",
-        status_code=303,
-    )
+    return _unit_payload(unit)
 
 
-@router.post("/{roster_id}/units/{roster_unit_id}/move")
-def move_roster_unit(
-    roster_id: int,
-    roster_unit_id: int,
-    request: Request,
-    direction: str = Form(...),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    roster_unit = db.get(models.RosterUnit, roster_unit_id)
-    if not roster or not roster_unit or roster_unit.roster_id != roster.id:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    normalized_direction = (direction or "").strip().lower()
-    if normalized_direction not in {"up", "down"}:
-        raise HTTPException(status_code=400, detail="Nieprawidłowy kierunek")
-
-    current_position = roster_unit.position or 0
-    base_neighbor_query = select(models.RosterUnit.position).where(
-        models.RosterUnit.roster_id == roster.id,
-        models.RosterUnit.id != roster_unit.id,
-    )
-    if normalized_direction == "up":
-        neighbor_position = (
-            db.execute(
-                base_neighbor_query.where(
-                    models.RosterUnit.position < current_position,
-                )
-                .order_by(models.RosterUnit.position.desc())
-                .limit(1)
-            )
-            .scalars()
-            .first()
-        )
-    else:
-        neighbor_position = (
-            db.execute(
-                base_neighbor_query.where(
-                    models.RosterUnit.position > current_position,
-                )
-                .order_by(models.RosterUnit.position)
-                .limit(1)
-            )
-            .scalars()
-            .first()
-        )
-
-    accept_header = (request.headers.get("accept") or "").lower()
-    wants_json = "application/json" in accept_header
-
-    def _json_payload(moved: bool) -> JSONResponse:
-        ordered_units = _ordered_roster_units(db, roster)
-        payload = {
-            "selected": roster_unit.id,
-            "moved": moved,
-            "direction": normalized_direction,
-            "order": [
-                {
-                    "id": unit.id,
-                    "position": unit.position if unit.position is not None else index,
-                }
-                for index, unit in enumerate(ordered_units)
-                if unit.id is not None
-            ],
-        }
-        return JSONResponse(_json_safe(payload))
-
-    if neighbor_position is None:
-        if wants_json:
-            return _json_payload(moved=False)
-        return RedirectResponse(
-            url=f"/rosters/{roster.id}?selected={roster_unit.id}",
-            status_code=303,
-        )
-
-    target_position = neighbor_position
-    if target_position < current_position:
-        db.execute(
-            update(models.RosterUnit)
-            .where(
-                models.RosterUnit.roster_id == roster.id,
-                models.RosterUnit.position >= target_position,
-                models.RosterUnit.position < current_position,
-            )
-            .values(position=models.RosterUnit.position + 1)
-            .execution_options(synchronize_session=False)
-        )
-    elif target_position > current_position:
-        db.execute(
-            update(models.RosterUnit)
-            .where(
-                models.RosterUnit.roster_id == roster.id,
-                models.RosterUnit.position <= target_position,
-                models.RosterUnit.position > current_position,
-            )
-            .values(position=models.RosterUnit.position - 1)
-            .execution_options(synchronize_session=False)
-        )
-    else:
-        if wants_json:
-            return _json_payload(moved=False)
-        return RedirectResponse(
-            url=f"/rosters/{roster.id}?selected={roster_unit.id}",
-            status_code=303,
-        )
-
-    roster_unit.position = target_position
-    db.commit()
-    if wants_json:
-        return _json_payload(moved=True)
-    return RedirectResponse(
-        url=f"/rosters/{roster.id}?selected={roster_unit.id}",
-        status_code=303,
-    )
-
-
-@router.post("/{roster_id}/units/reorder")
-def reorder_roster_units(
-    roster_id: int,
-    payload: dict[str, Any] = Body(...),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    if not roster:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    order = payload.get("order") if isinstance(payload, Mapping) else None
-    if not isinstance(order, Sequence):
-        raise HTTPException(status_code=400, detail="Nieprawidłowa kolejność")
-
-    roster_units = _ordered_roster_units(db, roster)
-    try:
-        changed = _apply_roster_order(roster_units, order)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Nieprawidłowa kolejność") from exc
-
-    if changed:
-        db.commit()
-    ordered_units = _ordered_roster_units(db, roster)
-    payload = {
-        "order": [
-            {
-                "id": unit.id,
-                "position": unit.position if unit.position is not None else index,
-            }
-            for index, unit in enumerate(ordered_units)
-            if unit.id is not None
-        ]
-    }
-    return JSONResponse(_json_safe(payload))
-
-
-# ============================================================
-# SECTION: UNIT UPDATE & QUOTE ENDPOINT
-# update_roster_unit — zapis loadoutu, klasyfikacji, liczebności
-# quote_roster_unit  — POST /quote, wywołuje calculate_roster_unit_quote
-# duplicate_roster_unit, delete_roster_unit
-# ============================================================
-@router.post("/{roster_id}/units/{roster_unit_id}/update")
+@router.patch(
+    "/{roster_id}/units/{unit_id}", dependencies=[Depends(require_csrf)]
+)
 def update_roster_unit(
     roster_id: int,
-    roster_unit_id: int,
-    request: Request,
-    count: int = Form(...),
-    loadout_json: str | None = Form(None),
-    custom_name: str | None = Form(None),
+    unit_id: int,
+    payload: UnitQuoteInput,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    roster_unit = (
-        db.execute(
-            select(models.RosterUnit)
-            .options(
-                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
-            )
-            .where(models.RosterUnit.id == roster_unit_id)
-        )
-        .scalars()
-        .first()
-    )
-    if not roster or roster_unit is None or roster_unit.roster_id != roster.id:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-    roster_unit.count = max(int(count), 1)
-    unit_data_cache: dict[int, dict[str, Any]] = {}
-    unit_payloads: dict[int, dict[str, Any]] = {}
-
-    def _unit_payload(unit: models.Unit) -> dict[str, Any]:
-        return _unit_payload_cached(unit, unit_data_cache, unit_payloads)
-
-    # Hero-attachment group: when a member of a hero-parent group is updated,
-    # the classification of the whole group must be re-evaluated because joined
-    # units share a Wojownik/Strzelec classification (the sole documented
-    # exception to "koszt jednego oddziału nigdy nie wpływa na inny").
-    group_unit_ids = _hero_group_partner_ids(db, roster_unit)
-    paired_units: list[models.RosterUnit] = []
-    if group_unit_ids:
-        paired_units = (
-            db.execute(
-                select(models.RosterUnit)
-                .options(
-                    selectinload(models.RosterUnit.unit).options(
-                        *_unit_eager_options()
-                    )
-                )
-                .where(models.RosterUnit.id.in_(group_unit_ids))
-            )
-            .scalars()
-            .all()
-        )
-
-    payload_cache: dict[int, dict[str, Any]] = {}
-    loadout_map: dict[int, dict[str, Any]] = {}
-    role_slug_maps: dict[int, dict[str, str]] = {}
-    affected_units = [roster_unit, *paired_units]
-
-    for ru in affected_units:
-        payload = _unit_payload(ru.unit)
-        payload_cache[ru.id] = payload
-        role_slug_maps[ru.id] = _role_slug_map(ru.unit)
-        weapon_options = payload["weapon_options"]
-        active_items = payload["active_items"]
-        aura_items = payload["aura_items"]
-        passive_items = payload["passive_items"]
-        if ru.id == roster_unit.id:
-            parsed_loadout = _parse_loadout_json(loadout_json)
-            loadout = _sanitize_loadout(
-                ru.unit,
-                ru.count,
-                parsed_loadout,
-                weapon_options=weapon_options,
-                active_items=active_items,
-                aura_items=aura_items,
-                passive_items=passive_items,
-            )
-        else:
-            loadout = _roster_unit_loadout(
-                ru,
-                weapon_options=weapon_options,
-                active_items=active_items,
-                aura_items=aura_items,
-                passive_items=passive_items,
-            )
-        loadout_map[ru.id] = loadout
-
-    classifications, totals_by_id = _classification_map(
-        affected_units, loadout_map
-    )
-
-    applied_loadouts: dict[int, dict[str, Any]] = {}
-    for ru in affected_units:
-        classification = classifications.get(ru.id)
-        role_slug_map = role_slug_maps.get(ru.id) or {}
-        loadout = loadout_map.get(ru.id)
-        applied_loadouts[ru.id] = (
-            _apply_classification_to_loadout(
-                loadout, classification, role_slug_map=role_slug_map
-            )
-            or loadout
-        )
-
-    for ru in affected_units:
-        ru.extra_weapons_json = json.dumps(
-            applied_loadouts.get(ru.id, {}), ensure_ascii=False
-        )
-        if ru.id == roster_unit.id:
-            ru.custom_name = custom_name.strip() if custom_name else None
-            ru.count = roster_unit.count
-    affected_ids = {ru.id for ru in affected_units if ru.id is not None}
-    precomputed_costs: dict[int, float] = {}
-    for ru in affected_units:
-        if ru.id is None:
-            continue
-        role_slug = (classifications.get(ru.id) or {}).get("slug", "wojownik")
-        precomputed_costs[ru.id] = round(float(totals_by_id.get(ru.id, {}).get(role_slug, 0.0)), 2)
-    total_cost, _ = costs.recalculate_roster_costs(
-        roster,
-        loadout_overrides=applied_loadouts,
-        changed_unit_ids=affected_ids,
-        precomputed_costs=precomputed_costs,
-    )
+    user: models.User = Depends(current_user_dep),
+) -> dict[str, object]:
+    unit, roster = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
+    request, quote = _calculate_for_roster(payload, roster)
+    apply_request_to_roster_unit(unit, request, quote)
     db.commit()
-    accept_header = (request.headers.get("accept") or "").lower()
-    if "application/json" in accept_header:
-        def _unit_payload_for_response(target: models.RosterUnit) -> dict[str, Any]:
-            payload = payload_cache.get(target.id) or _unit_payload(target.unit)
-            passive_items = payload["passive_items"]
-            active_items = payload["active_items"]
-            aura_items = payload["aura_items"]
-            classification = classifications.get(target.id)
-            loadout_payload = applied_loadouts.get(target.id) or {}
-            selected_passives = _selected_passive_entries(
-                target, loadout_payload, passive_items, classification
-            )
-            selected_actives = _selected_ability_entries(
-                loadout_payload, active_items, "active"
-            )
-            selected_auras = _selected_ability_entries(
-                loadout_payload, aura_items, "aura"
-            )
-            loadout_summary = _loadout_display_summary(
-                target, loadout_payload, payload["weapon_options"]
-            )
-            base_cost_per_model = _base_cost_per_model(target.unit, classification)
-            return {
-                "id": target.id,
-                "count": target.count,
-                "custom_name": target.custom_name or "",
-                "cached_cost": target.cached_cost,
-                "loadout_json": json.dumps(loadout_payload, ensure_ascii=False),
-                "loadout_summary": loadout_summary,
-                "base_cost_per_model": base_cost_per_model,
-                "classification": classification,
-                "selected_passive_items": selected_passives,
-                "selected_active_items": selected_actives,
-                "selected_aura_items": selected_auras,
-                "parent_roster_unit_id": target.parent_roster_unit_id,
-                "weapon_cost": _roster_unit_classification_weapon_cost(
-                    target, loadout_payload
-                ),
-            }
-
-        unit_payloads = {
-            ru.id: _unit_payload_for_response(ru) for ru in affected_units if ru.id
-        }
-        unit_payload = unit_payloads.get(roster_unit.id)
-        payload = {
-            "unit": unit_payload,
-            "units": list(unit_payloads.values()),
-            "warnings": [],
-            "total_cost": total_cost,
-        }
-        return JSONResponse(_json_safe(payload))
-    return RedirectResponse(
-        url=f"/rosters/{roster.id}?selected={roster_unit.id}",
-        status_code=303,
-    )
+    return _unit_payload(unit)
 
 
-@router.post("/{roster_id}/units/{roster_unit_id}/quote")
-def quote_roster_unit(
+@router.post(
+    "/{roster_id}/units/from-template", dependencies=[Depends(require_csrf)]
+)
+def create_unit_from_template(
     roster_id: int,
-    roster_unit_id: int,
-    payload: dict[str, Any] | None = Body(default=None),
+    payload: TemplateCopyPayload,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    roster_unit = (
-        db.execute(
-            select(models.RosterUnit)
-            .options(
-                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
-            )
-            .where(models.RosterUnit.id == roster_unit_id)
+    user: models.User = Depends(current_user_dep),
+) -> dict[str, object]:
+    roster = _owned_roster(db, roster_id, user.id)
+    template = db.execute(
+        select(models.UnitTemplate)
+        .join(models.Army)
+        .where(
+            models.UnitTemplate.id == payload.template_id,
+            models.Army.owner_id == user.id,
         )
-        .scalars()
-        .first()
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=404, detail="Szablon nie istnieje")
+    needs_custom = template_requires_custom_stats(template)
+    if needs_custom and not roster.custom_stats_enabled:
+        if not payload.enable_custom_stats:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "custom_stats_required",
+                    "message": "Ten szablon wymaga włączenia dowolnych statystyk.",
+                },
+            )
+        roster.custom_stats_enabled = True
+    request = request_from_snapshot(
+        template,
+        unit_copies=payload.unit_copies,
+        custom_stats_enabled=roster.custom_stats_enabled,
+        simple_points_enabled=roster.simple_points_enabled,
+        small_battle_enabled=roster.small_battle_enabled,
     )
-    if not roster or roster_unit is None or roster_unit.roster_id != roster.id:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    request_payload = payload if isinstance(payload, dict) else {}
-    requested_count = request_payload.get("count")
-    default_count = costs.normalize_roster_unit_count(
-        getattr(roster_unit, "count", 1), default=1
+    if roster.small_battle_enabled and not needs_custom:
+        request = request.model_copy(
+            update={"toughness": request.toughness * Decimal("2")}
+        )
+    try:
+        quote = calculate_unit_quote(request, ruleset_version=roster.ruleset_version)
+    except QuoteValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    position = db.execute(
+        select(func.coalesce(func.max(models.RosterUnit.position), -1)).where(
+            models.RosterUnit.roster_id == roster.id
+        )
+    ).scalar_one() + 1
+    unit = models.RosterUnit(
+        roster_id=roster.id,
+        source_template_id=template.id,
+        name="",
+        models_per_unit=1,
+        unit_copies=1,
+        defense=1,
+        toughness=1,
+        profiles_json="{}",
+        position=position,
+        unit_cost=0,
     )
-    if requested_count is None:
-        count = default_count
-    else:
-        count = costs.normalize_roster_unit_count(
-            requested_count,
-            default=0,
-        )
-
-    include_item_costs = request_payload.get("include_item_costs", True) is not False
-
-    quote = costs.calculate_roster_unit_quote(
-        roster_unit.unit,
-        request_payload.get("loadout"),
-        count,
-        include_item_costs=include_item_costs,
-    )
-
-    # When this unit belongs to a hero group (attached hero or parent with heroes),
-    # the Wojownik/Strzelec classification is shared across the group.  Use
-    # _classification_map (the SSOT for group classification) so that the returned
-    # selected_total is always consistent with the roster-list badge.
-    warrior_total = float(quote.get("warrior_total") or 0.0)
-    shooter_total = float(quote.get("shooter_total") or 0.0)
-    selected_role = quote.get("selected_role")
-    selected_total = float(quote.get("selected_total") or 0.0)
-
-    # Fast-path: standalone heroes (parent_roster_unit_id=None + is_hero) are never
-    # in a group — skip the DB round-trip that _hero_group_partner_ids would issue.
-    parent_id = getattr(roster_unit, "parent_roster_unit_id", None)
-    if parent_id is None and unit_is_hero(roster_unit.unit, roster_unit):
-        group_unit_ids: set[int] = set()
-    else:
-        group_unit_ids = _hero_group_partner_ids(db, roster_unit)
-
-    if group_unit_ids:
-        partner_units: list[models.RosterUnit] = (
-            db.execute(
-                select(models.RosterUnit)
-                .options(
-                    selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
-                )
-                .where(models.RosterUnit.id.in_(group_unit_ids))
-            )
-            .scalars()
-            .all()
-        )
-        unit_data_cache: dict[int, dict[str, Any]] = {}
-        unit_payloads_cache: dict[int, dict[str, Any]] = {}
-        loadout_map: dict[int, dict[str, Any]] = {}
-
-        for partner in partner_units:
-            p_payload = _unit_payload_cached(partner.unit, unit_data_cache, unit_payloads_cache)
-            loadout_map[partner.id] = _roster_unit_loadout(
-                partner,
-                weapon_options=p_payload["weapon_options"],
-                active_items=p_payload["active_items"],
-                aura_items=p_payload["aura_items"],
-                passive_items=p_payload["passive_items"],
-            )
-
-        # For the current unit use the transient loadout from the request (the same
-        # payload passed to calculate_roster_unit_quote above), or the stored loadout
-        # when no transient loadout was provided.
-        c_payload = _unit_payload_cached(roster_unit.unit, unit_data_cache, unit_payloads_cache)
-        raw_loadout_dict = request_payload.get("loadout")
-        loadout_map[roster_unit.id] = (
-            _sanitize_loadout(
-                roster_unit.unit,
-                count,
-                raw_loadout_dict if isinstance(raw_loadout_dict, dict) else None,
-                weapon_options=c_payload["weapon_options"],
-                active_items=c_payload["active_items"],
-                aura_items=c_payload["aura_items"],
-                passive_items=c_payload["passive_items"],
-            )
-            if isinstance(raw_loadout_dict, dict)
-            else _roster_unit_loadout(
-                roster_unit,
-                weapon_options=c_payload["weapon_options"],
-                active_items=c_payload["active_items"],
-                aura_items=c_payload["aura_items"],
-                passive_items=c_payload["passive_items"],
-            )
-        )
-
-        classifications, totals_by_id = _classification_map(
-            [roster_unit, *partner_units], loadout_map
-        )
-        group_class = classifications.get(roster_unit.id)
-        group_role = (group_class or {}).get("slug") or "wojownik"
-        unit_totals = totals_by_id.get(roster_unit.id, {})
-        warrior_total = float(unit_totals.get("wojownik") or warrior_total)
-        shooter_total = float(unit_totals.get("strzelec") or shooter_total)
-        selected_role = group_role
-        selected_total = round(shooter_total if group_role == "strzelec" else warrior_total, 2)
-
-        # When group classification overrides the solo role, item_costs.weapons must be
-        # recomputed with the correct role's traits so the right panel shows accurate
-        # per-weapon costs (e.g. Miecz energetyczny halved when hero classified strzelec
-        # by the group but evaluated solo as wojownik).
-        solo_role = quote.get("selected_role") or "wojownik"
-        if include_item_costs and group_role != solo_role:
-            unit_obj = roster_unit.unit
-            normalized_for_traits = costs.normalize_roster_unit_loadout(
-                unit_obj, request_payload.get("loadout")
-            )
-            passive_for_traits = costs.compute_passive_state(unit_obj, normalized_for_traits)
-            base_traits = list(costs._strip_role_traits(passive_for_traits.traits))
-            group_traits = costs._with_role_trait(base_traits, group_role)
-            weapon_by_id_for_group: dict[int, Any] = {}
-            for link in getattr(unit_obj, "weapon_links", []) or []:
-                wid = getattr(link, "weapon_id", None)
-                weapon = getattr(link, "weapon", None)
-                if wid is None or weapon is None:
-                    continue
-                weapon_by_id_for_group[int(wid)] = weapon
-            dw_id = getattr(unit_obj, "default_weapon_id", None)
-            dw = getattr(unit_obj, "default_weapon", None)
-            if dw_id is not None and dw is not None:
-                weapon_by_id_for_group.setdefault(int(dw_id), dw)
-            corrected_weapons = {
-                str(wid): round(costs.weapon_cost(w, unit_obj.quality, group_traits), 2)
-                for wid, w in weapon_by_id_for_group.items()
-            }
-            existing_item_costs = dict(quote.get("item_costs") or {})
-            existing_item_costs["weapons"] = corrected_weapons
-            quote = {**quote, "item_costs": existing_item_costs}
-
-    return JSONResponse(
-        _json_safe(
-            {
-                "roster_unit_id": roster_unit.id,
-                # TODO: remove legacy alias after frontend/clients fully migrate.
-                "unit_id": roster_unit.id,
-                "count": count,
-                "cost_engine_version": quote.get("cost_engine_version"),
-                "selected_role": selected_role,
-                "warrior_total": warrior_total,
-                "shooter_total": shooter_total,
-                "selected_total": selected_total,
-                "components": quote.get("components") or {},
-                "item_costs": quote.get("item_costs") or {},
-                "loadout": quote.get("loadout") or {},
-            }
-        )
-    )
+    apply_request_to_roster_unit(unit, request, quote)
+    db.add(unit)
+    db.commit()
+    return _unit_payload(unit)
 
 
-@router.post("/{roster_id}/units/{roster_unit_id}/duplicate")
+@router.post(
+    "/{roster_id}/units/{unit_id}/duplicate",
+    dependencies=[Depends(require_csrf)],
+)
 def duplicate_roster_unit(
     roster_id: int,
-    roster_unit_id: int,
+    unit_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    roster_unit = db.get(models.RosterUnit, roster_unit_id)
-    if not roster or not roster_unit or roster_unit.roster_id != roster.id:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    clone = models.RosterUnit(
-        roster=roster,
-        unit=roster_unit.unit,
-        count=roster_unit.count,
-        extra_weapons_json=roster_unit.extra_weapons_json,
-        custom_name=roster_unit.custom_name,
-    )
-    clone.cached_cost = roster_unit.cached_cost
-    if clone.cached_cost is None:
-        clone.cached_cost = costs.roster_unit_cost(clone)
-    insert_position = (roster_unit.position or 0) + 1
+    user: models.User = Depends(current_user_dep),
+) -> dict[str, object]:
+    source, _ = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
+    insert_position = source.position + 1
     db.execute(
         update(models.RosterUnit)
         .where(
-            models.RosterUnit.roster_id == roster.id,
+            models.RosterUnit.roster_id == roster_id,
             models.RosterUnit.position >= insert_position,
         )
         .values(position=models.RosterUnit.position + 1)
-        .execution_options(synchronize_session=False)
     )
-    clone.position = insert_position
+    clone = models.RosterUnit(
+        roster_id=roster_id,
+        source_template_id=source.source_template_id,
+        name=f"{source.name} — kopia"[:120],
+        models_per_unit=source.models_per_unit,
+        unit_copies=source.unit_copies,
+        defense=source.defense,
+        toughness=source.toughness,
+        passive_abilities_json=source.passive_abilities_json,
+        special_abilities_json=source.special_abilities_json,
+        profiles_json=source.profiles_json,
+        position=insert_position,
+        unit_cost=source.unit_cost,
+    )
     db.add(clone)
     db.commit()
-    return RedirectResponse(
-        url=f"/rosters/{roster.id}?selected={clone.id}",
-        status_code=303,
-    )
+    return _unit_payload(clone)
 
 
-def _recompute_all_classifications(
-    db: Session,
-    roster: models.Roster,
-) -> tuple[float, dict[int, float]]:
-    """Apply the hero-group classification policy to every roster unit and
-    refresh ``extra_weapons_json`` + ``cached_cost``. Returns (total_cost, per-unit map).
-    Used by attach/detach because changing group membership can flip the
-    classification (Wojownik/Strzelec) for several units at once."""
-    unit_data_cache: dict[int, dict[str, Any]] = {}
-    unit_payloads: dict[int, dict[str, Any]] = {}
-
-    loadout_map: dict[int, dict[str, Any]] = {}
-    role_slug_maps: dict[int, dict[str, str]] = {}
-    for ru in roster.roster_units:
-        payload = _unit_payload_cached(ru.unit, unit_data_cache, unit_payloads)
-        loadout_map[ru.id] = _roster_unit_loadout(
-            ru,
-            weapon_options=payload["weapon_options"],
-            active_items=payload["active_items"],
-            aura_items=payload["aura_items"],
-            passive_items=payload["passive_items"],
-        )
-        role_slug_maps[ru.id] = _role_slug_map(ru.unit)
-
-    classifications, totals_by_id = _classification_map(
-        list(roster.roster_units), loadout_map
-    )
-
-    applied_loadouts: dict[int, dict[str, Any]] = {}
-    precomputed_costs: dict[int, float] = {}
-    for ru in roster.roster_units:
-        loadout = loadout_map.get(ru.id) or {}
-        classification = classifications.get(ru.id)
-        applied = _apply_classification_to_loadout(
-            loadout, classification, role_slug_map=role_slug_maps.get(ru.id) or {}
-        ) or loadout
-        applied_loadouts[ru.id] = applied
-        ru.extra_weapons_json = json.dumps(applied, ensure_ascii=False)
-        role_slug = (classification or {}).get("slug", "wojownik")
-        precomputed_costs[ru.id] = round(
-            float(totals_by_id.get(ru.id, {}).get(role_slug, 0.0)), 2
-        )
-
-    affected_ids = {ru.id for ru in roster.roster_units if ru.id is not None}
-    total_cost, unit_costs = costs.recalculate_roster_costs(
-        roster,
-        loadout_overrides=applied_loadouts,
-        changed_unit_ids=affected_ids,
-        precomputed_costs=precomputed_costs,
-    )
-    return total_cost, unit_costs
-
-
-@router.post("/{roster_id}/units/{roster_unit_id}/attach")
-def attach_roster_unit(
-    roster_id: int,
-    roster_unit_id: int,
-    payload: dict[str, Any] = Body(...),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    """Attach a hero roster unit to a non-hero parent roster unit in the same
-    roster. Both units' classifications will be jointly determined."""
-    raw_parent_id = payload.get("parent_roster_unit_id")
-    try:
-        parent_id = int(raw_parent_id) if raw_parent_id is not None else None
-    except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="parent_roster_unit_id invalid")
-    if parent_id is None:
-        raise HTTPException(status_code=400, detail="parent_roster_unit_id required")
-    if parent_id == roster_unit_id:
-        raise HTTPException(status_code=400, detail="Cannot attach unit to itself")
-
-    roster_stmt = (
-        select(models.Roster)
-        .options(
-            selectinload(models.Roster.roster_units).options(
-                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
-            )
-        )
-        .where(models.Roster.id == roster_id)
-    )
-    roster = db.execute(roster_stmt).scalars().unique().one_or_none()
-    if roster is None:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    roster_unit = next(
-        (ru for ru in roster.roster_units if ru.id == roster_unit_id), None
-    )
-    parent_unit = next(
-        (ru for ru in roster.roster_units if ru.id == parent_id), None
-    )
-    if roster_unit is None or parent_unit is None:
-        raise HTTPException(status_code=404)
-    from ..services.rules import unit_is_hero
-
-    if not unit_is_hero(roster_unit.unit, roster_unit):
-        raise HTTPException(
-            status_code=400, detail="Only hero units can be attached"
-        )
-    if unit_is_hero(parent_unit.unit, parent_unit):
-        raise HTTPException(
-            status_code=400, detail="Cannot attach to another hero unit"
-        )
-    if parent_unit.parent_roster_unit_id is not None:
-        raise HTTPException(
-            status_code=400, detail="Parent unit is itself attached"
-        )
-
-    roster_unit.parent_roster_unit_id = parent_unit.id
-    total_cost, unit_costs = _recompute_all_classifications(db, roster)
-    db.commit()
-    return JSONResponse(
-        _json_safe(
-            {
-                "roster_unit_id": roster_unit_id,
-                "parent_roster_unit_id": parent_unit.id,
-                "total_cost": total_cost,
-                "unit_costs": unit_costs,
-            }
-        )
-    )
-
-
-@router.post("/{roster_id}/units/{roster_unit_id}/detach")
-def detach_roster_unit(
-    roster_id: int,
-    roster_unit_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    """Detach a hero roster unit from its parent. After detach the hero is a
-    standalone roster entry and reverts to its own solo classification."""
-    roster_stmt = (
-        select(models.Roster)
-        .options(
-            selectinload(models.Roster.roster_units).options(
-                selectinload(models.RosterUnit.unit).options(*_unit_eager_options())
-            )
-        )
-        .where(models.Roster.id == roster_id)
-    )
-    roster = db.execute(roster_stmt).scalars().unique().one_or_none()
-    if roster is None:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-    roster_unit = next(
-        (ru for ru in roster.roster_units if ru.id == roster_unit_id), None
-    )
-    if roster_unit is None:
-        raise HTTPException(status_code=404)
-    if roster_unit.parent_roster_unit_id is None:
-        return JSONResponse(
-            _json_safe(
-                {
-                    "roster_unit_id": roster_unit_id,
-                    "parent_roster_unit_id": None,
-                    "total_cost": round(
-                        sum(float(ru.cached_cost or 0.0) for ru in roster.roster_units),
-                        2,
-                    ),
-                    "unit_costs": {
-                        ru.id: float(ru.cached_cost or 0.0)
-                        for ru in roster.roster_units
-                        if ru.id is not None
-                    },
-                }
-            )
-        )
-    roster_unit.parent_roster_unit_id = None
-    total_cost, unit_costs = _recompute_all_classifications(db, roster)
-    db.commit()
-    return JSONResponse(
-        _json_safe(
-            {
-                "roster_unit_id": roster_unit_id,
-                "parent_roster_unit_id": None,
-                "total_cost": total_cost,
-                "unit_costs": unit_costs,
-            }
-        )
-    )
-
-
-@router.post("/{roster_id}/units/{roster_unit_id}/delete")
+@router.delete(
+    "/{roster_id}/units/{unit_id}",
+    status_code=204,
+    dependencies=[Depends(require_csrf)],
+)
 def delete_roster_unit(
     roster_id: int,
-    roster_unit_id: int,
-    request: Request,
+    unit_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    roster_unit = db.get(models.RosterUnit, roster_unit_id)
-    if not roster or not roster_unit or roster_unit.roster_id != roster.id:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    accept_header = (request.headers.get("accept") or "").lower()
-    wants_json = "application/json" in accept_header
-    removed_cost = float(roster_unit.cached_cost or 0.0)
-    pre_delete_total = (
-        sum(float(ru.cached_cost or 0.0) for ru in roster.roster_units)
-        if wants_json else 0.0
-    )
-    removed_position = roster_unit.position or 0
-    # Detach any heroes attached to the unit being deleted (don't rely on
-    # ON DELETE SET NULL because SQLite FK enforcement may not be active).
-    db.execute(
-        update(models.RosterUnit)
-        .where(models.RosterUnit.parent_roster_unit_id == roster_unit.id)
-        .values(parent_roster_unit_id=None)
-    )
-    db.delete(roster_unit)
-    db.flush()
+    user: models.User = Depends(current_user_dep),
+) -> Response:
+    unit, _ = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
+    removed_position = unit.position
+    db.delete(unit)
     db.execute(
         update(models.RosterUnit)
         .where(
-            models.RosterUnit.roster_id == roster.id,
+            models.RosterUnit.roster_id == roster_id,
             models.RosterUnit.position > removed_position,
         )
         .values(position=models.RosterUnit.position - 1)
     )
     db.commit()
-    if wants_json:
-        return JSONResponse({
-            "deleted_roster_unit_id": roster_unit_id,
-            "total_cost": round(pre_delete_total - removed_cost, 2),
-        })
-    return RedirectResponse(url=f"/rosters/{roster.id}", status_code=303)
+    return Response(status_code=204)
 
 
-# ============================================================
-# SECTION: STRATEGIC CARDS (Karty Strategiczne)
-# _parse_strategic_cards, strategic_cards_edit/save/print
-# ============================================================
-def _parse_strategic_cards(raw: str | None) -> dict[str, list[str]]:
-    """Parsuje strategic_cards_json -> {'tasks':[3], 'supports':[3]}.
-
-    Nieznane slugi są pomijane, brakujące sloty padowane pustym stringiem,
-    nadmiarowe ucinane do 3. Odporne na None / niepoprawny JSON / nie-stringi.
-    """
-    empty = {"tasks": ["", "", ""], "supports": ["", "", ""]}
-    if not raw:
-        return empty
-    try:
-        data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError, ValueError):
-        return empty
-    if not isinstance(data, Mapping):
-        return empty
-
-    raw_tasks = data.get("tasks") or []
-    raw_supports = data.get("supports") or []
-    if not isinstance(raw_tasks, (list, tuple)):
-        raw_tasks = []
-    if not isinstance(raw_supports, (list, tuple)):
-        raw_supports = []
-
-    tasks = [s for s in raw_tasks if isinstance(s, str) and s in TASKS_BY_SLUG][:3]
-    supports = [s for s in raw_supports if isinstance(s, str) and s in SUPPORTS_BY_SLUG][:3]
-    return {
-        "tasks": (tasks + ["", "", ""])[:3],
-        "supports": (supports + ["", "", ""])[:3],
-    }
-
-
-def _strategic_card_matrix(selected: dict[str, list[str]]) -> list[list[dict[str, str] | None]]:
-    """Buduje macierz 3x3: matrix[row=support_idx][col=task_idx] = {task_text, support_text} albo None."""
-    tasks_resolved = [TASKS_BY_SLUG.get(slug) for slug in selected["tasks"]]
-    supports_resolved = [SUPPORTS_BY_SLUG.get(slug) for slug in selected["supports"]]
-    matrix: list[list[dict[str, str] | None]] = []
-    for support in supports_resolved:
-        row: list[dict[str, str] | None] = []
-        for task in tasks_resolved:
-            if task is None or support is None:
-                row.append(None)
-            else:
-                row.append({"task_text": task.text, "support_text": support.text})
-        matrix.append(row)
-    return matrix
-
-
-@router.get("/{roster_id}/strategic-cards", response_class=HTMLResponse)
-def strategic_cards_edit(
+@router.post("/{roster_id}/units/reorder", dependencies=[Depends(require_csrf)])
+def reorder_roster_units(
     roster_id: int,
-    request: Request,
+    payload: ReorderPayload,
     db: Session = Depends(get_db),
-    current_user: models.User | None = Depends(get_current_user(optional=True)),
-):
-    if not current_user:
-        return RedirectResponse(url="/auth/login", status_code=303)
-    roster = db.get(models.Roster, roster_id)
-    if not roster:
-        raise HTTPException(status_code=404)
-    _ensure_roster_view_access(roster, current_user)
-    can_edit = current_user.is_admin or roster.owner_id == current_user.id
-    selected = _parse_strategic_cards(roster.strategic_cards_json)
-    return templates.TemplateResponse(
-        "roster_strategic_cards.html",
-        {
-            "request": request,
-            "user": current_user,
-            "roster": roster,
-            "tasks": STRATEGIC_TASKS,
-            "supports": STRATEGIC_SUPPORTS,
-            "selected": selected,
-            "can_edit": can_edit,
-        },
-    )
-
-
-@router.post("/{roster_id}/strategic-cards")
-def strategic_cards_save(
-    roster_id: int,
-    tasks: list[str] = Form(default_factory=list),
-    supports: list[str] = Form(default_factory=list),
-    redirect_to: str = Form("self"),
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user()),
-):
-    roster = db.get(models.Roster, roster_id)
-    if not roster:
-        raise HTTPException(status_code=404)
-    _ensure_roster_edit_access(roster, current_user)
-
-    def _dedup_first_n(values: list[str], known: dict, limit: int = 3) -> list[str]:
-        """Filtruje znane slugi, deduplikuje (zachowując kolejność), padding do limit pustkami."""
-        seen: set[str] = set()
-        out: list[str] = []
-        for v in values:
-            v = (v or "").strip()
-            if v and v in known and v not in seen:
-                seen.add(v)
-                out.append(v)
-            if len(out) >= limit:
-                break
-        return (out + [""] * limit)[:limit]
-
-    payload = {
-        "tasks": _dedup_first_n(tasks, TASKS_BY_SLUG),
-        "supports": _dedup_first_n(supports, SUPPORTS_BY_SLUG),
-    }
-    roster.strategic_cards_json = json.dumps(payload, ensure_ascii=False)
+    user: models.User = Depends(current_user_dep),
+) -> dict[str, object]:
+    _owned_roster(db, roster_id, user.id)
+    units = db.execute(
+        select(models.RosterUnit).where(models.RosterUnit.roster_id == roster_id)
+    ).scalars().all()
+    by_id = {item.id: item for item in units}
+    if len(payload.unit_ids) != len(set(payload.unit_ids)) or set(payload.unit_ids) != set(by_id):
+        raise HTTPException(status_code=422, detail="Kolejność musi zawierać wszystkie oddziały raz")
+    for position, item_id in enumerate(payload.unit_ids):
+        by_id[item_id].position = position
     db.commit()
-    if redirect_to == "print":
-        return RedirectResponse(url=f"/rosters/{roster.id}/strategic-cards/print", status_code=303)
-    if redirect_to == "roster":
-        return RedirectResponse(url=f"/rosters/{roster.id}", status_code=303)
-    return RedirectResponse(url=f"/rosters/{roster.id}/strategic-cards", status_code=303)
+    return {"unit_ids": payload.unit_ids}
 
 
-@router.get("/{roster_id}/strategic-cards/print", response_class=HTMLResponse)
-def strategic_cards_print(
+@router.post(
+    "/{roster_id}/units/{unit_id}/save-template",
+    dependencies=[Depends(require_csrf)],
+)
+def save_unit_as_template(
     roster_id: int,
-    request: Request,
+    unit_id: int,
+    payload: SaveTemplatePayload,
     db: Session = Depends(get_db),
-    current_user: models.User | None = Depends(get_current_user(optional=True)),
-):
-    if not current_user:
-        return RedirectResponse(url="/auth/login", status_code=303)
-    roster = db.get(models.Roster, roster_id)
-    if not roster:
-        raise HTTPException(status_code=404)
-    _ensure_roster_view_access(roster, current_user)
-    selected = _parse_strategic_cards(roster.strategic_cards_json)
-    matrix = _strategic_card_matrix(selected)
-    return templates.TemplateResponse(
-        "roster_strategic_cards_print.html",
-        {
-            "request": request,
-            "user": current_user,
-            "roster": roster,
-            "matrix": matrix,
-        },
-    )
-
-
-# ============================================================
-# SECTION: UNIT DISPLAY HELPERS
-# _default_loadout_summary, _unit_weapon_options, _passive_entries,
-# _base_cost_per_model, _default_loadout_payload, itp.
-# Dane wyświetlane w edytorze oddziału (prawy panel rozpiski).
-# ============================================================
-def _default_loadout_summary(unit: models.Unit) -> str:
-    parts: list[str] = []
-    for weapon, count in unit.default_weapon_loadout:
-        label = f"{weapon.effective_name} x{count}" if count > 1 else weapon.effective_name
-        parts.append(label)
-    return ", ".join(parts) if parts else "-"
-
-
-def _unit_weapon_options(unit: models.Unit) -> list[dict]:
-    options: list[dict] = []
-    seen: set[int] = set()
-    flags = _unit_army_flags(unit)
-    primary_id: int | None = None
-    if getattr(unit, "default_weapon_id", None):
-        primary_id = unit.default_weapon_id
-    elif getattr(unit, "default_weapon", None) and getattr(unit.default_weapon, "id", None):
-        primary_id = unit.default_weapon.id
-    for link in getattr(unit, "weapon_links", []):
-        if link.weapon_id is None or link.weapon is None:
-            continue
-        if link.weapon_id in seen:
-            continue
-        cost_value = costs.weapon_cost(link.weapon, unit.quality, flags)
-        default_count = getattr(link, "default_count", None)
-        try:
-            default_count = int(default_count) if default_count is not None else None
-        except (TypeError, ValueError):
-            default_count = None
-        is_primary = bool(getattr(link, "is_primary", False))
-        if (
-            not is_primary
-            and primary_id is not None
-            and link.weapon_id == primary_id
-            and (default_count or 0) > 0
-        ):
-            is_primary = True
-        options.append(
-            {
-                "id": link.weapon_id,
-                "name": link.weapon.effective_name,
-                "is_default": bool(getattr(link, "is_default", False)),
-                "is_primary": is_primary,
-                "cost": cost_value,
-                "default_count": default_count,
-                "range": link.weapon.effective_range or link.weapon.range or "-",
-                "attacks": getattr(link.weapon, "display_attacks", None)
-                or link.weapon.effective_attacks,
-                "ap": link.weapon.effective_ap,
-                "traits": link.weapon.effective_tags or link.weapon.tags or "",
-            }
+    user: models.User = Depends(current_user_dep),
+) -> dict[str, object]:
+    unit, roster = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
+    army = _owned_army(db, payload.army_id, user.id)
+    position = db.execute(
+        select(func.coalesce(func.max(models.UnitTemplate.position), -1)).where(
+            models.UnitTemplate.army_id == army.id
         )
-        seen.add(link.weapon_id)
-    if unit.default_weapon_id and unit.default_weapon_id not in seen and unit.default_weapon:
-        cost_value = costs.weapon_cost(unit.default_weapon, unit.quality, flags)
-        options.append(
-            {
-                "id": unit.default_weapon_id,
-                "name": unit.default_weapon.effective_name,
-                "is_default": True,
-                "is_primary": bool(primary_id == unit.default_weapon_id),
-                "cost": cost_value,
-                "default_count": 1,
-                "range": unit.default_weapon.effective_range
-                or unit.default_weapon.range
-                or "-",
-                "attacks": getattr(unit.default_weapon, "display_attacks", None)
-                or unit.default_weapon.effective_attacks,
-                "ap": unit.default_weapon.effective_ap,
-                "traits": unit.default_weapon.effective_tags
-                or unit.default_weapon.tags
-                or "",
-            }
-        )
-    options.sort(key=lambda item: (not item["is_default"], item["name"].casefold()))
-    return options
-def _passive_entries(unit: models.Unit) -> list[dict]:
-    payload = utils.passive_flags_to_payload(unit.flags)
-    entries: list[dict] = []
-    flags = _unit_army_flags(unit)
-    unit_traits = costs.flags_to_ability_list(flags)
-    default_weapons = costs.unit_default_weapons(unit)
-    prefix = utils.ARMY_RULE_OFF_PREFIX
-
-    for item in payload:
-        if not item:
-            continue
-        slug = str(item.get("slug") or "").strip()
-        if not slug or _is_hidden_trait(slug):
-            continue
-        label = item.get("label") or slug
-        value = item.get("value")
-        description = item.get("description") or ""
-        is_mandatory = bool(item.get("is_mandatory", False))
-        is_default = bool(item.get("is_default", False)) or is_mandatory
-        default_count = 1 if is_default else 0
-        try:
-            components = costs.ability_cost_components_from_name(
-                label or slug,
-                value,
-                unit_traits,
-                toughness=unit.toughness,
-                quality=unit.quality,
-                defense=unit.defense,
-                weapons=default_weapons,
-            )
-            cost_base_value = float(components.base)
-            cost_weapon_delta = float(components.weapon_delta)
-            cost_value = float(components.total)
-        except Exception:  # pragma: no cover - fallback for unexpected input
-            fallback = costs.ability_cost_components_from_name(
-                slug,
-                value,
-                unit_traits,
-                toughness=unit.toughness,
-                quality=unit.quality,
-                defense=unit.defense,
-                weapons=default_weapons,
-            )
-            cost_base_value = float(fallback.base)
-            cost_weapon_delta = float(fallback.weapon_delta)
-            cost_value = float(fallback.total)
-        if slug.startswith(prefix):
-            base_slug = slug[len(prefix) :].strip()
-            cost_source = item.get("value") or base_slug or label
-            try:
-                disable_components = costs.ability_cost_components_from_name(
-                    cost_source or base_slug,
-                    None,
-                    unit_traits,
-                    toughness=unit.toughness,
-                    quality=unit.quality,
-                    defense=unit.defense,
-                    weapons=default_weapons,
-                )
-            except Exception:  # pragma: no cover - defensive
-                disable_components = costs.ability_cost_components_from_name(
-                    base_slug or slug,
-                    None,
-                    unit_traits,
-                    toughness=unit.toughness,
-                    quality=unit.quality,
-                    defense=unit.defense,
-                    weapons=default_weapons,
-                )
-            cost_base_value = -float(disable_components.base)
-            cost_weapon_delta = -float(disable_components.weapon_delta)
-            cost_value = cost_base_value + cost_weapon_delta
-        entries.append(
-            {
-                "slug": slug,
-                "value": "" if value is None else str(value),
-                "label": label,
-                "description": description,
-                "cost": cost_value,
-                "cost_base": cost_base_value,
-                "cost_weapon_delta": cost_weapon_delta,
-                "is_default": is_default,
-                "default_count": default_count,
-                "is_mandatory": is_mandatory,
-            }
-        )
-
-    return entries
-
-
-def _passive_labels(unit: models.Unit) -> list[str]:
-    return [
-        entry["label"]
-        for entry in _passive_entries(unit)
-        if entry.get("label")
-    ]
-
-
-def _coerce_int(value: Any, default: int = 0) -> int:
-    try:
-        number = int(value)
-    except (TypeError, ValueError):
-        try:
-            number = int(float(value))
-        except (TypeError, ValueError):
-            return default
-    return number
-
-
-def _ability_loadout_key(ability_id: Any, value: Any | None) -> str:
-    if ability_id is None:
-        return ""
-    base = str(ability_id)
-    if value is None:
-        return base
-    if isinstance(value, bool):
-        variant = "1" if value else "0"
-    elif isinstance(value, (int, float)):
-        if isinstance(value, float) and value.is_integer():
-            variant = str(int(value))
-        else:
-            variant = str(value)
-    else:
-        variant = str(value).strip()
-    if not variant:
-        return base
-    return f"{base}:{variant}"
-
-
-def _split_ability_loadout_key(key: Any) -> tuple[str, str | None]:
-    text = str(key).strip()
-    if not text:
-        return "", None
-    if ":" in text:
-        ability_id, variant = text.split(":", 1)
-        return ability_id, variant
-    return text, None
-
-
-def _loadout_counts(
-    loadout: dict[str, Any] | None, section: str
-) -> dict[str, int]:
-    result: dict[str, int] = {}
-    if not isinstance(loadout, dict):
-        return result
-    raw_section = loadout.get(section)
-    if isinstance(raw_section, dict):
-        items = raw_section.items()
-    elif isinstance(raw_section, list):
-        items = []
-        for entry in raw_section:
-            if not isinstance(entry, dict):
-                continue
-            if section == "passive":
-                key = entry.get("slug") or entry.get("id")
-            else:
-                key = (
-                    entry.get("loadout_key")
-                    or entry.get("key")
-                    or entry.get("id")
-                    or entry.get("ability_id")
-                )
-                if key is None:
-                    ability_id = entry.get("ability_id")
-                    value = entry.get("value")
-                    if ability_id is not None:
-                        key = _ability_loadout_key(ability_id, value)
-            if key is None:
-                continue
-            items.append((key, entry.get("count")))
-    else:
-        return result
-    for key, raw_value in items:
-        if key is None:
-            continue
-        key_str = str(key)
-        count = _coerce_int(raw_value, 0)
-        if count < 0:
-            count = 0
-        result[key_str] = count
-    return result
-
-
-def _loadout_passive_flags(loadout: dict[str, Any] | None) -> dict[str, int]:
-    counts = _loadout_counts(loadout, "passive")
-    return {key: 1 if value > 0 else 0 for key, value in counts.items()}
-
-
-def _selected_passive_entries(
-    roster_unit: models.RosterUnit,
-    loadout: dict[str, Any] | None,
-    passive_items: list[dict] | None,
-    classification: dict[str, Any] | None = None,
-) -> list[dict]:
-    entries = passive_items if passive_items is not None else _passive_entries(roster_unit.unit)
-    flags = _loadout_passive_flags(loadout)
-    selected: list[dict] = []
-    seen_slugs: set[str] = set()
-    seen_identifiers: set[str] = set()
-    for entry in entries:
-        if not entry:
-            continue
-        slug = str(entry.get("slug") or "").strip()
-        if not slug:
-            continue
-        if entry.get("is_army_rule"):
-            seen_slugs.add(slug)
-            identifier = costs.ability_identifier(slug)
-            if identifier:
-                seen_identifiers.add(identifier)
-            continue
-        identifier = costs.ability_identifier(slug)
-        if _is_hidden_trait(slug):
-            seen_slugs.add(slug)
-            if identifier:
-                seen_identifiers.add(identifier)
-            continue
-        default_flag = 1 if entry.get("is_default") or entry.get("default_count") else 0
-        is_mandatory = bool(entry.get("is_mandatory", False))
-        selected_flag = flags.get(slug, default_flag)
-        if is_mandatory:
-            selected_flag = 1
-        # When a group classification is active, suppress role abilities that
-        # don't match it — the group slug is injected at the end of this
-        # function instead, so only the shared classification is shown.
-        if (
-            identifier in costs.ROLE_SLUGS
-            and isinstance(classification, dict)
-            and classification.get("slug")
-            and costs.ability_identifier(str(classification.get("slug") or "")) != identifier
-        ):
-            selected_flag = 0
-        if selected_flag <= 0:
-            seen_slugs.add(slug)
-            if identifier:
-                seen_identifiers.add(identifier)
-            continue
-        item = dict(entry)
-        item["selected"] = True
-        item["count"] = 1
-        if is_mandatory:
-            item["is_mandatory"] = True
-        selected.append(item)
-        seen_slugs.add(slug)
-        if identifier:
-            seen_identifiers.add(identifier)
-    for slug, flag in flags.items():
-        slug_value = str(slug).strip()
-        if not slug_value or flag <= 0:
-            if slug_value:
-                seen_slugs.add(slug_value)
-                identifier = costs.ability_identifier(slug_value)
-                if identifier:
-                    seen_identifiers.add(identifier)
-            continue
-        identifier = costs.ability_identifier(slug_value)
-        if _is_hidden_trait(slug_value):
-            seen_slugs.add(slug_value)
-            if identifier:
-                seen_identifiers.add(identifier)
-            continue
-        if slug_value in seen_slugs or (identifier and identifier in seen_identifiers):
-            continue
-        seen_slugs.add(slug_value)
-        if identifier:
-            seen_identifiers.add(identifier)
-    if isinstance(classification, dict):
-        class_slug = str(classification.get("slug") or "").strip()
-        if class_slug:
-            identifier = costs.ability_identifier(class_slug)
-            if _is_hidden_trait(class_slug):
-                seen_slugs.add(class_slug)
-                if identifier:
-                    seen_identifiers.add(identifier)
-                return selected
-            if class_slug not in seen_slugs and (
-                not identifier or identifier not in seen_identifiers
-            ):
-                label = classification.get("label") or class_slug
-                entry = {
-                    "slug": class_slug,
-                    "label": label,
-                    "description": "",
-                    "selected": True,
-                    "count": 1,
-                }
-                selected.append(entry)
-                seen_slugs.add(class_slug)
-                if identifier:
-                    seen_identifiers.add(identifier)
-    return selected
-
-
-# ============================================================
-# SECTION: LOADOUT PROCESSING
-# _role_slug_map, _apply_classification_to_loadout,
-# _selected_ability_entries, _ability_entries, itp.
-# Buduje payload loadoutu wysyłany do calculate_roster_unit_quote.
-# ============================================================
-def _role_slug_map(unit: models.Unit | None) -> dict[str, str]:
-    if unit is None:
-        return {}
-    mapping: dict[str, str] = {}
-    flags = _unit_army_flags(unit)
-    for raw_key in flags.keys():
-        if raw_key is None:
-            continue
-        value = str(raw_key).strip()
-        if not value:
-            continue
-        while value.endswith(("?", "!")):
-            value = value[:-1].strip()
-        identifier = costs.ability_identifier(value)
-        if identifier in costs.ROLE_SLUGS and identifier not in mapping:
-            mapping[identifier] = value
-    return mapping
-
-
-def _apply_classification_to_loadout(
-    loadout: dict[str, Any] | None,
-    classification: dict[str, Any] | None,
-    *,
-    role_slug_map: Mapping[str, str] | None = None,
-) -> dict[str, Any] | None:
-    if not isinstance(loadout, dict):
-        return loadout
-
-    passive_section = loadout.get("passive")
-    if not isinstance(passive_section, dict):
-        passive_section = {}
-        loadout["passive"] = passive_section
-
-    target_identifier: str | None = None
-    target_key: str | None = None
-    if isinstance(classification, dict):
-        raw_slug = classification.get("slug")
-        if isinstance(raw_slug, str):
-            normalized = costs.ability_identifier(raw_slug)
-            if normalized in costs.ROLE_SLUGS:
-                target_identifier = normalized
-                stripped = raw_slug.strip()
-                target_key = stripped or normalized
-
-    existing_map: dict[str, str] = {}
-    for key in list(passive_section.keys()):
-        identifier = costs.ability_identifier(key)
-        if identifier not in costs.ROLE_SLUGS:
-            continue
-        if identifier not in existing_map:
-            existing_map[identifier] = str(key)
-        if not target_identifier or identifier != target_identifier:
-            # Set to 0 rather than removing the key so that _sanitize_loadout
-            # does not re-introduce the default value on the next page load,
-            # and _selected_passive_entries sees an explicit disabled flag.
-            passive_section[key] = 0
-
-    if target_identifier:
-        preferred_map = dict(existing_map)
-        if role_slug_map:
-            for ident, slug in role_slug_map.items():
-                if ident in costs.ROLE_SLUGS and ident not in preferred_map:
-                    preferred_map[ident] = slug
-        candidate = preferred_map.get(target_identifier)
-        if candidate:
-            target_key = candidate
-        if target_key is None:
-            target_key = target_identifier
-        cleaned_key = str(target_key).strip()
-        while cleaned_key.endswith(("?", "!")):
-            cleaned_key = cleaned_key[:-1].strip()
-        passive_section[cleaned_key or target_identifier] = 1
-
-    return loadout
-
-
-def _selected_ability_entries(
-    loadout: dict[str, Any] | None,
-    ability_items: list[dict] | None,
-    section: str,
-) -> list[dict]:
-    entries = ability_items if ability_items is not None else []
-    counts = _loadout_counts(loadout, section)
-    name_map: dict[str, str] = {}
-    if isinstance(loadout, dict):
-        name_map = _extract_label_map(loadout.get(f"{section}_labels"))
-    selected: list[dict] = []
-    seen: set[str] = set()
-    for entry in entries:
-        if not entry or entry.get("ability_id") is None:
-            continue
-        ability_id = entry.get("ability_id")
-        loadout_key = entry.get("loadout_key")
-        if not loadout_key:
-            loadout_key = _ability_loadout_key(ability_id, entry.get("value"))
-        if not loadout_key:
-            continue
-        key = str(loadout_key)
-        default_count = _coerce_int(entry.get("default_count") or 0, 0)
-        stored = counts.get(key, default_count)
-        if stored <= 0:
-            seen.add(key)
-            continue
-        item = dict(entry)
-        item["count"] = stored
-        item["loadout_key"] = key
-
-        custom_name = item.get("custom_name") or name_map.get(key)
-        if isinstance(custom_name, str):
-            normalized = custom_name.strip()
-            if normalized:
-                item["custom_name"] = normalized
-            elif "custom_name" in item:
-                item.pop("custom_name", None)
-
-        selected.append(item)
-        seen.add(key)
-    for key, value in counts.items():
-        if key in seen or value <= 0:
-            continue
-        seen.add(key)
-
-    return selected
-
-
-def _ability_base_label(entry: dict) -> str:
-    base = entry.get("label") or entry.get("raw") or entry.get("slug") or ""
-    custom = str(entry.get("custom_name") or "").strip()
-    if custom:
-        return f"{custom} [{base}]" if base else custom
-    return base
-
-
-def _expand_ability_labels(entries: list[dict]) -> list[str]:
-    labels: list[str] = []
-    for entry in entries:
-        if not entry:
-            continue
-        label = _ability_base_label(entry)
-        if label:
-            labels.extend([label] * max(_coerce_int(entry.get("count"), 0), 1))
-    return labels
-
-
-def _ability_label_with_count(entry: dict) -> str:
-    base_label = entry.get("label") or entry.get("raw") or entry.get("slug") or ""
-    custom = str(entry.get("custom_name") or "").strip()
-    if custom:
-        label = f"{custom} [{base_label}]" if base_label else custom
-    else:
-        label = base_label
-    count = _coerce_int(entry.get("count"), 0)
-    if count > 1:
-        return f"{label} ×{count}"
-    return label
-
-
-def _ability_entries(unit: models.Unit, ability_type: str) -> list[dict]:
-    entries: list[dict] = []
-    payload = ability_registry.unit_ability_payload(unit, ability_type)
-    payload_by_id: dict[int, list[dict]] = {}
-    for item in payload:
-        ability_id = item.get("ability_id")
-        if ability_id is None:
-            continue
-        try:
-            key = int(ability_id)
-        except (TypeError, ValueError):  # pragma: no cover - defensive
-            continue
-        payload_by_id.setdefault(key, []).append(item)
-    flags = _unit_army_flags(unit)
-    unit_traits = costs.flags_to_ability_list(flags)
-    ability_links = [
-        link
-        for link in getattr(unit, "abilities", [])
-        if link.ability and link.ability.type == ability_type
-    ]
-    ability_links.sort(
-        key=lambda link: (
-            getattr(link, "position", 0),
-            getattr(link, "id", 0) or 0,
-        )
-    )
-    for link in ability_links:
-        ability = link.ability
-        params: dict[str, Any] = {}
-        if link.params_json:
-            try:
-                params = json.loads(link.params_json)
-            except json.JSONDecodeError:  # pragma: no cover - defensive
-                params = {}
-        value = params.get("value")
-        value_str = str(value) if value is not None else None
-        payload_entry: dict[str, Any] | None = None
-        payload_candidates = payload_by_id.get(ability.id or -1) or []
-        if value_str is not None:
-            for candidate in payload_candidates:
-                if str(candidate.get("value") or "") == value_str:
-                    payload_entry = candidate
-                    break
-        if payload_entry is None and payload_candidates:
-            payload_entry = payload_candidates[0]
-        payload_entry = payload_entry or {}
-        label = payload_entry.get("label") or ability.name or ""
-        custom_name = payload_entry.get("custom_name")
-        slug = payload_entry.get("slug") or ability_registry.ability_slug(ability) or ""
-        raw_label = payload_entry.get("raw") or payload_entry.get("base_label") or label
-        if isinstance(custom_name, str):
-            custom_name = custom_name.strip() or None
-        base_label = payload_entry.get("base_label") or label
-        description = payload_entry.get("description") or ability.description or ""
-        is_default = payload_entry.get("is_default")
-        if is_default is None:
-            is_default = False
-            if "default" in params:
-                is_default = bool(params.get("default"))
-            elif "is_default" in params:
-                is_default = bool(params.get("is_default"))
-        cost_value = costs.ability_cost(
-            link,
-            unit_traits,
-            toughness=unit.toughness,
-        )
-        entries.append(
-            {
-                "ability_id": ability.id,
-                "label": base_label,
-                "raw": raw_label,
-                "slug": slug,
-                "description": description,
-                "cost": cost_value,
-                "is_default": bool(is_default),
-                "default_count": 1 if bool(is_default) else 0,
-                "custom_name": custom_name,
-                "value": value,
-                "loadout_key": _ability_loadout_key(ability.id, value),
-            }
-        )
-    entries.sort(key=lambda entry: (not entry.get("is_default", False), entry.get("label", "").casefold()))
-    return entries
-
-
-def _roster_unit_weapon_components_sum(
-    roster_unit: models.RosterUnit,
-    applied_loadout: dict[str, Any] | None,
-) -> tuple[float, float]:
-    unit = getattr(roster_unit, "unit", None)
-    if unit is None:
-        return (0.0, 0.0)
-    if not isinstance(applied_loadout, dict):
-        applied_loadout = {}
-    # Use compute_passive_state (like roster_unit_role_totals) to get base
-    # traits without role-classification slugs (wojownik/strzelec).  Using
-    # _unit_army_flags directly would include the unit's own role slug and
-    # halve the wrong weapon type (e.g. strzelec halves melee, but the
-    # classification formula (melee+ranged+max)/2 must receive raw values).
-    passive_state = costs.compute_passive_state(unit, applied_loadout)
-    unit_traits = costs._strip_role_traits(passive_state.traits)
-    weapons_section = applied_loadout.get("weapons") or {}
-    total_mode = applied_loadout.get("mode") == "total"
-    model_count = max(int(getattr(roster_unit, "count", 1) or 1), 1)
-
-    weapons_by_id: dict[int, models.Weapon] = {}
-    for link in getattr(unit, "weapon_links", None) or []:
-        if link.weapon_id is not None and link.weapon is not None:
-            weapons_by_id.setdefault(int(link.weapon_id), link.weapon)
-    default_id = getattr(unit, "default_weapon_id", None)
-    default_w = getattr(unit, "default_weapon", None)
-    if default_id is not None and default_w is not None:
-        weapons_by_id.setdefault(int(default_id), default_w)
-
-    counts_iter: list[tuple[Any, Any]] = []
-    if isinstance(weapons_section, dict):
-        counts_iter = list(weapons_section.items())
-    elif isinstance(weapons_section, list):
-        for entry in weapons_section:
-            if not isinstance(entry, dict):
-                continue
-            wid = (
-                entry.get("weapon_id")
-                or entry.get("id")
-                or entry.get("loadout_key")
-                or entry.get("key")
-            )
-            cnt = entry.get("per_model") if "per_model" in entry else entry.get("count")
-            if wid is not None:
-                counts_iter.append((wid, cnt))
-
-    melee_sum = 0.0
-    ranged_sum = 0.0
-    for raw_id, raw_count in counts_iter:
-        try:
-            weapon_id = int(str(raw_id).split(":", 1)[0])
-        except (TypeError, ValueError):
-            continue
-        try:
-            count = int(raw_count)
-        except (TypeError, ValueError):
-            try:
-                count = int(float(raw_count))
-            except (TypeError, ValueError):
-                continue
-        if count <= 0:
-            continue
-        weapon = weapons_by_id.get(weapon_id)
-        if weapon is None:
-            continue
-        components = costs.weapon_cost_components(weapon, unit.quality, unit_traits)
-        total_count = count if total_mode else count * model_count
-        melee_sum += float(components.get("melee") or 0.0) * total_count
-        ranged_sum += float(components.get("ranged") or 0.0) * total_count
-
-    return (melee_sum, ranged_sum)
-
-
-def _roster_unit_classification_weapon_cost(
-    roster_unit: models.RosterUnit,
-    applied_loadout: dict[str, Any] | None,
-) -> float:
-    melee, ranged = _roster_unit_weapon_components_sum(roster_unit, applied_loadout)
-    return round((melee + ranged + max(melee, ranged)) / 2.0, 2)
-
-
-def _base_cost_per_model(
-    unit: models.Unit, classification: dict[str, Any] | None = None
-) -> float:
-    passive_state = costs.compute_passive_state(unit)
-    base_traits = costs._strip_role_traits(passive_state.traits)
-    slug: str | None = None
-    if isinstance(classification, dict):
-        raw_slug = classification.get("slug")
-        if isinstance(raw_slug, str):
-            normalized = raw_slug.strip().casefold()
-            if normalized in costs.ROLE_SLUGS:
-                slug = normalized
-    if slug:
-        base_traits.append(slug)
-    base_value = costs.base_model_cost(
-        unit.quality,
-        unit.defense,
-        unit.toughness,
-        base_traits,
-    )
-    passive_cost = 0.0
-    trait_tokens: set[str] = set()
-
-    def _add_tokens(value: str | None) -> set[str]:
-        tokens: set[str] = set()
-        if not value:
-            return tokens
-        raw_text = str(value).strip()
-        if not raw_text:
-            return tokens
-        tokens.add(raw_text.casefold())
-        identifier = costs.ability_identifier(raw_text)
-        if identifier:
-            tokens.add(identifier)
-        normalized = costs.normalize_name(raw_text)
-        if normalized:
-            tokens.add(normalized)
-        return tokens
-
-    for trait in base_traits:
-        trait_tokens.update(_add_tokens(trait))
-    default_weapons = costs.unit_default_weapons(unit)
-    for entry in passive_state.payload:
-        slug_value = str(entry.get("slug") or "").strip()
-        if not slug_value:
-            continue
-        if costs.ability_identifier(slug_value) in costs.ROLE_SLUGS:
-            continue
-        try:
-            default_count = int(entry.get("default_count") or 0)
-        except (TypeError, ValueError):
-            default_count = 0
-        if default_count <= 0:
-            continue
-        entry_tokens = _add_tokens(slug_value)
-        entry_tokens.update(_add_tokens(entry.get("label")))
-        if trait_tokens.intersection(entry_tokens):
-            continue
-        label = entry.get("label") or slug_value
-        value = entry.get("value")
-        passive_cost += costs.ability_cost_from_name(
-            label or slug_value,
-            value,
-            base_traits,
-            toughness=unit.toughness,
-            quality=unit.quality,
-            defense=unit.defense,
-            weapons=default_weapons,
-        )
-        trait_tokens.update(entry_tokens)
-    return round(base_value + passive_cost, 2)
-
-
-def _default_loadout_payload(
-    unit: models.Unit,
-    weapon_options: list[dict] | None = None,
-    active_items: list[dict] | None = None,
-    aura_items: list[dict] | None = None,
-    passive_items: list[dict] | None = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "weapons": {},
-        "active": {},
-        "aura": {},
-        "passive": {},
-        "active_labels": {},
-        "aura_labels": {},
-    }
-    options = weapon_options if weapon_options is not None else _unit_weapon_options(unit)
-    for option in options:
-        weapon_id = option.get("id")
-        if weapon_id is None:
-            continue
-        try:
-            default_count = int(option.get("default_count") or 0)
-        except (TypeError, ValueError):
-            default_count = 0
-        payload["weapons"][str(weapon_id)] = max(default_count, 0)
-
-    for ability_entry, key in (
-        (active_items if active_items is not None else _ability_entries(unit, "active"), "active"),
-        (aura_items if aura_items is not None else _ability_entries(unit, "aura"), "aura"),
-    ):
-        for item in ability_entry:
-            ability_id = item.get("ability_id")
-            if ability_id is None:
-                continue
-            try:
-                default_count = int(item.get("default_count") or 0)
-            except (TypeError, ValueError):
-                default_count = 0
-            entry_key = item.get("loadout_key")
-            if not entry_key:
-                entry_key = _ability_loadout_key(ability_id, item.get("value")) or str(
-                    ability_id
-                )
-            payload[key][str(entry_key)] = max(default_count, 0)
-
-    passive_entries = passive_items if passive_items is not None else _passive_entries(unit)
-    for entry in passive_entries:
-        slug = entry.get("slug")
-        if not slug:
-            continue
-        is_mandatory = bool(entry.get("is_mandatory", False))
-        payload["passive"][str(slug)] = 1 if (entry.get("is_default") or is_mandatory) else 0
-
-    return payload
-
-
-def _extract_label_map(source: Any) -> dict[str, str]:
-    result: dict[str, str] = {}
-    if isinstance(source, dict):
-        items = source.items()
-    elif isinstance(source, list):
-        items = []
-        for entry in source:
-            if not isinstance(entry, dict):
-                continue
-            entry_id = (
-                entry.get("loadout_key")
-                or entry.get("key")
-                or entry.get("id")
-                or entry.get("ability_id")
-            )
-            if entry_id is None and entry.get("ability_id") is not None:
-                entry_id = _ability_loadout_key(entry.get("ability_id"), entry.get("value"))
-            if entry_id is None:
-                continue
-            name_value = entry.get("name") or entry.get("label") or entry.get("value")
-            items.append((entry_id, name_value))
-    else:
-        return result
-    for raw_id, raw_value in items:
-        if raw_id is None or raw_value is None:
-            continue
-        text_value = str(raw_value).strip()
-        if not text_value:
-            continue
-        result[str(raw_id)] = text_value[:ABILITY_NAME_MAX_LENGTH]
-    return result
-
-
-def _parse_loadout_json(text: str | None) -> dict[str, Any]:
-    base: dict[str, Any] = {
-        "weapons": {},
-        "active": {},
-        "aura": {},
-        "passive": {},
-        "active_labels": {},
-        "aura_labels": {},
-        "primary_weapon": {},
-    }
-    mode: str | None = None
-    if not text:
-        return base
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return base
-    if isinstance(data, dict):
-        mode_value = data.get("mode")
-        if isinstance(mode_value, str):
-            mode = mode_value
-        items = data.items()
-    else:
-        return base
-    for section, values in items:
-        if section == "mode":
-            continue
-        if section in {"active_labels", "aura_labels"}:
-            base[section] = _extract_label_map(values)
-            continue
-        if section == "primary_weapon":
-            if isinstance(values, dict):
-                safe: dict[str, str | None] = {}
-                for k, v in values.items():
-                    if k in ("melee", "ranged"):
-                        safe[k] = str(v) if v is not None else None
-                base["primary_weapon"] = safe
-            continue
-        if section not in {"weapons", "active", "aura", "passive"}:
-            continue
-        if isinstance(values, dict):
-            iterable = values.items()
-        elif isinstance(values, list):
-            iterable = []
-            for entry in values:
-                if not isinstance(entry, dict):
-                    continue
-                if section == "passive":
-                    entry_id = (
-                        entry.get("slug")
-                        or entry.get("id")
-                        or entry.get("ability_id")
-                        or entry.get("weapon_id")
-                    )
-                    if entry_id is None:
-                        continue
-                    raw_enabled = entry.get("enabled")
-                    if raw_enabled is None:
-                        raw_enabled = entry.get("count") or entry.get("per_model") or entry.get("value")
-
-                    def _to_flag(value: Any) -> int:
-                        if isinstance(value, bool):
-                            return 1 if value else 0
-                        if isinstance(value, (int, float)):
-                            return 1 if value > 0 else 0
-                        if value is None:
-                            return 0
-                        text = str(value).strip().lower()
-                        if text in {"", "0", "false", "no", "nie"}:
-                            return 0
-                        return 1
-
-                    iterable.append((entry_id, _to_flag(raw_enabled)))
-                else:
-                    entry_id = entry.get("id") or entry.get("weapon_id") or entry.get("ability_id")
-                    if entry_id is None:
-                        continue
-                    iterable.append((entry_id, entry.get("per_model") or entry.get("count") or 0))
-        else:
-            continue
-        section_payload: dict[str, int] = {}
-        for raw_id, raw_count in iterable:
-            key = str(raw_id)
-            try:
-                count_value = int(raw_count)
-            except (TypeError, ValueError):
-                try:
-                    count_value = int(float(raw_count))
-                except (TypeError, ValueError):
-                    count_value = 0
-            if count_value < 0:
-                count_value = 0
-            section_payload[key] = count_value
-        base[section] = section_payload
-    if mode:
-        base["mode"] = mode
-    return base
-
-
-# ============================================================
-# SECTION: LOADOUT SANITIZATION
-# _sanitize_loadout — walidacja i czyszczenie loadoutu przed zapisem
-# ============================================================
-def _sanitize_loadout(
-    unit: models.Unit,
-    model_count: int,
-    payload: dict[str, Any] | None,
-    *,
-    weapon_options: list[dict] | None = None,
-    active_items: list[dict] | None = None,
-    aura_items: list[dict] | None = None,
-    passive_items: list[dict] | None = None,
-) -> dict[str, Any]:
-    resolved_passive_items = (
-        passive_items if passive_items is not None else _passive_entries(unit)
-    )
-    defaults = _default_loadout_payload(
+    ).scalar_one() + 1
+    template = create_template_from_roster_unit(
         unit,
-        weapon_options=weapon_options,
-        active_items=active_items,
-        aura_items=aura_items,
-        passive_items=resolved_passive_items,
+        army=army,
+        position=position,
+        ruleset_version=roster.ruleset_version,
     )
-    mode_value: str | None = None
-    if isinstance(payload, dict):
-        raw_mode = payload.get("mode")
-        if isinstance(raw_mode, str):
-            mode_value = raw_mode
-    if not payload:
-        return defaults
-    safe_payload = {
-        "weapons": payload.get("weapons") or {},
-        "active": payload.get("active") or {},
-        "aura": payload.get("aura") or {},
-        "passive": payload.get("passive") or {},
-        "active_labels": payload.get("active_labels") or {},
-        "aura_labels": payload.get("aura_labels") or {},
-    }
-
-    max_count = max(int(model_count), 0)
-
-    ability_sections: dict[str, list[dict]] = {
-        "active": active_items if active_items is not None else _ability_entries(unit, "active"),
-        "aura": aura_items if aura_items is not None else _ability_entries(unit, "aura"),
-    }
-    ability_id_lookup: dict[str, dict[str, list[str]]] = {}
-    ability_label_lookup: dict[str, dict[str, str]] = {}
-    for section_name, entries in ability_sections.items():
-        id_map: dict[str, list[str]] = {}
-        label_map: dict[str, str] = {}
-        for entry in entries:
-            ability_id = entry.get("ability_id")
-            if ability_id is None:
-                continue
-            loadout_key = entry.get("loadout_key")
-            if not loadout_key:
-                loadout_key = _ability_loadout_key(ability_id, entry.get("value"))
-            if not loadout_key:
-                continue
-            ability_id_str = str(ability_id)
-            id_map.setdefault(ability_id_str, []).append(loadout_key)
-            label = entry.get("label")
-            if isinstance(label, str):
-                normalized_label = label.strip()
-                if normalized_label:
-                    label_map[loadout_key] = normalized_label
-        ability_id_lookup[section_name] = id_map
-        ability_label_lookup[section_name] = label_map
-
-    label_sources: dict[str, dict[str, str]] = {
-        section: _extract_label_map(safe_payload.get(f"{section}_labels"))
-        for section in ("active", "aura")
-    }
-    normalized_label_maps: dict[str, dict[str, str]] = {section: {} for section in label_sources}
-
-    def _canonical_ability_key(
-        section: str, key: str, label_hint: str | None = None
-    ) -> str:
-        key_str = str(key)
-        if section not in ability_sections:
-            return key_str
-        defaults_section = defaults.get(section, {})
-        if key_str in defaults_section:
-            return key_str
-        normalized_hint = label_hint.strip().casefold() if isinstance(label_hint, str) else None
-        if normalized_hint:
-            for candidate_key, candidate_label in ability_label_lookup.get(section, {}).items():
-                candidate_normalized = candidate_label.strip().casefold()
-                if candidate_normalized == normalized_hint:
-                    return candidate_key
-        base_id, _ = _split_ability_loadout_key(key_str)
-        candidates = ability_id_lookup.get(section, {}).get(base_id, [])
-        if len(candidates) == 1:
-            return candidates[0]
-        for candidate in candidates:
-            if candidate in defaults_section:
-                return candidate
-        if candidates:
-            return candidates[0]
-        return key_str
-
-    def _normalize_section(section: str) -> dict[str, Any]:
-        source = safe_payload.get(section, {})
-        if isinstance(source, dict):
-            return {str(key): value for key, value in source.items() if key is not None}
-        if isinstance(source, list):
-            normalized: dict[str, Any] = {}
-            for entry in source:
-                if not isinstance(entry, dict):
-                    continue
-                if section == "passive":
-                    entry_id = (
-                        entry.get("slug")
-                        or entry.get("id")
-                        or entry.get("ability_id")
-                        or entry.get("weapon_id")
-                    )
-                    raw_value = entry.get("enabled")
-                    if raw_value is None:
-                        raw_value = (
-                            entry.get("count")
-                            or entry.get("per_model")
-                            or entry.get("value")
-                        )
-                else:
-                    entry_id = entry.get("id") or entry.get("weapon_id") or entry.get("ability_id")
-                    # Use explicit None check rather than `or` chain: count=0 is
-                    # a legitimate value (weapon explicitly deselected) that
-                    # must not fall back to the next key or to the default. Old
-                    # `entry.get("per_model") or entry.get("count")` collapsed
-                    # 0 to None, causing _sanitize_loadout to substitute the
-                    # weapon's default_count and silently re-enable it. This
-                    # was the source of attached-hero cost regression (49.14
-                    # vs correct 37.80 — weapon 203 reactivated by the
-                    # fallback).
-                    raw_value = entry.get("per_model")
-                    if raw_value is None:
-                        raw_value = entry.get("count")
-                    if raw_value is None:
-                        raw_value = entry.get("value")
-                if entry_id is None:
-                    continue
-                normalized[str(entry_id)] = raw_value
-            return normalized
-        return {}
-
-    def _merge(section: str, clamp: int | None = None) -> None:
-        defaults_section = defaults.get(section, {})
-        if not isinstance(defaults_section, dict):
-            defaults_section = {}
-            defaults[section] = defaults_section
-        incoming_map = _normalize_section(section)
-        if section in ability_sections:
-            labels = label_sources.get(section, {})
-            normalized_incoming: dict[str, Any] = {}
-            for raw_key, raw_value in incoming_map.items():
-                label_hint = labels.pop(raw_key, None)
-                canonical_key = _canonical_ability_key(section, raw_key, label_hint)
-                normalized_incoming[canonical_key] = raw_value
-                if label_hint:
-                    normalized_label_maps.setdefault(section, {})[canonical_key] = label_hint
-            for raw_key, label_hint in list(labels.items()):
-                canonical_key = _canonical_ability_key(section, raw_key, label_hint)
-                normalized_label_maps.setdefault(section, {})[canonical_key] = label_hint
-                labels.pop(raw_key, None)
-            incoming_map = normalized_incoming
-        else:
-            existing_labels = label_sources.get(section, {})
-            for key_str, value in existing_labels.items():
-                normalized_label_maps.setdefault(section, {})[key_str] = value
-        keys = set(defaults_section.keys()) | set(incoming_map.keys())
-        for key in keys:
-            key_str = str(key)
-            raw_value = incoming_map.get(key_str, defaults_section.get(key_str, 0))
-            try:
-                value = int(raw_value)
-            except (TypeError, ValueError):
-                try:
-                    value = int(float(raw_value))
-                except (TypeError, ValueError):
-                    value = defaults_section.get(key_str, 0)
-            if value < 0:
-                value = 0
-            if section == "weapons":
-                defaults_section[key_str] = value
-            else:
-                if clamp is None:
-                    defaults_section[key_str] = min(value, max_count)
-                elif clamp == 1:
-                    defaults_section[key_str] = 1 if value > 0 else 0
-                else:
-                    defaults_section[key_str] = min(value, clamp)
-
-    _merge("weapons")
-    _merge("active")
-    _merge("aura")
-    _merge("passive", clamp=1)
-
-    passive_defaults = defaults.get("passive")
-    if not isinstance(passive_defaults, dict):
-        passive_defaults = {}
-        defaults["passive"] = passive_defaults
-    for entry in resolved_passive_items:
-        if not entry:
-            continue
-        slug_value = str(entry.get("slug") or "").strip()
-        if not slug_value:
-            continue
-        if not entry.get("is_mandatory"):
-            continue
-        passive_defaults[slug_value] = 1
-
-    for section in ("active", "aura"):
-        defaults[f"{section}_labels"] = normalized_label_maps.get(section, {})
-
-    if mode_value:
-        defaults["mode"] = mode_value
-    if isinstance(payload, dict):
-        raw_primary = payload.get("primary_weapon")
-        if isinstance(raw_primary, dict) and raw_primary:
-            safe_primary: dict[str, str | None] = {}
-            for k, v in raw_primary.items():
-                if k in ("melee", "ranged"):
-                    safe_primary[k] = str(v) if v is not None else None
-            if safe_primary:
-                defaults["primary_weapon"] = safe_primary
-    return defaults
+    db.add(template)
+    db.flush()
+    unit.source_template_id = template.id
+    db.commit()
+    return {"template_id": template.id, "name": template.name}
 
 
-def _roster_unit_loadout(
-    roster_unit: models.RosterUnit,
-    *,
-    weapon_options: list[dict] | None = None,
-    active_items: list[dict] | None = None,
-    aura_items: list[dict] | None = None,
-    passive_items: list[dict] | None = None,
-) -> dict[str, Any]:
-    raw_payload = _parse_loadout_json(roster_unit.extra_weapons_json)
-    loadout = _sanitize_loadout(
-        roster_unit.unit,
-        roster_unit.count,
-        raw_payload,
-        weapon_options=weapon_options,
-        active_items=active_items,
-        aura_items=aura_items,
-        passive_items=passive_items,
-    )
-
-    return loadout
-
-
-def _loadout_display_summary(
-    roster_unit: models.RosterUnit,
-    loadout: dict[str, dict[str, int]],
-    weapon_options: list[dict],
-) -> str:
-    summary: list[str] = []
-    mode = loadout.get("mode") if isinstance(loadout, dict) else None
-    option_by_id = {str(option.get("id")): option for option in weapon_options if option.get("id") is not None}
-    for weapon_id, stored_count in loadout.get("weapons", {}).items():
-        option = option_by_id.get(weapon_id)
-        if not option:
-            continue
-        try:
-            parsed_count = int(stored_count)
-        except (TypeError, ValueError):
-            try:
-                parsed_count = int(float(stored_count))
-            except (TypeError, ValueError):
-                parsed_count = 0
-        if parsed_count < 0:
-            parsed_count = 0
-        if mode == "total":
-            total_count = parsed_count
-        else:
-            total_count = parsed_count * max(int(roster_unit.count), 0)
-        if total_count <= 0:
-            continue
-        name = option.get("name") or "Broń"
-        summary.append(f"{name} x{total_count}")
-    return ", ".join(summary)
-
-
-def _classification_from_totals(
-    warrior: float,
-    shooter: float,
-    fallback: str = "wojownik",
-) -> dict[str, Any] | None:
-    warrior = max(float(warrior or 0.0), 0.0)
-    shooter = max(float(shooter or 0.0), 0.0)
-    if warrior <= 0 and shooter <= 0:
-        return None
-
-    fallback_slug = costs.ability_identifier(fallback)
-    if fallback_slug not in costs.ROLE_SLUGS:
-        fallback_slug = "wojownik"
-    if warrior > shooter:
-        slug = "wojownik"
-    elif shooter > warrior:
-        slug = "strzelec"
-    else:
-        slug = "wojownik" if fallback_slug == "wojownik" else "strzelec"
-
-    selected_label = "Wojownik" if slug == "wojownik" else "Strzelec"
-    warrior_points = round(warrior, 2)
-    shooter_points = round(shooter, 2)
-    display = f"Wojownik {warrior_points} pkt / Strzelec {shooter_points} pkt"
-    return {
-        "slug": slug,
-        "label": selected_label,
-        "warrior_cost": warrior_points,
-        "shooter_cost": shooter_points,
-        "display": display,
-    }
-
-
-def _classification_fallback_slug(loadout: dict[str, Any] | None) -> str:
-    if not isinstance(loadout, dict):
-        return "wojownik"
-
-    candidates: list[str] = []
-    selected_role = loadout.get("selected_role")
-    if isinstance(selected_role, str):
-        candidates.append(selected_role)
-
-    raw_classification = loadout.get("classification")
-    if isinstance(raw_classification, Mapping):
-        raw_slug = raw_classification.get("slug")
-        if isinstance(raw_slug, str):
-            candidates.append(raw_slug)
-
-    passive_section = loadout.get("passive")
-    if isinstance(passive_section, Mapping):
-        for key, raw_value in passive_section.items():
-            try:
-                count_value = int(raw_value)
-            except (TypeError, ValueError):
-                try:
-                    count_value = int(float(raw_value))
-                except (TypeError, ValueError):
-                    count_value = 1 if raw_value else 0
-            if count_value <= 0:
-                continue
-            identifier = costs.ability_identifier(str(key))
-            if identifier in costs.ROLE_SLUGS:
-                candidates.append(str(key))
-                break
-
-    for candidate in candidates:
-        identifier = costs.ability_identifier(candidate)
-        if identifier in costs.ROLE_SLUGS:
-            return identifier
-    return "wojownik"
-
-
-def _roster_unit_classification(
-    roster_unit: models.RosterUnit,
-    loadout: dict[str, dict[str, int]] | None,
-    *,
-    totals: Mapping[str, float] | None = None,
-) -> dict[str, Any] | None:
-    totals_map: Mapping[str, float]
-    if isinstance(totals, Mapping):
-        totals_map = totals
-    else:
-        quote = _internal_roster_unit_quote(roster_unit, loadout)
-        totals_map = {
-            "wojownik": float(quote.get("warrior_total") or 0.0),
-            "strzelec": float(quote.get("shooter_total") or 0.0),
-        }
-    warrior_total = float(totals_map.get("wojownik") or 0.0)
-    shooter_total = float(totals_map.get("strzelec") or 0.0)
-    fallback_slug = _classification_fallback_slug(
-        loadout if isinstance(loadout, dict) else None
-    )
-    return _classification_from_totals(
-        warrior_total,
-        shooter_total,
-        fallback=fallback_slug,
-    )
-
-
-def _loadout_weapon_details(
-    roster_unit: models.RosterUnit,
-    loadout: dict[str, dict[str, int]],
-    weapon_options: list[dict],
-) -> list[dict[str, Any]]:
-    details: list[dict[str, Any]] = []
-    mode = loadout.get("mode") if isinstance(loadout, dict) else None
-    primary_override: dict[str, str] = {}
-    raw_override = loadout.get("primary_weapon") if isinstance(loadout, dict) else None
-    if isinstance(raw_override, dict):
-        primary_override = {
-            k: (str(v) if v is not None else None)
-            for k, v in raw_override.items()
-            if k in ("melee", "ranged")
-        }
-    option_by_id = {
-        str(option.get("id")): option
-        for option in weapon_options
-        if option.get("id") is not None
-    }
-    weapons_section = loadout.get("weapons") if isinstance(loadout, dict) else {}
-    items = weapons_section.items() if isinstance(weapons_section, dict) else []
-    for weapon_id, stored_count in items:
-        option = option_by_id.get(str(weapon_id))
-        if not option:
-            continue
-        try:
-            parsed_count = int(stored_count)
-        except (TypeError, ValueError):
-            try:
-                parsed_count = int(float(stored_count))
-            except (TypeError, ValueError):
-                parsed_count = 0
-        if parsed_count < 0:
-            parsed_count = 0
-        if mode == "total":
-            total_count = parsed_count
-        else:
-            total_count = parsed_count * max(int(roster_unit.count), 0)
-        if total_count <= 0:
-            continue
-        range_val = option.get("range", 0)
-        try:
-            is_melee = (int(range_val) == 0)
-        except (TypeError, ValueError):
-            is_melee = True
-        weapon_type = "melee" if is_melee else "ranged"
-        if weapon_type in primary_override:
-            override_val = primary_override.get(weapon_type)
-            is_primary = override_val is not None and str(option.get("id")) == override_val
-        else:
-            is_primary = bool(option.get("is_primary", False))
-        details.append(
-            {
-                "weapon_id": option.get("id"),
-                "name": option.get("name") or "Broń",
-                "count": total_count,
-                "range": option.get("range"),
-                "attacks": option.get("attacks"),
-                "ap": option.get("ap"),
-                "traits": option.get("traits"),
-                "is_primary": is_primary,
-            }
+@router.post(
+    "/{roster_id}/units/{unit_id}/update-template",
+    dependencies=[Depends(require_csrf)],
+)
+def update_source_template(
+    roster_id: int,
+    unit_id: int,
+    db: Session = Depends(get_db),
+    user: models.User = Depends(current_user_dep),
+) -> dict[str, object]:
+    unit, roster = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
+    if unit.source_template_id is None:
+        raise HTTPException(status_code=409, detail="Oddział nie pochodzi z szablonu")
+    template = db.execute(
+        select(models.UnitTemplate)
+        .join(models.Army)
+        .where(
+            models.UnitTemplate.id == unit.source_template_id,
+            models.Army.owner_id == user.id,
         )
-    return details
-
-
-def _roster_unit_export_data(
-    roster_unit: models.RosterUnit,
-    *,
-    unit_cache: dict[int, dict[str, Any]] | None = None,
-    loadout_override: dict[str, Any] | None = None,
-    classification: dict[str, Any] | None = None,
-    totals: Mapping[str, float] | None = None,
-) -> dict[str, Any]:
-    unit = roster_unit.unit
-    if unit is None:  # pragma: no cover - defensive fallback
-        total_value = float(roster_unit.cached_cost or 0.0)
-        rounded_total = utils.round_points(total_value)
-        return {
-            "instance": roster_unit,
-            "unit": None,
-            "unit_name": "Jednostka",
-            "custom_name": (roster_unit.custom_name or "").strip() or None,
-            "count": roster_unit.count,
-            "quality": "-",
-            "defense": "-",
-            "toughness": "-",
-            "passive_labels": [],
-            "active_labels": [],
-            "aura_labels": [],
-            "weapon_details": [],
-            "weapon_summary": "",
-            "default_summary": "",
-            "total_cost": total_value,
-            "rounded_total_cost": rounded_total,
-        }
-
-    cache_key: int | None = getattr(unit, "id", None)
-    cached_values: dict[str, Any] | None = None
-    if unit_cache is not None and cache_key is not None:
-        cached_values = unit_cache.get(cache_key)
-
-    if cached_values is not None:
-        weapon_options = cached_values.get("weapon_options")
-        passive_items = cached_values.get("passive_items")
-        active_items = cached_values.get("active_items")
-        aura_items = cached_values.get("aura_items")
-        default_summary = cached_values.get("default_summary")
-        if weapon_options is None:
-            weapon_options = _unit_weapon_options(unit)
-        if passive_items is None:
-            passive_items = _passive_entries(unit)
-        if active_items is None:
-            active_items = _ability_entries(unit, "active")
-        if aura_items is None:
-            aura_items = _ability_entries(unit, "aura")
-        if default_summary is None:
-            default_summary = _default_loadout_summary(unit)
-            cached_values["default_summary"] = default_summary
-    else:
-        weapon_options = _unit_weapon_options(unit)
-        passive_items = _passive_entries(unit)
-        active_items = _ability_entries(unit, "active")
-        aura_items = _ability_entries(unit, "aura")
-        default_summary = _default_loadout_summary(unit)
-        if unit_cache is not None and cache_key is not None:
-            unit_cache[cache_key] = {
-                "weapon_options": weapon_options,
-                "passive_items": passive_items,
-                "active_items": active_items,
-                "aura_items": aura_items,
-                "default_summary": default_summary,
-            }
-    loadout = (
-        loadout_override
-        if loadout_override is not None
-        else _roster_unit_loadout(
-            roster_unit,
-            weapon_options=weapon_options,
-            active_items=active_items,
-            aura_items=aura_items,
-            passive_items=passive_items,
-        )
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=404, detail="Szablon nie istnieje")
+    update_template_from_roster_unit(
+        template, unit, ruleset_version=roster.ruleset_version
     )
-    classification_data = (
-        classification
-        if classification is not None
-        else _roster_unit_classification(roster_unit, loadout)
-    )
-    weapon_details = _loadout_weapon_details(roster_unit, loadout, weapon_options)
-    weapon_summary = _loadout_display_summary(roster_unit, loadout, weapon_options)
-    if not weapon_summary:
-        if default_summary:
-            weapon_summary = default_summary
-        else:
-            default_summary = _default_loadout_summary(unit)
-            weapon_summary = default_summary
-            if cached_values is not None:
-                cached_values["default_summary"] = default_summary
-            elif unit_cache is not None and cache_key is not None:
-                unit_cache.setdefault(cache_key, {})["default_summary"] = default_summary
-    selected_passives = _selected_passive_entries(
-        roster_unit, loadout, passive_items, classification_data
-    )
-    selected_actives = _selected_ability_entries(loadout, active_items, "active")
-    selected_auras = _selected_ability_entries(loadout, aura_items, "aura")
-    passive_labels = [
-        entry.get("label") or entry.get("raw") or entry.get("slug") or ""
-        for entry in selected_passives
-        if entry
-    ]
-    active_labels = _expand_ability_labels(selected_actives)
-    aura_labels = _expand_ability_labels(selected_auras)
-    # Single quote call services both totals_map (when not pre-supplied)
-    # and selected_total. Previous version called _internal_roster_unit_quote
-    # twice with identical args — wasted ~40-80ms per unit on exports.
-    quote = _internal_roster_unit_quote(roster_unit, loadout)
-    totals_map: Mapping[str, float]
-    if isinstance(totals, Mapping):
-        totals_map = totals
-    else:
-        totals_map = {
-            "wojownik": float(quote.get("warrior_total") or 0.0),
-            "strzelec": float(quote.get("shooter_total") or 0.0),
-        }
-    total_value = float(quote.get("selected_total") or 0.0)
-    rounded_total = utils.round_points(total_value)
-
-    active_slugs: list[str] = []
-    for entry in selected_actives:
-        slug_value = entry.get("slug") if isinstance(entry, dict) else None
-        identifier = costs.ability_identifier(slug_value) if slug_value else None
-        if identifier:
-            active_slugs.append(identifier)
-
-    if default_summary is None:
-        default_summary = _default_loadout_summary(unit)
-        if cached_values is not None:
-            cached_values["default_summary"] = default_summary
-        elif unit_cache is not None and cache_key is not None:
-            unit_cache.setdefault(cache_key, {})["default_summary"] = default_summary
-
-    def _build_descs(entries: list[dict]) -> dict[str, str]:
-        result: dict[str, str] = {}
-        for entry in entries:
-            if not entry:
-                continue
-            lbl = _ability_label_with_count(entry)
-            desc = str(entry.get("description") or "").strip()
-            if lbl and desc:
-                result[lbl] = desc
-                base_lbl = str(entry.get("label") or "").strip()
-                if base_lbl and base_lbl not in result:
-                    result[base_lbl] = desc
-        return result
-
-    is_hero_flag = unit_is_hero(unit, roster_unit, loadout)
-    return {
-        "instance": roster_unit,
-        "unit": unit,
-        "unit_name": unit.name,
-        "custom_name": (roster_unit.custom_name or "").strip() or None,
-        "count": roster_unit.count,
-        "quality": unit.quality,
-        "defense": unit.defense,
-        "toughness": unit.toughness,
-        "passive_labels": [label for label in passive_labels if label],
-        "active_labels": [label for label in active_labels if label],
-        "aura_labels": [label for label in aura_labels if label],
-        "active_descs": _build_descs(selected_actives),
-        "aura_descs": _build_descs(selected_auras),
-        "weapon_details": weapon_details,
-        "weapon_summary": weapon_summary,
-        "default_summary": default_summary,
-        "total_cost": total_value,
-        "rounded_total_cost": rounded_total,
-        "classification": classification_data,
-        "active_slugs": active_slugs,
-        "is_hero": is_hero_flag,
-        "parent_roster_unit_id": getattr(roster_unit, "parent_roster_unit_id", None),
-    }
-
-
-def _selected_passive_labels(
-    roster_unit: models.RosterUnit,
-    loadout: dict[str, dict[str, int]],
-    passive_items: list[dict],
-    classification: dict[str, Any] | None = None,
-) -> list[str]:
-    selected_entries = _selected_passive_entries(
-        roster_unit, loadout, passive_items, classification
-    )
-    return [
-        entry.get("label") or entry.get("raw") or entry.get("slug") or ""
-        for entry in selected_entries
-        if entry
-    ]
+    db.commit()
+    return {"template_id": template.id, "name": template.name}

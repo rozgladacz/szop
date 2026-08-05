@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-06-02
-- **Kontekst:** Strumień B, Faza B3.9.c (`docs/handoffs/HANDOFF_faza-b-3-hardening.md`). Post-B3 code review (`/code-review medium`) wykrył **dziurę architektoniczną A** — engine nie rozróżniał **trwałego stanu** (cumulative `wounds_received` na `UnitBlob`, persisted między aktywacjami) od **delty tej aktywacji** (pkt 20.a SZOP_Rozjemca "oddziały **otrzymały rany** w tej aktywacji"). Konsekwencje:
+- **Kontekst:** Strumień B, Faza B3.9.c. Post-B3 code review (`/code-review medium`) wykrył **dziurę architektoniczną A** — engine nie rozróżniał **trwałego stanu** (cumulative `wounds_received` na `UnitBlob`, persisted między aktywacjami) od **delty tej aktywacji** (pkt 20.a SZOP_Rozjemca "oddziały **otrzymały rany** w tej aktywacji"). Konsekwencje:
 
   - **Bug #1.** `_regroup_test` triggerował test pkt 20.a gdy cumulative `wounds_received > 0` — oddział z 1 raną z poprzedniej aktywacji + 0 ran w tej musi NIE wykonywać testu, ale proxy zwracał True.
   - **Bug #2.** Defender szarży otrzymuje rany w aktywacji chargera (pkt 14.d), ale `activation_phase` uruchamiał Przegrupowanie tylko na **actorze**. Pkt 20.a wymaga testu od każdego oddziału który otrzymał rany w tej aktywacji — defender tego nie dostawał, dopóki nie odpalił własnej aktywacji.

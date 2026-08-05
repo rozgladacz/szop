@@ -1,65 +1,40 @@
 {% extends "base.html" %}
-{% block title %}SZOP - Kreator armii{% endblock %}
+{% block title %}OPOS — kalkulator oddziałów{% endblock %}
 {% block content %}
-<div class="row g-3 mb-4">
-  <div class="col-md-4">
-    <div class="card h-100">
-      <div class="card-body">
-        <h5 class="card-title">Moje rozpiski</h5>
-        <p class="card-text">Twórz i zarządzaj listami armii gotowymi do gry.</p>
-        <a class="btn btn-primary" href="/rosters">Przejdź</a>
-      </div>
-    </div>
+<section class="hero-panel">
+  <div>
+    <h1>Stwórz armię, wydrukuj karty, graj.</h1>
+    <p>Oddziały tworzysz bezpośrednio w rozpisce. Armie są prywatną biblioteką profili, do których możesz wrócić później.</p>
   </div>
-  <div class="col-md-4">
-    <div class="card h-100">
-      <div class="card-body">
-        <h5 class="card-title">Armie</h5>
-        <p class="card-text">Dodawaj frakcje, jednostki i ich parametry.</p>
-        <a class="btn btn-primary" href="/armies">Przejdź</a>
-      </div>
-    </div>
+  <div class="hero-actions">
+    <a class="button button-primary" href="/rosters/new">Nowa rozpiska</a>
+    <a class="button" href="/armies/new">Nowa Armia</a>
   </div>
-  <div class="col-md-4">
-    <div class="card h-100">
-      <div class="card-body">
-        <h5 class="card-title">Zbrojownie</h5>
-        <p class="card-text">Zarządzaj listami uzbrojenia i ich wariantami.</p>
-        <a class="btn btn-primary" href="/armories">Przejdź</a>
-      </div>
-    </div>
-  </div>
-</div>
+</section>
 
-<div class="row">
-  <div class="col-lg-6">
-    <h4>Ostatnie rozpiski</h4>
-    <ul class="list-group mb-4">
+<div class="dashboard-grid">
+  <section class="panel">
+    <div class="section-heading"><h2>Ostatnie rozpiski</h2><a href="/rosters">Wszystkie</a></div>
+    {% if rosters %}
+      <div class="item-list">
       {% for roster in rosters %}
-      <li class="list-group-item d-flex justify-content-between align-items-center">
-        <span>{{ roster.name }} ({{ roster.army.name }})</span>
-        <div class="btn-group">
-          <a class="btn btn-sm btn-outline-secondary" href="/rosters/{{ roster.id }}">Edytuj</a>
-          <a class="btn btn-sm btn-outline-success" href="/rosters/{{ roster.id }}/print" target="_blank">Drukuj</a>
-        </div>
-      </li>
-      {% else %}
-      <li class="list-group-item">Brak rozpisek</li>
+        <a class="list-row" href="/rosters/{{ roster.id }}">
+          <span><strong>{{ roster.name }}</strong><small>{{ roster.roster_units|length }} wspólnych profili</small></span>
+          <span class="points">{{ roster.total_cost }} pkt</span>
+        </a>
       {% endfor %}
-    </ul>
-  </div>
-  <div class="col-lg-6">
-    <h4>Ostatnie armie</h4>
-    <ul class="list-group mb-4">
+      </div>
+    {% else %}<p class="empty-state">Nie masz jeszcze rozpiski.</p>{% endif %}
+  </section>
+  <section class="panel">
+    <div class="section-heading"><h2>Twoje Armie</h2><a href="/armies">Wszystkie</a></div>
+    {% if armies %}
+      <div class="item-list">
       {% for army in armies %}
-      <li class="list-group-item d-flex justify-content-between align-items-center">
-        <span>{{ army.name }}</span>
-        <a class="btn btn-sm btn-outline-secondary" href="/armies/{{ army.id }}">Pokaż</a>
-      </li>
-      {% else %}
-      <li class="list-group-item">Brak armii</li>
+        <a class="list-row" href="/armies/{{ army.id }}"><strong>{{ army.name }}</strong><span>Otwórz →</span></a>
       {% endfor %}
-    </ul>
-  </div>
+      </div>
+    {% else %}<p class="empty-state">Armia przyda się, gdy zechcesz zachować profil oddziału.</p>{% endif %}
+  </section>
 </div>
 {% endblock %}

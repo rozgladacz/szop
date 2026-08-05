@@ -100,7 +100,6 @@
       "Bash(python -m pytest tests/test_hero_attach_detach.py tests/test_roster_classification.py -x --tb=short -q)",
       "Bash(python -m pytest tests/test_hero_attach_detach.py tests/test_roster_classification.py -x --tb=short)",
       "Bash(python -m pytest -x --tb=short)",
-      "Bash(mkdir -p \"docs/handoffs\" \".claude/skills/handoff-start\" \".claude/skills/handoff-archive\" \".claude/skills/handoff-status\" \".claude/skills/load-context\" \".claude/skills/handoff-sync\")",
       "Bash(python -m pytest -x --tb=short -q)",
       "Bash(dir \"D:\\\\OneDrive - KBJ S.A\\\\Dokumenty\\\\GitHub\\\\OPR\\\\app\\\\services\\\\\" 2>&1 | head -20)",
       "Bash(.venv/Scripts/python scripts/update_descriptions.py)",
@@ -137,7 +136,7 @@
       "Bash(.venv/Scripts/python -m py_compile app/data/abilities.py)",
       "Bash(python -m pytest tests/test_abilities_migration.py -q)",
       "PowerShell(python -m pytest tests/test_abilities_migration.py -q 2>&1)",
-      "Bash(python scripts/_inspect_geometry.py)"
+      "Bash(python scripts/_inspect_geometry.py)",
       "Bash(cd \"/d/OneDrive - KBJ S.A/Dokumenty/GitHub/OPR\" && find . -type f -name \"*.html\" | grep -E \"\\(roster|edit\\)\" | head -20)",
       "Bash(python -m pytest -x -q)",
       "Bash(python -m pytest tests/ -q --tb=short --ignore=tests/e2e)",

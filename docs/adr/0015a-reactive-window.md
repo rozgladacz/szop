@@ -2,7 +2,7 @@
 
 - **Status:** Accepted (framework gotowy; konkretne zdolności w B3.5 effects.py)
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B3.4 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`). Combat resolution (`app/services/engine/combat.py`) musi obsłużyć **reactive abilities** — sytuacje gdzie obrońca reaguje w trakcie ataku atakującego. Klasyczne przykłady: kontratak w Szarży (pkt 14.d.iv), Kontra (id 10), Strażnik (id 31 — przerwij w aktywacji wroga). Bez jasnej semantyki ryzyko: pętle reaktywne, niedeterminizm, ambiguity który gracz triggeruje co.
+- **Kontekst:** Strumień B, Faza B3.4. Combat resolution (`app/services/engine/combat.py`) musi obsłużyć **reactive abilities** — sytuacje gdzie obrońca reaguje w trakcie ataku atakującego. Klasyczne przykłady: kontratak w Szarży (pkt 14.d.iv), Kontra (id 10), Strażnik (id 31 — przerwij w aktywacji wroga). Bez jasnej semantyki ryzyko: pętle reaktywne, niedeterminizm, ambiguity który gracz triggeruje co.
 
 ## Decyzja
 

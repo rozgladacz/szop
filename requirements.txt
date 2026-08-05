@@ -8,13 +8,12 @@ python-multipart==0.0.9
 passlib[bcrypt]==1.7.4
 itsdangerous==2.2.0
 
-# Obsługa eksportów i dodatkowych formatów
-reportlab==4.2.0      # opcjonalne: eksport PDF
-openpyxl==3.1.2       # opcjonalne: eksport XLSX
+# Statyczne karty HTML/PDF
+weasyprint==69.0
 
 # Konfiguracja
 python-dotenv==1.0.1
 
-# Deklaratywne reguły (Strumień A — feature toggle OPR_RULES_BACKEND)
+# Jedyny wykonywalny ruleset OPOS YAML
 pydantic>=2.0,<3.0
 PyYAML>=6.0,<7.0

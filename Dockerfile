@@ -10,8 +10,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# gosu — bezpieczne drop-privilege w entrypoint (nie wymaga powłoki setuid)
-RUN apt-get update && apt-get install -y --no-install-recommends gosu \
+# gosu + natywne biblioteki przypiętego WeasyPrint 69.0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        gosu \
+        libcairo2 \
+        libfontconfig1 \
+        libgdk-pixbuf-2.0-0 \
+        libharfbuzz0b \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Użytkownik nieprivilegowany — UID 1000 jest zgodny z typowymi ustawieniami linuxowymi
@@ -23,7 +30,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Kopiowanie kodu aplikacji
 COPY app/ ./app/
-COPY seeds/ ./seeds/
+COPY alembic/ ./alembic/
+COPY alembic.ini ./
 
 # Entrypoint
 COPY scripts/docker-entrypoint.sh /entrypoint.sh

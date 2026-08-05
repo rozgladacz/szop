@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B0 (`docs/handoffs/HANDOFF_faza-b-engine-mvp.md`). Wprowadza fundament persistence layer + state management dla game engine MVP. Następne kroki (B2 modele danych, B3 rule executor) zależą od tego ADR.
+- **Kontekst:** Strumień B, Faza B0. Wprowadza fundament persistence layer + state management dla game engine MVP. Następne kroki (B2 modele danych, B3 rule executor) zależą od tego ADR.
 
 ## Decyzja
 

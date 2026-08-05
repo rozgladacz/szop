@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B0 (`docs/handoffs/HANDOFF_faza-b-engine-mvp.md`). Definiuje semantykę `BattleState.UnitBlob` w zakresie ran. Zgodne z istniejącym frontendowym widokiem „Stan bitewny" (rozpiska → state) — backend nie wprowadza nowej granularity.
+- **Kontekst:** Strumień B, Faza B0. Definiuje semantykę `BattleState.UnitBlob` w zakresie ran. Zgodne z istniejącym frontendowym widokiem „Stan bitewny" (rozpiska → state) — backend nie wprowadza nowej granularity.
 
 ## Decyzja
 

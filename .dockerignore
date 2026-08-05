@@ -20,7 +20,6 @@ tests/
 docs/
 scripts/profile_quote.py
 scripts/reflect_and_improve.py
-HANDOFF.md
 FRICTION_REPORT.md
 README_INTEGRATION.md
 AGENTS.md

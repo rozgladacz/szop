@@ -15,7 +15,34 @@ from ..config import DATA_DIR, DB_URL
 from ..db import SessionLocal, engine
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-_REQUIRED_TABLES = {"users", "armies", "rosters", "units", "weapons"}
+_REQUIRED_TABLES = {
+    "users",
+    "armies",
+    "unit_templates",
+    "rosters",
+    "roster_units",
+}
+_REQUIRED_COLUMNS = {
+    "users": {"id", "username", "password_hash", "is_admin"},
+    "armies": {"id", "name", "owner_id"},
+    "unit_templates": {
+        "id", "army_id", "owner_id", "name", "models_per_unit", "defense",
+        "toughness", "passive_abilities_json", "special_abilities_json",
+        "profiles_json", "ruleset_version", "position",
+    },
+    "rosters": {
+        "id", "name", "owner_id", "army_id", "points_limit",
+        "ruleset_version", "custom_stats_enabled", "simple_points_enabled",
+        "collapse_descriptions", "small_battle_enabled",
+    },
+    "roster_units": {
+        "id", "roster_id", "source_template_id", "name", "models_per_unit",
+        "unit_copies", "defense", "toughness", "passive_abilities_json",
+        "special_abilities_json", "profiles_json", "position", "unit_cost",
+    },
+}
+MAX_RESTORE_BYTES = 128 * 1024 * 1024
+_COPY_CHUNK_BYTES = 1024 * 1024
 _CLEANUP_RETRY_SECONDS = 5
 _CLEANUP_SLEEP_SECONDS = 0.1
 
@@ -73,6 +100,9 @@ def _validate_sqlite_file(path: Path) -> None:
     try:
         uri = f"file:{path.as_posix()}?mode=ro"
         with sqlite3.connect(uri, uri=True) as conn:
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise DBRestoreError("Przesłana baza SQLite jest uszkodzona.")
             cursor = conn.execute(
                 f"""
                 SELECT name FROM sqlite_master
@@ -81,12 +111,35 @@ def _validate_sqlite_file(path: Path) -> None:
                 tuple(_REQUIRED_TABLES),
             )
             tables = {row[0] for row in cursor.fetchall()}
+            columns = {
+                table: {row[1] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+                for table in tables
+            }
     except sqlite3.Error as exc:
         raise DBRestoreError("Przesłany plik nie jest prawidłową bazą SQLite.") from exc
 
     missing = _REQUIRED_TABLES - tables
     if missing:
         raise DBRestoreError("Brakuje wymaganych tabel w bazie danych.")
+    invalid_tables = [
+        table
+        for table, required in _REQUIRED_COLUMNS.items()
+        if not required.issubset(columns.get(table, set()))
+    ]
+    if invalid_tables:
+        raise DBRestoreError("Struktura tabel bazy danych nie jest zgodna z OPOS.")
+
+
+def _copy_upload_limited(source, target: Path) -> None:
+    copied = 0
+    with target.open("wb") as buffer:
+        while chunk := source.read(_COPY_CHUNK_BYTES):
+            copied += len(chunk)
+            if copied > MAX_RESTORE_BYTES:
+                raise DBRestoreError("Przesłana baza przekracza limit 128 MB.")
+            buffer.write(chunk)
+        buffer.flush()
+        os.fsync(buffer.fileno())
 
 
 def _copy_sqlite_with_sidecars(source: Path, target: Path) -> None:
@@ -171,10 +224,7 @@ def restore_sqlite_database(
 
     try:
         upload_file.file.seek(0)
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(upload_file.file, buffer)
-            buffer.flush()
-            os.fsync(buffer.fileno())
+        _copy_upload_limited(upload_file.file, temp_path)
 
         _validate_sqlite_file(temp_path)
         for sidecar in (wal_temp, shm_temp):

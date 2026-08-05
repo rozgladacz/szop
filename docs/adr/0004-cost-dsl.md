@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-24
-- **Kontekst:** Strumień A, Faza A2 (`docs/handoffs/HANDOFF_faza-a.md`).
+- **Kontekst:** Strumień A, Faza A2.
   Bazuje na ADR-0003 (YAML + Pydantic) i ADR-0005 (feature toggle).
 
 ## Decyzja

@@ -1,27 +1,16 @@
 {% extends "base.html" %}
-{% block title %}Logowanie - SZOP{% endblock %}
+{% block title %}Logowanie — OPOS{% endblock %}
+{% block body_class %}auth-page{% endblock %}
 {% block content %}
-<div class="row justify-content-center">
-  <div class="col-md-6 col-lg-4">
-    <div class="card">
-      <div class="card-body">
-        <h5 class="card-title mb-3">Logowanie</h5>
-        {% if error %}
-        <div class="alert alert-danger">{{ error }}</div>
-        {% endif %}
-        <form method="post">
-          <div class="mb-3">
-            <label class="form-label" for="username">Nazwa użytkownika</label>
-            <input class="form-control" id="username" name="username" required />
-          </div>
-          <div class="mb-3">
-            <label class="form-label" for="password">Hasło</label>
-            <input class="form-control" id="password" name="password" type="password" required />
-          </div>
-          <button class="btn btn-primary" type="submit">Zaloguj</button>
-        </form>
-      </div>
-    </div>
-  </div>
-</div>
+<section class="auth-card">
+  <p class="eyebrow">OPOS</p><h1>Zaloguj się</h1>
+  {% if error %}<p class="form-error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="/auth/login" class="stack-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Nazwa użytkownika<input name="username" autocomplete="username" required autofocus></label>
+    <label>Hasło<input name="password" type="password" autocomplete="current-password" required></label>
+    <button class="button button-primary" type="submit">Zaloguj</button>
+  </form>
+  <a href="/auth/register">Utwórz konto</a>
+</section>
 {% endblock %}

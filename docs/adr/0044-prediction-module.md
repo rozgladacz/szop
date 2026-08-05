@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Data:** 2026-05-30
-- **Kontekst:** Strumień B, Faza B3.3 (`docs/handoffs/HANDOFF_faza-b-3-executor.md`). Agenci-boty (Strumień D — `greedy_player`, `minimax_player`) i MCP tool `simulate_engagement` (Strumień C) potrzebują tanie oszacowanie wyniku ataku **bez** pełnej Monte Carlo. Wywoływanie `combat.resolve_ranged_attack` w pętli (500-1000 iter dla każdej kombinacji target/weapon w `greedy_player.choose_action`) jest zbyt wolne dla real-time play (~10ms budget per decyzja).
+- **Kontekst:** Strumień B, Faza B3.3. Agenci-boty (Strumień D — `greedy_player`, `minimax_player`) i MCP tool `simulate_engagement` (Strumień C) potrzebują tanie oszacowanie wyniku ataku **bez** pełnej Monte Carlo. Wywoływanie `combat.resolve_ranged_attack` w pętli (500-1000 iter dla każdej kombinacji target/weapon w `greedy_player.choose_action`) jest zbyt wolne dla real-time play (~10ms budget per decyzja).
 
 ## Decyzja
 
