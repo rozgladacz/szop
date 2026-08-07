@@ -25,14 +25,16 @@ Wszystkie 10 typów:
 - `AbilityOverrideApplied` (faza-b-order-interrupts 2026-06) — nadanie/odebranie pasywki X (Rozkaz/Klątwa/Oznaczenie, pkt 12)
 - `AbilityOverridesCleared` (faza-b-order-interrupts 2026-06) — wygaśnięcie override'ów na końcu aktywacji (pkt 11.b.vi)
 
-(Lista historycznie „10 typów"; B4.4b.2 rozszerza rejestr do 26 bez zmiany
-tagów ani payloadów 16 istniejących eventów.)
+(Lista historycznie „10 typów"; B4.4b.2 rozszerza rejestr do 26, a
+B4.4d.C2a2 do 33 bez zmiany tagów ani payloadów istniejących eventów.)
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields, is_dataclass
 from typing import Any, Union
+
+from app.services.engine.state import ChargeAttackIntent, ShootAttackIntent
 
 SCHEMA_VERSION = 1
 
@@ -571,6 +573,185 @@ class ActivePlayerChanged:
         _require_protocol_player(self.new_active_player, "new_active_player")
 
 
+def _validate_attack_header(event: object, *, has_window: bool) -> None:
+    _validate_protocol_header(event, activation_exists=True)
+    _require_protocol_int(getattr(event, "attack_id"), "attack_id")
+    _require_protocol_int(getattr(event, "attack_version"), "attack_version")
+    ordinal = _require_protocol_int(
+        getattr(event, "attack_ordinal"),
+        "attack_ordinal",
+    )
+    if ordinal not in (1, 2):
+        raise ValueError("attack_ordinal must be 1 or 2")
+    if has_window:
+        _require_protocol_int(getattr(event, "window_version"), "window_version")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackDeclared:
+    """Accepted immutable attack intent and its protocol-v3 scope."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    attack_id: int
+    attack_version: int
+    attack_ordinal: int
+    intent: ShootAttackIntent | ChargeAttackIntent
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_attack_header(self, has_window=False)
+        if self.attack_id != self.sequence:
+            raise ValueError("AttackDeclared.attack_id must equal sequence")
+        if self.attack_version != 1:
+            raise ValueError("AttackDeclared.attack_version must be 1")
+        if type(self.intent) not in (ShootAttackIntent, ChargeAttackIntent):
+            raise TypeError("intent must be a shoot or charge attack intent")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackInterruptWindowOpened:
+    """Explicit opening marker for one pending attack's interrupt scope."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    attack_id: int
+    attack_version: int
+    attack_ordinal: int
+    window_version: int
+    priority_player: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_attack_header(self, has_window=True)
+        if self.attack_version != 1 or self.window_version != 1:
+            raise ValueError("opened attack and window versions must be 1")
+        _require_protocol_player(self.priority_player, "priority_player")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackInterruptTriggered:
+    """Accepted attack-scope interrupt without duplicating its outcome."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    attack_id: int
+    attack_version: int
+    attack_ordinal: int
+    window_version: int
+    priority_player: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_attack_header(self, has_window=True)
+        if self.attack_version < 2 or self.window_version < 2:
+            raise ValueError("triggered attack and window versions must be >= 2")
+        _require_protocol_player(self.priority_player, "priority_player")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackInterruptPriorityPassed:
+    """Accepted attack pass; ``None`` next priority denotes window closure."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    attack_id: int
+    attack_version: int
+    attack_ordinal: int
+    window_version: int
+    passed_player: int
+    next_priority_player: int | None
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_attack_header(self, has_window=True)
+        if self.attack_version < 2 or self.window_version < 2:
+            raise ValueError("passed attack and window versions must be >= 2")
+        passed_player = _require_protocol_player(self.passed_player, "passed_player")
+        if self.next_priority_player is not None:
+            next_player = _require_protocol_player(
+                self.next_priority_player,
+                "next_priority_player",
+            )
+            if next_player == passed_player:
+                raise ValueError("next_priority_player must differ from passed_player")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackInterruptWindowClosed:
+    """Explicit closure marker for one pending attack's interrupt scope."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    attack_id: int
+    attack_version: int
+    attack_ordinal: int
+    window_version: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_attack_header(self, has_window=True)
+        if self.attack_version < 3 or self.window_version < 3:
+            raise ValueError("closed attack and window versions must be >= 3")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackAbilityOverrideApplied:
+    """One source-scoped passive granted only to the declared attacker."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    attack_id: int
+    attack_version: int
+    attack_ordinal: int
+    window_version: int
+    attacker_unit_id: int
+    source_unit_id: int
+    ability_slug: str
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_attack_header(self, has_window=True)
+        for field_name in ("attacker_unit_id", "source_unit_id"):
+            unit_id = _require_protocol_int(
+                getattr(self, field_name),
+                field_name,
+                positive=False,
+            )
+            if unit_id < 0:
+                raise ValueError(f"{field_name} must be non-negative")
+        if (
+            type(self.ability_slug) is not str
+            or not self.ability_slug
+            or len(self.ability_slug) > 128
+        ):
+            raise ValueError("ability_slug must contain between 1 and 128 characters")
+
+
+@dataclass(frozen=True, slots=True)
+class AttackResolved:
+    """Terminal marker removing only one fully resolved pending attack."""
+
+    sequence: int
+    activation_id: int
+    activation_version: int
+    attack_id: int
+    attack_version: int
+    attack_ordinal: int
+    version: int = SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_attack_header(self, has_window=False)
+        if self.attack_version < 4:
+            raise ValueError("resolved attack version must be >= 4")
+
+
 # Union polimorficzny dla type hints. `BattleEvent` jest aliasem.
 BattleEvent = Union[
     MoveExecuted,
@@ -599,6 +780,13 @@ BattleEvent = Union[
     ActivationFinalized,
     InitiativeTransferred,
     ActivePlayerChanged,
+    AttackDeclared,
+    AttackInterruptWindowOpened,
+    AttackInterruptTriggered,
+    AttackInterruptPriorityPassed,
+    AttackInterruptWindowClosed,
+    AttackAbilityOverrideApplied,
+    AttackResolved,
 ]
 
 _PROTOCOL_EVENT_TYPES = (
@@ -612,7 +800,47 @@ _PROTOCOL_EVENT_TYPES = (
     ActivationFinalized,
     InitiativeTransferred,
     ActivePlayerChanged,
+    AttackDeclared,
+    AttackInterruptWindowOpened,
+    AttackInterruptTriggered,
+    AttackInterruptPriorityPassed,
+    AttackInterruptWindowClosed,
+    AttackAbilityOverrideApplied,
+    AttackResolved,
 )
+
+_ATTACK_INTENT_REGISTRY = {
+    "shoot": ShootAttackIntent,
+    "charge": ChargeAttackIntent,
+}
+_ATTACK_INTENT_DISCRIMINATORS = {
+    intent_type: discriminator
+    for discriminator, intent_type in _ATTACK_INTENT_REGISTRY.items()
+}
+
+
+def _attack_intent_to_json(
+    intent: ShootAttackIntent | ChargeAttackIntent,
+) -> dict[str, Any]:
+    discriminator = _ATTACK_INTENT_DISCRIMINATORS.get(type(intent))
+    if discriminator is None:
+        raise TypeError("unsupported attack intent type")
+    payload = asdict(intent)
+    return {"attack_type": discriminator, **payload}
+
+
+def _attack_intent_from_json(payload: object) -> ShootAttackIntent | ChargeAttackIntent:
+    if type(payload) is not dict:
+        raise ValueError("attack intent must be an object")
+    discriminator = payload.get("attack_type")
+    if type(discriminator) is not str or discriminator not in _ATTACK_INTENT_REGISTRY:
+        raise ValueError("unknown attack intent type")
+    intent_type = _ATTACK_INTENT_REGISTRY[discriminator]
+    expected_fields = {field_.name for field_ in fields(intent_type)}
+    if set(payload) != expected_fields | {"attack_type"}:
+        raise ValueError("attack intent fields do not match schema")
+    values = {key: value for key, value in payload.items() if key != "attack_type"}
+    return intent_type(**values)
 
 _EVENT_REGISTRY: dict[str, type] = {
     cls.__name__: cls
@@ -647,6 +875,8 @@ def event_to_json(event: BattleEvent) -> dict[str, Any]:
     if not is_dataclass(event):
         raise TypeError(f"Not a dataclass event: {type(event).__name__}")
     payload = asdict(event)
+    if type(event) is AttackDeclared:
+        payload["intent"] = _attack_intent_to_json(event.intent)
     payload["event_type"] = type(event).__name__
     return payload
 
@@ -676,6 +906,8 @@ def json_to_event(data: dict[str, Any]) -> BattleEvent:
     # Legacy event payloads retain their historical forward-compatible behavior:
     # unknown keys are ignored and omitted fields may use dataclass defaults.
     payload = {k: v for k, v in data.items() if k in known_fields}
+    if cls is AttackDeclared:
+        payload["intent"] = _attack_intent_from_json(payload.get("intent"))
     # Convert lists → tuples for fields typed as tuple (sequence/rolls etc.)
     for f in fields(cls):
         if f.name in payload and isinstance(payload[f.name], list):

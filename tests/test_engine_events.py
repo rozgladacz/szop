@@ -15,6 +15,13 @@ import pytest
 from app.services.engine.events import (
     SCHEMA_VERSION,
     ActivePlayerChanged,
+    AttackAbilityOverrideApplied,
+    AttackDeclared,
+    AttackInterruptPriorityPassed,
+    AttackInterruptTriggered,
+    AttackInterruptWindowClosed,
+    AttackInterruptWindowOpened,
+    AttackResolved,
     ActivationActionCommitted,
     ActivationContinuationChosen,
     ActivationFinalized,
@@ -37,6 +44,7 @@ from app.services.engine.events import (
     event_to_json,
     json_to_event,
 )
+from app.services.engine.state import ChargeAttackIntent, ShootAttackIntent
 
 
 # ---------------------------------------------------------------------------
@@ -425,3 +433,196 @@ def test_legacy_initiative_passed_tag_and_payload_are_unchanged():
 def test_protocol_events_reject_inconsistent_schema_values(factory):
     with pytest.raises((TypeError, ValueError)):
         factory()
+
+
+ATTACK_PROTOCOL_EVENT_GOLDENS = (
+    (
+        AttackDeclared(
+            sequence=201,
+            activation_id=101,
+            activation_version=4,
+            attack_id=201,
+            attack_version=1,
+            attack_ordinal=1,
+            intent=ShootAttackIntent(11, 21, "rifle"),
+        ),
+        {
+            "sequence": 201,
+            "activation_id": 101,
+            "activation_version": 4,
+            "attack_id": 201,
+            "attack_version": 1,
+            "attack_ordinal": 1,
+            "intent": {
+                "attack_type": "shoot",
+                "attacker_unit_id": 11,
+                "target_unit_id": 21,
+                "weapon_slug": "rifle",
+            },
+            "version": 1,
+            "event_type": "AttackDeclared",
+        },
+    ),
+    (
+        AttackDeclared(
+            sequence=301,
+            activation_id=101,
+            activation_version=4,
+            attack_id=301,
+            attack_version=1,
+            attack_ordinal=1,
+            intent=ChargeAttackIntent(11, 21, "sword", False),
+        ),
+        {
+            "sequence": 301,
+            "activation_id": 101,
+            "activation_version": 4,
+            "attack_id": 301,
+            "attack_version": 1,
+            "attack_ordinal": 1,
+            "intent": {
+                "attack_type": "charge",
+                "attacker_unit_id": 11,
+                "target_unit_id": 21,
+                "weapon_slug": "sword",
+                "counter_attack_declared": False,
+            },
+            "version": 1,
+            "event_type": "AttackDeclared",
+        },
+    ),
+    (
+        AttackInterruptWindowOpened(202, 101, 4, 201, 1, 1, 1, 0),
+        {
+            "sequence": 202,
+            "activation_id": 101,
+            "activation_version": 4,
+            "attack_id": 201,
+            "attack_version": 1,
+            "attack_ordinal": 1,
+            "window_version": 1,
+            "priority_player": 0,
+            "version": 1,
+            "event_type": "AttackInterruptWindowOpened",
+        },
+    ),
+    (
+        AttackInterruptTriggered(203, 101, 5, 201, 2, 1, 2, 0),
+        {
+            "sequence": 203,
+            "activation_id": 101,
+            "activation_version": 5,
+            "attack_id": 201,
+            "attack_version": 2,
+            "attack_ordinal": 1,
+            "window_version": 2,
+            "priority_player": 0,
+            "version": 1,
+            "event_type": "AttackInterruptTriggered",
+        },
+    ),
+    (
+        AttackInterruptPriorityPassed(204, 101, 6, 201, 3, 1, 3, 0, 1),
+        {
+            "sequence": 204,
+            "activation_id": 101,
+            "activation_version": 6,
+            "attack_id": 201,
+            "attack_version": 3,
+            "attack_ordinal": 1,
+            "window_version": 3,
+            "passed_player": 0,
+            "next_priority_player": 1,
+            "version": 1,
+            "event_type": "AttackInterruptPriorityPassed",
+        },
+    ),
+    (
+        AttackInterruptWindowClosed(206, 101, 7, 201, 4, 1, 4),
+        {
+            "sequence": 206,
+            "activation_id": 101,
+            "activation_version": 7,
+            "attack_id": 201,
+            "attack_version": 4,
+            "attack_ordinal": 1,
+            "window_version": 4,
+            "version": 1,
+            "event_type": "AttackInterruptWindowClosed",
+        },
+    ),
+    (
+        AttackAbilityOverrideApplied(204, 101, 5, 201, 2, 1, 2, 11, 12, "furia"),
+        {
+            "sequence": 204,
+            "activation_id": 101,
+            "activation_version": 5,
+            "attack_id": 201,
+            "attack_version": 2,
+            "attack_ordinal": 1,
+            "window_version": 2,
+            "attacker_unit_id": 11,
+            "source_unit_id": 12,
+            "ability_slug": "furia",
+            "version": 1,
+            "event_type": "AttackAbilityOverrideApplied",
+        },
+    ),
+    (
+        AttackResolved(207, 101, 8, 201, 5, 1),
+        {
+            "sequence": 207,
+            "activation_id": 101,
+            "activation_version": 8,
+            "attack_id": 201,
+            "attack_version": 5,
+            "attack_ordinal": 1,
+            "version": 1,
+            "event_type": "AttackResolved",
+        },
+    ),
+)
+
+
+@pytest.mark.parametrize(
+    ("event", "golden"),
+    ATTACK_PROTOCOL_EVENT_GOLDENS,
+    ids=lambda value: type(value).__name__ if not isinstance(value, dict) else None,
+)
+def test_attack_protocol_event_v1_golden_json_round_trip(event, golden) -> None:
+    assert event_to_json(event) == golden
+    restored = json_to_event(json.loads(json.dumps(golden)))
+    assert restored == event
+    assert type(restored) is type(event)
+
+
+def test_attack_declaration_intent_codec_is_closed_and_exact() -> None:
+    payload = event_to_json(ATTACK_PROTOCOL_EVENT_GOLDENS[0][0])
+
+    with pytest.raises(ValueError, match="intent fields"):
+        json_to_event(
+            payload
+            | {"intent": payload["intent"] | {"counter_attack_declared": False}}
+        )
+    with pytest.raises(ValueError, match="attack intent type"):
+        json_to_event(payload | {"intent": payload["intent"] | {"attack_type": "x"}})
+    with pytest.raises((TypeError, ValueError)):
+        json_to_event(payload | {"intent": payload["intent"] | {"attacker_unit_id": True}})
+
+
+def test_attack_protocol_registry_and_reducers_are_complete() -> None:
+    from app.services.engine.events import _EVENT_REGISTRY
+    from app.services.engine.state import _EVENT_REDUCERS
+
+    expected = {
+        "AttackDeclared",
+        "AttackInterruptWindowOpened",
+        "AttackInterruptTriggered",
+        "AttackInterruptPriorityPassed",
+        "AttackInterruptWindowClosed",
+        "AttackAbilityOverrideApplied",
+        "AttackResolved",
+    }
+
+    assert expected <= _EVENT_REGISTRY.keys()
+    assert expected <= _EVENT_REDUCERS.keys()

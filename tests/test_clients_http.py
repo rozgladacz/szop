@@ -10,6 +10,13 @@ from app.services.engine.action_codec import action_from_json, action_to_json
 from app.services.engine.actions import DefendAction
 from app.services.engine.events import (
     ActivePlayerChanged,
+    AttackAbilityOverrideApplied,
+    AttackDeclared,
+    AttackInterruptPriorityPassed,
+    AttackInterruptTriggered,
+    AttackInterruptWindowClosed,
+    AttackInterruptWindowOpened,
+    AttackResolved,
     ActivationActionCommitted,
     ActivationContinuationChosen,
     ActivationFinalized,
@@ -38,6 +45,7 @@ from app.services.engine.events import (
     StatusRemoved,
     event_to_json,
 )
+from app.services.engine.state import ShootAttackIntent
 from app.services.engine.state_codec import battle_state_to_json
 from szop_client import (
     BattleMetadata,
@@ -2037,16 +2045,23 @@ def test_all_current_battle_events_have_json_safe_public_projections() -> None:
         ActivationFinalized(24, 17),
         InitiativeTransferred(25, 17, 0, 1),
         ActivePlayerChanged(26, 17, 0, 1),
+        AttackDeclared(27, 17, 7, 27, 1, 1, ShootAttackIntent(1, 2, "rifle")),
+        AttackInterruptWindowOpened(28, 17, 7, 27, 1, 1, 1, 0),
+        AttackInterruptTriggered(29, 17, 8, 27, 2, 1, 2, 0),
+        AttackAbilityOverrideApplied(30, 17, 8, 27, 2, 1, 2, 1, 3, "furia"),
+        AttackInterruptPriorityPassed(31, 17, 9, 27, 3, 1, 3, 0, 1),
+        AttackInterruptWindowClosed(32, 17, 10, 27, 4, 1, 4),
+        AttackResolved(33, 17, 11, 27, 5, 1),
     )
 
     assert {type(event) for event in events} == set(get_args(BattleEvent))
     projected, last_sequence = battle_events_to_wire(events, since=0)
 
-    assert [item["sequence"] for item in projected] == list(range(1, 27))
+    assert [item["sequence"] for item in projected] == list(range(1, 34))
     assert [item["type"] for item in projected] == [
         type(event).__name__ for event in events
     ]
-    assert last_sequence == 26
+    assert last_sequence == 33
     json.dumps(projected, allow_nan=False)
 
 

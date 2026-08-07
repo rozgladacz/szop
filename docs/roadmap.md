@@ -508,13 +508,16 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   [ADR-0056 sekcja 5](adr/0056-interrupt-activation-protocol.md) zamroziła
   jawny protocol/checkpoint v3. **C2a1 model + codec DONE 2026-07-30:** dodaje
   wyłącznie immutable pending-attack model i prywatny exact checkpoint codec
-  v3; V1/v2 pozostają byte-for-byte niezmienione, a persistence/publiczny wire
-  nadal akceptują wyłącznie v1/v2.
-  v3 zachowuje maneuver/defend/special jak v2, natomiast dopiero po zamknięciu
-  ogólnego `BEFORE_ACTION` accepted `ShootAction|ChargeAction` utrwala minimalny
-  frozen intent `{attacker,target,weapon_slug[,counter_attack_declared]}` i
-  otwiera osobny no-nested attack window. Statystyki broni zawsze pochodzą z
-  kanonicznego inventory, a declaration nie wykonuje rzutów.
+  v3. **C2a2 eventy + reducery + pure lifecycle DONE 2026-08-07:** dodaje siedem
+  strict attack-protocol eventów, kompletne reducery i prywatne pure
+  declare/pass/close/resolve dla `ShootAction|ChargeAction`. V3 zachowuje
+  maneuver/defend/special jak v2, a deklaracja utrwala minimalny frozen intent
+  `{attacker,target,weapon_slug[,counter_attack_declared]}` i otwiera osobny
+  no-nested attack window. Statystyki broni zawsze pochodzą z kanonicznego
+  inventory, declaration/pass/close nie wykonują rzutów, resolve używa
+  prywatnego klonu RNG, a każdy restart head zachowuje complete-tail replay
+  equality. V1/v2 pozostają niezmienione, a persistence/publiczny wire nadal
+  akceptują wyłącznie v1/v2.
 
   Priority/passy reużywają dwugraczową kolejkę od snapshotu inicjatywy.
   Oznaczenie może nadać tylko X z `oznaczenie_tak: true` innemu żywemu/frontowemu
@@ -538,9 +541,8 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   `oznaczenie` nadal jest odrzucane bez zapisu.
 
   Dalsze slice'y pozostają OPEN i każdy wymaga osobnego commitu/DoD:
-  **C2a2** siedem eventów, reducery i pure declare/pass/close/resolve z
-  restart/RNG parity; **C2b** immutable `oznaczenie_tak`, strict private handler
-  i attack effect view bez I/O/allowlisty; **C2c** durable service, opt-in/DB
+  **C2b** immutable `oznaczenie_tak`, strict private handler i attack effect
+  view bez I/O/allowlisty; **C2c** durable service, opt-in/DB
   constraint v3, FastAPI, publiczna allowlista i
   `HttpClient.resolve_activation_attack` z same-owner/two-bearer, auth/audit,
   stale/race/rollback/no-oracle i exact 5/6/7 SELECT gates.

@@ -16,6 +16,9 @@ from app.services.engine.actions import (
 from app.services.engine.activation_protocol import (
     ActivationProtocolError,
     ActivationProtocolErrorReason,
+    _commit_activation_action_v3,
+    _pass_attack_interrupt_priority,
+    _resolve_activation_attack,
     commit_activation_action,
     continue_activation,
     finalize_activation,
@@ -29,6 +32,13 @@ from app.services.engine.interrupts import (
 )
 from app.services.engine.events import (
     ActivePlayerChanged,
+    AttackAbilityOverrideApplied,
+    AttackDeclared,
+    AttackInterruptPriorityPassed,
+    AttackInterruptTriggered,
+    AttackInterruptWindowClosed,
+    AttackInterruptWindowOpened,
+    AttackResolved,
     AbilityOverrideApplied,
     AbilityOverridesCleared,
     ActivationActionCommitted,
@@ -59,6 +69,8 @@ from app.services.engine.state import (
     effective_passives,
 )
 from app.services.engine.state_codec import (
+    _battle_state_from_json_v3,
+    _battle_state_to_json_v3,
     battle_state_from_json,
     battle_state_to_json,
 )
@@ -156,6 +168,11 @@ def _after_first_action(*, sequence: int = 10):
 def _restart(state: BattleState) -> BattleState:
     payload = json.loads(json.dumps(battle_state_to_json(state, version=2)))
     return battle_state_from_json(payload)
+
+
+def _restart_v3(state: BattleState) -> BattleState:
+    payload = json.loads(json.dumps(_battle_state_to_json_v3(state)))
+    return _battle_state_from_json_v3(payload)
 
 
 def _action_idle_state(
@@ -264,6 +281,82 @@ def _commit(
             else expected_activation_version
         ),
         action=action,
+        dice=dice,
+        sequence=sequence,
+        **kwargs,
+    )
+
+
+def _commit_v3(
+    state: BattleState,
+    action,
+    dice: DeterministicDice,
+    *,
+    sequence: int,
+    caller_player: int = 0,
+    expected_activation_version: int | None = None,
+    outcome_executor=None,
+):
+    activation = state.activation
+    kwargs = {}
+    if outcome_executor is not None:
+        kwargs["outcome_executor"] = outcome_executor
+    return _commit_activation_action_v3(
+        state,
+        caller_player=caller_player,
+        activation_id=activation.activation_id,
+        expected_activation_version=(
+            activation.version
+            if expected_activation_version is None
+            else expected_activation_version
+        ),
+        action=action,
+        dice=dice,
+        sequence=sequence,
+        **kwargs,
+    )
+
+
+def _pass_attack(
+    state: BattleState,
+    *,
+    caller_player: int,
+    sequence: int,
+):
+    activation = state.activation
+    attack = activation.attack
+    return _pass_attack_interrupt_priority(
+        state,
+        caller_player=caller_player,
+        activation_id=activation.activation_id,
+        expected_activation_version=activation.version,
+        attack_id=attack.attack_id,
+        expected_attack_version=attack.version,
+        expected_window_version=attack.window.version,
+        sequence=sequence,
+    )
+
+
+def _resolve_attack(
+    state: BattleState,
+    dice: DeterministicDice,
+    *,
+    sequence: int,
+    caller_player: int = 0,
+    outcome_executor=None,
+):
+    activation = state.activation
+    attack = activation.attack
+    kwargs = {}
+    if outcome_executor is not None:
+        kwargs["outcome_executor"] = outcome_executor
+    return _resolve_activation_attack(
+        state,
+        caller_player=caller_player,
+        activation_id=activation.activation_id,
+        expected_activation_version=activation.version,
+        attack_id=attack.attack_id,
+        expected_attack_version=attack.version,
         dice=dice,
         sequence=sequence,
         **kwargs,
@@ -2669,3 +2762,437 @@ def test_finalize_rejects_faulty_outcome_seam_atomically(violation: str) -> None
             outcome_executor=invalid_executor,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# B4.4d.C2a2 — private protocol-v3 attack lifecycle
+# ---------------------------------------------------------------------------
+
+
+def _v3_ready_with_tail(
+    initial: BattleState,
+    *,
+    sequence: int,
+):
+    started = start_activation(initial, selected_unit_id=11, sequence=sequence)
+    first_pass = pass_interrupt_priority(
+        started.state,
+        caller_player=0,
+        activation_id=started.state.activation.activation_id,
+        expected_activation_version=started.state.activation.version,
+        expected_window_version=started.state.activation.window.version,
+        sequence=started.next_sequence,
+    )
+    ready = pass_interrupt_priority(
+        first_pass.state,
+        caller_player=1,
+        activation_id=first_pass.state.activation.activation_id,
+        expected_activation_version=first_pass.state.activation.version,
+        expected_window_version=first_pass.state.activation.window.version,
+        sequence=first_pass.next_sequence,
+    )
+    return started, first_pass, ready
+
+
+def _assert_transition_equal(left, right) -> None:
+    assert [event_to_json(event) for event in left.events] == [
+        event_to_json(event) for event in right.events
+    ]
+    assert left.state == right.state
+    assert left.next_sequence == right.next_sequence
+    if hasattr(left, "dice"):
+        assert left.dice.to_checkpoint() == right.dice.to_checkpoint()
+
+
+@pytest.mark.parametrize(
+    ("action", "action_type"),
+    [
+        (ShootAction(11, 21, RIFLE), "shoot"),
+        (
+            ChargeAction(11, 21, SWORD, counter_attack_declared=False),
+            "charge",
+        ),
+    ],
+)
+def test_v3_pass_only_attack_lifecycle_restarts_replays_and_isolates_rng(
+    action,
+    action_type: str,
+) -> None:
+    initial = _action_idle_state()
+    started, general_first_pass, ready = _v3_ready_with_tail(
+        initial,
+        sequence=3000,
+    )
+    complete_tail = [
+        *started.events,
+        *general_first_pass.events,
+        *ready.events,
+    ]
+    dice = DeterministicDice(307)
+    dice.roll_d6(4)
+    declaration_rng = json.loads(json.dumps(dice.to_checkpoint()))
+
+    declared = _commit_v3(
+        ready.state,
+        action,
+        dice,
+        sequence=ready.next_sequence,
+    )
+    restarted_declared = _commit_v3(
+        _restart_v3(ready.state),
+        action,
+        DeterministicDice.from_checkpoint(declaration_rng),
+        sequence=ready.next_sequence,
+    )
+
+    _assert_transition_equal(declared, restarted_declared)
+    assert [type(event) for event in declared.events] == [
+        AttackDeclared,
+        AttackInterruptWindowOpened,
+    ]
+    assert dice.to_checkpoint() == declaration_rng
+    assert declared.dice.to_checkpoint() == declaration_rng
+    assert declared.state.activation.action_count == 0
+    assert declared.state.activation.action_types == ()
+    assert declared.state.activation.phase is ActivationPhase.ATTACK_WINDOW
+    assert declared.state.activation.attack.intent.weapon_slug == action.weapon.slug
+    assert _restart_v3(declared.state) == declared.state
+    complete_tail.extend(declared.events)
+    assert declared.state == apply_events(initial, complete_tail)
+
+    first_pass = _pass_attack(
+        declared.state,
+        caller_player=0,
+        sequence=declared.next_sequence,
+    )
+    restarted_first_pass = _pass_attack(
+        _restart_v3(declared.state),
+        caller_player=0,
+        sequence=declared.next_sequence,
+    )
+
+    _assert_transition_equal(first_pass, restarted_first_pass)
+    assert [type(event) for event in first_pass.events] == [
+        AttackInterruptPriorityPassed
+    ]
+    assert first_pass.state.activation.attack.window.priority_player == 1
+    assert first_pass.state.activation.action_count == 0
+    assert declared.dice.to_checkpoint() == declaration_rng
+    assert _restart_v3(first_pass.state) == first_pass.state
+    complete_tail.extend(first_pass.events)
+    assert first_pass.state == apply_events(initial, complete_tail)
+
+    closed = _pass_attack(
+        first_pass.state,
+        caller_player=1,
+        sequence=first_pass.next_sequence,
+    )
+    restarted_closed = _pass_attack(
+        _restart_v3(first_pass.state),
+        caller_player=1,
+        sequence=first_pass.next_sequence,
+    )
+
+    _assert_transition_equal(closed, restarted_closed)
+    assert [type(event) for event in closed.events] == [
+        AttackInterruptPriorityPassed,
+        AttackInterruptWindowClosed,
+    ]
+    assert closed.state.activation.phase is ActivationPhase.ATTACK_RESOLUTION_READY
+    assert closed.state.activation.attack.window is None
+    assert closed.state.activation.action_count == 0
+    assert declared.dice.to_checkpoint() == declaration_rng
+    assert _restart_v3(closed.state) == closed.state
+    complete_tail.extend(closed.events)
+    assert closed.state == apply_events(initial, complete_tail)
+
+    resolve_rng = json.loads(json.dumps(declared.dice.to_checkpoint()))
+    resolved = _resolve_attack(
+        closed.state,
+        declared.dice,
+        sequence=closed.next_sequence,
+    )
+    restarted_resolved = _resolve_attack(
+        _restart_v3(closed.state),
+        DeterministicDice.from_checkpoint(resolve_rng),
+        sequence=closed.next_sequence,
+    )
+
+    _assert_transition_equal(resolved, restarted_resolved)
+    assert isinstance(resolved.events[-2], AttackResolved)
+    assert isinstance(resolved.events[-1], ActivationActionCommitted)
+    assert resolved.events[-1].action_type == action_type
+    assert resolved.events[-2].activation_version == resolved.events[-1].activation_version
+    assert declared.dice.to_checkpoint() == resolve_rng
+    assert resolved.dice.to_checkpoint() != resolve_rng
+    before_commit = apply_events(closed.state, resolved.events[:-1])
+    assert before_commit.activation.action_count == 0
+    assert before_commit.activation.action_types == ()
+    assert before_commit.activation.attack is None
+    assert before_commit.activation.phase is ActivationPhase.ACTION_READY
+    assert resolved.state.activation.action_count == 1
+    assert resolved.state.activation.action_types == (action_type,)
+    assert resolved.state.activation.phase is ActivationPhase.AWAITING_CONTINUATION
+    assert _restart_v3(resolved.state) == resolved.state
+    complete_tail.extend(resolved.events)
+    assert resolved.state == apply_events(initial, complete_tail)
+
+
+@pytest.mark.parametrize(
+    "action",
+    [
+        ManeuverAction(11, Position(1, 0)),
+        DefendAction(11),
+        SpecialAction(11, "discard_exhausted"),
+    ],
+)
+def test_v3_nonattack_dispatch_is_exact_v2_semantics(action) -> None:
+    initial = _action_idle_state(actor_statuses=(STATUS_WYCZERPANY,))
+    _, _, ready = _v3_ready_with_tail(initial, sequence=3200)
+    checkpoint = DeterministicDice(311).to_checkpoint()
+    v2_input = DeterministicDice.from_checkpoint(checkpoint)
+    v3_input = DeterministicDice.from_checkpoint(checkpoint)
+
+    v2 = _commit(
+        ready.state,
+        action,
+        v2_input,
+        sequence=ready.next_sequence,
+    )
+    v3 = _commit_v3(
+        _restart_v3(ready.state),
+        action,
+        v3_input,
+        sequence=ready.next_sequence,
+    )
+
+    _assert_transition_equal(v2, v3)
+    assert v2_input.to_checkpoint() == checkpoint
+    assert v3_input.to_checkpoint() == checkpoint
+    assert not any(
+        type(event) in {AttackDeclared, AttackInterruptWindowOpened, AttackResolved}
+        for event in v3.events
+    )
+
+
+def test_v2_attack_bridge_remains_atomic_and_has_no_pending_attack() -> None:
+    ready = _ready_for_action(sequence=3300)
+
+    result = _commit(
+        ready.state,
+        ShootAction(11, 21, RIFLE),
+        DeterministicDice(313),
+        sequence=ready.next_sequence,
+    )
+
+    assert result.state.activation.attack is None
+    assert result.state.activation.action_types == ("shoot",)
+    assert result.state.activation.phase is ActivationPhase.AWAITING_CONTINUATION
+    assert not any(
+        type(event) in {AttackDeclared, AttackInterruptWindowOpened, AttackResolved}
+        for event in result.events
+    )
+
+
+def test_v3_declaration_uses_unambiguous_canonical_inventory_atomically() -> None:
+    base = _action_idle_state()
+    actor, target = base.blobs
+    cases = (
+        (base, ShootAction(11, 21, replace(RIFLE, attacks=99))),
+        (base, ShootAction(11, 21, replace(RIFLE, slug="missing"))),
+        (
+            replace(
+                base,
+                blobs=(
+                    replace(
+                        actor,
+                        ranged_weapons=(RIFLE, replace(RIFLE, attacks=3)),
+                    ),
+                    target,
+                ),
+            ),
+            ShootAction(11, 21, RIFLE),
+        ),
+        (
+            replace(
+                base,
+                blobs=(
+                    replace(
+                        actor,
+                        ranged_weapons=(
+                            RIFLE,
+                            replace(RIFLE, range_inches=24.0),
+                        ),
+                    ),
+                    target,
+                ),
+            ),
+            ShootAction(11, 21, RIFLE),
+        ),
+        (
+            replace(base, blobs=(actor, replace(target, owner_player=0))),
+            ShootAction(11, 21, RIFLE),
+        ),
+        (base, ChargeAction(11, 21, SWORD, counter_attack_declared=1)),
+    )
+
+    for index, (state, action) in enumerate(cases):
+        _, _, ready = _v3_ready_with_tail(state, sequence=3400 + index * 10)
+        dice = DeterministicDice(317 + index)
+        rng_before = dice.to_checkpoint()
+        _assert_rejected(
+            ready.state,
+            ActivationProtocolErrorReason.ILLEGAL_ACTION,
+            lambda ready=ready, action=action, dice=dice: _commit_v3(
+                ready.state,
+                action,
+                dice,
+                sequence=ready.next_sequence,
+            ),
+        )
+        assert dice.to_checkpoint() == rng_before
+
+
+def _closed_v3_attack(*, sequence: int = 3500):
+    initial = _action_idle_state()
+    _, _, ready = _v3_ready_with_tail(initial, sequence=sequence)
+    declared = _commit_v3(
+        ready.state,
+        ShootAction(11, 21, RIFLE),
+        DeterministicDice(331),
+        sequence=ready.next_sequence,
+    )
+    first_pass = _pass_attack(
+        declared.state,
+        caller_player=0,
+        sequence=declared.next_sequence,
+    )
+    closed = _pass_attack(
+        first_pass.state,
+        caller_player=1,
+        sequence=first_pass.next_sequence,
+    )
+    return initial, declared, first_pass, closed
+
+
+def test_v3_resolve_failure_after_partial_rng_preserves_input_state_and_rng() -> None:
+    _, _, _, closed = _closed_v3_attack(sequence=3500)
+    dice = DeterministicDice(337)
+    rng_before = dice.to_checkpoint()
+
+    def failing_executor(*, dice, **kwargs):
+        del kwargs
+        dice.roll_d6(8)
+        raise RuntimeError("partial outcome failure")
+
+    _assert_rejected(
+        closed.state,
+        ActivationProtocolErrorReason.ILLEGAL_ACTION,
+        lambda: _resolve_attack(
+            closed.state,
+            dice,
+            sequence=closed.next_sequence,
+            outcome_executor=failing_executor,
+        ),
+    )
+    assert dice.to_checkpoint() == rng_before
+    assert closed.state.activation.phase is ActivationPhase.ATTACK_RESOLUTION_READY
+
+
+def test_v3_resolve_reloads_canonical_inventory_and_rejects_drift() -> None:
+    _, _, _, closed = _closed_v3_attack(sequence=3600)
+    actor, target = closed.state.blobs
+    drifted = replace(
+        closed.state,
+        blobs=(replace(actor, ranged_weapons=()), target),
+    )
+    dice = DeterministicDice(347)
+    rng_before = dice.to_checkpoint()
+
+    _assert_rejected(
+        drifted,
+        ActivationProtocolErrorReason.ILLEGAL_ACTION,
+        lambda: _resolve_attack(
+            drifted,
+            dice,
+            sequence=closed.next_sequence,
+        ),
+    )
+    assert dice.to_checkpoint() == rng_before
+
+
+def test_attack_trigger_and_override_reducers_update_only_attack_scope() -> None:
+    initial = _action_idle_state(actor_overrides=(("ordered", True),))
+    _, _, ready = _v3_ready_with_tail(initial, sequence=3700)
+    declared = _commit_v3(
+        ready.state,
+        ShootAction(11, 21, RIFLE),
+        DeterministicDice(349),
+        sequence=ready.next_sequence,
+    )
+    activation = declared.state.activation
+    attack = activation.attack
+    trigger = AttackInterruptTriggered(
+        sequence=declared.next_sequence,
+        activation_id=activation.activation_id,
+        activation_version=activation.version + 1,
+        attack_id=attack.attack_id,
+        attack_version=attack.version + 1,
+        attack_ordinal=attack.ordinal,
+        window_version=attack.window.version + 1,
+        priority_player=attack.window.priority_player,
+    )
+    triggered = apply_events(declared.state, (trigger,))
+    triggered_attack = triggered.activation.attack
+
+    assert triggered.activation.version == activation.version + 1
+    assert triggered_attack.version == attack.version + 1
+    assert triggered_attack.window.version == attack.window.version + 1
+    assert triggered_attack.window.interrupt_count == 1
+    assert triggered_attack.window.priority_player == attack.window.priority_player
+    assert triggered.used_interrupts_this_round == declared.state.used_interrupts_this_round
+
+    override = AttackAbilityOverrideApplied(
+        sequence=declared.next_sequence + 1,
+        activation_id=activation.activation_id,
+        activation_version=triggered.activation.version,
+        attack_id=attack.attack_id,
+        attack_version=triggered_attack.version,
+        attack_ordinal=attack.ordinal,
+        window_version=triggered_attack.window.version,
+        attacker_unit_id=11,
+        source_unit_id=12,
+        ability_slug="furia",
+    )
+    overridden = apply_events(triggered, (override,))
+    actor = next(blob for blob in overridden.blobs if blob.id == 11)
+
+    assert len(overridden.activation.attack.ability_overrides) == 1
+    stored_override = overridden.activation.attack.ability_overrides[0]
+    assert stored_override.source_unit_id == 12
+    assert stored_override.ability_slug == "furia"
+    assert actor.ability_overrides == (("ordered", True),)
+
+
+def test_v3_second_attack_declaration_uses_second_ordinal() -> None:
+    initial = _action_idle_state()
+    _, _, first_ready = _v3_ready_with_tail(initial, sequence=3800)
+    first = _commit_v3(
+        first_ready.state,
+        DefendAction(11),
+        DeterministicDice(353),
+        sequence=first_ready.next_sequence,
+    )
+    second_ready = _ready_for_second_action(first)
+
+    declared = _commit_v3(
+        second_ready.state,
+        ChargeAction(11, 21, SWORD, counter_attack_declared=False),
+        first.dice,
+        sequence=second_ready.next_sequence,
+    )
+
+    assert declared.state.activation.attack.ordinal == 2
+    assert declared.events[0].attack_ordinal == 2
+    assert declared.state.activation.action_count == 1
+    assert declared.state.activation.action_types == ("defend",)

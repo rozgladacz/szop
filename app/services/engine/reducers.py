@@ -24,6 +24,13 @@ from dataclasses import replace
 
 from app.services.engine.events import (
     ActivePlayerChanged,
+    AttackAbilityOverrideApplied,
+    AttackDeclared,
+    AttackInterruptPriorityPassed,
+    AttackInterruptTriggered,
+    AttackInterruptWindowClosed,
+    AttackInterruptWindowOpened,
+    AttackResolved,
     ActivationActionCommitted,
     ActivationContinuationChosen,
     ActivationFinalized,
@@ -53,6 +60,8 @@ from app.services.engine.events import (
 from app.services.engine.state import (
     ActivationPhase,
     ActivationState,
+    AttackAbilityOverride,
+    AttackState,
     BattleState,
     InterruptWindowState,
     Lokalizacja,
@@ -108,6 +117,40 @@ def _window_for_event(
     if window is None or window.ordinal != window_ordinal:
         raise ValueError("protocol event does not match the open interrupt window")
     return activation, window
+
+
+def _attack_for_event(
+    state: BattleState,
+    activation_id: int,
+    attack_id: int,
+    attack_ordinal: int,
+) -> tuple[ActivationState, AttackState]:
+    activation = _activation_for_event(state, activation_id)
+    attack = activation.attack
+    if (
+        attack is None
+        or attack.attack_id != attack_id
+        or attack.ordinal != attack_ordinal
+    ):
+        raise ValueError("protocol event does not match the pending attack")
+    return activation, attack
+
+
+def _attack_window_for_event(
+    state: BattleState,
+    activation_id: int,
+    attack_id: int,
+    attack_ordinal: int,
+) -> tuple[ActivationState, AttackState, InterruptWindowState]:
+    activation, attack = _attack_for_event(
+        state,
+        activation_id,
+        attack_id,
+        attack_ordinal,
+    )
+    if attack.window is None:
+        raise ValueError("protocol event requires an open attack window")
+    return activation, attack, attack.window
 
 
 # ---------------------------------------------------------------------------
@@ -324,6 +367,283 @@ def _reduce_active_player_changed(
     event: ActivePlayerChanged,
 ) -> BattleState:
     return replace(state, active_player=event.new_active_player)
+
+
+# ---------------------------------------------------------------------------
+# Attack protocol v1 — private checkpoint protocol v3 (ADR-0056 section 5)
+# ---------------------------------------------------------------------------
+
+
+@register_reducer("AttackDeclared")
+def _reduce_attack_declared(
+    state: BattleState,
+    event: AttackDeclared,
+) -> BattleState:
+    activation = _activation_for_event(state, event.activation_id)
+    if (
+        activation.phase is not ActivationPhase.ACTION_READY
+        or activation.window is not None
+        or activation.attack is not None
+        or event.activation_version != activation.version + 1
+        or event.attack_ordinal != activation.action_count + 1
+        or event.intent.attacker_unit_id != activation.selected_unit_id
+    ):
+        raise ValueError("AttackDeclared does not match the activation head")
+    window = InterruptWindowState(
+        ordinal=event.attack_ordinal,
+        version=event.attack_version,
+        priority_player=activation.initiative_player,
+        passed_players=(),
+        interrupt_count=0,
+    )
+    attack = AttackState(
+        attack_id=event.attack_id,
+        version=event.attack_version,
+        ordinal=event.attack_ordinal,
+        intent=event.intent,
+        window=window,
+        ability_overrides=(),
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            phase=ActivationPhase.ATTACK_WINDOW,
+            window=None,
+            attack=attack,
+        ),
+    )
+
+
+@register_reducer("AttackInterruptWindowOpened")
+def _reduce_attack_interrupt_window_opened(
+    state: BattleState,
+    event: AttackInterruptWindowOpened,
+) -> BattleState:
+    activation, attack = _attack_for_event(
+        state,
+        event.activation_id,
+        event.attack_id,
+        event.attack_ordinal,
+    )
+    if (
+        activation.phase is not ActivationPhase.ATTACK_WINDOW
+        or event.activation_version != activation.version
+        or event.attack_version != attack.version
+        or attack.ability_overrides
+    ):
+        raise ValueError("AttackInterruptWindowOpened does not match attack head")
+    window = InterruptWindowState(
+        ordinal=event.attack_ordinal,
+        version=event.window_version,
+        priority_player=event.priority_player,
+        passed_players=(),
+        interrupt_count=0,
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            phase=ActivationPhase.ATTACK_WINDOW,
+            attack=replace(
+                attack,
+                version=event.attack_version,
+                window=window,
+            ),
+        ),
+    )
+
+
+@register_reducer("AttackInterruptTriggered")
+def _reduce_attack_interrupt_triggered(
+    state: BattleState,
+    event: AttackInterruptTriggered,
+) -> BattleState:
+    activation, attack, window = _attack_window_for_event(
+        state,
+        event.activation_id,
+        event.attack_id,
+        event.attack_ordinal,
+    )
+    if (
+        activation.phase is not ActivationPhase.ATTACK_WINDOW
+        or event.activation_version != activation.version + 1
+        or event.attack_version != attack.version + 1
+        or event.window_version != window.version + 1
+        or event.priority_player != window.priority_player
+    ):
+        raise ValueError("AttackInterruptTriggered does not match attack head")
+    updated_window = replace(
+        window,
+        version=event.window_version,
+        priority_player=event.priority_player,
+        interrupt_count=window.interrupt_count + 1,
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            attack=replace(
+                attack,
+                version=event.attack_version,
+                window=updated_window,
+            ),
+        ),
+    )
+
+
+@register_reducer("AttackInterruptPriorityPassed")
+def _reduce_attack_interrupt_priority_passed(
+    state: BattleState,
+    event: AttackInterruptPriorityPassed,
+) -> BattleState:
+    activation, attack, window = _attack_window_for_event(
+        state,
+        event.activation_id,
+        event.attack_id,
+        event.attack_ordinal,
+    )
+    if (
+        activation.phase is not ActivationPhase.ATTACK_WINDOW
+        or event.activation_version != activation.version + 1
+        or event.attack_version != attack.version + 1
+        or event.window_version != window.version + 1
+        or event.passed_player != window.priority_player
+    ):
+        raise ValueError("AttackInterruptPriorityPassed does not match attack head")
+    if event.next_priority_player is None:
+        return replace(
+            state,
+            activation=replace(
+                activation,
+                version=event.activation_version,
+                phase=ActivationPhase.ATTACK_RESOLUTION_READY,
+                attack=replace(
+                    attack,
+                    version=event.attack_version,
+                    window=None,
+                ),
+            ),
+        )
+    updated_window = replace(
+        window,
+        version=event.window_version,
+        priority_player=event.next_priority_player,
+        passed_players=window.passed_players + (event.passed_player,),
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            attack=replace(
+                attack,
+                version=event.attack_version,
+                window=updated_window,
+            ),
+        ),
+    )
+
+
+@register_reducer("AttackInterruptWindowClosed")
+def _reduce_attack_interrupt_window_closed(
+    state: BattleState,
+    event: AttackInterruptWindowClosed,
+) -> BattleState:
+    activation, attack = _attack_for_event(
+        state,
+        event.activation_id,
+        event.attack_id,
+        event.attack_ordinal,
+    )
+    if (
+        activation.phase is not ActivationPhase.ATTACK_RESOLUTION_READY
+        or event.activation_version != activation.version
+        or event.attack_version != attack.version
+        or attack.window is not None
+    ):
+        raise ValueError("AttackInterruptWindowClosed does not match attack head")
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            phase=ActivationPhase.ATTACK_RESOLUTION_READY,
+            attack=replace(
+                attack,
+                version=event.attack_version,
+                window=None,
+            ),
+        ),
+    )
+
+
+@register_reducer("AttackAbilityOverrideApplied")
+def _reduce_attack_ability_override_applied(
+    state: BattleState,
+    event: AttackAbilityOverrideApplied,
+) -> BattleState:
+    activation, attack, window = _attack_window_for_event(
+        state,
+        event.activation_id,
+        event.attack_id,
+        event.attack_ordinal,
+    )
+    if (
+        activation.phase is not ActivationPhase.ATTACK_WINDOW
+        or event.activation_version != activation.version
+        or event.attack_version != attack.version
+        or event.window_version != window.version
+        or event.attacker_unit_id != attack.intent.attacker_unit_id
+    ):
+        raise ValueError("AttackAbilityOverrideApplied does not match attack head")
+    override = AttackAbilityOverride(
+        source_unit_id=event.source_unit_id,
+        ability_slug=event.ability_slug,
+    )
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            attack=replace(
+                attack,
+                ability_overrides=attack.ability_overrides + (override,),
+            ),
+        ),
+    )
+
+
+@register_reducer("AttackResolved")
+def _reduce_attack_resolved(
+    state: BattleState,
+    event: AttackResolved,
+) -> BattleState:
+    activation, attack = _attack_for_event(
+        state,
+        event.activation_id,
+        event.attack_id,
+        event.attack_ordinal,
+    )
+    if (
+        activation.phase is not ActivationPhase.ATTACK_RESOLUTION_READY
+        or attack.window is not None
+        or event.activation_version != activation.version + 1
+        or event.attack_version != attack.version + 1
+    ):
+        raise ValueError("AttackResolved does not match attack head")
+    return replace(
+        state,
+        activation=replace(
+            activation,
+            version=event.activation_version,
+            phase=ActivationPhase.ACTION_READY,
+            window=None,
+            attack=None,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------

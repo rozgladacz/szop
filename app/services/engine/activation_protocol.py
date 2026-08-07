@@ -1,25 +1,34 @@
-"""Pure control-plane transitions for durable activation protocol v2.
+"""Pure control-plane transitions for activation protocol v2 and private v3.
 
 This module owns the durable protocol transitions plus the narrow mechanical
-leaf boundaries from ADR-0056.  It performs no I/O.  Every live state returned
-here is derived by replaying emitted events through ``apply_events``.
+leaf boundaries from ADR-0056, including the pass-only attack lifecycle v3.
+It performs no I/O.  Every live state returned here is derived by replaying
+emitted events through ``apply_events``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from enum import Enum
 from typing import Any, Protocol, get_args
 
+from app.services.engine.action_codec import action_to_json
 from app.services.engine.actions import (
     ACTION_TYPE_BY_CLASS,
     Action,
+    ChargeAction,
+    ShootAction,
     can_append_activation_action_type,
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     ActivePlayerChanged,
+    AttackDeclared,
+    AttackInterruptPriorityPassed,
+    AttackInterruptWindowClosed,
+    AttackInterruptWindowOpened,
+    AttackResolved,
     ActivationActionCommitted,
     ActivationContinuationChosen,
     ActivationFinalized,
@@ -40,9 +49,13 @@ from app.services.engine.resolver import _validate_action
 from app.services.engine.state import (
     ActivationPhase,
     ActivationState,
+    AttackState,
     BattleState,
+    ChargeAttackIntent,
     Lokalizacja,
+    ShootAttackIntent,
     UnitBlob,
+    WeaponProfile,
     apply_events,
     effective_passives,
 )
@@ -60,6 +73,7 @@ class ActivationProtocolErrorReason(str, Enum):
     INVALID_SELECTION = "invalid_selection"
     INVALID_CALLER = "invalid_caller"
     STALE_ACTIVATION = "stale_activation"
+    STALE_ATTACK = "stale_attack"
     STALE_WINDOW = "stale_window"
     ILLEGAL_CONTINUE = "illegal_continue"
     ILLEGAL_ACTION = "illegal_action"
@@ -150,6 +164,7 @@ _BATTLE_EVENT_TYPES = get_args(BattleEvent)
 _MAX_ACCEPTED_INTERRUPTS_PER_WINDOW = 64
 _MAX_INTERRUPT_OUTCOME_EVENTS = 64
 _MAX_FINALIZATION_OUTCOME_EVENTS = 64
+_MAX_ATTACK_RESOLUTION_EVENTS = 10_000
 
 
 def _reject(reason: ActivationProtocolErrorReason) -> None:
@@ -182,6 +197,27 @@ def _require_activation(
     ):
         _reject(ActivationProtocolErrorReason.STALE_ACTIVATION)
     return activation
+
+
+def _require_attack(
+    activation: ActivationState,
+    *,
+    attack_id: int,
+    expected_attack_version: int,
+) -> AttackState:
+    attack = activation.attack
+    if attack is None:
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    if (
+        type(attack_id) is not int
+        or attack_id < 1
+        or type(expected_attack_version) is not int
+        or expected_attack_version < 1
+        or attack.attack_id != attack_id
+        or attack.version != expected_attack_version
+    ):
+        _reject(ActivationProtocolErrorReason.STALE_ATTACK)
+    return attack
 
 
 def _require_caller(caller_player: int, expected_player: int) -> None:
@@ -218,6 +254,158 @@ def _selected_unit(state: BattleState, selected_unit_id: int) -> UnitBlob:
     ):
         _reject(ActivationProtocolErrorReason.INVALID_SELECTION)
     return unit
+
+
+def _clone_dice(
+    dice: DeterministicDice,
+    *,
+    reason: ActivationProtocolErrorReason,
+) -> DeterministicDice:
+    if type(dice) is not DeterministicDice:
+        _reject(reason)
+    try:
+        return DeterministicDice.from_checkpoint(dice.to_checkpoint())
+    except Exception as exc:
+        raise ActivationProtocolError(reason) from exc
+
+
+def _canonical_weapon(
+    actor: UnitBlob,
+    *,
+    weapon_slug: str,
+    ranged: bool,
+) -> WeaponProfile:
+    if type(weapon_slug) is not str or not weapon_slug or len(weapon_slug) > 128:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    inventory = actor.ranged_weapons if ranged else actor.melee_weapons
+    candidates = tuple(
+        profile
+        for profile in inventory
+        if type(profile) is WeaponProfile and profile.slug == weapon_slug
+    )
+    if not candidates or any(
+        not _same_weapon_profile(profile, candidates[0])
+        for profile in candidates[1:]
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    return candidates[0]
+
+
+def _same_weapon_profile(left: WeaponProfile, right: WeaponProfile) -> bool:
+    """Compare canonical profiles without Python's bool/int or int/float coercion."""
+
+    return all(
+        type(getattr(left, field_.name)) is type(getattr(right, field_.name))
+        and getattr(left, field_.name) == getattr(right, field_.name)
+        for field_ in fields(WeaponProfile)
+    )
+
+
+def _canonical_attack_intent(
+    state: BattleState,
+    activation: ActivationState,
+    action: Action,
+) -> ShootAttackIntent | ChargeAttackIntent:
+    if type(action) not in (ShootAction, ChargeAction):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    try:
+        action_to_json(action)
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+    action_type = ACTION_TYPE_BY_CLASS[type(action)]
+    if (
+        type(action.unit_id) is not int
+        or action.unit_id != activation.selected_unit_id
+        or type(action.target_id) is not int
+        or action.target_id < 0
+        or type(action.weapon) is not WeaponProfile
+        or not can_append_activation_action_type(action_type, activation.action_types)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    try:
+        _validate_action(state, action)
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+    actor = next((blob for blob in state.blobs if blob.id == action.unit_id), None)
+    target = next((blob for blob in state.blobs if blob.id == action.target_id), None)
+    if (
+        actor is None
+        or target is None
+        or actor.models_alive <= 0
+        or actor.location is not Lokalizacja.FRONT
+        or target.models_alive <= 0
+        or target.location is not Lokalizacja.FRONT
+        or type(actor.owner_player) is not int
+        or actor.owner_player not in (0, 1)
+        or type(target.owner_player) is not int
+        or target.owner_player not in (0, 1)
+        or target.owner_player == actor.owner_player
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    canonical_weapon = _canonical_weapon(
+        actor,
+        weapon_slug=action.weapon.slug,
+        ranged=type(action) is ShootAction,
+    )
+    if not _same_weapon_profile(action.weapon, canonical_weapon):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    if type(action) is ShootAction:
+        return ShootAttackIntent(
+            attacker_unit_id=action.unit_id,
+            target_unit_id=action.target_id,
+            weapon_slug=canonical_weapon.slug,
+        )
+    if type(action.counter_attack_declared) is not bool:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    return ChargeAttackIntent(
+        attacker_unit_id=action.unit_id,
+        target_unit_id=action.target_id,
+        weapon_slug=canonical_weapon.slug,
+        counter_attack_declared=action.counter_attack_declared,
+    )
+
+
+def _canonical_action_from_attack(
+    state: BattleState,
+    activation: ActivationState,
+    attack: AttackState,
+) -> Action:
+    actor = next(
+        (blob for blob in state.blobs if blob.id == attack.intent.attacker_unit_id),
+        None,
+    )
+    if actor is None:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    if type(attack.intent) is ShootAttackIntent:
+        action: Action = ShootAction(
+            unit_id=attack.intent.attacker_unit_id,
+            target_id=attack.intent.target_unit_id,
+            weapon=_canonical_weapon(
+                actor,
+                weapon_slug=attack.intent.weapon_slug,
+                ranged=True,
+            ),
+        )
+    elif type(attack.intent) is ChargeAttackIntent:
+        action = ChargeAction(
+            unit_id=attack.intent.attacker_unit_id,
+            target_id=attack.intent.target_unit_id,
+            weapon=_canonical_weapon(
+                actor,
+                weapon_slug=attack.intent.weapon_slug,
+                ranged=False,
+            ),
+            counter_attack_declared=attack.intent.counter_attack_declared,
+        )
+    else:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    if _canonical_attack_intent(state, activation, action) != attack.intent:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    return action
 
 
 def _result(
@@ -586,12 +774,10 @@ def trigger_activation_interrupt(
         priority_player=window.priority_player,
     )
     protocol_state = apply_events(state, (protocol_event,))
-    try:
-        working_dice = DeterministicDice.from_checkpoint(dice.to_checkpoint())
-    except Exception as exc:
-        raise ActivationProtocolError(
-            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
-        ) from exc
+    working_dice = _clone_dice(
+        dice,
+        reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+    )
     outcome_events, replay_state = _validated_interrupt_outcomes(
         protocol_state,
         source=source,
@@ -745,12 +931,10 @@ def commit_activation_action(
     ):
         _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
 
-    try:
-        working_dice = DeterministicDice.from_checkpoint(dice.to_checkpoint())
-    except Exception as exc:
-        raise ActivationProtocolError(
-            ActivationProtocolErrorReason.ILLEGAL_ACTION
-        ) from exc
+    working_dice = _clone_dice(
+        dice,
+        reason=ActivationProtocolErrorReason.ILLEGAL_ACTION,
+    )
     outcome_state, outcome_events, next_sequence = _validated_action_outcomes(
         state,
         action=action,
@@ -775,6 +959,262 @@ def commit_activation_action(
         state=result_state,
         events=events,
         next_sequence=next_sequence + 1,
+        dice=working_dice,
+    )
+
+
+def _declare_activation_attack(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    action: ShootAction | ChargeAction,
+    dice: DeterministicDice,
+    sequence: int,
+) -> ActivationActionTransitionResult:
+    """Persist one canonical attack intent without resolving it or moving RNG."""
+
+    _require_protocol_v2(state)
+    activation = _require_activation(
+        state,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+    )
+    if activation.phase is not ActivationPhase.ACTION_READY:
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    _require_caller(caller_player, activation.controlling_player)
+    if type(sequence) is not int or sequence < 1:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    intent = _canonical_attack_intent(state, activation, action)
+    working_dice = _clone_dice(
+        dice,
+        reason=ActivationProtocolErrorReason.ILLEGAL_ACTION,
+    )
+
+    activation_version = activation.version + 1
+    attack_id = sequence
+    attack_ordinal = activation.action_count + 1
+    events: tuple[BattleEvent, ...] = (
+        AttackDeclared(
+            sequence=sequence,
+            activation_id=activation.activation_id,
+            activation_version=activation_version,
+            attack_id=attack_id,
+            attack_version=1,
+            attack_ordinal=attack_ordinal,
+            intent=intent,
+        ),
+        AttackInterruptWindowOpened(
+            sequence=sequence + 1,
+            activation_id=activation.activation_id,
+            activation_version=activation_version,
+            attack_id=attack_id,
+            attack_version=1,
+            attack_ordinal=attack_ordinal,
+            window_version=1,
+            priority_player=activation.initiative_player,
+        ),
+    )
+    try:
+        result_state = apply_events(state, events)
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+    return ActivationActionTransitionResult(
+        state=result_state,
+        events=events,
+        next_sequence=sequence + len(events),
+        dice=working_dice,
+    )
+
+
+def _commit_activation_action_v3(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    action: Action,
+    dice: DeterministicDice,
+    sequence: int,
+    outcome_executor: ActivationActionOutcomeExecutor = _execute_single_action_outcomes,
+) -> ActivationActionTransitionResult:
+    """Private v3 action dispatch: declare attacks, resolve nonattacks as v2."""
+
+    if type(action) in (ShootAction, ChargeAction):
+        return _declare_activation_attack(
+            state,
+            caller_player=caller_player,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+            action=action,
+            dice=dice,
+            sequence=sequence,
+        )
+    return commit_activation_action(
+        state,
+        caller_player=caller_player,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+        action=action,
+        dice=dice,
+        sequence=sequence,
+        outcome_executor=outcome_executor,
+    )
+
+
+def _pass_attack_interrupt_priority(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    attack_id: int,
+    expected_attack_version: int,
+    expected_window_version: int,
+    sequence: int,
+) -> ActivationTransitionResult:
+    """Record one explicit attack-scope pass, handing off or closing."""
+
+    _require_protocol_v2(state)
+    activation = _require_activation(
+        state,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+    )
+    attack = _require_attack(
+        activation,
+        attack_id=attack_id,
+        expected_attack_version=expected_attack_version,
+    )
+    window = attack.window
+    if activation.phase is not ActivationPhase.ATTACK_WINDOW or window is None:
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    if (
+        type(expected_window_version) is not int
+        or expected_window_version < 1
+        or window.version != expected_window_version
+    ):
+        _reject(ActivationProtocolErrorReason.STALE_WINDOW)
+    _require_caller(caller_player, window.priority_player)
+    if type(sequence) is not int or sequence < 1:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+
+    activation_version = activation.version + 1
+    attack_version = attack.version + 1
+    window_version = window.version + 1
+    closing = bool(window.passed_players)
+    pass_event = AttackInterruptPriorityPassed(
+        sequence=sequence,
+        activation_id=activation.activation_id,
+        activation_version=activation_version,
+        attack_id=attack.attack_id,
+        attack_version=attack_version,
+        attack_ordinal=attack.ordinal,
+        window_version=window_version,
+        passed_player=caller_player,
+        next_priority_player=None if closing else 1 - caller_player,
+    )
+    if not closing:
+        return _result(state, (pass_event,), sequence=sequence)
+    close_event = AttackInterruptWindowClosed(
+        sequence=sequence + 1,
+        activation_id=activation.activation_id,
+        activation_version=activation_version,
+        attack_id=attack.attack_id,
+        attack_version=attack_version,
+        attack_ordinal=attack.ordinal,
+        window_version=window_version,
+    )
+    return _result(state, (pass_event, close_event), sequence=sequence)
+
+
+def _resolve_activation_attack(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    attack_id: int,
+    expected_attack_version: int,
+    dice: DeterministicDice,
+    sequence: int,
+    outcome_executor: ActivationActionOutcomeExecutor = _execute_single_action_outcomes,
+) -> ActivationActionTransitionResult:
+    """Resolve one closed v3 attack from canonical inventory on a private RNG."""
+
+    _require_protocol_v2(state)
+    activation = _require_activation(
+        state,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+    )
+    attack = _require_attack(
+        activation,
+        attack_id=attack_id,
+        expected_attack_version=expected_attack_version,
+    )
+    if (
+        activation.phase is not ActivationPhase.ATTACK_RESOLUTION_READY
+        or attack.window is not None
+    ):
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    _require_caller(caller_player, activation.controlling_player)
+    if (
+        type(sequence) is not int
+        or sequence < 1
+        or not callable(outcome_executor)
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+
+    action = _canonical_action_from_attack(state, activation, attack)
+    action_type = ACTION_TYPE_BY_CLASS[type(action)]
+    working_dice = _clone_dice(
+        dice,
+        reason=ActivationProtocolErrorReason.ILLEGAL_ACTION,
+    )
+    outcome_state, outcome_events, next_sequence = _validated_action_outcomes(
+        state,
+        action=action,
+        dice=working_dice,
+        sequence=sequence,
+        outcome_executor=outcome_executor,
+    )
+    if len(outcome_events) + 2 > _MAX_ATTACK_RESOLUTION_EVENTS:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+
+    activation_version = activation.version + 1
+    resolved = AttackResolved(
+        sequence=next_sequence,
+        activation_id=activation.activation_id,
+        activation_version=activation_version,
+        attack_id=attack.attack_id,
+        attack_version=attack.version + 1,
+        attack_ordinal=attack.ordinal,
+    )
+    committed = ActivationActionCommitted(
+        sequence=next_sequence + 1,
+        activation_id=activation.activation_id,
+        activation_version=activation_version,
+        action_type=action_type,
+    )
+    events = (*outcome_events, resolved, committed)
+    try:
+        result_state = apply_events(outcome_state, (resolved, committed))
+        if result_state != apply_events(state, events):
+            _reject(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+    except ActivationProtocolError:
+        raise
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_ACTION
+        ) from exc
+    return ActivationActionTransitionResult(
+        state=result_state,
+        events=events,
+        next_sequence=next_sequence + 2,
         dice=working_dice,
     )
 

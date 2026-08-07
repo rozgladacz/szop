@@ -2,9 +2,10 @@
 
 - **Status:** Accepted
 - **Data:** 2026-07-19
-- **Rozszerzenie:** B4.4d.C2a0/C2a1, 2026-07-30 — frozen design oraz immutable
-  model/exact checkpoint codec v3 trwałej deklaracji i zakresu jednego ataku;
-  bez runtime/publicznego wire v3
+- **Rozszerzenie:** B4.4d.C2a0/C2a1/C2a2, 2026-07-30/2026-08-07 — frozen
+  design, immutable model/exact checkpoint codec oraz prywatny pure lifecycle v3
+  trwałej deklaracji i zakresu jednego ataku; bez metadata/handlera Oznaczenia,
+  persistence ani publicznego wire v3
 - **Kontekst:** B4.4a; projekt przed implementacją
   `POST /battles/{id}/interrupts`
 - **Rozszerza:** ADR-0010, ADR-0015, ADR-0015a, ADR-0049, ADR-0051 i
@@ -246,8 +247,9 @@ same następne operacje i zachować pozycję RNG.
 ### 5. B4.4d.C2a0 — trwała deklaracja i zakres jednego ataku
 
 Ta sekcja jest normatywnym kontraktem protocol/checkpoint v3. C2a1 implementuje
-wyłącznie immutable model i prywatny exact codec; nie zmienia istniejącego
-runtime v2. Powodem nowej wersji jest zmiana znaczenia
+immutable model i prywatny exact codec, a C2a2 siedem eventów, reducery oraz
+prywatny pure lifecycle declare/pass/close/resolve. Istniejący runtime v2 nie
+zmienia się. Powodem nowej wersji jest zmiana znaczenia
 zaakceptowanego `ShootAction`/`ChargeAction`: v2 rozstrzyga go od razu, natomiast
 v3 najpierw utrwala deklarację i dopiero po osobnym attack-scope window pozwala
 go rozstrzygnąć. Historyczne checkpointy i requesty v1/v2 nie są przepisywane
@@ -1156,7 +1158,7 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   DB/schema, metody klienta ani zmian v1.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
   pakowanie pozostają osobnymi slice'ami; C2a0 design Oznaczenia jest DONE,
-  C2a1 model+codec jest DONE, a C2a2/C2b/C2c pozostają OPEN.
+  C2a1 model+codec i C2a2 pure lifecycle są DONE, a C2b/C2c pozostają OPEN.
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -1219,12 +1221,16 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   typ każdego headu i tuple override'ów, a golden bajty v1/v2 są niezmienione.
   Runtime persistence/DB/service/publiczny wire/klient i allowlista pozostają
   na v1/v2; nie dodano eventów, reducerów ani protocol transitions.
-- **C2a2 eventy + reducery + pure lifecycle OPEN:** dodać siedem eventów z
-  sekcji 5.3, reducery i pure declare/pass/close/resolve z canonical inventory,
-  prywatnym RNG oraz complete-tail equality na każdym restart headzie. Warunek
-  zakończenia: pass-only attack scope działa dla Shoot/Charge, nonattack v3 i
-  całe v2 nie dryfują, validation/outcome failure nie zmienia state/RNG; bez
-  metadata/handlera Oznaczenia, persistence/router/client i allowlisty.
+- **C2a2 eventy + reducery + pure lifecycle DONE 2026-08-07:** siedem strict
+  eventów z sekcji 5.3 ma exact codec/registry i kompletne reducery. Prywatne
+  pure declare/pass/close/resolve działa dla pass-only Shoot/Charge, rozwiązuje
+  broń z canonical inventory, klonuje RNG i zachowuje complete-tail equality po
+  każdym restart headzie. Declaration/pass/close nie przesuwają RNG, a każdy
+  validation/outcome failure zachowuje wejściowy state i RNG. Nonattack v3
+  deleguje do semantyki v2, całe v1/v2 nie dryfują, outcome eventy pozostają
+  SSOT mechaniki, a wyłącznie `ActivationActionCommitted` zwiększa
+  `action_count/action_types`. Bez metadata/handlera Oznaczenia, attack effect
+  view/combat wiring, persistence/DB/router/FastAPI/klienta i allowlisty.
 - **C2b source-correct metadata/private handler OPEN:** dodać immutable
   `oznaczenie_tak`, strict katalog/payload, source/ally/other-attacker/target
   edge-to-edge 12″/raz-rundę oraz attack effect view widoczny tylko dla
