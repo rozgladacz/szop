@@ -16,17 +16,26 @@ ZERO = Decimal("0")
 ONE = Decimal("1")
 
 
-def rescale_points_limit(
-    points_limit: int | None, *, from_simple: bool, to_simple: bool
-) -> int | None:
-    """Keep a roster limit in the same scale as its displayed unit costs."""
-    if points_limit is None or from_simple == to_simple:
-        return points_limit
-    factor = Decimal("0.1") if to_simple else Decimal("10")
-    scaled = (Decimal(points_limit) * factor).quantize(
-        Decimal("1"), rounding=ROUND_HALF_UP
+def scale_points(points: int | Decimal | None, points_scale: int) -> int | None:
+    """Scale a stored base-points value for display using half-up rounding."""
+    if points is None:
+        return None
+    if points_scale < 1:
+        raise ValueError("Points scale must be positive")
+    return int(
+        (Decimal(points) / Decimal(points_scale)).quantize(
+            Decimal("1"), rounding=ROUND_HALF_UP
+        )
     )
-    return max(1, int(scaled))
+
+
+def scale_entry_cost(
+    unit_cost: int | Decimal, unit_copies: int, points_scale: int
+) -> int:
+    """Scale one stored unit cost before applying the number of copies."""
+    scaled_unit_cost = scale_points(unit_cost, points_scale)
+    assert scaled_unit_cost is not None
+    return scaled_unit_cost * unit_copies
 
 
 class AttackProfileInput(BaseModel):
@@ -71,7 +80,7 @@ class UnitQuoteInput(BaseModel):
     special_abilities: tuple[SpecialAbilityInput, ...] = ()
     profiles: AttackProfilesInput
     custom_stats_enabled: bool = False
-    simple_points_enabled: bool = False
+    points_scale: int = Field(default=1, ge=1, le=1_000_000)
     small_battle_enabled: bool = False
 
     @field_validator("name")
@@ -110,7 +119,8 @@ class QuoteBreakdown(BaseModel):
     aura_cost: Decimal
     toughness_modifier: Decimal
     raw_unit_cost: Decimal
-    points_divisor: Decimal
+    points_scale: Decimal
+    unscaled_unit_cost: Decimal
     rounded_unit_cost: Decimal
     unit_copies: int
     entry_cost: Decimal
@@ -157,13 +167,13 @@ def _validate_request(request: UnitQuoteInput, ruleset: OposRuleset) -> None:
     if not request.custom_stats_enabled:
         standard = ruleset.standard_stats
         if request.defense not in standard.defense:
-            raise QuoteValidationError("Defense is outside the standard list")
+            raise QuoteValidationError("Zbroja is outside the standard list")
         allowed_toughness = tuple(
             value * (Decimal("2") if request.small_battle_enabled else ONE)
             for value in standard.toughness
         )
         if request.toughness not in allowed_toughness:
-            raise QuoteValidationError("Toughness is outside the standard list")
+            raise QuoteValidationError("Życie is outside the standard list")
 
     formula = ruleset.formula
     passive_defs = tuple(abilities[slug] for slug in request.passive_abilities)
@@ -249,6 +259,7 @@ def _profile_costs(
     strength_bonus = sum((item.effects.strength_bonus for item in passive_defs), ZERO)
     breakdown: list[ProfileQuote] = []
     total = ZERO
+    most_expensive = ZERO
     for range_slug, profile in request.profiles.items():
         effective_strength = profile.strength + strength_bonus
         strength_multiplier = (
@@ -270,6 +281,8 @@ def _profile_costs(
         )
         all_models = per_model * Decimal(request.models_per_unit)
         total += all_models
+        if profile.dice > 0:
+            most_expensive = max(most_expensive, all_models)
         breakdown.append(
             ProfileQuote(
                 range=range_slug,
@@ -282,7 +295,7 @@ def _profile_costs(
                 cost_all_models=all_models,
             )
         )
-    return total, tuple(breakdown)
+    return total + most_expensive, tuple(breakdown)
 
 
 def _core_cost(
@@ -362,19 +375,26 @@ def calculate_unit_quote(
         aura_cost += max(delta, minimum_aura)
 
     toughness_modifier = ONE + ruleset.formula.toughness_modifier_per_point * request.toughness
-    points_divisor = Decimal("10") if request.simple_points_enabled else ONE
-    raw_unit_cost = (
+    points_scale = Decimal(request.points_scale)
+    unscaled_raw_unit_cost = (
         (base + weapon_cost + order_cost + aura_cost)
         * toughness_modifier
-        / points_divisor
     )
-    rounded_unit_cost = raw_unit_cost.quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-    entry_cost = rounded_unit_cost * Decimal(request.unit_copies)
+    unscaled_unit_cost = unscaled_raw_unit_cost.quantize(
+        Decimal("1"), rounding=ROUND_HALF_UP
+    )
+    raw_unit_cost = unscaled_raw_unit_cost / points_scale
+    rounded_unit_cost = Decimal(scale_points(unscaled_unit_cost, request.points_scale))
+    entry_cost = Decimal(
+        scale_entry_cost(
+            unscaled_unit_cost, request.unit_copies, request.points_scale
+        )
+    )
     scaled_profiles = tuple(
         profile.model_copy(
             update={
-                "cost_per_model": profile.cost_per_model / points_divisor,
-                "cost_all_models": profile.cost_all_models / points_divisor,
+                "cost_per_model": profile.cost_per_model / points_scale,
+                "cost_all_models": profile.cost_all_models / points_scale,
             }
         )
         for profile in profiles
@@ -385,13 +405,14 @@ def calculate_unit_quote(
         effective_defense=effective_defense,
         defense_multiplier=defense_multiplier,
         ability_cost_modifier=ability_delta,
-        base_cost=base / points_divisor,
-        weapon_cost=weapon_cost / points_divisor,
-        order_cost=order_cost / points_divisor,
-        aura_cost=aura_cost / points_divisor,
+        base_cost=base / points_scale,
+        weapon_cost=weapon_cost / points_scale,
+        order_cost=order_cost / points_scale,
+        aura_cost=aura_cost / points_scale,
         toughness_modifier=toughness_modifier,
         raw_unit_cost=raw_unit_cost,
-        points_divisor=points_divisor,
+        points_scale=points_scale,
+        unscaled_unit_cost=unscaled_unit_cost,
         rounded_unit_cost=rounded_unit_cost,
         unit_copies=request.unit_copies,
         entry_cost=entry_cost,

@@ -9,7 +9,8 @@ from .quote import (
     SpecialAbilityInput,
     UnitQuoteInput,
     calculate_unit_quote,
-    rescale_points_limit,
+    scale_entry_cost,
+    scale_points,
 )
 from .snapshot import normalize_snapshot_abilities
 
@@ -23,5 +24,6 @@ __all__ = [
     "calculate_unit_quote",
     "load_opos_ruleset",
     "normalize_snapshot_abilities",
-    "rescale_points_limit",
+    "scale_entry_cost",
+    "scale_points",
 ]

@@ -114,6 +114,8 @@ def restore_from_path(source: Path) -> Path:
     try:
         shutil.copyfile(source, temp_path)
         db_restore._validate_sqlite_file(temp_path)
+        db_restore._upgrade_sqlite_file(temp_path)
+        db_restore._validate_sqlite_file(temp_path)
         db_restore._replace_sqlite_db(temp_path, target_path)
     except db_restore.DBRestoreError:
         temp_path.unlink(missing_ok=True)

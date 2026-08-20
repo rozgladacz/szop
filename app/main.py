@@ -19,6 +19,7 @@ from .db import get_db, init_db
 from .paths import STATIC_DIR, TEMPLATES_DIR
 from .routers import admin, armies, auth, export, quote, rosters, users
 from .security import get_csrf_token, get_current_user
+from .services.opos_rules import scale_entry_cost
 
 
 logger = logging.getLogger(__name__)
@@ -63,6 +64,18 @@ def index(
         .order_by(models.Roster.updated_at.desc())
         .limit(5)
     ).scalars().all()
+    roster_rows = [
+        {
+            "roster": roster,
+            "total_cost": sum(
+                scale_entry_cost(
+                    unit.unit_cost, unit.unit_copies, roster.points_scale
+                )
+                for unit in roster.roster_units
+            ),
+        }
+        for roster in rosters_list
+    ]
     return templates.TemplateResponse(
         request,
         "index.html",
@@ -71,6 +84,7 @@ def index(
             "user": user,
             "armies": armies_list,
             "rosters": rosters_list,
+            "roster_rows": roster_rows,
             "csrf_token": get_csrf_token(request),
         },
     )

@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Protocol
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy import select, text
+from sqlalchemy.orm import Session, selectinload
 
 from app import models
 from app.services.opos_rules import (
@@ -16,6 +17,10 @@ from app.services.opos_rules import (
     calculate_unit_quote,
     normalize_snapshot_abilities,
 )
+
+
+OPOS_1_2_USER_VERSION = 10200
+OPOS_1_3_USER_VERSION = 10300
 
 
 class UnitSnapshot(Protocol):
@@ -37,7 +42,7 @@ def request_from_snapshot(
     *,
     unit_copies: int = 1,
     custom_stats_enabled: bool,
-    simple_points_enabled: bool = False,
+    points_scale: int = 1,
     small_battle_enabled: bool = False,
 ) -> UnitQuoteInput:
     passive_abilities, profiles, _ = normalize_snapshot_abilities(
@@ -55,14 +60,14 @@ def request_from_snapshot(
             "special_abilities": json.loads(snapshot.special_abilities_json),
             "profiles": profiles,
             "custom_stats_enabled": custom_stats_enabled,
-            "simple_points_enabled": simple_points_enabled,
+            "points_scale": points_scale,
             "small_battle_enabled": small_battle_enabled,
         }
     )
 
 
 def normalize_legacy_snapshot_records(session: Session) -> int:
-    """Persist the OPOS 1.1 ability-category change in existing snapshots."""
+    """Persist legacy ability names and categories in existing snapshots."""
     changed = 0
     for model in (models.UnitTemplate, models.RosterUnit):
         for snapshot in session.scalars(select(model)):
@@ -70,11 +75,113 @@ def normalize_legacy_snapshot_records(session: Session) -> int:
                 json.loads(snapshot.passive_abilities_json),
                 json.loads(snapshot.profiles_json),
             )
-            if not was_changed:
-                continue
-            snapshot.passive_abilities_json = _json_dump(passive_abilities)
-            snapshot.profiles_json = _json_dump(profiles)
+            special_abilities = json.loads(snapshot.special_abilities_json)
+            normalized_specials = [
+                {
+                    **selection,
+                    "target_slug": "breakthrough",
+                }
+                if selection.get("target_slug") == "guardian"
+                else selection
+                for selection in special_abilities
+            ]
+            special_changed = normalized_specials != special_abilities
+            if was_changed:
+                snapshot.passive_abilities_json = _json_dump(passive_abilities)
+                snapshot.profiles_json = _json_dump(profiles)
+            if special_changed:
+                snapshot.special_abilities_json = _json_dump(normalized_specials)
+            if was_changed or special_changed:
+                changed += 1
+    return changed
+
+
+def migrate_opos_1_2(session: Session) -> int:
+    """Atomically scale Życie and recalculate snapshots for OPOS 1.2."""
+    if session.get_bind().dialect.name != "sqlite":
+        return 0
+    current_version = int(session.execute(text("PRAGMA user_version")).scalar_one())
+    if current_version >= OPOS_1_2_USER_VERSION:
+        return 0
+
+    normalize_legacy_snapshot_records(session)
+    changed = 0
+    for template in session.scalars(select(models.UnitTemplate)):
+        template.toughness = Decimal(template.toughness) * Decimal("2")
+        changed += 1
+
+    rosters = session.scalars(
+        select(models.Roster).options(selectinload(models.Roster.roster_units))
+    ).all()
+    for roster in rosters:
+        for unit in roster.roster_units:
+            unit.toughness = Decimal(unit.toughness) * Decimal("2")
+            request = request_from_snapshot(
+                unit,
+                unit_copies=unit.unit_copies,
+                custom_stats_enabled=roster.custom_stats_enabled,
+                small_battle_enabled=roster.small_battle_enabled,
+            )
+            quote = calculate_unit_quote(request, ruleset_version=roster.ruleset_version)
+            apply_request_to_roster_unit(unit, request, quote)
             changed += 1
+
+    if changed:
+        session.flush()
+    session.execute(text(f"PRAGMA user_version = {OPOS_1_2_USER_VERSION}"))
+    return changed
+
+
+def convert_legacy_simple_points(session: Session) -> int:
+    """Restore base points for rosters persisted by the former boolean mode."""
+    if session.get_bind().dialect.name != "sqlite":
+        return 0
+    columns = {
+        row[1] for row in session.execute(text("PRAGMA table_info(rosters)"))
+    }
+    if "simple_points_enabled" not in columns:
+        return 0
+    roster_ids = tuple(
+        session.execute(
+            text("SELECT id FROM rosters WHERE simple_points_enabled = 1")
+        ).scalars()
+    )
+    if not roster_ids:
+        return 0
+    changed = 0
+    rosters = session.scalars(
+        select(models.Roster)
+        .options(selectinload(models.Roster.roster_units))
+        .where(models.Roster.id.in_(roster_ids))
+    ).all()
+    for roster in rosters:
+        if roster.points_limit is not None:
+            roster.points_limit *= 10
+        for unit in roster.roster_units:
+            request = request_from_snapshot(
+                unit,
+                unit_copies=unit.unit_copies,
+                custom_stats_enabled=roster.custom_stats_enabled,
+                small_battle_enabled=roster.small_battle_enabled,
+            )
+            quote = calculate_unit_quote(
+                request, ruleset_version=roster.ruleset_version
+            )
+            apply_request_to_roster_unit(unit, request, quote)
+            changed += 1
+    session.flush()
+    return changed
+
+
+def migrate_opos_1_3(session: Session) -> int:
+    """Replace the simple-points flag with a divisor and restore base values."""
+    if session.get_bind().dialect.name != "sqlite":
+        return 0
+    current_version = int(session.execute(text("PRAGMA user_version")).scalar_one())
+    if current_version >= OPOS_1_3_USER_VERSION:
+        return 0
+    changed = convert_legacy_simple_points(session)
+    session.execute(text(f"PRAGMA user_version = {OPOS_1_3_USER_VERSION}"))
     return changed
 
 
@@ -100,7 +207,7 @@ def apply_request_to_roster_unit(
     for key, value in _snapshot_values(request).items():
         setattr(unit, key, value)
     unit.unit_copies = request.unit_copies
-    unit.unit_cost = int(quote.rounded_unit_cost)
+    unit.unit_cost = int(quote.unscaled_unit_cost)
 
 
 def create_template_from_roster_unit(

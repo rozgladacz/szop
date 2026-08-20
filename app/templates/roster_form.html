@@ -6,14 +6,14 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Nazwa rozpiski<input name="name" maxlength="120" required autofocus></label>
     <label>Armia <span class="optional">opcjonalnie, jako biblioteka</span><select name="army_id"><option value="">Bez przypisanej Armii</option>{% for army in armies %}<option value="{{ army.id }}">{{ army.name }}</option>{% endfor %}</select></label>
-    <label>Limit punktów <span class="optional">opcjonalnie</span><input name="points_limit" type="number" min="1" step="1"></label>
+    <label><span class="points-limit-label">Limit punktów, bez skalowania</span> <span class="optional">opcjonalnie</span><input name="points_limit" type="number" min="1" step="1"></label>
     <details class="additional-settings">
       <summary>Dodatkowe ustawienia</summary>
       <div class="additional-settings-grid">
-        <label class="toggle-row"><input name="custom_stats_enabled" type="checkbox" value="true"><span><strong>Dowolne statystyki</strong><small>Pozwala wyjść poza standardowe Obrony, Wytrzymałości i Siły.</small></span></label>
-        <label class="toggle-row"><input name="simple_points_enabled" type="checkbox" value="true" checked><span><strong>Proste punkty</strong><small>Dzieli ceny i podany limit punktów przez 10.</small></span></label>
+        <label class="toggle-row"><input name="custom_stats_enabled" type="checkbox" value="true"><span><strong>Dowolne statystyki</strong><small>Pozwala wyjść poza standardowe wartości Zbroi, Życia i Siły.</small></span></label>
+        <div class="scale-row"><input class="scale-toggle" id="new-points-scaling-enabled" name="points_scaling_enabled" type="checkbox" value="true" checked><label class="scale-copy" for="new-points-scaling-enabled"><strong>Skalowanie punktów</strong><small>Dzieli punkty przez wpisaną wartość.</small></label><input class="scale-value" name="points_scale" type="number" min="1" max="1000000" step="1" value="10" aria-label="Wartość skalowania punktów" required></div>
         <label class="toggle-row"><input name="collapse_descriptions" type="checkbox" value="true"><span><strong>Zwiń opisy</strong><small>Pokazuje symbole i nazwy zdolności bez pełnych opisów.</small></span></label>
-        <label class="toggle-row"><input name="small_battle_enabled" type="checkbox" value="true" checked><span><strong>Mała bitwa</strong><small>Podwaja standardowe wartości Wytrzymałości.</small></span></label>
+        <label class="toggle-row"><input name="small_battle_enabled" type="checkbox" value="true"><span><strong>Mała bitwa</strong><small>Podwaja standardowe wartości Życia.</small></span></label>
       </div>
     </details>
     <div class="form-actions"><a class="button button-quiet" href="/rosters">Anuluj</a><button class="button button-primary" type="submit">Utwórz rozpiskę</button></div>

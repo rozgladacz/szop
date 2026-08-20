@@ -36,10 +36,18 @@ def test_one_primary_card_is_created_independent_of_copy_count() -> None:
     assert "unit_copies" not in cards[0]
 
 
+def test_card_cost_is_scaled_from_stored_base_points() -> None:
+    cards = build_unit_cards(
+        _unit(), ruleset_version="v1", points_scale=10
+    )
+
+    assert cards[0]["unit_cost"] == 8
+
+
 def test_overflow_abilities_create_continuation_without_shrinking() -> None:
     passives = [
         "hero", "ambush", "scout", "agile", "fast", "jump", "dodge",
-        "parry", "steadfast", "patient", "breakthrough", "guardian",
+        "parry", "steadfast", "patient", "breakthrough", "clumsy",
         "counterattack",
     ]
 
@@ -53,7 +61,7 @@ def test_overflow_abilities_create_continuation_without_shrinking() -> None:
 def test_continuation_cards_never_exceed_eight_descriptions() -> None:
     passives = [
         "hero", "ambush", "scout", "agile", "fast", "immobile", "jump",
-        "dodge", "parry", "steadfast", "patient", "breakthrough", "guardian",
+        "dodge", "parry", "steadfast", "patient", "breakthrough", "clumsy",
         "counterattack", "airplane",
     ]
 
@@ -65,7 +73,7 @@ def test_continuation_cards_never_exceed_eight_descriptions() -> None:
 def test_collapsed_descriptions_do_not_change_card_capacity() -> None:
     passives = [
         "hero", "ambush", "scout", "agile", "fast", "jump", "dodge",
-        "parry", "steadfast", "patient", "breakthrough", "guardian",
+        "parry", "steadfast", "patient", "breakthrough", "clumsy",
         "counterattack",
     ]
 

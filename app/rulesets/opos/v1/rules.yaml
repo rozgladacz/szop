@@ -1,4 +1,4 @@
-version: "1.1.0"
+version: "1.2.0"
 game: OPOS
 sources:
   normative: app/static/docs/OPOS.docx
@@ -6,7 +6,7 @@ sources:
 
 standard_stats:
   defense: [3, 4, 5]
-  toughness: [1, 2, 3, 6, 9, 12]
+  toughness: [2, 4, 6, 12, 18, 24]
   strength: [0, 1, 2]
 
 stat_descriptions:
@@ -19,7 +19,7 @@ formula:
   defense_quadratic: 0.09
   defense_linear: -0.19
   defense_constant: 1
-  weapon_factor: 12
+  weapon_factor: 6
   strength_quadratic: -0.04
   strength_linear: 0.5
   strength_constant: 1
@@ -29,15 +29,15 @@ formula:
 ranges:
   melee:
     name: Wręcz
-    multiplier: 0.6
+    multiplier: 0.5
     icon: range-melee
   short:
     name: Krótki
-    multiplier: 1
+    multiplier: 0.6
     icon: range-short
   long:
     name: Daleki
-    multiplier: 0.6
+    multiplier: 1
     icon: range-long
 
 stat_icons:
@@ -84,7 +84,7 @@ abilities:
     name: Szybki
     category: passive
     icon: fast
-    description: Zamiast atakować może wykonać dodatkowy ruch.
+    description: Zamiast atakować może wykonać dodatkowy ruch, ale nie może nim przejąć celu.
     aura_eligible: true
     effects:
       ability_cost_delta: 1
@@ -96,6 +96,14 @@ abilities:
     aura_eligible: false
     effects:
       ability_cost_delta: -3
+  - slug: clumsy
+    name: Niezgrabny
+    category: passive
+    icon: clumsy
+    description: Nie może wchodzić na Wysoki teren.
+    aura_eligible: false
+    effects:
+      ability_cost_delta: -1
   - slug: jump
     name: Skok
     category: passive
@@ -124,7 +132,7 @@ abilities:
     name: Wytrwały
     category: passive
     icon: steadfast
-    description: +1 do obrony za każdy znacznik aktywacji.
+    description: +1 do Zbroi za każdy znacznik aktywacji.
     aura_eligible: true
     effects:
       defense_bonus: 1
@@ -132,7 +140,7 @@ abilities:
     name: Cierpliwy
     category: passive
     icon: patient
-    description: +1 do ataku za każdy znacznik aktywacji na celu.
+    description: +1 do Siły za każdy znacznik aktywacji na celu.
     aura_eligible: true
     effects:
       strength_bonus: 1
@@ -140,15 +148,7 @@ abilities:
     name: Przełamanie
     category: passive
     icon: breakthrough
-    description: Jeżeli cel ataku jest w zasięgu wręcz od celu misji, możesz przerzucić wszystkie 1.
-    aura_eligible: true
-    effects:
-      strength_bonus: 0.25
-  - slug: guardian
-    name: Strażnik
-    category: passive
-    icon: guardian
-    description: Jeżeli jesteś w zasięgu wręcz od celu misji, możesz przerzucić wszystkie 1.
+    description: Jeżeli ty lub cel ataku jest w zasięgu wręcz od celu misji, możesz przerzucić wszystkie 1.
     aura_eligible: true
     effects:
       strength_bonus: 0.25
@@ -168,6 +168,10 @@ abilities:
     aura_eligible: false
     effects:
       ability_cost_delta: -1
+      profile_multipliers:
+        melee: 0
+        short: 0
+        long: 1.6
 
   - slug: patching
     name: Łatanie
@@ -193,7 +197,7 @@ abilities:
     name: Transport
     category: special
     icon: transport
-    description: Zanim wykona ruch przyjazne oddziały wręcz od niego mogą zostać zdjęte z planszy i rozstawione ponownie wręcz od niego, gdy zakończy ruch.
+    description: Zanim wykona ruch przyjazne oddziały bez Niezgrabny wręcz od niego mogą zostać zdjęte z planszy i rozstawione ponownie wręcz od niego, gdy zakończy ruch.
     effects:
       ability_cost_delta: 2
 
@@ -201,7 +205,8 @@ abilities:
     name: Obszarowa
     category: weapon
     icon: area
-    description: Masz dodatkową kość ataku za każdy model, który jest wręcz od celu.
+    description: Wybierz widoczny model w zasięgu. Atakujesz jego oraz wszystkie modele wręcz od niego. Kości przeciw modelom tego samego oddziału rzuć razem.
+    small_battle_description: "Atakujesz grupę figurek, które: widzisz, są w zasięgu broni, są miarkę od siebie i widzą się wzajemnie bez osłony. Po tobie przeciwnik może dodać figurki do grupy. Jeżeli kilka z nich należy do jednego oddziału, rzuć kośćmi razem."
     aura_eligible: true
     effects:
       weapon_multiplier: 2.5
@@ -209,7 +214,7 @@ abilities:
     name: Zabójczy
     category: weapon
     icon: deadly
-    description: Za każdy sukces pokonaj model, jeżeli ma 6 lub mniej wytrzymałości, a jeżeli więcej zadaj 6 ran.
+    description: Za każdy sukces pokonaj model, jeżeli ma 6 lub mniej Życia, a jeżeli więcej zadaj 6 ran.
     aura_eligible: true
     effects:
       weapon_multiplier: 4

@@ -7,7 +7,11 @@ from collections.abc import Iterable
 from decimal import Decimal
 
 from app import models
-from app.services.opos_rules import load_opos_ruleset, normalize_snapshot_abilities
+from app.services.opos_rules import (
+    load_opos_ruleset,
+    normalize_snapshot_abilities,
+    scale_points,
+)
 
 
 PRIMARY_ABILITY_LIMIT = 6
@@ -93,6 +97,7 @@ def build_unit_cards(
     unit: models.RosterUnit,
     *,
     ruleset_version: str,
+    points_scale: int = 1,
     collapse_descriptions: bool = False,
 ) -> list[dict[str, object]]:
     abilities = build_ability_payloads(
@@ -104,7 +109,7 @@ def build_unit_cards(
         {
             "kind": "profile",
             "name": unit.name,
-            "unit_cost": unit.unit_cost,
+            "unit_cost": scale_points(unit.unit_cost, points_scale),
             "defense": display_number(unit.defense),
             "toughness": display_number(unit.toughness),
             "abilities": abilities[:primary_limit],
@@ -119,7 +124,7 @@ def build_unit_cards(
             {
                 "kind": "continuation",
                 "name": unit.name,
-                "unit_cost": unit.unit_cost,
+                "unit_cost": scale_points(unit.unit_cost, points_scale),
                 "abilities": remaining[start : start + continuation_limit],
                 "continuation_number": len(cards),
             }
@@ -131,6 +136,7 @@ def build_card_pages(
     units: Iterable[models.RosterUnit],
     *,
     ruleset_version: str,
+    points_scale: int = 1,
     collapse_descriptions: bool = False,
 ) -> list[list[dict[str, object] | None]]:
     cards = [
@@ -139,6 +145,7 @@ def build_card_pages(
         for card in build_unit_cards(
             unit,
             ruleset_version=ruleset_version,
+            points_scale=points_scale,
             collapse_descriptions=collapse_descriptions,
         )
     ]

@@ -9,7 +9,7 @@ from app.services.opos_rules import (
     SpecialAbilityInput,
     UnitQuoteInput,
     calculate_unit_quote,
-    rescale_points_limit,
+    scale_points,
 )
 
 
@@ -19,7 +19,7 @@ def unit_input(**overrides: object) -> UnitQuoteInput:
         "models_per_unit": 1,
         "unit_copies": 1,
         "defense": 3,
-        "toughness": 1,
+        "toughness": 2,
         "profiles": AttackProfilesInput(
             melee=AttackProfileInput(dice=1, strength=0),
             short=AttackProfileInput(dice=0, strength=0),
@@ -33,58 +33,60 @@ def unit_input(**overrides: object) -> UnitQuoteInput:
 def test_golden_basic_unit_has_no_intermediate_rounding() -> None:
     quote = calculate_unit_quote(unit_input())
 
-    assert quote.toughness_sum == Decimal("1")
+    assert quote.toughness_sum == Decimal("2")
     assert quote.effective_defense == Decimal("3")
     assert quote.defense_multiplier == Decimal("1.24")
-    assert quote.base_cost == Decimal("7.44")
-    assert quote.weapon_cost == Decimal("7.2")
-    assert quote.raw_unit_cost == Decimal("14.7864")
-    assert quote.rounded_unit_cost == Decimal("15")
+    assert quote.base_cost == Decimal("14.88")
+    assert quote.weapon_cost == Decimal("6.0")
+    assert quote.raw_unit_cost == Decimal("21.2976")
+    assert quote.rounded_unit_cost == Decimal("21")
 
 
 def test_models_and_copies_are_applied_at_distinct_stages() -> None:
     quote = calculate_unit_quote(unit_input(models_per_unit=3, unit_copies=4))
 
-    assert quote.toughness_sum == Decimal("3")
-    assert quote.base_cost == Decimal("22.32")
-    assert quote.weapon_cost == Decimal("21.6")
-    assert quote.rounded_unit_cost == Decimal("44")
-    assert quote.entry_cost == Decimal("176")
+    assert quote.toughness_sum == Decimal("6")
+    assert quote.base_cost == Decimal("44.64")
+    assert quote.weapon_cost == Decimal("18.0")
+    assert quote.rounded_unit_cost == Decimal("64")
+    assert quote.entry_cost == Decimal("256")
 
 
-def test_simple_points_divide_raw_cost_before_half_up_rounding() -> None:
+def test_points_scale_divides_cost_dynamically_and_keeps_unscaled_cost() -> None:
     regular = calculate_unit_quote(unit_input(models_per_unit=25, defense=5, toughness=6))
-    simple = calculate_unit_quote(
+    scaled = calculate_unit_quote(
         unit_input(
             models_per_unit=25,
             defense=5,
             toughness=6,
-            simple_points_enabled=True,
+            points_scale=10,
         )
     )
 
-    assert simple.points_divisor == Decimal("10")
-    assert simple.raw_unit_cost == regular.raw_unit_cost / Decimal("10")
-    assert simple.raw_unit_cost == Decimal("238.50000")
-    assert simple.rounded_unit_cost == Decimal("239")
-    assert simple.base_cost == regular.base_cost / Decimal("10")
+    assert scaled.points_scale == Decimal("10")
+    assert scaled.unscaled_unit_cost == regular.unscaled_unit_cost
+    assert scaled.raw_unit_cost == regular.raw_unit_cost / Decimal("10")
+    assert scaled.raw_unit_cost == Decimal("235.32000")
+    assert scaled.rounded_unit_cost == Decimal("235")
+    assert scaled.base_cost == regular.base_cost / Decimal("10")
 
 
-def test_points_limit_tracks_simple_points_scale_with_half_up_rounding() -> None:
-    assert rescale_points_limit(505, from_simple=False, to_simple=True) == 51
-    assert rescale_points_limit(51, from_simple=True, to_simple=False) == 510
-    assert rescale_points_limit(None, from_simple=False, to_simple=True) is None
+def test_stored_points_are_scaled_with_half_up_rounding() -> None:
+    assert scale_points(505, 10) == 51
+    assert scale_points(2353, 10) == 235
+    assert scale_points(2355, 10) == 236
+    assert scale_points(None, 10) is None
 
 
 def test_small_battle_uses_doubled_standard_toughness_list() -> None:
     accepted = calculate_unit_quote(
-        unit_input(toughness=18, small_battle_enabled=True)
+        unit_input(toughness=36, small_battle_enabled=True)
     )
-    assert accepted.toughness_sum == Decimal("18")
+    assert accepted.toughness_sum == Decimal("36")
 
-    with pytest.raises(QuoteValidationError, match="Toughness"):
+    with pytest.raises(QuoteValidationError, match="Życie"):
         calculate_unit_quote(
-            unit_input(toughness=1, small_battle_enabled=True)
+            unit_input(toughness=2, small_battle_enabled=True)
         )
 
 
@@ -92,21 +94,42 @@ def test_hero_is_applied_before_patching() -> None:
     quote = calculate_unit_quote(
         unit_input(
             models_per_unit=2,
-            toughness=3,
+            toughness=6,
             passive_abilities=("hero",),
             special_abilities=(SpecialAbilityInput(slug="patching"),),
         )
     )
 
-    assert quote.toughness_sum == Decimal("15")
+    assert quote.toughness_sum == Decimal("27")
 
 
-def test_airplane_subtracts_one_from_ability_cost() -> None:
+def test_airplane_changes_ability_and_profile_costs() -> None:
     regular = calculate_unit_quote(unit_input())
-    airplane = calculate_unit_quote(unit_input(passive_abilities=("airplane",)))
+    airplane = calculate_unit_quote(
+        unit_input(
+            passive_abilities=("airplane",),
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(dice=1, strength=0),
+                short=AttackProfileInput(dice=1, strength=0),
+                long=AttackProfileInput(dice=1, strength=0),
+            ),
+        )
+    )
 
     assert airplane.ability_cost_modifier == Decimal("-1")
     assert airplane.base_cost < regular.base_cost
+    assert [profile.cost_per_model for profile in airplane.profiles] == [
+        Decimal("0.0"), Decimal("0.0"), Decimal("9.6"),
+    ]
+    assert airplane.weapon_cost == Decimal("19.2")
+
+
+def test_clumsy_subtracts_one_from_ability_cost() -> None:
+    regular = calculate_unit_quote(unit_input())
+    clumsy = calculate_unit_quote(unit_input(passive_abilities=("clumsy",)))
+
+    assert clumsy.ability_cost_modifier == Decimal("-1")
+    assert clumsy.base_cost < regular.base_cost
 
 
 def test_deadly_uses_multiplier_four() -> None:
@@ -121,7 +144,68 @@ def test_deadly_uses_multiplier_four() -> None:
     )
 
     assert quote.profiles[0].ability_multiplier == Decimal("4")
-    assert quote.profiles[0].cost_per_model == Decimal("28.8")
+    assert quote.profiles[0].cost_per_model == Decimal("12.0")
+    assert quote.weapon_cost == Decimal("24.0")
+
+
+def test_profile_costs_and_extra_maximum_follow_hotfix() -> None:
+    quote = calculate_unit_quote(
+        unit_input(
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(dice=1, strength=0),
+                short=AttackProfileInput(dice=1, strength=0),
+                long=AttackProfileInput(dice=1, strength=0),
+            )
+        )
+    )
+
+    assert [profile.cost_per_model for profile in quote.profiles] == [
+        Decimal("3.0"), Decimal("3.6"), Decimal("6.0"),
+    ]
+    assert quote.weapon_cost == Decimal("18.6")
+
+
+@pytest.mark.parametrize(
+    ("range_slug", "expected"),
+    (("melee", "6.0"), ("short", "7.2"), ("long", "12.0")),
+)
+def test_one_active_profile_is_counted_twice(
+    range_slug: str, expected: str
+) -> None:
+    profiles = {
+        slug: AttackProfileInput(dice=int(slug == range_slug), strength=0)
+        for slug in ("melee", "short", "long")
+    }
+
+    quote = calculate_unit_quote(
+        unit_input(profiles=AttackProfilesInput.model_validate(profiles))
+    )
+
+    assert quote.weapon_cost == Decimal(expected)
+
+
+def test_tied_maximum_is_added_once_and_no_profiles_cost_zero() -> None:
+    tied = calculate_unit_quote(
+        unit_input(
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(dice=2, strength=0),
+                short=AttackProfileInput(dice=0, strength=0),
+                long=AttackProfileInput(dice=1, strength=0),
+            )
+        )
+    )
+    empty = calculate_unit_quote(
+        unit_input(
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(dice=0, strength=0),
+                short=AttackProfileInput(dice=0, strength=0),
+                long=AttackProfileInput(dice=0, strength=0),
+            )
+        )
+    )
+
+    assert tied.weapon_cost == Decimal("18.0")
+    assert empty.weapon_cost == Decimal("0.0")
 
 
 def test_charge_and_prepared_only_affect_their_ranges() -> None:
@@ -160,7 +244,7 @@ def test_aura_cost_is_raw_delta_with_minimum_plus_one_equivalent() -> None:
         )
     )
 
-    assert quote.aura_cost == Decimal("1.24")
+    assert quote.aura_cost == Decimal("2.48")
 
 
 def test_aura_can_grant_a_weapon_ability_to_compatible_profiles() -> None:
@@ -172,7 +256,24 @@ def test_aura_can_grant_a_weapon_ability_to_compatible_profiles() -> None:
         )
     )
 
-    assert quote.aura_cost == Decimal("3.60")
+    assert quote.aura_cost == Decimal("3.00")
+
+
+def test_aura_recomputes_which_profile_is_most_expensive() -> None:
+    quote = calculate_unit_quote(
+        unit_input(
+            special_abilities=(
+                SpecialAbilityInput(slug="aura", target_slug="prepared"),
+            ),
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(dice=2, strength=0),
+                short=AttackProfileInput(dice=0, strength=0),
+                long=AttackProfileInput(dice=1, strength=0),
+            ),
+        )
+    )
+
+    assert quote.aura_cost == Decimal("4.80")
 
 
 def test_aura_weapon_range_restrictions_are_respected() -> None:
@@ -189,7 +290,7 @@ def test_aura_weapon_range_restrictions_are_respected() -> None:
         )
     )
 
-    assert quote.aura_cost == Decimal("4.80")
+    assert quote.aura_cost == Decimal("2.88")
 
 
 def test_non_aura_eligible_ability_is_rejected() -> None:
@@ -246,7 +347,7 @@ def test_custom_stats_require_positive_strength_multiplier() -> None:
 
 
 def test_standard_mode_rejects_custom_stats() -> None:
-    with pytest.raises(QuoteValidationError, match="Defense"):
+    with pytest.raises(QuoteValidationError, match="Zbroja"):
         calculate_unit_quote(unit_input(defense=Decimal("3.5")))
 
 

@@ -11,7 +11,7 @@ Logika kosztów żyje wyłącznie w `app/services/opos_rules/`. Routery, modele 
 - `User` — konto i rola.
 - `Army` — nazwa oraz właściciel.
 - `UnitTemplate` — pełny snapshot pojedynczego oddziału, bez liczby kopii.
-- `Roster` — nazwa, właściciel, opcjonalna Armia, limit, wersja rulesetu oraz przełączniki `custom_stats_enabled`, `simple_points_enabled`, `collapse_descriptions` i `small_battle_enabled`.
+- `Roster` — nazwa, właściciel, opcjonalna Armia, bazowy limit punktów, skala `points_scale`, wersja rulesetu oraz przełączniki `custom_stats_enabled`, `collapse_descriptions` i `small_battle_enabled`.
 - `RosterUnit` — snapshot wspólnego profilu, `models_per_unit`, `unit_copies`, pozycja i serwerowo wyliczony koszt jednego oddziału.
 
 Kopiowanie szablonu do rozpiski jest jednokierunkowe. Późniejsze zmiany nie propagują się. „Aktualizuj szablon” jest osobną, jawną mutacją.
@@ -21,9 +21,9 @@ Kopiowanie szablonu do rozpiski jest jednokierunkowe. Późniejsze zmiany nie pr
 1. Klient wysyła statystyki do `POST /quote` bez identyfikatora encji.
 2. Ruleset jest pobierany z cache, payload walidowany, a cena liczona bez dostępu do DB.
 3. Przy zapisie oddziału backend ponownie liczy quote i ignoruje cenę klienta.
-4. `unit_cost` jest zaokrąglonym half-up kosztem pojedynczego oddziału; suma wpisu to `unit_copies × unit_cost`.
+4. `unit_cost` jest nieskalowanym, zaokrąglonym half-up kosztem pojedynczego oddziału. Przy prezentacji koszt jest dzielony przez `points_scale`, ponownie zaokrąglany half-up, a suma wpisu to `unit_copies × koszt wyświetlany`.
 
-Profile z zerem kości są nieaktywne. Standardowe statystyki są ograniczone listami z YAML; tryb `custom_stats_enabled` dopuszcza dodatnią Obronę i Wytrzymałość oraz Siłę o dodatnim mnożniku. `small_battle_enabled` podwaja standardową listę Wytrzymałości, a `simple_points_enabled` dzieli wynik surowy i limit rozpiski przez 10 przed końcowym zaokrągleniem half-up. `collapse_descriptions` ukrywa pełne opisy i zwiększa liczbę zdolności mieszczących się na karcie głównej.
+Profile z zerem kości są nieaktywne. Standardowe statystyki są ograniczone listami z YAML; tryb `custom_stats_enabled` dopuszcza dodatnią Obronę i Wytrzymałość oraz Siłę o dodatnim mnożniku. `small_battle_enabled` podwaja standardową listę Wytrzymałości, a dodatnie całkowite `points_scale` dynamicznie skaluje koszty i limit rozpiski bez zmiany bazowych wartości w DB. `collapse_descriptions` ukrywa pełne opisy i zwiększa liczbę zdolności mieszczących się na karcie głównej.
 
 ## HTTP i bezpieczeństwo
 

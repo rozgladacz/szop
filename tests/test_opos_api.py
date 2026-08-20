@@ -57,12 +57,14 @@ def api() -> Generator[tuple[TestClient, sessionmaker, dict[str, int], list[int]
             owner_id=owner.id,
             army=army,
             ruleset_version="v1",
+            points_scale=1,
         )
         foreign_roster = models.Roster(
             name="Cudza",
             owner_id=stranger.id,
             army=foreign_army,
             ruleset_version="v1",
+            points_scale=1,
         )
         session.add_all([roster, foreign_roster])
         session.flush()
@@ -123,11 +125,11 @@ def test_quote_is_stateless_and_does_not_query_database(api) -> None:
     response = client.post("/quote", json=_profile_payload())
 
     assert response.status_code == 200
-    assert response.json()["entry_cost"] == "234"
+    assert response.json()["entry_cost"] == "222"
     assert queries == []
 
 
-def test_create_roster_exposes_collapsed_extra_settings_and_scales_limit(api) -> None:
+def test_create_roster_uses_numeric_scale_and_disables_small_battle_by_default(api) -> None:
     client, sessions, _, _ = api
     token = client.get("/_csrf").json()["token"]
 
@@ -139,9 +141,9 @@ def test_create_roster_exposes_collapsed_extra_settings_and_scales_limit(api) ->
             "points_limit": "505",
             "csrf_token": token,
             "custom_stats_enabled": "true",
-            "simple_points_enabled": "true",
+            "points_scaling_enabled": "true",
+            "points_scale": "7",
             "collapse_descriptions": "true",
-            "small_battle_enabled": "true",
         },
         follow_redirects=False,
     )
@@ -149,19 +151,42 @@ def test_create_roster_exposes_collapsed_extra_settings_and_scales_limit(api) ->
     assert form.status_code == 200
     assert '<details class="additional-settings">' in form.text
     assert '<details class="additional-settings" open>' not in form.text
-    assert 'name="simple_points_enabled"' in form.text
+    assert 'name="points_scaling_enabled" type="checkbox" value="true" checked' in form.text
+    assert 'name="points_scale" type="number"' in form.text
+    assert '<span class="points-limit-label">Limit punktów, bez skalowania</span>' in form.text
+    assert "W podsumowaniu zostanie podzielony przez skalowanie." not in form.text
     assert 'name="collapse_descriptions"' in form.text
     assert 'name="small_battle_enabled"' in form.text
-    assert 'name="simple_points_enabled" type="checkbox" value="true" checked' in form.text
-    assert 'name="small_battle_enabled" type="checkbox" value="true" checked' in form.text
+    assert 'name="points_scale" type="number" min="1" max="1000000" step="1" value="10"' in form.text
+    assert 'name="small_battle_enabled" type="checkbox" value="true" checked' not in form.text
     assert created.status_code == 303
     with sessions() as session:
         roster = session.query(models.Roster).filter_by(name="Mała rozpiska").one()
-        assert roster.points_limit == 51
+        assert roster.points_limit == 505
         assert roster.custom_stats_enabled is True
-        assert roster.simple_points_enabled is True
+        assert roster.points_scale == 7
         assert roster.collapse_descriptions is True
-        assert roster.small_battle_enabled is True
+        assert roster.small_battle_enabled is False
+
+
+def test_unchecked_points_scaling_persists_base_scale_one(api) -> None:
+    client, sessions, _, _ = api
+    token = client.get("/_csrf").json()["token"]
+
+    response = client.post(
+        "/rosters",
+        data={
+            "name": "Bez skalowania",
+            "csrf_token": token,
+            "points_scale": "7",
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    with sessions() as session:
+        roster = session.query(models.Roster).filter_by(name="Bez skalowania").one()
+        assert roster.points_scale == 1
 
 
 def test_write_recalculates_price_and_rejects_client_price(api) -> None:
@@ -180,11 +205,30 @@ def test_write_recalculates_price_and_rejects_client_price(api) -> None:
 
     assert rejected.status_code == 422
     assert accepted.status_code == 200
-    assert accepted.json()["unit_cost"] == 78
-    assert accepted.json()["entry_cost"] == 234
+    assert accepted.json()["unit_cost"] == 74
+    assert accepted.json()["entry_cost"] == 222
     with sessions() as session:
         stored = session.get(models.RosterUnit, accepted.json()["id"])
-        assert stored is not None and stored.unit_cost == 78
+        assert stored is not None and stored.unit_cost == 74
+
+
+def test_scaled_roster_returns_scaled_cost_but_persists_base_cost(api) -> None:
+    client, sessions, ids, _ = api
+    with sessions.begin() as session:
+        session.get(models.Roster, ids["roster"]).points_scale = 10
+
+    response = client.post(
+        f"/rosters/{ids['roster']}/units",
+        json=_profile_payload(),
+        headers=_csrf(client),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["unit_cost"] == 7
+    assert response.json()["entry_cost"] == 21
+    with sessions() as session:
+        stored = session.get(models.RosterUnit, response.json()["id"])
+        assert stored is not None and stored.unit_cost == 74
 
 
 def test_mutations_require_csrf_and_hide_foreign_resources(api) -> None:
@@ -310,8 +354,9 @@ def test_roster_detail_renders_icons_after_unit_is_saved(api) -> None:
     assert response.status_code == 200
     assert "Straż" in response.text
     assert "/static/icons/opos.svg#icon-defense" in response.text
-    assert 'aria-label="Obrona 4"' in response.text
-    assert 'aria-label="Obrona 4.00"' not in response.text
+    assert 'aria-label="Zbroja 4"' in response.text
+    assert 'aria-label="Zbroja 4.00"' not in response.text
+    assert 'aria-label="Życie 2"' in response.text
     assert response.text.count('data-range="') == 3
     assert "Wręcz" in response.text
     assert "Krótki" in response.text
@@ -323,7 +368,10 @@ def test_roster_detail_renders_icons_after_unit_is_saved(api) -> None:
     assert 'class="library-tools"' in response.text
     assert 'aria-label="Zdolności oddziału"' in response.text
     assert "/static/icons/opos.svg#icon-steadfast" in response.text
-    assert 'name="simple_points_enabled"' in response.text
+    assert 'name="points_scale"' in response.text
+    assert 'name="points_scaling_enabled"' in response.text
+    assert '<span class="points-limit-label">Limit punktów</span>' in response.text
+    assert "W podsumowaniu zostanie podzielony przez skalowanie." not in response.text
     assert 'name="collapse_descriptions"' in response.text
     assert 'name="small_battle_enabled"' in response.text
 
@@ -420,7 +468,8 @@ def test_roster_modes_recalculate_points_and_scale_standard_toughness(api) -> No
             "name": "Test",
             "csrf_token": headers["X-CSRF-Token"],
             "points_limit": "500",
-            "simple_points_enabled": "true",
+            "points_scaling_enabled": "true",
+            "points_scale": "10",
             "collapse_descriptions": "true",
             "small_battle_enabled": "true",
         },
@@ -431,12 +480,12 @@ def test_roster_modes_recalculate_points_and_scale_standard_toughness(api) -> No
     with sessions() as session:
         roster = session.get(models.Roster, ids["roster"])
         unit = session.get(models.RosterUnit, created["id"])
-        assert roster.simple_points_enabled is True
+        assert roster.points_scale == 10
         assert roster.collapse_descriptions is True
         assert roster.small_battle_enabled is True
-        assert roster.points_limit == 50
+        assert roster.points_limit == 500
         assert unit.toughness == 4
-        assert unit.unit_cost == 14
+        assert unit.unit_cost > 13
 
 
 def test_collapsed_cards_hide_ability_descriptions(api) -> None:

@@ -121,3 +121,19 @@ def test_legacy_charge_and_prepared_are_moved_to_attack_profiles() -> None:
         profiles,
         False,
     )
+
+
+def test_legacy_guardian_is_mapped_to_breakthrough_once() -> None:
+    profiles = {
+        "melee": {"dice": 0, "strength": 0, "abilities": []},
+        "short": {"dice": 0, "strength": 0, "abilities": []},
+        "long": {"dice": 0, "strength": 0, "abilities": []},
+    }
+
+    passives, normalized_profiles, changed = normalize_snapshot_abilities(
+        ["guardian", "breakthrough"], profiles
+    )
+
+    assert passives == ["breakthrough"]
+    assert normalized_profiles is profiles
+    assert changed is True

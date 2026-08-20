@@ -17,10 +17,10 @@
     <div class="section-heading"><h2>Ostatnie rozpiski</h2><a href="/rosters">Wszystkie</a></div>
     {% if rosters %}
       <div class="item-list">
-      {% for roster in rosters %}
+      {% for row in roster_rows %}{% set roster = row.roster %}
         <a class="list-row" href="/rosters/{{ roster.id }}">
           <span><strong>{{ roster.name }}</strong><small>{{ roster.roster_units|length }} wspólnych profili</small></span>
-          <span class="points">{{ roster.total_cost }} pkt</span>
+          <span class="points">{{ row.total_cost }} pkt</span>
         </a>
       {% endfor %}
       </div>

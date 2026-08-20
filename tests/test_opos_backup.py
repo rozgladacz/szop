@@ -28,6 +28,18 @@ def test_restore_accepts_fresh_opos_schema(tmp_path: Path) -> None:
     db_restore._validate_sqlite_file(path)
 
 
+def test_restore_upgrades_temporary_database_before_replacement(tmp_path: Path) -> None:
+    path = tmp_path / "opos-old.db"
+    engine = create_engine(f"sqlite:///{path}")
+    Base.metadata.create_all(engine)
+    engine.dispose()
+
+    db_restore._upgrade_sqlite_file(path)
+
+    with sqlite3.connect(path) as connection:
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10300
+
+
 def test_restore_rejects_legacy_szop_shape(tmp_path: Path) -> None:
     path = tmp_path / "szop.db"
     _database(path, {"users", "armies", "rosters", "units", "weapons"})

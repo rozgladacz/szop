@@ -27,7 +27,8 @@ from ..services.opos_rules import (
     UnitQuoteInput,
     calculate_unit_quote,
     normalize_snapshot_abilities,
-    rescale_points_limit,
+    scale_entry_cost,
+    scale_points,
 )
 from ..services.opos_units import (
     apply_request_to_roster_unit,
@@ -118,7 +119,7 @@ def _calculate_for_roster(
     request = payload.model_copy(
         update={
             "custom_stats_enabled": roster.custom_stats_enabled,
-            "simple_points_enabled": roster.simple_points_enabled,
+            "points_scale": roster.points_scale,
             "small_battle_enabled": roster.small_battle_enabled,
         }
     )
@@ -129,7 +130,9 @@ def _calculate_for_roster(
     return request, quote
 
 
-def _unit_payload(unit: models.RosterUnit) -> dict[str, object]:
+def _unit_payload(
+    unit: models.RosterUnit, *, points_scale: int = 1
+) -> dict[str, object]:
     passive_abilities, profiles, _ = normalize_snapshot_abilities(
         json.loads(unit.passive_abilities_json),
         json.loads(unit.profiles_json),
@@ -146,8 +149,10 @@ def _unit_payload(unit: models.RosterUnit) -> dict[str, object]:
         "special_abilities": json.loads(unit.special_abilities_json),
         "profiles": profiles,
         "position": unit.position,
-        "unit_cost": unit.unit_cost,
-        "entry_cost": unit.entry_cost,
+        "unit_cost": scale_points(unit.unit_cost, points_scale),
+        "entry_cost": scale_entry_cost(
+            unit.unit_cost, unit.unit_copies, points_scale
+        ),
     }
 
 
@@ -163,6 +168,19 @@ def list_rosters(
         .where(models.Roster.owner_id == user.id)
         .order_by(models.Roster.updated_at.desc(), models.Roster.id.desc())
     ).scalars().all()
+    roster_rows = [
+        {
+            "roster": roster,
+            "total_cost": sum(
+                scale_entry_cost(
+                    unit.unit_cost, unit.unit_copies, roster.points_scale
+                )
+                for unit in roster.roster_units
+            ),
+            "points_limit": scale_points(roster.points_limit, roster.points_scale),
+        }
+        for roster in rosters
+    ]
     return templates.TemplateResponse(
         request,
         "rosters_list.html",
@@ -170,6 +188,7 @@ def list_rosters(
             "request": request,
             "user": user,
             "rosters": rosters,
+            "roster_rows": roster_rows,
             "csrf_token": get_csrf_token(request),
         },
     )
@@ -206,7 +225,8 @@ def create_roster(
     army_id: int | None = Form(default=None),
     points_limit: int | None = Form(default=None),
     custom_stats_enabled: bool = Form(default=False),
-    simple_points_enabled: bool = Form(default=False),
+    points_scaling_enabled: bool = Form(default=False),
+    points_scale: int = Form(default=10, ge=1, le=1_000_000),
     collapse_descriptions: bool = Form(default=False),
     small_battle_enabled: bool = Form(default=False),
     db: Session = Depends(get_db),
@@ -217,17 +237,15 @@ def create_roster(
         raise HTTPException(status_code=422, detail="Limit punktów musi być dodatni")
     if army_id is not None:
         _owned_army(db, army_id, user.id)
-    scaled_limit = rescale_points_limit(
-        points_limit, from_simple=False, to_simple=simple_points_enabled
-    )
+    effective_points_scale = points_scale if points_scaling_enabled else 1
     roster = models.Roster(
         name=_clean_name(name, "Nazwa rozpiski"),
         owner_id=user.id,
         army_id=army_id,
-        points_limit=scaled_limit,
+        points_limit=points_limit,
         ruleset_version=OPOS_RULESET_VERSION,
         custom_stats_enabled=custom_stats_enabled,
-        simple_points_enabled=simple_points_enabled,
+        points_scale=effective_points_scale,
         collapse_descriptions=collapse_descriptions,
         small_battle_enabled=small_battle_enabled,
     )
@@ -258,6 +276,10 @@ def roster_detail(
     unit_rows = [
         {
             "unit": item,
+            "unit_cost": scale_points(item.unit_cost, roster.points_scale),
+            "entry_cost": scale_entry_cost(
+                item.unit_cost, item.unit_copies, roster.points_scale
+            ),
             "defense": display_number(item.defense),
             "toughness": display_number(item.toughness),
             "profiles": build_profile_payloads(
@@ -269,6 +291,7 @@ def roster_detail(
         }
         for item in units
     ]
+    total_cost = sum(row["entry_cost"] for row in unit_rows)
     return templates.TemplateResponse(
         request,
         "roster_edit.html",
@@ -278,7 +301,13 @@ def roster_detail(
             "roster": roster,
             "units": units,
             "unit_rows": unit_rows,
-            "units_payload": [_unit_payload(item) for item in units],
+            "units_payload": [
+                _unit_payload(item, points_scale=roster.points_scale) for item in units
+            ],
+            "total_cost": total_cost,
+            "display_points_limit": scale_points(
+                roster.points_limit, roster.points_scale
+            ),
             "army_templates": roster.army.templates if roster.army else [],
             "csrf_token": get_csrf_token(request),
         },
@@ -293,7 +322,8 @@ def update_roster_settings(
     csrf_token: str = Form(...),
     points_limit: int | None = Form(default=None),
     custom_stats_enabled: bool = Form(default=False),
-    simple_points_enabled: bool = Form(default=False),
+    points_scaling_enabled: bool = Form(default=False),
+    points_scale: int = Form(default=10, ge=1, le=1_000_000),
     collapse_descriptions: bool = Form(default=False),
     small_battle_enabled: bool = Form(default=False),
     db: Session = Depends(get_db),
@@ -304,11 +334,8 @@ def update_roster_settings(
     if points_limit is not None and points_limit <= 0:
         raise HTTPException(status_code=422, detail="Limit punktów musi być dodatni")
     roster.name = _clean_name(name, "Nazwa rozpiski")
-    roster.points_limit = rescale_points_limit(
-        points_limit,
-        from_simple=roster.simple_points_enabled,
-        to_simple=simple_points_enabled,
-    )
+    roster.points_limit = points_limit
+    effective_points_scale = points_scale if points_scaling_enabled else 1
     units = db.execute(
         select(models.RosterUnit).where(models.RosterUnit.roster_id == roster.id)
     ).scalars().all()
@@ -322,7 +349,7 @@ def update_roster_settings(
             unit,
             unit_copies=unit.unit_copies,
             custom_stats_enabled=custom_stats_enabled,
-            simple_points_enabled=simple_points_enabled,
+            points_scale=effective_points_scale,
             small_battle_enabled=small_battle_enabled,
         )
         if scale_standard_toughness:
@@ -341,7 +368,7 @@ def update_roster_settings(
             ) from exc
         apply_request_to_roster_unit(unit, quote_request, quote)
     roster.custom_stats_enabled = custom_stats_enabled
-    roster.simple_points_enabled = simple_points_enabled
+    roster.points_scale = effective_points_scale
     roster.collapse_descriptions = collapse_descriptions
     roster.small_battle_enabled = small_battle_enabled
     db.commit()
@@ -371,7 +398,7 @@ def duplicate_roster(
         points_limit=source.points_limit,
         ruleset_version=source.ruleset_version,
         custom_stats_enabled=source.custom_stats_enabled,
-        simple_points_enabled=source.simple_points_enabled,
+        points_scale=source.points_scale,
         collapse_descriptions=source.collapse_descriptions,
         small_battle_enabled=source.small_battle_enabled,
     )
@@ -438,7 +465,7 @@ def create_roster_unit(
     apply_request_to_roster_unit(unit, request, quote)
     db.add(unit)
     db.commit()
-    return _unit_payload(unit)
+    return _unit_payload(unit, points_scale=roster.points_scale)
 
 
 @router.patch(
@@ -455,7 +482,7 @@ def update_roster_unit(
     request, quote = _calculate_for_roster(payload, roster)
     apply_request_to_roster_unit(unit, request, quote)
     db.commit()
-    return _unit_payload(unit)
+    return _unit_payload(unit, points_scale=roster.points_scale)
 
 
 @router.post(
@@ -493,7 +520,7 @@ def create_unit_from_template(
         template,
         unit_copies=payload.unit_copies,
         custom_stats_enabled=roster.custom_stats_enabled,
-        simple_points_enabled=roster.simple_points_enabled,
+        points_scale=roster.points_scale,
         small_battle_enabled=roster.small_battle_enabled,
     )
     if roster.small_battle_enabled and not needs_custom:
@@ -524,7 +551,7 @@ def create_unit_from_template(
     apply_request_to_roster_unit(unit, request, quote)
     db.add(unit)
     db.commit()
-    return _unit_payload(unit)
+    return _unit_payload(unit, points_scale=roster.points_scale)
 
 
 @router.post(
@@ -537,7 +564,7 @@ def duplicate_roster_unit(
     db: Session = Depends(get_db),
     user: models.User = Depends(current_user_dep),
 ) -> dict[str, object]:
-    source, _ = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
+    source, roster = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
     insert_position = source.position + 1
     db.execute(
         update(models.RosterUnit)
@@ -563,7 +590,7 @@ def duplicate_roster_unit(
     )
     db.add(clone)
     db.commit()
-    return _unit_payload(clone)
+    return _unit_payload(clone, points_scale=roster.points_scale)
 
 
 @router.delete(

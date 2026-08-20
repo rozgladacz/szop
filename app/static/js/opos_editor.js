@@ -8,7 +8,7 @@
   const rosterId = Number(root.dataset.rosterId);
   const armyId = Number(root.dataset.armyId || 0);
   const customStats = root.dataset.customStats === "true";
-  const simplePoints = root.dataset.simplePoints === "true";
+  const pointsScale = Number(root.dataset.pointsScale);
   const collapseDescriptions = root.dataset.collapseDescriptions === "true";
   const smallBattle = root.dataset.smallBattle === "true";
   const dialog = document.getElementById("unit-dialog");
@@ -70,7 +70,9 @@
     copy.append(strong);
     if (!collapseDescriptions) {
       const small = document.createElement("small");
-      small.textContent = definition.description;
+      small.textContent = smallBattle && definition.small_battle_description
+        ? definition.small_battle_description
+        : definition.description;
       copy.append(small);
     }
     label.append(input, icon(definition.icon, definition.name), copy);
@@ -217,7 +219,7 @@
       special_abilities: specialAbilities,
       profiles,
       custom_stats_enabled: customStats,
-      simple_points_enabled: simplePoints,
+      points_scale: pointsScale,
       small_battle_enabled: smallBattle,
     };
   }
@@ -230,7 +232,7 @@
     [
       ["Koszt bazowy", quote.base_cost], ["Profile ataku", quote.weapon_cost],
       ["Rozkaz", quote.order_cost], ["Aura", quote.aura_cost],
-      ["Modyfikator Wytrzymałości", `× ${quote.toughness_modifier}`],
+      ["Modyfikator Życia", `× ${quote.toughness_modifier}`],
       ["Cena surowa", quote.raw_unit_cost],
     ].forEach(([label, value]) => {
       const dt = document.createElement("dt");

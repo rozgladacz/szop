@@ -56,6 +56,23 @@
     if (message && !window.confirm(message)) event.preventDefault();
   });
 
+  document.querySelectorAll(".scale-row").forEach((row) => {
+    const toggle = row.querySelector(".scale-toggle");
+    const value = row.querySelector(".scale-value");
+    const limitLabel = row.closest("form")?.querySelector(".points-limit-label");
+    if (!toggle || !value) return;
+    const sync = () => {
+      value.disabled = !toggle.checked;
+      value.required = toggle.checked;
+      row.classList.toggle("is-disabled", !toggle.checked);
+      if (limitLabel) {
+        limitLabel.textContent = toggle.checked ? "Limit punktów, bez skalowania" : "Limit punktów";
+      }
+    };
+    toggle.addEventListener("change", sync);
+    sync();
+  });
+
   document.addEventListener("click", async (event) => {
     const button = event.target.closest(".js-delete-template");
     if (!button) return;

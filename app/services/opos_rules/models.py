@@ -72,6 +72,7 @@ class AbilityDefinition(BaseModel):
     category: AbilityCategory
     icon: str
     description: str
+    small_battle_description: str | None = None
     aura_eligible: bool = False
     requires_target: bool = False
     allowed_ranges: tuple[RangeSlug, ...] = ("melee", "short", "long")

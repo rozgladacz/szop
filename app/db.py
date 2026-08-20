@@ -48,11 +48,7 @@ _LEGACY_SZOP_TABLES = frozenset(
     }
 )
 
-_ROSTER_MODE_COLUMNS = (
-    "simple_points_enabled",
-    "collapse_descriptions",
-    "small_battle_enabled",
-)
+_ROSTER_BOOLEAN_MODE_COLUMNS = ("collapse_descriptions", "small_battle_enabled")
 
 
 def assert_not_legacy_szop_database(bind: Engine) -> None:
@@ -80,15 +76,44 @@ def ensure_roster_mode_columns(bind: Engine) -> None:
     if "rosters" not in inspector.get_table_names():
         return
     existing = {column["name"] for column in inspector.get_columns("rosters")}
-    missing = [name for name in _ROSTER_MODE_COLUMNS if name not in existing]
-    if not missing:
+    missing_boolean = [
+        name for name in _ROSTER_BOOLEAN_MODE_COLUMNS if name not in existing
+    ]
+    points_scale_missing = "points_scale" not in existing
+    if not missing_boolean and not points_scale_missing:
         return
     with bind.begin() as connection:
-        for name in missing:
+        for name in missing_boolean:
             connection.exec_driver_sql(
                 f"ALTER TABLE rosters ADD COLUMN {name} "
                 "BOOLEAN NOT NULL DEFAULT 0"
             )
+        if points_scale_missing:
+            connection.exec_driver_sql(
+                "ALTER TABLE rosters ADD COLUMN points_scale "
+                "INTEGER NOT NULL DEFAULT 10"
+            )
+            if "simple_points_enabled" in existing:
+                connection.exec_driver_sql(
+                    "UPDATE rosters SET points_scale = "
+                    "CASE WHEN simple_points_enabled = 1 THEN 10 ELSE 1 END"
+                )
+
+
+def drop_legacy_simple_points_column(bind: Engine) -> None:
+    """Remove the superseded boolean after its data has been converted."""
+    if bind.dialect.name != "sqlite":
+        return
+    inspector = inspect(bind)
+    if "rosters" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("rosters")}
+    if "simple_points_enabled" not in existing:
+        return
+    with bind.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE rosters DROP COLUMN simple_points_enabled"
+        )
 
 
 def get_db() -> Generator:
@@ -97,6 +122,24 @@ def get_db() -> Generator:
         yield db
     finally:
         db.close()
+
+
+def upgrade_opos_database(bind: Engine) -> int:
+    """Upgrade one OPOS database inside its own atomic transaction."""
+    from . import models  # noqa: F401 - register all tables on Base.metadata
+    from .services.opos_units import migrate_opos_1_2, migrate_opos_1_3
+
+    assert_not_legacy_szop_database(bind)
+    ensure_roster_mode_columns(bind)
+    Base.metadata.create_all(bind=bind)
+    local_session = sessionmaker(
+        bind=bind, autoflush=False, autocommit=False, future=True
+    )
+    with local_session.begin() as session:
+        migrated = migrate_opos_1_2(session)
+        migrated += migrate_opos_1_3(session)
+    drop_legacy_simple_points_column(bind)
+    return migrated
 
 
 def init_db() -> None:
@@ -112,9 +155,9 @@ def init_db() -> None:
             db_path = Path.cwd() / db_path
         db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    assert_not_legacy_szop_database(engine)
-    ensure_roster_mode_columns(engine)
-    Base.metadata.create_all(bind=engine)
+    migrated = upgrade_opos_database(engine)
+    if migrated:
+        logger.info("Zmigrowano %s snapshotów OPOS.", migrated)
     with SessionLocal.begin() as session:
         normalized = normalize_legacy_snapshot_records(session)
         if normalized:

@@ -149,6 +149,7 @@ def _card_context(
         "pages": build_card_pages(
             units,
             ruleset_version=roster.ruleset_version,
+            points_scale=roster.points_scale or 10,
             collapse_descriptions=roster.collapse_descriptions,
         ),
         "asset_base": asset_base.rstrip("/"),

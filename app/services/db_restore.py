@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from fastapi import UploadFile
+from sqlalchemy import create_engine
 from sqlalchemy.orm import close_all_sessions
 
 from ..config import DATA_DIR, DB_URL
@@ -32,8 +33,7 @@ _REQUIRED_COLUMNS = {
     },
     "rosters": {
         "id", "name", "owner_id", "army_id", "points_limit",
-        "ruleset_version", "custom_stats_enabled", "simple_points_enabled",
-        "collapse_descriptions", "small_battle_enabled",
+        "ruleset_version", "custom_stats_enabled",
     },
     "roster_units": {
         "id", "roster_id", "source_template_id", "name", "models_per_unit",
@@ -128,6 +128,21 @@ def _validate_sqlite_file(path: Path) -> None:
     ]
     if invalid_tables:
         raise DBRestoreError("Struktura tabel bazy danych nie jest zgodna z OPOS.")
+
+
+def _upgrade_sqlite_file(path: Path) -> None:
+    """Upgrade a validated temporary database before it replaces live data."""
+    from ..db import upgrade_opos_database
+
+    temporary_engine = create_engine(
+        f"sqlite:///{path.as_posix()}",
+        connect_args={"check_same_thread": False},
+        future=True,
+    )
+    try:
+        upgrade_opos_database(temporary_engine)
+    finally:
+        temporary_engine.dispose()
 
 
 def _copy_upload_limited(source, target: Path) -> None:
@@ -226,6 +241,8 @@ def restore_sqlite_database(
         upload_file.file.seek(0)
         _copy_upload_limited(upload_file.file, temp_path)
 
+        _validate_sqlite_file(temp_path)
+        _upgrade_sqlite_file(temp_path)
         _validate_sqlite_file(temp_path)
         for sidecar in (wal_temp, shm_temp):
             sidecar.unlink(missing_ok=True)

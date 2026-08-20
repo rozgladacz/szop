@@ -37,6 +37,37 @@ def extract_docx_text(path: Path) -> str:
     return "\n".join(chunks)
 
 
+def extract_docx_abilities(path: Path) -> dict[str, set[str]]:
+    """Read the three normative ability lists independently of YAML."""
+    document = Document(path)
+    headings = {
+        "zdolności pasywne": "passive",
+        "zdolności specjalne": "special",
+        "zdolności ataku": "weapon",
+        "zdolności broni": "weapon",
+    }
+    result = {category: set() for category in headings.values()}
+    category: str | None = None
+    for paragraph in document.paragraphs:
+        value = paragraph.text.strip()
+        normalized = normalize(value)
+        matched_heading = next(
+            (heading for heading in headings if normalized.startswith(heading)), None
+        )
+        if matched_heading is not None:
+            category = headings[matched_heading]
+            continue
+        if normalized.startswith("koszt oddziału"):
+            break
+        if category is None or ":" not in value:
+            continue
+        name = value.split(":", maxsplit=1)[0].strip()
+        if normalize(name).startswith("aura"):
+            name = "Aura"
+        result[category].add(name)
+    return result
+
+
 def extract_pdf_text(path: Path) -> tuple[str, int]:
     reader = PdfReader(path)
     return "\n".join(page.extract_text() or "" for page in reader.pages), len(reader.pages)
@@ -52,9 +83,15 @@ def _semantic_document_errors(
             errors.append(f"{label}: brak zdolności {ability.name}")
 
     critical_slugs = (
+        "fast",
+        "steadfast",
+        "patient",
+        "breakthrough",
         "airplane",
+        "clumsy",
         "deadly",
         "transport",
+        "area",
         "double",
         "charge",
         "prepared",
@@ -66,16 +103,24 @@ def _semantic_document_errors(
             errors.append(f"{label}: opis {ability.name} różni się od YAML")
 
     formula_facts = {
-        "modyfikator wytrzymałości": (
-            "Modyfikator wytrzymałości wynosi 1+0,01 * wytrzymałość"
+        "modyfikator życia": (
+            "Modyfikator życia wynosi 1+0,01 * życie"
         ),
-        "modyfikator obrony": "Modyfikator obrony: 0,09x^2-0,19x+1",
+        "modyfikator zbroi": "Modyfikator zbroi: 0,09x^2-0,19x+1",
         "modyfikator siły": "Modyfikator siły: -0,04x^2 +0,5x+1",
         "koszt broni": (
-            "Koszt broni wynosi: liczba kości * 12 * modyfikator zasięgu * "
+            "Koszt broni wynosi: liczba kości * 6 * modyfikator zasięgu * "
             "modyfikator siły * modyfikatory zdolności za każdą broń"
         ),
+        "najdroższy profil liczony dwukrotnie": (
+            "Koszt najdroższego profilu policz dwukrotnie"
+        ),
+        "zasięgi 0,5/0,6/1": (
+            "Zasięg Wręcz Krótki Długi Modyfikator 0,5 0,6 1"
+        ),
         "Samolot -1": "Samolot: odlicz 1 od kosztu zdolności",
+        "Samolot 0/0/1,6": "Modyfikator zasięgu: 0/0/1,6",
+        "Niezgrabny -1": "Niezgrabny: odlicz 1 od kosztu zdolności",
         "Zabójczy ×4": "Zabójczy: *4",
         "Transport +2": "Transport: dolicz 2 do kosztu zdolności",
         "Podwójny — sukces także remisem": (
@@ -85,6 +130,9 @@ def _semantic_document_errors(
         "Szarża ×1,4": "Szarża: *1,4",
         "Przygotowanie ×1,4": "Przygotowanie: *1,4",
     }
+    area_small = by_slug["area"].small_battle_description
+    if area_small and normalize(area_small) not in normalized:
+        errors.append(f"{label}: brak wariantowego opisu Obszarowej")
     for fact_name, fragment in formula_facts.items():
         if normalize(fragment) not in normalized:
             errors.append(f"{label}: brak semantyki „{fact_name}”")
@@ -93,9 +141,11 @@ def _semantic_document_errors(
 
 def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
     errors: list[str] = []
+    if ruleset.version != "1.2.0":
+        errors.append("YAML: hotfix musi mieć wersję 1.2.0")
     expected_stats = {
         "defense": (Decimal("3"), Decimal("4"), Decimal("5")),
-        "toughness": tuple(Decimal(value) for value in (1, 2, 3, 6, 9, 12)),
+        "toughness": tuple(Decimal(value) for value in (2, 4, 6, 12, 18, 24)),
         "strength": (Decimal("0"), Decimal("1"), Decimal("2")),
     }
     for field, expected in expected_stats.items():
@@ -103,9 +153,9 @@ def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
             errors.append(f"YAML: niepoprawna standardowa lista {field}")
 
     expected_ranges = {
-        "melee": Decimal("0.6"),
-        "short": Decimal("1"),
-        "long": Decimal("0.6"),
+        "melee": Decimal("0.5"),
+        "short": Decimal("0.6"),
+        "long": Decimal("1"),
     }
     for slug, multiplier in expected_ranges.items():
         if ruleset.ranges[slug].multiplier != multiplier:
@@ -114,8 +164,23 @@ def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
     by_slug = ruleset.abilities_by_slug
     if by_slug["airplane"].effects.ability_cost_delta != Decimal("-1"):
         errors.append("YAML: Samolot musi kosztować -1")
+    expected_airplane_ranges = {
+        "melee": Decimal("0"),
+        "short": Decimal("0"),
+        "long": Decimal("1.6"),
+    }
+    if by_slug["airplane"].effects.profile_multipliers != expected_airplane_ranges:
+        errors.append("YAML: Samolot musi mieć mnożniki profili 0/0/1,6")
     if by_slug["airplane"].aura_eligible:
         errors.append("YAML: Samolot nie może być celem Aury")
+    if by_slug["clumsy"].effects.ability_cost_delta != Decimal("-1"):
+        errors.append("YAML: Niezgrabny musi kosztować -1")
+    if by_slug["clumsy"].aura_eligible:
+        errors.append("YAML: Niezgrabny nie może być celem Aury")
+    if "guardian" in by_slug:
+        errors.append("YAML: Strażnik musi zostać usunięty")
+    if not by_slug["area"].small_battle_description:
+        errors.append("YAML: Obszarowa wymaga opisu dla małej bitwy")
     if by_slug["deadly"].effects.weapon_multiplier != Decimal("4"):
         errors.append("YAML: Zabójczy musi mieć mnożnik ×4")
     if by_slug["transport"].effects.ability_cost_delta != Decimal("2"):
@@ -151,7 +216,7 @@ def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
         "base_constant": Decimal("6"),
         "defense_quadratic": Decimal("0.09"),
         "defense_linear": Decimal("-0.19"),
-        "weapon_factor": Decimal("12"),
+        "weapon_factor": Decimal("6"),
         "strength_quadratic": Decimal("-0.04"),
         "strength_linear": Decimal("0.5"),
         "toughness_modifier_per_point": Decimal("0.01"),
@@ -184,11 +249,26 @@ def run_checks(
     published = pdf_path or ROOT_DIR / active_ruleset.sources.published
 
     docx_text = extract_docx_text(normative)
+    docx_abilities = extract_docx_abilities(normative)
     pdf_text, pdf_pages = extract_pdf_text(published)
     errors = _yaml_contract_errors(active_ruleset)
     errors.extend(
         _semantic_document_errors(docx_text, label="DOCX", ruleset=active_ruleset)
     )
+    for category, names in docx_abilities.items():
+        yaml_names = {ability.name for ability in active_ruleset.abilities_of(category)}
+        missing_in_yaml = sorted(names - yaml_names)
+        missing_in_docx = sorted(yaml_names - names)
+        if missing_in_yaml:
+            errors.append(
+                f"DOCX/YAML: dodatkowe zdolności {category}: "
+                + ", ".join(missing_in_yaml)
+            )
+        if missing_in_docx:
+            errors.append(
+                f"DOCX/YAML: brak zdolności {category}: "
+                + ", ".join(missing_in_docx)
+            )
     errors.extend(
         _semantic_document_errors(pdf_text, label="PDF", ruleset=active_ruleset)
     )

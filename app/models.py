@@ -124,8 +124,8 @@ class Roster(TimestampMixin, Base):
     custom_stats_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )
-    simple_points_enabled: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, default=False
+    points_scale: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
     )
     collapse_descriptions: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False

@@ -11,7 +11,7 @@ Na systemie z `make`: `make check`.
 
 ## Zakres suite
 
-- `test_opos_ruleset.py`, `test_opos_quote.py` — kompletność YAML, golden cases, wszystkie zdolności, Aura, rounding, proste punkty, mała bitwa i custom stats.
+- `test_opos_ruleset.py`, `test_opos_quote.py` — kompletność YAML, golden cases, wszystkie zdolności, Aura, rounding, skalowanie punktów, mała bitwa i custom stats.
 - `test_opos_models.py`, `test_opos_snapshots.py`, `test_opos_backup.py` — schemat, kopiowanie snapshotów, własność i świeża baza.
 - `test_opos_api.py`, `test_opos_csrf.py` — kontrakty endpointów, server-side recalc, IDOR i CSRF.
 - `test_opos_cards.py`, `test_opos_pdf_security.py` — liczba kart, kontynuacje, brak liczebności i bezpieczne zasoby.
@@ -26,7 +26,7 @@ Po zmianach frontendowych uruchom serwer i ręcznie sprawdź desktop oraz szerok
 2. utworzenie Armii oraz szablonu,
 3. utworzenie rozpiski i bezpośrednie dodanie oddziału,
 4. dodanie z Armii, quote, zapis, duplikowanie i reorder,
-5. przełączenie „Dowolne statystyki”, „Proste punkty”, „Zwiń opisy” i „Mała bitwa”,
+5. zmianę „Skalowania punktów” oraz przełączenie „Dowolne statystyki”, „Zwiń opisy” i „Mała bitwa”,
 6. karty HTML i PDF, w tym zwarty wariant bez pełnych opisów, długie nazwy oraz profile bez zdolności.
 
 Sprawdź konsolę przeglądarki oraz składnię `opos.js` i `opos_editor.js` przez `node --check`.
