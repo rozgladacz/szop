@@ -40,6 +40,21 @@ class User(TimestampMixin, Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    default_custom_stats_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    default_points_scale: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=10, server_default="10"
+    )
+    default_collapse_descriptions: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    default_small_battle_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    default_shield_fist_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
 
     armies: Mapped[list["Army"]] = relationship(
         back_populates="owner", cascade="all, delete-orphan"
@@ -60,7 +75,6 @@ class Army(TimestampMixin, Base):
     owner_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-
     owner: Mapped[User] = relationship(back_populates="armies")
     templates: Mapped[list["UnitTemplate"]] = relationship(
         back_populates="army",
@@ -95,7 +109,7 @@ class UnitTemplate(TimestampMixin, Base):
     )
     profiles_json: Mapped[str] = mapped_column(Text, nullable=False)
     ruleset_version: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="v1"
+        String(20), nullable=False, default="v3"
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -119,7 +133,7 @@ class Roster(TimestampMixin, Base):
     )
     points_limit: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     ruleset_version: Mapped[str] = mapped_column(
-        String(20), nullable=False, default="v1"
+        String(20), nullable=False, default="v3"
     )
     custom_stats_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
@@ -132,6 +146,9 @@ class Roster(TimestampMixin, Base):
     )
     small_battle_enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
+    )
+    shield_fist_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
     )
 
     owner: Mapped[User] = relationship(back_populates="rosters")

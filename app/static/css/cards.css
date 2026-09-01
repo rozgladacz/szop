@@ -16,12 +16,16 @@ html, body { margin: 0; color: #141b19; font-family: "DejaVu Sans", sans-serif; 
 .card-cell:nth-child(odd) { border-right: .2mm dashed #777; }
 .card-cell:nth-child(-n+2) { border-bottom: .2mm dashed #777; }
 .unit-card { height: 96mm; position: relative; display: grid; grid-template-rows: auto minmax(31mm, auto) 1fr auto; gap: 2.2mm; padding: 4.2mm; border: .45mm solid #17201e; border-radius: 2mm; background: #fff; overflow: hidden; break-inside: avoid; page-break-inside: avoid; }
+.unit-card-profile.has-attack-descriptions { grid-template-rows: auto minmax(31mm, auto) auto 1fr auto; }
 .card-header { display: flex; justify-content: space-between; align-items: center; gap: 3mm; padding-bottom: 1.8mm; border-bottom: .35mm solid #17201e; }
 .card-title { min-width: 0; flex: 1; }
 .card-kicker { display: block; margin-bottom: .5mm; color: #176b5b; font-size: 6.5pt; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
 .card-header h1 { margin: 0; font-size: 18pt; line-height: 1.02; }
 .card-title h1 { overflow-wrap: anywhere; }
 .card-title.is-long h1 { font-size: 14pt; line-height: 1.05; }
+.card-cost-group { display: flex; align-items: center; gap: 1.2mm; flex: 0 0 auto; }
+.card-models .card-icon-wrap { width: 10.5mm; height: 10.5mm; }
+.card-models .card-icon-value { font-size: 8.5pt; }
 .card-cost { display: flex; align-items: baseline; gap: .8mm; padding: 1.5mm 2.4mm; color: white; background: #176b5b; border-radius: 1.5mm; font-size: 17pt; line-height: 1; white-space: nowrap; }
 .card-cost small { font-size: 6pt; text-transform: uppercase; }
 .card-stats { display: flex; gap: 2mm; flex: 0 0 auto; }
@@ -39,7 +43,9 @@ html, body { margin: 0; color: #141b19; font-family: "DejaVu Sans", sans-serif; 
 .attack-abilities { display: flex; flex-wrap: wrap; justify-content: center; gap: .7mm 1.2mm; margin-top: 1.6mm; }
 .attack-abilities span { display: inline-flex; align-items: center; gap: .4mm; font-size: 5.5pt; }
 .attack-abilities .card-icon-wrap { width: 4.5mm; height: 4.5mm; }
-.card-abilities { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: space-evenly; gap: 1.3mm 2.5mm; min-height: 0; }
+.card-abilities, .card-attack-descriptions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: space-evenly; gap: 1.3mm 2.5mm; min-height: 0; }
+.card-attack-descriptions { align-content: start; }
+.card-abilities.is-separated { padding-top: 1mm; border-top: .2mm solid #c4cbc8; }
 .card-ability { min-width: 0; display: grid; grid-template-columns: 7mm 1fr; gap: 1mm; align-items: start; }
 .card-ability .card-icon-wrap { width: 6.5mm; height: 6.5mm; }
 .card-ability p { margin: 0; min-width: 0; }

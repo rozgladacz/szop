@@ -11,6 +11,7 @@ from sqlalchemy import create_engine
 from app.db import Base
 from app.routers import users
 from app.services import backup, db_restore
+from app.services.opos_units import OPOS_V3_1_USER_VERSION
 
 
 def _database(path: Path, tables: set[str]) -> None:
@@ -37,7 +38,9 @@ def test_restore_upgrades_temporary_database_before_replacement(tmp_path: Path) 
     db_restore._upgrade_sqlite_file(path)
 
     with sqlite3.connect(path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 10300
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == (
+            OPOS_V3_1_USER_VERSION
+        )
 
 
 def test_restore_rejects_legacy_szop_shape(tmp_path: Path) -> None:

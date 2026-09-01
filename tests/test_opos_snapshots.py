@@ -90,7 +90,7 @@ def test_explicit_template_update_copies_current_snapshot() -> None:
 
 
 def test_custom_template_is_detected_before_standard_roster_copy() -> None:
-    unit = _roster_unit(_request(defense=Decimal("3.5")))
+    unit = _roster_unit(_request(defense=Decimal("6")))
     template = create_template_from_roster_unit(
         unit,
         army=models.Army(name="Biblioteka", owner_id=1),

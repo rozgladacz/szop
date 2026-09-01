@@ -13,8 +13,12 @@ from ..config import OPOS_RULESET_VERSION
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_csrf_token, get_current_user, require_csrf, validate_csrf
-from ..services.cards import display_number
-from ..services.opos_rules import QuoteValidationError, UnitQuoteInput, calculate_unit_quote
+from ..services.opos_rules import (
+    QuoteValidationError,
+    UnitQuoteInput,
+    calculate_unit_quote,
+    display_number,
+)
 from ..services.opos_units import (
     apply_request_to_roster_unit,
     create_template_from_roster_unit,
@@ -107,7 +111,10 @@ def create_army(
     user: models.User = Depends(current_user_dep),
 ) -> RedirectResponse:
     validate_csrf(request, csrf_token)
-    army = models.Army(name=_clean_name(name, label="Nazwa Armii"), owner_id=user.id)
+    army = models.Army(
+        name=_clean_name(name, label="Nazwa Armii"),
+        owner_id=user.id,
+    )
     db.add(army)
     db.commit()
     return RedirectResponse(url=f"/armies/{army.id}", status_code=303)
@@ -177,7 +184,12 @@ def create_template(
     user: models.User = Depends(current_user_dep),
 ) -> dict[str, object]:
     army = _owned_army(db, army_id, user.id)
-    request = payload.model_copy(update={"unit_copies": 1})
+    request = payload.model_copy(
+        update={
+            "unit_copies": 1,
+            "shield_fist_enabled": False,
+        }
+    )
     try:
         quote = calculate_unit_quote(request, ruleset_version=OPOS_RULESET_VERSION)
     except QuoteValidationError as exc:
@@ -220,7 +232,12 @@ def replace_template(
     user: models.User = Depends(current_user_dep),
 ) -> dict[str, object]:
     template = _owned_template(db, army_id, template_id, user.id)
-    request = payload.model_copy(update={"unit_copies": 1})
+    request = payload.model_copy(
+        update={
+            "unit_copies": 1,
+            "shield_fist_enabled": False,
+        }
+    )
     try:
         quote = calculate_unit_quote(request, ruleset_version=OPOS_RULESET_VERSION)
     except QuoteValidationError as exc:

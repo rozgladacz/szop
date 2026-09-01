@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .loader import load_opos_ruleset
 from .models import AbilityDefinition, OposRuleset, RangeSlug
+from .notation import canonical_stat_value
 
 
 _INPUT_CONFIG = ConfigDict(extra="forbid")
@@ -74,7 +75,7 @@ class UnitQuoteInput(BaseModel):
     name: str = Field(default="Oddział", min_length=1, max_length=120)
     models_per_unit: int = Field(ge=1, le=999)
     unit_copies: int = Field(default=1, ge=1, le=999)
-    defense: Decimal = Field(gt=0)
+    defense: Decimal
     toughness: Decimal = Field(gt=0)
     passive_abilities: tuple[str, ...] = ()
     special_abilities: tuple[SpecialAbilityInput, ...] = ()
@@ -82,6 +83,7 @@ class UnitQuoteInput(BaseModel):
     custom_stats_enabled: bool = False
     points_scale: int = Field(default=1, ge=1, le=1_000_000)
     small_battle_enabled: bool = False
+    shield_fist_enabled: bool = False
 
     @field_validator("name")
     @classmethod
@@ -131,6 +133,33 @@ class QuoteValidationError(ValueError):
     """Raised when a syntactically valid quote violates the active ruleset."""
 
 
+def canonicalize_unit_input(request: UnitQuoteInput) -> UnitQuoteInput:
+    """Return the canonical snapshot/quote representation of editor input."""
+    if not request.shield_fist_enabled:
+        return request
+    profiles = {
+        range_slug: profile.model_copy(
+            update={
+                "strength": canonical_stat_value(
+                    "strength",
+                    profile.strength,
+                    shield_fist_enabled=True,
+                )
+            }
+        )
+        for range_slug, profile in request.profiles.items()
+    }
+    return request.model_copy(
+        update={
+            "defense": canonical_stat_value(
+                "defense", request.defense, shield_fist_enabled=True
+            ),
+            "profiles": request.profiles.model_copy(update=profiles),
+            "shield_fist_enabled": False,
+        }
+    )
+
+
 def _ability_map(ruleset: OposRuleset) -> dict[str, AbilityDefinition]:
     return ruleset.abilities_by_slug
 
@@ -138,6 +167,14 @@ def _ability_map(ruleset: OposRuleset) -> dict[str, AbilityDefinition]:
 def _unique(values: tuple[str, ...], field: str) -> None:
     if len(values) != len(set(values)):
         raise QuoteValidationError(f"{field} contains duplicates")
+
+
+def _selected_ability_slugs(request: UnitQuoteInput) -> set[str]:
+    selected = set(request.passive_abilities)
+    selected.update(item.slug for item in request.special_abilities)
+    for _, profile in request.profiles.items():
+        selected.update(profile.abilities)
+    return selected
 
 
 def _validate_request(request: UnitQuoteInput, ruleset: OposRuleset) -> None:
@@ -163,6 +200,26 @@ def _validate_request(request: UnitQuoteInput, ruleset: OposRuleset) -> None:
             target = abilities.get(item.target_slug or "")
             if target is None or not target.aura_eligible:
                 raise QuoteValidationError(f"Ability is not a valid Aura target: {item.target_slug}")
+
+    if request.custom_stats_enabled and ruleset.custom_stats is not None:
+        values = {
+            "defense": (request.defense,),
+            "toughness": (request.toughness,),
+            "strength": tuple(profile.strength for _, profile in request.profiles.items()),
+        }
+        for stat_name, stat_values in values.items():
+            limits = getattr(ruleset.custom_stats, stat_name)
+            for value in stat_values:
+                if limits.integer_only and value != value.to_integral_value():
+                    raise QuoteValidationError(
+                        f"{stat_name} must be an integer in custom stats mode"
+                    )
+                if value < limits.minimum or value > limits.maximum:
+                    raise QuoteValidationError(
+                        f"{stat_name} must be between {limits.minimum} and {limits.maximum}"
+                    )
+    elif request.defense <= ZERO:
+        raise QuoteValidationError("Zbroja must be positive")
 
     if not request.custom_stats_enabled:
         standard = ruleset.standard_stats
@@ -197,6 +254,15 @@ def _validate_request(request: UnitQuoteInput, ruleset: OposRuleset) -> None:
             if range_slug not in definition.allowed_ranges:
                 raise QuoteValidationError(f"{definition.name} is not allowed at {range_slug} range")
 
+    selected = _selected_ability_slugs(request)
+    for slug in sorted(selected):
+        for other in abilities[slug].incompatible_with:
+            if other in selected:
+                raise QuoteValidationError(
+                    f"Zdolności {abilities[slug].name} i {abilities[other].name} "
+                    "wzajemnie się wykluczają"
+                )
+
 
 def _passive_effects(
     passive_slugs: tuple[str, ...], ruleset: OposRuleset
@@ -214,7 +280,13 @@ def _toughness_sum(
     for ability in passive_defs:
         value *= ability.effects.toughness_multiplier
     for ability in special_defs:
-        value += ability.effects.toughness_flat_bonus
+        bonus = ability.effects.toughness_flat_bonus
+        if (
+            request.small_battle_enabled
+            and ability.effects.small_battle_toughness_flat_bonus is not None
+        ):
+            bonus = ability.effects.small_battle_toughness_flat_bonus
+        value += bonus
     return value
 
 
@@ -245,6 +317,11 @@ def _base_cost(
     defense_multiplier = _defense_multiplier(effective_defense, ruleset)
     ability_delta = sum((item.effects.ability_cost_delta for item in passive_defs), ZERO)
     ability_delta += sum((item.effects.ability_cost_delta for item in special_defs), ZERO)
+    selected = _selected_ability_slugs(request)
+    for ability in (*passive_defs, *special_defs):
+        for conditional in ability.effects.conditional_ability_costs:
+            if selected.intersection(conditional.any_of):
+                ability_delta += conditional.delta
     base = (formula.base_constant + ability_delta) * defense_multiplier * toughness_sum
     return base, toughness_sum, effective_defense, ability_delta
 
@@ -271,7 +348,11 @@ def _profile_costs(
         for passive in passive_defs:
             ability_multiplier *= passive.effects.profile_multipliers.get(range_slug, ONE)
         for slug in profile.abilities:
-            ability_multiplier *= abilities[slug].effects.weapon_multiplier
+            effects = abilities[slug].effects
+            multiplier = effects.weapon_multiplier
+            if request.small_battle_enabled and effects.small_battle_weapon_multiplier is not None:
+                multiplier = effects.small_battle_weapon_multiplier
+            ability_multiplier *= multiplier
         per_model = (
             Decimal(profile.dice)
             * formula.weapon_factor
@@ -326,9 +407,10 @@ def _with_weapon_ability(
 
 
 def calculate_unit_quote(
-    request: UnitQuoteInput, *, ruleset_version: str = "v1"
+    request: UnitQuoteInput, *, ruleset_version: str = "v3"
 ) -> QuoteBreakdown:
     """Calculate one shared unit profile and its copy total without DB access."""
+    request = canonicalize_unit_input(request)
     ruleset = load_opos_ruleset(ruleset_version)
     _validate_request(request, ruleset)
     abilities = _ability_map(ruleset)

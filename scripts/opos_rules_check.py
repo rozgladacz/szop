@@ -87,6 +87,8 @@ def _semantic_document_errors(
         "steadfast",
         "patient",
         "breakthrough",
+        "invulnerable",
+        "sentinel",
         "airplane",
         "clumsy",
         "deadly",
@@ -95,6 +97,8 @@ def _semantic_document_errors(
         "double",
         "charge",
         "prepared",
+        "encirclement",
+        "single-use",
     )
     by_slug = ruleset.abilities_by_slug
     for slug in critical_slugs:
@@ -110,17 +114,17 @@ def _semantic_document_errors(
         "modyfikator siły": "Modyfikator siły: -0,04x^2 +0,5x+1",
         "koszt broni": (
             "Koszt broni wynosi: liczba kości * 6 * modyfikator zasięgu * "
-            "modyfikator siły * modyfikatory zdolności za każdą broń"
+            "modyfikator siły * modyfikatory zdolności dla każdego profilu"
         ),
         "najdroższy profil liczony dwukrotnie": (
             "Koszt najdroższego profilu policz dwukrotnie"
         ),
         "zasięgi 0,5/0,6/1": (
-            "Zasięg Wręcz Krótki Długi Modyfikator 0,5 0,6 1"
+            "Zasięg Wręcz Krótki Daleki Modyfikator 0,5 0,6 1"
         ),
         "Samolot -1": "Samolot: odlicz 1 od kosztu zdolności",
         "Samolot 0/0/1,6": "Modyfikator zasięgu: 0/0/1,6",
-        "Niezgrabny -1": "Niezgrabny: odlicz 1 od kosztu zdolności",
+        "Niezgrabny -0,5": "Niezgrabny: odlicz 0,5 od kosztu zdolności",
         "Zabójczy ×4": "Zabójczy: *4",
         "Transport +2": "Transport: dolicz 2 do kosztu zdolności",
         "Podwójny — sukces także remisem": (
@@ -129,6 +133,12 @@ def _semantic_document_errors(
         "Aura dla profili ataku": "lub ich profile ataku",
         "Szarża ×1,4": "Szarża: *1,4",
         "Przygotowanie ×1,4": "Przygotowanie: *1,4",
+        "Niewrażliwy +0,25": "Niewrażliwy: Efektywna Zbroja +0,25",
+        "Strażnik +1": "Strażnik: dolicz 1 do kosztu zdolności",
+        "Osaczenie ×1,4": "Osaczenie: *1,4",
+        "Jednorazowy ×0,4": "Jednorazowy: *0,4",
+        "Tarcza i Pięść": "Pięść równy 3-Siła i Tarcza równy Zbroja -3",
+        "konflikty zdolności": "Zdolności które się nawzajem wykluczają",
     }
     area_small = by_slug["area"].small_battle_description
     if area_small and normalize(area_small) not in normalized:
@@ -141,8 +151,8 @@ def _semantic_document_errors(
 
 def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
     errors: list[str] = []
-    if ruleset.version != "1.2.0":
-        errors.append("YAML: hotfix musi mieć wersję 1.2.0")
+    if ruleset.version != "3.0.0":
+        errors.append("YAML: aktywny zestaw zasad musi mieć wersję 3.0.0")
     expected_stats = {
         "defense": (Decimal("3"), Decimal("4"), Decimal("5")),
         "toughness": tuple(Decimal(value) for value in (2, 4, 6, 12, 18, 24)),
@@ -173,24 +183,38 @@ def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
         errors.append("YAML: Samolot musi mieć mnożniki profili 0/0/1,6")
     if by_slug["airplane"].aura_eligible:
         errors.append("YAML: Samolot nie może być celem Aury")
-    if by_slug["clumsy"].effects.ability_cost_delta != Decimal("-1"):
-        errors.append("YAML: Niezgrabny musi kosztować -1")
+    if by_slug["clumsy"].effects.ability_cost_delta != Decimal("-0.5"):
+        errors.append("YAML: Niezgrabny musi kosztować -0,5")
     if by_slug["clumsy"].aura_eligible:
         errors.append("YAML: Niezgrabny nie może być celem Aury")
     if "guardian" in by_slug:
-        errors.append("YAML: Strażnik musi zostać usunięty")
+        errors.append("YAML: stary slug guardian musi pozostać usunięty")
+    if by_slug["invulnerable"].effects.defense_bonus != Decimal("0.25"):
+        errors.append("YAML: Niewrażliwy musi dawać +0,25 efektywnej Zbroi")
+    if by_slug["sentinel"].effects.ability_cost_delta != Decimal("1"):
+        errors.append("YAML: Strażnik musi kosztować +1")
     if not by_slug["area"].small_battle_description:
         errors.append("YAML: Obszarowa wymaga opisu dla małej bitwy")
     if by_slug["deadly"].effects.weapon_multiplier != Decimal("4"):
         errors.append("YAML: Zabójczy musi mieć mnożnik ×4")
+    if by_slug["deadly"].effects.small_battle_weapon_multiplier != Decimal("8"):
+        errors.append("YAML: Zabójczy w małej bitwie musi mieć mnożnik ×8")
+    deadly_small = normalize(by_slug["deadly"].small_battle_description or "")
+    if "12 lub mniej" not in deadly_small or "zadaj 12 ran" not in deadly_small:
+        errors.append("YAML: Zabójczy w małej bitwie wymaga progu i 12 ran")
     if by_slug["transport"].effects.ability_cost_delta != Decimal("2"):
         errors.append("YAML: Transport musi kosztować +2")
+    transport_conditionals = by_slug["transport"].effects.conditional_ability_costs
+    if not transport_conditionals or transport_conditionals[0].delta != Decimal("2"):
+        errors.append("YAML: Transport z mobilnością musi kosztować dodatkowe +2")
     if by_slug["double"].effects.weapon_multiplier != Decimal("1.5"):
         errors.append("YAML: Podwójny musi mieć mnożnik ×1,5")
 
     expected_weapon_contracts = {
         "charge": (("melee",), Decimal("1.4")),
         "prepared": (("short", "long"), Decimal("1.4")),
+        "encirclement": (("melee", "short", "long"), Decimal("1.4")),
+        "single-use": (("melee", "short", "long"), Decimal("0.4")),
     }
     for slug, (ranges, multiplier) in expected_weapon_contracts.items():
         ability = by_slug[slug]
@@ -199,7 +223,7 @@ def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
         if ability.allowed_ranges != ranges:
             errors.append(f"YAML: {ability.name} ma niepoprawne zasięgi")
         if ability.effects.weapon_multiplier != multiplier:
-            errors.append(f"YAML: {ability.name} musi mieć mnożnik ×1,4")
+            errors.append(f"YAML: {ability.name} ma niepoprawny mnożnik")
 
     weapon_slugs = {
         ability.slug for ability in ruleset.abilities_of("weapon")
@@ -209,8 +233,29 @@ def _yaml_contract_errors(ruleset: OposRuleset) -> list[str]:
         for ability in ruleset.aura_targets
         if ability.category == "weapon"
     }
-    if aura_weapon_slugs != weapon_slugs:
-        errors.append("YAML: Aura musi dopuszczać wszystkie zdolności broni")
+    expected_aura_weapon_slugs = weapon_slugs - {"reload", "single-use"}
+    if aura_weapon_slugs != expected_aura_weapon_slugs:
+        errors.append(
+            "YAML: Aura musi wykluczać Jednorazowy i Przeładowanie"
+        )
+
+    custom_stats = ruleset.custom_stats
+    expected_custom = {
+        "defense": (Decimal("1"), Decimal("6")),
+        "toughness": (Decimal("1"), Decimal("99")),
+        "strength": (Decimal("-1"), Decimal("4")),
+    }
+    if custom_stats is None:
+        errors.append("YAML: brak zakresów dowolnych statystyk")
+    else:
+        for field, (minimum, maximum) in expected_custom.items():
+            limits = getattr(custom_stats, field)
+            if (limits.minimum, limits.maximum, limits.integer_only) != (
+                minimum,
+                maximum,
+                True,
+            ):
+                errors.append(f"YAML: niepoprawny zakres dowolnej statystyki {field}")
 
     expected_formula = {
         "base_constant": Decimal("6"),

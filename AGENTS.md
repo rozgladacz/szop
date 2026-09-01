@@ -21,6 +21,7 @@
 4. OPOS używa świeżej `data/opos.db`; nie konwertuj ani nie podmieniaj jej bazą SZOP.
 5. Gdy użytkownik mówi „cofnij” lub równoważnie — zatrzymaj się i odwróć ostatnią zmianę.
 6. Przed destrukcyjnym gitem pokaż `git remote -v` i `git branch`; nigdy nie zakładaj tożsamości repozytorium.
+7. Pliki zasad w `app/static/docs/` są wyłącznie do odczytu; nie zmieniaj ich bez wyraźnego polecenia użytkownika.
 
 ## Procedura
 

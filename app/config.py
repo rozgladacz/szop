@@ -51,7 +51,7 @@ INITIAL_ADMIN_PASSWORD = _load_or_create_secret(
 )
 DB_URL = os.getenv("DB_URL", "sqlite:///./data/opos.db")
 DEBUG = os.getenv("DEBUG", "false").lower() in {"1", "true", "yes"}
-OPOS_RULESET_VERSION = os.getenv("OPOS_RULESET_VERSION", "v1")
+OPOS_RULESET_VERSION = os.getenv("OPOS_RULESET_VERSION", "v3")
 UPDATE_REPO_URL = os.getenv("UPDATE_REPO_URL", "https://github.com/rozgladacz/opos")
 UPDATE_BRANCH = os.getenv("UPDATE_BRANCH", "main")
 UPDATE_REPO_PATH = os.getenv("UPDATE_REPO_PATH", ".")

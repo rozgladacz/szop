@@ -10,10 +10,11 @@ from app.db import (
     Base,
     assert_not_legacy_szop_database,
     ensure_roster_mode_columns,
+    ensure_user_preference_columns,
     upgrade_opos_database,
 )
 from app.services.opos_rules import QuoteValidationError, calculate_unit_quote
-from app.services.opos_units import OPOS_1_3_USER_VERSION, request_from_snapshot
+from app.services.opos_units import OPOS_V3_1_USER_VERSION, request_from_snapshot
 
 
 def _profiles() -> str:
@@ -33,6 +34,19 @@ def test_fresh_schema_contains_only_opos_domain_tables() -> None:
     assert set(inspect(test_engine).get_table_names()) == {
         "users", "armies", "unit_templates", "rosters", "roster_units",
     }
+    inspector = inspect(test_engine)
+    army_columns = {item["name"] for item in inspector.get_columns("armies")}
+    roster_columns = {item["name"] for item in inspector.get_columns("rosters")}
+    user_columns = {item["name"] for item in inspector.get_columns("users")}
+    assert "shield_fist_enabled" not in army_columns
+    assert "shield_fist_enabled" in roster_columns
+    assert {
+        "default_custom_stats_enabled",
+        "default_points_scale",
+        "default_collapse_descriptions",
+        "default_small_battle_enabled",
+        "default_shield_fist_enabled",
+    } <= user_columns
 
 
 def test_roster_cost_uses_rounded_unit_cost_times_copies() -> None:
@@ -112,7 +126,60 @@ def test_existing_opos_database_gets_missing_roster_mode_columns() -> None:
         "points_scale",
         "collapse_descriptions",
         "small_battle_enabled",
+        "shield_fist_enabled",
     } <= columns
+
+
+def test_existing_opos_database_gets_user_preference_columns() -> None:
+    old_engine = create_engine("sqlite:///:memory:")
+    with old_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(64))"
+        )
+
+    ensure_user_preference_columns(old_engine)
+
+    columns = {item["name"] for item in inspect(old_engine).get_columns("users")}
+    assert {
+        "default_custom_stats_enabled",
+        "default_points_scale",
+        "default_collapse_descriptions",
+        "default_small_battle_enabled",
+        "default_shield_fist_enabled",
+    } <= columns
+
+
+def test_v3_1_migration_moves_shield_fist_from_army_to_roster() -> None:
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+    with test_engine.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE armies ADD COLUMN shield_fist_enabled "
+            "BOOLEAN NOT NULL DEFAULT 0"
+        )
+    with Session(test_engine) as session:
+        user = models.User(username="owner-v3-1", password_hash="hash")
+        army = models.Army(name="Armia", owner=user)
+        roster = models.Roster(name="Rozpiska", owner=user, army=army)
+        session.add(roster)
+        session.commit()
+        session.execute(
+            text("UPDATE armies SET shield_fist_enabled = 1 WHERE id = :id"),
+            {"id": army.id},
+        )
+        session.execute(text("PRAGMA user_version = 30000"))
+        session.commit()
+
+    assert upgrade_opos_database(test_engine) == 1
+
+    with Session(test_engine) as session:
+        assert session.query(models.Roster).one().shield_fist_enabled is True
+        assert session.execute(text("PRAGMA user_version")).scalar_one() == (
+            OPOS_V3_1_USER_VERSION
+        )
+    assert "shield_fist_enabled" not in {
+        item["name"] for item in inspect(test_engine).get_columns("armies")
+    }
 
 
 def test_legacy_simple_points_are_restored_to_base_values() -> None:
@@ -157,7 +224,7 @@ def test_legacy_simple_points_are_restored_to_base_values() -> None:
         session.execute(text("PRAGMA user_version = 10200"))
         session.commit()
 
-    assert upgrade_opos_database(test_engine) == 1
+    assert upgrade_opos_database(test_engine) == 2
 
     with Session(test_engine) as session:
         roster = session.query(models.Roster).one()
@@ -167,7 +234,7 @@ def test_legacy_simple_points_are_restored_to_base_values() -> None:
             unit_copies=unit.unit_copies,
             custom_stats_enabled=False,
         )
-        expected = calculate_unit_quote(request, ruleset_version="v1")
+        expected = calculate_unit_quote(request, ruleset_version="v3")
         assert roster.points_scale == 10
         assert roster.points_limit == 500
         assert unit.unit_cost == int(expected.unscaled_unit_cost)
@@ -219,7 +286,7 @@ def test_opos_1_2_migration_scales_normalizes_and_requotes_atomically() -> None:
         session.add_all([template, unit])
         session.commit()
 
-    assert upgrade_opos_database(test_engine) == 2
+    assert upgrade_opos_database(test_engine) == 4
 
     with Session(test_engine) as session:
         template = session.query(models.UnitTemplate).one()
@@ -237,8 +304,10 @@ def test_opos_1_2_migration_scales_normalizes_and_requotes_atomically() -> None:
         assert request.special_abilities[0].target_slug == "breakthrough"
         assert unit.unit_cost > 1
         assert unit.unit_copies == 3
+        assert roster.ruleset_version == "v3"
+        assert template.ruleset_version == "v3"
         assert session.execute(text("PRAGMA user_version")).scalar_one() == (
-            OPOS_1_3_USER_VERSION
+            OPOS_V3_1_USER_VERSION
         )
 
     assert upgrade_opos_database(test_engine) == 0
@@ -277,3 +346,45 @@ def test_opos_1_2_migration_rolls_back_on_invalid_snapshot() -> None:
         assert unit.toughness == Decimal("1")
         assert unit.unit_cost == 7
         assert session.execute(text("PRAGMA user_version")).scalar_one() == 0
+
+
+def test_v3_migration_rolls_back_on_out_of_range_custom_snapshot() -> None:
+    test_engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(test_engine)
+    profiles = json.loads(_profiles())
+    profiles["melee"]["strength"] = 20
+    with Session(test_engine) as session:
+        user = models.User(username="owner-v3", password_hash="hash")
+        roster = models.Roster(
+            name="Błędna v3",
+            owner=user,
+            ruleset_version="v1",
+            custom_stats_enabled=True,
+        )
+        session.add(
+            models.RosterUnit(
+                roster=roster,
+                name="Poza zakresem",
+                models_per_unit=1,
+                unit_copies=1,
+                defense=3,
+                toughness=2,
+                passive_abilities_json="[]",
+                special_abilities_json="[]",
+                profiles_json=json.dumps(profiles),
+                position=0,
+                unit_cost=7,
+            )
+        )
+        session.execute(text("PRAGMA user_version = 10300"))
+        session.commit()
+
+    with pytest.raises(RuntimeError, match="nie jest zgodny z OPOS v3"):
+        upgrade_opos_database(test_engine)
+
+    with Session(test_engine) as session:
+        roster = session.query(models.Roster).one()
+        unit = session.query(models.RosterUnit).one()
+        assert roster.ruleset_version == "v1"
+        assert unit.unit_cost == 7
+        assert session.execute(text("PRAGMA user_version")).scalar_one() == 10300

@@ -20,20 +20,24 @@ from ..security import get_csrf_token, get_current_user, require_csrf, validate_
 from ..services.cards import (
     build_ability_payloads,
     build_profile_payloads,
-    display_number,
 )
 from ..services.opos_rules import (
     QuoteValidationError,
     UnitQuoteInput,
     calculate_unit_quote,
+    display_number,
+    display_stat_value,
+    format_stat_value,
     normalize_snapshot_abilities,
     scale_entry_cost,
     scale_points,
+    stat_label,
 )
 from ..services.opos_units import (
     apply_request_to_roster_unit,
     create_template_from_roster_unit,
     request_from_snapshot,
+    snapshot_requires_custom_stats,
     template_requires_custom_stats,
     update_template_from_roster_unit,
 )
@@ -42,6 +46,7 @@ from ..services.opos_units import (
 router = APIRouter(prefix="/rosters", tags=["rosters"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["stat"] = display_number
+templates.env.globals["display_stat"] = format_stat_value
 current_user_dep = get_current_user()
 
 
@@ -82,6 +87,11 @@ def _owned_unit_and_roster(
 ) -> tuple[models.RosterUnit, models.Roster]:
     result = db.execute(
         select(models.RosterUnit, models.Roster)
+        .options(
+            joinedload(models.RosterUnit.source_template).joinedload(
+                models.UnitTemplate.army
+            ),
+        )
         .join(models.Roster, models.RosterUnit.roster_id == models.Roster.id)
         .where(
             models.RosterUnit.id == unit_id,
@@ -121,6 +131,7 @@ def _calculate_for_roster(
             "custom_stats_enabled": roster.custom_stats_enabled,
             "points_scale": roster.points_scale,
             "small_battle_enabled": roster.small_battle_enabled,
+            "shield_fist_enabled": roster.shield_fist_enabled,
         }
     )
     try:
@@ -130,28 +141,54 @@ def _calculate_for_roster(
     return request, quote
 
 
-def _unit_payload(
-    unit: models.RosterUnit, *, points_scale: int = 1
+def _roster_unit_payload(
+    unit: models.RosterUnit, roster: models.Roster
 ) -> dict[str, object]:
+    shield_fist_enabled = roster.shield_fist_enabled
     passive_abilities, profiles, _ = normalize_snapshot_abilities(
         json.loads(unit.passive_abilities_json),
         json.loads(unit.profiles_json),
     )
+    displayed_profiles = {
+        range_slug: {
+            **profile,
+            "strength": display_number(
+                display_stat_value(
+                    "strength",
+                    profile["strength"],
+                    shield_fist_enabled=shield_fist_enabled,
+                )
+            ),
+        }
+        for range_slug, profile in profiles.items()
+    }
+    source_army = unit.source_template.army if unit.source_template else None
     return {
         "id": unit.id,
         "source_template_id": unit.source_template_id,
         "name": unit.name,
         "models_per_unit": unit.models_per_unit,
         "unit_copies": unit.unit_copies,
-        "defense": str(unit.defense),
-        "toughness": str(unit.toughness),
+        "defense": display_number(
+            display_stat_value(
+                "defense",
+                unit.defense,
+                shield_fist_enabled=shield_fist_enabled,
+            )
+        ),
+        "toughness": display_number(unit.toughness),
         "passive_abilities": passive_abilities,
         "special_abilities": json.loads(unit.special_abilities_json),
-        "profiles": profiles,
+        "profiles": displayed_profiles,
+        "source_template_army_id": source_army.id if source_army else None,
+        "source_template_army_name": source_army.name if source_army else None,
+        "can_update_template": bool(
+            source_army and roster.army_id == source_army.id
+        ),
         "position": unit.position,
-        "unit_cost": scale_points(unit.unit_cost, points_scale),
+        "unit_cost": scale_points(unit.unit_cost, roster.points_scale),
         "entry_cost": scale_entry_cost(
-            unit.unit_cost, unit.unit_copies, points_scale
+            unit.unit_cost, unit.unit_copies, roster.points_scale
         ),
     }
 
@@ -229,6 +266,8 @@ def create_roster(
     points_scale: int = Form(default=10, ge=1, le=1_000_000),
     collapse_descriptions: bool = Form(default=False),
     small_battle_enabled: bool = Form(default=False),
+    shield_fist_enabled: bool = Form(default=False),
+    save_as_defaults: bool = Form(default=False),
     db: Session = Depends(get_db),
     user: models.User = Depends(current_user_dep),
 ) -> RedirectResponse:
@@ -248,7 +287,20 @@ def create_roster(
         points_scale=effective_points_scale,
         collapse_descriptions=collapse_descriptions,
         small_battle_enabled=small_battle_enabled,
+        shield_fist_enabled=shield_fist_enabled,
     )
+    if save_as_defaults:
+        db.execute(
+            update(models.User)
+            .where(models.User.id == user.id)
+            .values(
+                default_custom_stats_enabled=custom_stats_enabled,
+                default_points_scale=effective_points_scale,
+                default_collapse_descriptions=collapse_descriptions,
+                default_small_battle_enabled=small_battle_enabled,
+                default_shield_fist_enabled=shield_fist_enabled,
+            )
+        )
     db.add(roster)
     db.commit()
     return RedirectResponse(url=f"/rosters/{roster.id}", status_code=303)
@@ -261,18 +313,36 @@ def roster_detail(
     db: Session = Depends(get_db),
     user: models.User = Depends(current_user_dep),
 ):
-    roster = db.execute(
-        select(models.Roster)
+    roster_army_rows = db.execute(
+        select(models.Roster, models.Army)
+        .outerjoin(models.Army, models.Army.owner_id == models.Roster.owner_id)
         .options(joinedload(models.Roster.army).joinedload(models.Army.templates))
         .where(models.Roster.id == roster_id, models.Roster.owner_id == user.id)
-    ).unique().scalar_one_or_none()
-    if roster is None:
+        .order_by(models.Army.name, models.Army.id)
+    ).unique().all()
+    if not roster_army_rows:
         raise HTTPException(status_code=404)
+    roster = roster_army_rows[0][0]
+    armies = [army for _, army in roster_army_rows if army is not None]
     units = db.execute(
         select(models.RosterUnit)
+        .options(
+            joinedload(models.RosterUnit.source_template).joinedload(
+                models.UnitTemplate.army
+            )
+        )
         .where(models.RosterUnit.roster_id == roster.id)
         .order_by(models.RosterUnit.position, models.RosterUnit.id)
     ).scalars().all()
+    shield_fist_enabled = roster.shield_fist_enabled
+    requires_custom_stats = any(
+        snapshot_requires_custom_stats(
+            item,
+            ruleset_version=roster.ruleset_version,
+            small_battle_enabled=roster.small_battle_enabled,
+        )
+        for item in units
+    )
     unit_rows = [
         {
             "unit": item,
@@ -280,13 +350,34 @@ def roster_detail(
             "entry_cost": scale_entry_cost(
                 item.unit_cost, item.unit_copies, roster.points_scale
             ),
-            "defense": display_number(item.defense),
+            "defense": format_stat_value(
+                "defense",
+                item.defense,
+                shield_fist_enabled=shield_fist_enabled,
+            ),
+            "defense_label": stat_label(
+                "defense", shield_fist_enabled=shield_fist_enabled
+            ),
             "toughness": display_number(item.toughness),
             "profiles": build_profile_payloads(
-                item, ruleset_version=roster.ruleset_version
+                item,
+                ruleset_version=roster.ruleset_version,
+                shield_fist_enabled=shield_fist_enabled,
             ),
             "abilities": build_ability_payloads(
-                item, ruleset_version=roster.ruleset_version
+                item,
+                ruleset_version=roster.ruleset_version,
+                small_battle_enabled=roster.small_battle_enabled,
+            ),
+            "source_template_army_id": (
+                item.source_template.army_id if item.source_template else None
+            ),
+            "source_template_army_name": (
+                item.source_template.army.name if item.source_template else None
+            ),
+            "can_update_template": bool(
+                item.source_template
+                and item.source_template.army_id == roster.army_id
             ),
         }
         for item in units
@@ -302,13 +393,17 @@ def roster_detail(
             "units": units,
             "unit_rows": unit_rows,
             "units_payload": [
-                _unit_payload(item, points_scale=roster.points_scale) for item in units
+                _roster_unit_payload(item, roster)
+                for item in units
             ],
             "total_cost": total_cost,
             "display_points_limit": scale_points(
                 roster.points_limit, roster.points_scale
             ),
             "army_templates": roster.army.templates if roster.army else [],
+            "armies": armies,
+            "shield_fist_enabled": shield_fist_enabled,
+            "requires_custom_stats": requires_custom_stats,
             "csrf_token": get_csrf_token(request),
         },
     )
@@ -326,6 +421,7 @@ def update_roster_settings(
     points_scale: int = Form(default=10, ge=1, le=1_000_000),
     collapse_descriptions: bool = Form(default=False),
     small_battle_enabled: bool = Form(default=False),
+    shield_fist_enabled: bool = Form(default=False),
     db: Session = Depends(get_db),
     user: models.User = Depends(current_user_dep),
 ) -> RedirectResponse:
@@ -333,8 +429,7 @@ def update_roster_settings(
     roster = _owned_roster(db, roster_id, user.id)
     if points_limit is not None and points_limit <= 0:
         raise HTTPException(status_code=422, detail="Limit punktów musi być dodatni")
-    roster.name = _clean_name(name, "Nazwa rozpiski")
-    roster.points_limit = points_limit
+    clean_name = _clean_name(name, "Nazwa rozpiski")
     effective_points_scale = points_scale if points_scaling_enabled else 1
     units = db.execute(
         select(models.RosterUnit).where(models.RosterUnit.roster_id == roster.id)
@@ -367,10 +462,31 @@ def update_roster_settings(
                 detail="Ustawienia nie pasują do statystyk zapisanych oddziałów.",
             ) from exc
         apply_request_to_roster_unit(unit, quote_request, quote)
+    roster.name = clean_name
+    roster.points_limit = points_limit
     roster.custom_stats_enabled = custom_stats_enabled
     roster.points_scale = effective_points_scale
     roster.collapse_descriptions = collapse_descriptions
     roster.small_battle_enabled = small_battle_enabled
+    roster.shield_fist_enabled = shield_fist_enabled
+    db.commit()
+    return RedirectResponse(url=f"/rosters/{roster.id}", status_code=303)
+
+
+@router.post("/{roster_id}/army")
+def change_roster_army(
+    roster_id: int,
+    request: Request,
+    csrf_token: str = Form(...),
+    army_id: int | None = Form(default=None),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(current_user_dep),
+) -> RedirectResponse:
+    validate_csrf(request, csrf_token)
+    roster = _owned_roster(db, roster_id, user.id)
+    if army_id is not None:
+        _owned_army(db, army_id, user.id)
+    roster.army_id = army_id
     db.commit()
     return RedirectResponse(url=f"/rosters/{roster.id}", status_code=303)
 
@@ -401,6 +517,7 @@ def duplicate_roster(
         points_scale=source.points_scale,
         collapse_descriptions=source.collapse_descriptions,
         small_battle_enabled=source.small_battle_enabled,
+        shield_fist_enabled=source.shield_fist_enabled,
     )
     for item in source.roster_units:
         clone.roster_units.append(
@@ -465,7 +582,7 @@ def create_roster_unit(
     apply_request_to_roster_unit(unit, request, quote)
     db.add(unit)
     db.commit()
-    return _unit_payload(unit, points_scale=roster.points_scale)
+    return _roster_unit_payload(unit, roster)
 
 
 @router.patch(
@@ -482,7 +599,7 @@ def update_roster_unit(
     request, quote = _calculate_for_roster(payload, roster)
     apply_request_to_roster_unit(unit, request, quote)
     db.commit()
-    return _unit_payload(unit, points_scale=roster.points_scale)
+    return _roster_unit_payload(unit, roster)
 
 
 @router.post(
@@ -551,7 +668,7 @@ def create_unit_from_template(
     apply_request_to_roster_unit(unit, request, quote)
     db.add(unit)
     db.commit()
-    return _unit_payload(unit, points_scale=roster.points_scale)
+    return _roster_unit_payload(unit, roster)
 
 
 @router.post(
@@ -590,7 +707,7 @@ def duplicate_roster_unit(
     )
     db.add(clone)
     db.commit()
-    return _unit_payload(clone, points_scale=roster.points_scale)
+    return _roster_unit_payload(clone, roster)
 
 
 @router.delete(
@@ -652,6 +769,11 @@ def save_unit_as_template(
 ) -> dict[str, object]:
     unit, roster = _owned_unit_and_roster(db, roster_id, unit_id, user.id)
     army = _owned_army(db, payload.army_id, user.id)
+    if roster.army_id != army.id:
+        raise HTTPException(
+            status_code=409,
+            detail="Szablon można zapisać tylko do Armii bieżącej rozpiski.",
+        )
     position = db.execute(
         select(func.coalesce(func.max(models.UnitTemplate.position), -1)).where(
             models.UnitTemplate.army_id == army.id
@@ -693,6 +815,14 @@ def update_source_template(
     ).scalar_one_or_none()
     if template is None:
         raise HTTPException(status_code=404, detail="Szablon nie istnieje")
+    if roster.army_id != template.army_id:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Aby zaktualizować ten szablon, ponownie przypisz rozpisce "
+                "Armię źródłową."
+            ),
+        )
     update_template_from_roster_unit(
         template, unit, ruleset_version=roster.ruleset_version
     )

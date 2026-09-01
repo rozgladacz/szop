@@ -11,6 +11,8 @@
   const pointsScale = Number(root.dataset.pointsScale);
   const collapseDescriptions = root.dataset.collapseDescriptions === "true";
   const smallBattle = root.dataset.smallBattle === "true";
+  const shieldFist = root.dataset.shieldFist === "true";
+  const armySelect = document.getElementById("roster-army-select");
   const dialog = document.getElementById("unit-dialog");
   dialog.classList.toggle("is-compact", collapseDescriptions);
   const form = document.getElementById("unit-form");
@@ -26,9 +28,18 @@
   let orderBeforeDrag = [];
   let reorderQueue = Promise.resolve();
 
+  armySelect?.addEventListener("change", () => armySelect.form.requestSubmit());
+
   function numberText(value) {
-    const number = Number(value);
-    return Number.isInteger(number) ? String(number) : String(number);
+    return String(Number(value));
+  }
+
+  function formattedStat(statName, value) {
+    const text = numberText(value);
+    if (!shieldFist) return text;
+    if (statName === "strength") return `${text}+`;
+    if (statName === "defense") return Number(value) < 0 ? text : `+${text}`;
+    return text;
   }
 
   function createStatControl(id, statName, choices, value) {
@@ -37,8 +48,10 @@
     control.required = true;
     if (customStats) {
       control.type = "number";
-      control.step = "0.01";
-      if (id !== "strength") control.min = "0.01";
+      const limits = ruleset.custom_stats[statName];
+      control.step = limits.integer_only ? "1" : "any";
+      control.min = numberText(limits.minimum);
+      control.max = numberText(limits.maximum);
       control.value = numberText(value);
     } else {
       choices.forEach((choice, index) => {
@@ -46,8 +59,8 @@
         option.value = numberText(choice);
         const description = ruleset.stat_descriptions[statName]?.[index];
         option.textContent = description
-          ? `${numberText(choice)} — ${description}`
-          : numberText(choice);
+          ? `${formattedStat(statName, choice)} — ${description}`
+          : formattedStat(statName, choice);
         control.append(option);
       });
       control.value = numberText(value);
@@ -80,7 +93,7 @@
   }
 
   function emptyProfile() {
-    return {dice: 0, strength: 0, abilities: []};
+    return {dice: 0, strength: ruleset.standard_stats.strength[0], abilities: []};
   }
 
   function emptyUnit() {
@@ -113,7 +126,8 @@
     const toughnessChoices = smallBattle
       ? ruleset.standard_stats.toughness.map((value) => Number(value) * 2)
       : ruleset.standard_stats.toughness;
-    defenseHost.replaceChildren(createStatControl("defense", "defense", ruleset.standard_stats.defense, unit.defense));
+    const defense = createStatControl("defense", "defense", ruleset.standard_stats.defense, unit.defense);
+    defenseHost.replaceChildren(defense);
     toughnessHost.replaceChildren(createStatControl("toughness", "toughness", toughnessChoices, unit.toughness));
 
     const passiveHost = document.getElementById("passive-options");
@@ -165,7 +179,7 @@
       dice.dataset.field = "dice";
       diceLabel.append(dice);
       const strengthLabel = document.createElement("label");
-      strengthLabel.textContent = "Siła";
+      strengthLabel.textContent = ruleset.stat_labels.strength;
       const strength = createStatControl("strength", "strength", ruleset.standard_stats.strength, profile.strength);
       strength.removeAttribute("id");
       strength.dataset.field = "strength";
@@ -178,6 +192,36 @@
       });
       article.append(title, fields, options);
       profileHost.append(article);
+    });
+    refreshAbilityConflicts();
+  }
+
+  function selectedAbilitySlugs() {
+    return new Set([
+      ...values("passive"),
+      ...values("special"),
+      ...ranges.flatMap((rangeSlug) => values(`weapon-${rangeSlug}`)),
+    ]);
+  }
+
+  function abilitiesConflict(leftSlug, rightSlug) {
+    const left = ruleset.abilities.find((item) => item.slug === leftSlug);
+    const right = ruleset.abilities.find((item) => item.slug === rightSlug);
+    return (left?.incompatible_with || []).includes(rightSlug)
+      || (right?.incompatible_with || []).includes(leftSlug);
+  }
+
+  function refreshAbilityConflicts() {
+    const selected = selectedAbilitySlugs();
+    form.querySelectorAll('.ability-option input[type="checkbox"]').forEach((input) => {
+      const conflictingSlug = [...selected].find((slug) => slug !== input.value && abilitiesConflict(input.value, slug));
+      const blocked = !input.checked && Boolean(conflictingSlug);
+      input.disabled = blocked;
+      const label = input.closest(".ability-option");
+      label.classList.toggle("is-disabled", blocked);
+      label.title = blocked
+        ? `Nie można łączyć ze zdolnością „${ruleset.abilities.find((item) => item.slug === conflictingSlug)?.name}”.`
+        : "";
     });
   }
 
@@ -221,6 +265,7 @@
       custom_stats_enabled: customStats,
       points_scale: pointsScale,
       small_battle_enabled: smallBattle,
+      shield_fist_enabled: shieldFist,
     };
   }
 
@@ -320,6 +365,7 @@
   form.addEventListener("change", (event) => {
     const targetedSpecial = targetedSpecialDefinition();
     if (targetedSpecial && event.target.matches(`input[name="special"][value="${targetedSpecial.slug}"]`)) toggleAuraTarget();
+    refreshAbilityConflicts();
     requestQuote();
   });
   form.addEventListener("input", requestQuote);
@@ -426,8 +472,11 @@
     });
   });
 
-  fetchJSON("/ruleset")
-    .then((manifest) => { ruleset = manifest; })
+  fetchJSON(`/ruleset?shield_fist_enabled=${shieldFist}`)
+    .then((manifest) => {
+      ruleset = manifest;
+      document.getElementById("defense-label").textContent = ruleset.stat_labels.defense;
+    })
     .catch((error) => {
       document.getElementById("add-unit").disabled = true;
       toast(`Nie udało się wczytać reguł: ${error.message}`);

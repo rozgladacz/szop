@@ -11,11 +11,11 @@ from .models import OposRuleset
 
 
 RULESET_ROOT = Path(__file__).resolve().parents[2] / "rulesets" / "opos"
-SUPPORTED_RULESET_VERSIONS = ("v1",)
+SUPPORTED_RULESET_VERSIONS = ("v1", "v3")
 
 
 @lru_cache(maxsize=len(SUPPORTED_RULESET_VERSIONS))
-def load_opos_ruleset(version: str = "v1") -> OposRuleset:
+def load_opos_ruleset(version: str = "v3") -> OposRuleset:
     """Return an immutable cached ruleset without database access."""
     if version not in SUPPORTED_RULESET_VERSIONS:
         raise ValueError(f"Unsupported OPOS ruleset version: {version}")

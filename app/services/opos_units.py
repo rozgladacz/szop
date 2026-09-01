@@ -15,12 +15,15 @@ from app.services.opos_rules import (
     QuoteValidationError,
     UnitQuoteInput,
     calculate_unit_quote,
+    canonicalize_unit_input,
     normalize_snapshot_abilities,
 )
 
 
 OPOS_1_2_USER_VERSION = 10200
 OPOS_1_3_USER_VERSION = 10300
+OPOS_V3_USER_VERSION = 30000
+OPOS_V3_1_USER_VERSION = 30100
 
 
 class UnitSnapshot(Protocol):
@@ -185,7 +188,93 @@ def migrate_opos_1_3(session: Session) -> int:
     return changed
 
 
+def migrate_opos_v3(session: Session) -> int:
+    """Atomically validate, reprice and move all OPOS snapshots to rules v3."""
+    if session.get_bind().dialect.name != "sqlite":
+        return 0
+    current_version = int(session.execute(text("PRAGMA user_version")).scalar_one())
+    if current_version >= OPOS_V3_USER_VERSION:
+        return 0
+
+    normalize_legacy_snapshot_records(session)
+    changed = 0
+    for template in session.scalars(select(models.UnitTemplate)):
+        standard_request = request_from_snapshot(
+            template,
+            unit_copies=1,
+            custom_stats_enabled=False,
+        )
+        try:
+            calculate_unit_quote(standard_request, ruleset_version="v3")
+        except QuoteValidationError:
+            custom_request = standard_request.model_copy(
+                update={"custom_stats_enabled": True}
+            )
+            try:
+                calculate_unit_quote(custom_request, ruleset_version="v3")
+            except QuoteValidationError as exc:
+                raise RuntimeError(
+                    f"Szablon '{template.name}' nie jest zgodny z OPOS v3: {exc}"
+                ) from exc
+        template.ruleset_version = "v3"
+        changed += 1
+
+    rosters = session.scalars(
+        select(models.Roster).options(selectinload(models.Roster.roster_units))
+    ).all()
+    for roster in rosters:
+        for unit in roster.roster_units:
+            request = request_from_snapshot(
+                unit,
+                unit_copies=unit.unit_copies,
+                custom_stats_enabled=roster.custom_stats_enabled,
+                small_battle_enabled=roster.small_battle_enabled,
+            )
+            try:
+                quote = calculate_unit_quote(request, ruleset_version="v3")
+            except QuoteValidationError as exc:
+                raise RuntimeError(
+                    f"Oddział '{unit.name}' w rozpisce '{roster.name}' "
+                    f"nie jest zgodny z OPOS v3: {exc}"
+                ) from exc
+            apply_request_to_roster_unit(unit, request, quote)
+            changed += 1
+        roster.ruleset_version = "v3"
+
+    if changed:
+        session.flush()
+    session.execute(text(f"PRAGMA user_version = {OPOS_V3_USER_VERSION}"))
+    return changed
+
+
+def migrate_opos_v3_1(session: Session) -> int:
+    """Move the temporary Army-level Tarcza/Pięść option to each roster."""
+    if session.get_bind().dialect.name != "sqlite":
+        return 0
+    current_version = int(session.execute(text("PRAGMA user_version")).scalar_one())
+    if current_version >= OPOS_V3_1_USER_VERSION:
+        return 0
+
+    army_columns = {
+        row[1] for row in session.execute(text("PRAGMA table_info(armies)"))
+    }
+    changed = 0
+    if "shield_fist_enabled" in army_columns:
+        result = session.execute(
+            text(
+                "UPDATE rosters SET shield_fist_enabled = COALESCE(("
+                "SELECT armies.shield_fist_enabled FROM armies "
+                "WHERE armies.id = rosters.army_id"
+                "), 0)"
+            )
+        )
+        changed = max(result.rowcount or 0, 0)
+    session.execute(text(f"PRAGMA user_version = {OPOS_V3_1_USER_VERSION}"))
+    return changed
+
+
 def _snapshot_values(request: UnitQuoteInput) -> dict[str, object]:
+    request = canonicalize_unit_input(request)
     return {
         "name": request.name,
         "models_per_unit": request.models_per_unit,

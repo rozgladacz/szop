@@ -56,6 +56,16 @@
     if (message && !window.confirm(message)) event.preventDefault();
   });
 
+  const rosterSettings = document.getElementById("roster-settings-form");
+  rosterSettings?.addEventListener("submit", (event) => {
+    const customStats = rosterSettings.elements.namedItem("custom_stats_enabled");
+    if (rosterSettings.dataset.requiresCustomStats !== "true" || customStats?.checked) return;
+    event.preventDefault();
+    if (!window.confirm("Ta rozpiska zawiera oddziały wymagające trybu „Dowolne statystyki”. Pozostawić ten tryb włączony i zapisać pozostałe ustawienia?")) return;
+    customStats.checked = true;
+    event.submitter ? rosterSettings.requestSubmit(event.submitter) : rosterSettings.requestSubmit();
+  });
+
   document.querySelectorAll(".scale-row").forEach((row) => {
     const toggle = row.querySelector(".scale-toggle");
     const value = row.querySelector(".scale-value");
@@ -80,7 +90,7 @@
     button.disabled = true;
     try {
       await fetchJSON(`/armies/${button.dataset.armyId}/templates/${button.dataset.templateId}`, {method: "DELETE"});
-      button.closest(".template-card")?.remove();
+      button.closest("[data-template-row]")?.remove();
       toast("Szablon usunięty.");
     } catch (error) {
       button.disabled = false;

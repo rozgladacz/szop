@@ -90,6 +90,27 @@ def test_small_battle_uses_doubled_standard_toughness_list() -> None:
         )
 
 
+def test_small_battle_doubles_patching_and_deadly_values() -> None:
+    quote = calculate_unit_quote(
+        unit_input(
+            toughness=4,
+            small_battle_enabled=True,
+            special_abilities=(SpecialAbilityInput(slug="patching"),),
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(
+                    dice=1, strength=0, abilities=("deadly",)
+                ),
+                short=AttackProfileInput(dice=0, strength=0),
+                long=AttackProfileInput(dice=0, strength=0),
+            ),
+        )
+    )
+
+    assert quote.toughness_sum == Decimal("10")
+    assert quote.profiles[0].ability_multiplier == Decimal("8")
+    assert quote.profiles[0].cost_per_model == Decimal("24.0")
+
+
 def test_hero_is_applied_before_patching() -> None:
     quote = calculate_unit_quote(
         unit_input(
@@ -124,12 +145,79 @@ def test_airplane_changes_ability_and_profile_costs() -> None:
     assert airplane.weapon_cost == Decimal("19.2")
 
 
-def test_clumsy_subtracts_one_from_ability_cost() -> None:
+def test_clumsy_subtracts_half_from_ability_cost() -> None:
     regular = calculate_unit_quote(unit_input())
     clumsy = calculate_unit_quote(unit_input(passive_abilities=("clumsy",)))
 
-    assert clumsy.ability_cost_modifier == Decimal("-1")
+    assert clumsy.ability_cost_modifier == Decimal("-0.5")
     assert clumsy.base_cost < regular.base_cost
+
+
+def test_new_passive_abilities_apply_their_cost_effects() -> None:
+    quote = calculate_unit_quote(
+        unit_input(passive_abilities=("invulnerable", "sentinel"))
+    )
+
+    assert quote.effective_defense == Decimal("3.25")
+    assert quote.ability_cost_modifier == Decimal("1")
+
+
+def test_transport_costs_two_more_with_fast_agile_or_jump() -> None:
+    quote = calculate_unit_quote(
+        unit_input(
+            passive_abilities=("fast",),
+            special_abilities=(SpecialAbilityInput(slug="transport"),),
+        )
+    )
+
+    assert quote.ability_cost_modifier == Decimal("5")
+
+
+def test_incompatible_abilities_are_rejected_across_categories() -> None:
+    with pytest.raises(QuoteValidationError, match="wzajemnie się wykluczają"):
+        calculate_unit_quote(
+            unit_input(passive_abilities=("immobile", "fast"))
+        )
+
+    with pytest.raises(QuoteValidationError, match="wzajemnie się wykluczają"):
+        calculate_unit_quote(
+            unit_input(
+                passive_abilities=("immobile",),
+                profiles=AttackProfilesInput(
+                    melee=AttackProfileInput(
+                        dice=1, strength=0, abilities=("charge",)
+                    ),
+                    short=AttackProfileInput(dice=0, strength=0),
+                    long=AttackProfileInput(dice=0, strength=0),
+                ),
+            )
+        )
+
+
+def test_shield_fist_input_has_the_same_cost_as_canonical_stats() -> None:
+    canonical = calculate_unit_quote(
+        unit_input(
+            defense=4,
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(dice=1, strength=1),
+                short=AttackProfileInput(dice=0, strength=0),
+                long=AttackProfileInput(dice=0, strength=0),
+            ),
+        )
+    )
+    shield_fist = calculate_unit_quote(
+        unit_input(
+            defense=1,
+            shield_fist_enabled=True,
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(dice=1, strength=2),
+                short=AttackProfileInput(dice=0, strength=3),
+                long=AttackProfileInput(dice=0, strength=3),
+            ),
+        )
+    )
+
+    assert shield_fist == canonical
 
 
 def test_deadly_uses_multiplier_four() -> None:
@@ -230,6 +318,24 @@ def test_charge_and_prepared_only_affect_their_ranges() -> None:
     ]
 
 
+def test_encirclement_and_single_use_multiply_weapon_costs() -> None:
+    quote = calculate_unit_quote(
+        unit_input(
+            profiles=AttackProfilesInput(
+                melee=AttackProfileInput(
+                    dice=1,
+                    strength=0,
+                    abilities=("encirclement", "single-use"),
+                ),
+                short=AttackProfileInput(dice=0, strength=0),
+                long=AttackProfileInput(dice=0, strength=0),
+            )
+        )
+    )
+
+    assert quote.profiles[0].ability_multiplier == Decimal("0.56")
+
+
 def test_order_is_ten_percent_of_base() -> None:
     quote = calculate_unit_quote(
         unit_input(special_abilities=(SpecialAbilityInput(slug="order"),))
@@ -293,11 +399,14 @@ def test_aura_weapon_range_restrictions_are_respected() -> None:
     assert quote.aura_cost == Decimal("2.88")
 
 
-def test_non_aura_eligible_ability_is_rejected() -> None:
+@pytest.mark.parametrize("target_slug", ["airplane", "reload", "single-use"])
+def test_non_aura_eligible_ability_is_rejected(target_slug: str) -> None:
     with pytest.raises(QuoteValidationError, match="not a valid Aura target"):
         calculate_unit_quote(
             unit_input(
-                special_abilities=(SpecialAbilityInput(slug="aura", target_slug="airplane"),)
+                special_abilities=(
+                    SpecialAbilityInput(slug="aura", target_slug=target_slug),
+                )
             )
         )
 
@@ -318,14 +427,14 @@ def test_special_target_contract_comes_from_ruleset() -> None:
         )
 
 
-def test_custom_stats_require_positive_strength_multiplier() -> None:
+def test_custom_stats_require_bounded_integer_values() -> None:
     accepted = calculate_unit_quote(
         unit_input(
-            defense=Decimal("3.5"),
-            toughness=Decimal("4.5"),
+            defense=Decimal("6"),
+            toughness=Decimal("99"),
             custom_stats_enabled=True,
             profiles=AttackProfilesInput(
-                melee=AttackProfileInput(dice=1, strength=Decimal("3.5")),
+                melee=AttackProfileInput(dice=1, strength=Decimal("4")),
                 short=AttackProfileInput(dice=0, strength=0),
                 long=AttackProfileInput(dice=0, strength=0),
             ),
@@ -333,7 +442,7 @@ def test_custom_stats_require_positive_strength_multiplier() -> None:
     )
     assert accepted.profiles[0].strength_multiplier > 0
 
-    with pytest.raises(QuoteValidationError, match="must be positive"):
+    with pytest.raises(QuoteValidationError, match="strength must be between -1 and 4"):
         calculate_unit_quote(
             unit_input(
                 custom_stats_enabled=True,
@@ -343,6 +452,11 @@ def test_custom_stats_require_positive_strength_multiplier() -> None:
                     long=AttackProfileInput(dice=0, strength=0),
                 ),
             )
+        )
+
+    with pytest.raises(QuoteValidationError, match="defense must be an integer"):
+        calculate_unit_quote(
+            unit_input(defense=Decimal("3.5"), custom_stats_enabled=True)
         )
 
 

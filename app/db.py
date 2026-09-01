@@ -48,7 +48,18 @@ _LEGACY_SZOP_TABLES = frozenset(
     }
 )
 
-_ROSTER_BOOLEAN_MODE_COLUMNS = ("collapse_descriptions", "small_battle_enabled")
+_ROSTER_BOOLEAN_MODE_COLUMNS = (
+    "collapse_descriptions",
+    "small_battle_enabled",
+    "shield_fist_enabled",
+)
+_USER_PREFERENCE_COLUMNS = {
+    "default_custom_stats_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "default_points_scale": "INTEGER NOT NULL DEFAULT 10",
+    "default_collapse_descriptions": "BOOLEAN NOT NULL DEFAULT 0",
+    "default_small_battle_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+    "default_shield_fist_enabled": "BOOLEAN NOT NULL DEFAULT 0",
+}
 
 
 def assert_not_legacy_szop_database(bind: Engine) -> None:
@@ -100,6 +111,28 @@ def ensure_roster_mode_columns(bind: Engine) -> None:
                 )
 
 
+def ensure_user_preference_columns(bind: Engine) -> None:
+    """Add per-user defaults used by the new-roster form."""
+    if bind.dialect.name != "sqlite":
+        return
+    inspector = inspect(bind)
+    if "users" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("users")}
+    missing = {
+        name: definition
+        for name, definition in _USER_PREFERENCE_COLUMNS.items()
+        if name not in existing
+    }
+    if not missing:
+        return
+    with bind.begin() as connection:
+        for name, definition in missing.items():
+            connection.exec_driver_sql(
+                f"ALTER TABLE users ADD COLUMN {name} {definition}"
+            )
+
+
 def drop_legacy_simple_points_column(bind: Engine) -> None:
     """Remove the superseded boolean after its data has been converted."""
     if bind.dialect.name != "sqlite":
@@ -116,6 +149,22 @@ def drop_legacy_simple_points_column(bind: Engine) -> None:
         )
 
 
+def drop_legacy_army_shield_fist_column(bind: Engine) -> None:
+    """Remove the v3.0 Army-level mode after copying it to rosters."""
+    if bind.dialect.name != "sqlite":
+        return
+    inspector = inspect(bind)
+    if "armies" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("armies")}
+    if "shield_fist_enabled" not in existing:
+        return
+    with bind.begin() as connection:
+        connection.exec_driver_sql(
+            "ALTER TABLE armies DROP COLUMN shield_fist_enabled"
+        )
+
+
 def get_db() -> Generator:
     db = SessionLocal()
     try:
@@ -127,10 +176,16 @@ def get_db() -> Generator:
 def upgrade_opos_database(bind: Engine) -> int:
     """Upgrade one OPOS database inside its own atomic transaction."""
     from . import models  # noqa: F401 - register all tables on Base.metadata
-    from .services.opos_units import migrate_opos_1_2, migrate_opos_1_3
+    from .services.opos_units import (
+        migrate_opos_1_2,
+        migrate_opos_1_3,
+        migrate_opos_v3,
+        migrate_opos_v3_1,
+    )
 
     assert_not_legacy_szop_database(bind)
     ensure_roster_mode_columns(bind)
+    ensure_user_preference_columns(bind)
     Base.metadata.create_all(bind=bind)
     local_session = sessionmaker(
         bind=bind, autoflush=False, autocommit=False, future=True
@@ -138,7 +193,10 @@ def upgrade_opos_database(bind: Engine) -> int:
     with local_session.begin() as session:
         migrated = migrate_opos_1_2(session)
         migrated += migrate_opos_1_3(session)
+        migrated += migrate_opos_v3(session)
+        migrated += migrate_opos_v3_1(session)
     drop_legacy_simple_points_column(bind)
+    drop_legacy_army_shield_fist_column(bind)
     return migrated
 
 
