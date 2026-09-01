@@ -18,14 +18,14 @@ Serwerowa aplikacja FastAPI do budowania armii w systemie **SZOP (Szybkie Zasady
    ```
 3. Uruchom serwer deweloperski:
    ```bash
-   uvicorn app.main:app --reload
+   uvicorn app.main:app --reload --port 8001
    ```
-   Aplikacja będzie dostępna pod adresem http://127.0.0.1:8000/.
+   Aplikacja będzie dostępna pod adresem http://127.0.0.1:8001/.
 4. Pierwsze uruchomienie tworzy automatycznie bazę danych i konto administratora `admin`/`admin`.
 
 ---
 
-## Uruchomienie produkcyjne (Docker + Tailscale)
+## Uruchomienie produkcyjne (Docker + brama)
 
 Szczegółowa instrukcja krok po kroku: **[DEPLOY.md](DEPLOY.md)**
 
@@ -34,9 +34,12 @@ Skrócona wersja:
 ```bash
 mkdir -p /srv/szop && cd /srv/szop
 curl -fsSL https://raw.githubusercontent.com/rozgladacz/szop/main/docker-compose.yml -o docker-compose.yml
-docker compose up -d
-tailscale serve --bg --https=443 http://127.0.0.1:8000
+docker network inspect brama-szop >/dev/null
+docker compose pull szop-app szop-backup
+docker compose up -d --wait szop-app szop-backup
 ```
+
+Publiczny HTTPS zapewnia osobny stos `brama`. Pełny lokalny smoke SZOP i OPOS uruchamia `scripts/dev-up.ps1` w siostrzanym repo `brama`; kontener developerski SZOP używa `.dev-data`.
 
 ---
 
@@ -57,7 +60,7 @@ Kluczowe zmienne:
 | `SECRET_KEY` | auto-gen | Klucz sesji |
 | `DB_URL` | `sqlite:///./data/szop.db` | URL bazy danych |
 | `DEBUG` | `false` | Tryb debugowania |
-| `SESSION_HTTPS_ONLY` | `false` | Ustaw `true` za Tailscale serve |
+| `SESSION_HTTPS_ONLY` | `false` | Ustaw `true` za produkcyjną bramą HTTPS |
 | `BACKUP_RETENTION_DAYS` | `14` | Retencja automatycznych backupów |
 | `TRUSTED_HOSTS` | `*` | Dozwolone hosty (Host header guard) |
 
@@ -88,7 +91,7 @@ Procedura wydawania nowych wersji (dla maintainera): [RELEASE.md](RELEASE.md)
 ## Narzędzia developerskie
 
 - Testy: `pytest -q` (lub `make test`)
-- Serwer deweloperski: `uvicorn app.main:app --reload` (lub `make dev`)
+- Serwer deweloperski: `uvicorn app.main:app --reload --port 8001` (lub `make dev`)
 
 ### Szybki setup testów (Windows PowerShell)
 

@@ -6,8 +6,12 @@
 # unit names (e.g. scripts/profile_quote.py).  See AGENTS.md "String Handling".
 export PYTHONIOENCODING := utf-8
 
+PYTHON ?= python
+HOST ?= 127.0.0.1
+PORT ?= 8001
+
 dev:
-	python -m uvicorn app.main:app --reload
+	$(PYTHON) -m uvicorn app.main:app --reload --host $(HOST) --port $(PORT)
 
 test:
 	pytest -q

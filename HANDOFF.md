@@ -11,6 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
+| [HANDOFF_brama-opos-szop](docs/handoffs/HANDOFF_brama-opos-szop.md) | Wydzielenie Caddy do `brama` i niezależne stosy SZOP/OPOS | `docker-compose.yml`, `docker-compose.dev.yml`, `Makefile`, `DEPLOY.md`, `.env.example`, `README.md`, `Caddyfile` | In progress |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
@@ -18,6 +19,7 @@
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
+| `docker-compose.yml`, `docker-compose.dev.yml`, `Makefile`, `DEPLOY.md`, `.env.example`, `README.md`, `Caddyfile` | brama-opos-szop | rozdzielenie infrastruktury wejściowej i lokalnego uruchamiania |
 | `app/models.py` | rozmiar-podstawki | `+Unit.base_size` |
 | `app/services/costs/_engine.py` | rozmiar-podstawki | `BASE_SIZE_MELEE_LIMITS`, bump `COST_ENGINE_VERSION` |
 | `app/services/costs/crowding.py` | rozmiar-podstawki | nowy moduł (NEW) — SSOT zniżki „tłok" |

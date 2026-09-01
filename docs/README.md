@@ -30,7 +30,7 @@ Pozostała dokumentacja na poziomie głównym repo:
 - [AGENTS.md](../AGENTS.md) — manifest invariantów dla agentów AI ([CRITICAL]/[REQUIRED]/[RECOMMENDED])
 - [HANDOFF.md](../HANDOFF.md) — meta-spis aktywnych wątków, zablokowane zasoby, LOG SESJI
 - [README.md](../README.md) — uruchomienie lokalne / produkcyjne
-- [DEPLOY.md](../DEPLOY.md) — procedura wdrożenia (Docker, Tailscale)
+- [DEPLOY.md](../DEPLOY.md) — procedura wdrożenia (Docker, osobna brama Caddy)
 - [RELEASE.md](../RELEASE.md) — procedura wydania
 - [README_INTEGRATION.md](../README_INTEGRATION.md) — integracje
 - [FRICTION_REPORT.md](../FRICTION_REPORT.md) — raport friction (auto-generated z `scripts/reflect_and_improve.py`)

@@ -1,29 +1,12 @@
-services:
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"   # HTTP/3 (QUIC)
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      szop-app:
-        condition: service_healthy
+name: szop
 
+services:
   szop-app:
-    image: ghcr.io/rozgladacz/szop:latest
+    image: ${SZOP_IMAGE:-ghcr.io/rozgladacz/szop:latest}
     restart: unless-stopped
-    # Brak sekcji "ports" — szop-app dostępny tylko wewnątrz sieci Docker.
-    # Caddy proxy do szop-app:8000 przez sieć wewnętrzną.
-    # Aby testować lokalnie bez Caddy: odkomentuj poniższe:
-    # ports:
-    #   - "127.0.0.1:8000:8000"
+    # Brak sekcji "ports" — publiczny dostęp zapewnia osobny stos brama.
     volumes:
-      - ./data:/app/data
+      - ${SZOP_DATA_DIR:-./data}:/app/data
       # Docker socket — pozwala panelowi admina na "docker compose pull + up".
       # Usuń jeśli nie chcesz możliwości aktualizacji przez UI.
       - /var/run/docker.sock:/var/run/docker.sock
@@ -40,13 +23,16 @@ services:
       timeout: 10s
       start_period: 20s
       retries: 3
+    networks:
+      - default
+      - szop-edge
 
   szop-backup:
-    image: ghcr.io/rozgladacz/szop:latest
+    image: ${SZOP_IMAGE:-ghcr.io/rozgladacz/szop:latest}
     restart: unless-stopped
     entrypoint: ["python", "-m", "app.scripts.backup_loop"]
     volumes:
-      - ./data:/app/data
+      - ${SZOP_DATA_DIR:-./data}:/app/data
     env_file:
       - path: .env
         required: false
@@ -54,6 +40,7 @@ services:
       szop-app:
         condition: service_healthy
 
-volumes:
-  caddy_data:    # Certyfikaty Let's Encrypt — persystentne między restartami
-  caddy_config:
+networks:
+  szop-edge:
+    external: true
+    name: ${SZOP_EDGE_NETWORK:-brama-szop}

@@ -40,7 +40,7 @@ Nie rozszerzaj uprawnień usera bez wyraźnego wymagania.
 - **Frontend:** Vanilla JS (IIFE modules), Jinja2 templates
 - **Baza:** SQLite (`data/szop.db`)
 - **Testy:** pytest (Python + frontend parity), Node.js (JS smoke)
-- **DevOps:** Docker, Tailscale, Makefile
+- **DevOps:** Docker, wspólna brama Caddy, Makefile
 - **Export:** ReportLab (PDF), openpyxl (Excel)
 
 ## Główna struktura katalogów
