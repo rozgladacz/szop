@@ -1,9 +1,9 @@
 # HANDOFF — brama-opos-szop
 
 > **Wątek:** Rozdzielenie infrastruktury wejściowej SZOP i OPOS do osobnego repo `brama` oraz niezależne uruchamianie obu aplikacji.
-> **Status:** In progress
+> **Status:** Ready for deploy
 > **Utworzony:** 2026-09-01
-> **Ostatnia aktualizacja:** 2026-09-01
+> **Ostatnia aktualizacja:** 2026-09-02
 
 ## Cel
 
@@ -20,7 +20,7 @@ Wydzielić Caddy i publiczne porty 80/443 z aplikacji do małego stosu `brama`. 
 ## Blokuje / Blokowane przez
 
 - **Blokuje:** brak.
-- **Blokowane przez:** publikacja nowych repozytoriów wymaga ponownego logowania `gh auth login -h github.com`; walidacja runtime Compose/Caddy wymaga hosta z Dockerem. Aktywny wątek `rozmiar-podstawki` nie obejmuje tych plików.
+- **Blokowane przez:** produkcyjny cut-over wymaga dostępu do serwera Oracle, potwierdzenia obu domen DuckDNS i faktycznych nazw istniejących wolumenów Caddy. Aktywny wątek `rozmiar-podstawki` nie obejmuje tych plików.
 
 ## Gałąź git
 
@@ -41,13 +41,13 @@ Wydzielić Caddy i publiczne porty 80/443 z aplikacji do małego stosu `brama`. 
 ### Faza 3 — Weryfikacja end-to-end (Definition of Done)
 - [x] `pytest -q` w SZOP.
 - [x] `pytest -q` w OPOS.
-- [~] Walidacja wszystkich konfiguracji Compose i Caddy — statyczna walidacja YAML i skryptów zakończona; właściwe `docker compose config` i `caddy validate` wymagają hosta z Dockerem.
+- [x] Walidacja wszystkich konfiguracji Compose i Caddy — lokalna walidacja statyczna oraz workflow `Validate gateway` na GitHub zakończone powodzeniem.
 - [x] Smoke test JS — N/D, brak zmian JS; skrypt HTTP smoke sprawdzony na lokalnym serwerze testowym dla obu hostów.
 - [x] Call-site check — N/D, brak zmian funkcji ani wywołań aplikacyjnych.
 - [x] `/simplify` — wspólna orkiestracja lokalna pozostaje wyłącznie w `brama`, bez duplikowania w aplikacjach.
 - [x] `/review` — przejrzano diffy trzech repozytoriów i granice odpowiedzialności.
 - [x] `/security-review` — publiczne porty ma wyłącznie `brama`; aplikacje mają osobne sieci edge, sekrety pozostają poza Git.
-- [x] Re-run `pytest -q` jeśli review wprowadzi poprawki — N/D, po testach zmieniono tylko dokumentację i indeks Git lokalnych narzędzi.
+- [x] Re-run `pytest -q` po poprawkach CI — SZOP 329 passed, OPOS 127 passed; oba workflowy GitHub Actions zakończone powodzeniem.
 - [x] Diff review przed commitem.
 
 ## Pliki dotknięte
@@ -62,7 +62,6 @@ Wydzielić Caddy i publiczne porty 80/443 z aplikacji do małego stosu `brama`. 
 
 ## Hipotezy / pytania otwarte
 
-- Zdalne repozytoria `opos` i `brama` powinny odziedziczyć widoczność repo `szop`; publikacja nastąpi dopiero po audycie historii i konfiguracji.
 - Produkcyjne nazwy istniejących wolumenów Caddy trzeba potwierdzić na serwerze przed cut-overem.
 
 ## Jak zweryfikować
@@ -83,9 +82,11 @@ python -m pytest -q
 
 ## Notatki / odkrycia w trakcie
 
-- 2026-09-01: W drzewie SZOP istnieją niezacommitowane usunięcia `app/static/docs/OPOS.docx` i `app/static/docs/OPOS.pdf`; wątek ich nie dotyka.
+- 2026-09-01: Niezależny commit `4d8eb04` usunął z SZOP dokumenty `app/static/docs/OPOS.docx` i `app/static/docs/OPOS.pdf`; zmiany infrastrukturalne nie modyfikowały ich zawartości.
 - 2026-09-01: Docker CLI nie jest dostępny w lokalnym PATH; walidacja runtime Compose/Caddy będzie oznaczona jako wymagająca środowiska z Dockerem, a lokalnie wykonamy walidację YAML i skryptów.
 - 2026-09-01: Pełne testy: SZOP 329 passed; OPOS 127 passed po ustawieniu `OPOS_PDF_BROWSER` na Chrome. Automatycznie wykryty Edge nie tworzył PDF również poza sandboxem.
 - 2026-09-01: W trakcie pracy `origin/Rozwoj` otrzymał niezależny commit `4d8eb04` usuwający dwa dokumenty OPOS; bieżące zmiany infrastrukturalne opierają się już na tym commicie.
 - 2026-09-01: Z indeksu Git OPOS usunięto 1837 lokalnych artefaktów `.tools`; pliki pozostały na dysku i są ignorowane. Gałąź `opos-main-clean` została odtworzona jako jeden commit z drzewem identycznym z bieżącym stanem OPOS.
-- 2026-09-01: Token `gh` dla konta `rozgladacz` jest nieważny, dlatego repozytoria `opos` i `brama` nie zostały utworzone ani wypchnięte. Nie wykonywano też żadnych zmian na serwerze Oracle ani w DuckDNS.
+- 2026-09-02: Utworzono i opublikowano publiczne repozytoria `rozgladacz/opos` i `rozgladacz/brama`; gałąź `Rozwoj` SZOP również wypchnięto. Nie wykonywano zmian na serwerze Oracle ani w DuckDNS.
+- 2026-09-02: Pierwszy workflow OPOS nie widział modułów przy bezpośrednim wywołaniu `pytest`; poprawiono go na `python -m pytest`. Workflow SZOP ujawnił brak deklaracji testowej `httpx`; dodano sprawdzoną wersję `0.27.0` wyłącznie do `requirements-dev.txt`.
+- 2026-09-02: GitHub Actions: `Validate gateway` w bramie, `Tests` i `OPOS Rules Drift` w OPOS oraz `Tests` w SZOP zakończone powodzeniem.

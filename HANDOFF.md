@@ -11,7 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_brama-opos-szop](docs/handoffs/HANDOFF_brama-opos-szop.md) | Wydzielenie Caddy do `brama` i niezależne stosy SZOP/OPOS | `docker-compose.yml`, `docker-compose.dev.yml`, `Makefile`, `DEPLOY.md`, `.env.example`, `README.md`, `Caddyfile` | In progress |
+| [HANDOFF_brama-opos-szop](docs/handoffs/HANDOFF_brama-opos-szop.md) | Wydzielenie Caddy do `brama` i niezależne stosy SZOP/OPOS | `docker-compose.yml`, `docker-compose.dev.yml`, `Makefile`, `DEPLOY.md`, `.env.example`, `README.md`, `Caddyfile` | Ready for deploy |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
