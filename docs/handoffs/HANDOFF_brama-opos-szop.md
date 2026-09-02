@@ -1,7 +1,7 @@
 # HANDOFF — brama-opos-szop
 
 > **Wątek:** Rozdzielenie infrastruktury wejściowej SZOP i OPOS do osobnego repo `brama` oraz niezależne uruchamianie obu aplikacji.
-> **Status:** Ready for deploy
+> **Status:** Deploying — DNS pending
 > **Utworzony:** 2026-09-01
 > **Ostatnia aktualizacja:** 2026-09-02
 
@@ -20,7 +20,7 @@ Wydzielić Caddy i publiczne porty 80/443 z aplikacji do małego stosu `brama`. 
 ## Blokuje / Blokowane przez
 
 - **Blokuje:** brak.
-- **Blokowane przez:** produkcyjny cut-over wymaga dostępu do serwera Oracle, potwierdzenia obu domen DuckDNS i faktycznych nazw istniejących wolumenów Caddy. Aktywny wątek `rozmiar-podstawki` nie obejmuje tych plików.
+- **Blokowane przez:** `figurki.duckdns.org` nadal wskazuje inny host niż Oracle. Cut-over Caddy jest wstrzymany do czasu aktualizacji i propagacji rekordu. Aktywny wątek `rozmiar-podstawki` nie obejmuje tych plików.
 
 ## Gałąź git
 
@@ -90,3 +90,7 @@ python -m pytest -q
 - 2026-09-02: Utworzono i opublikowano publiczne repozytoria `rozgladacz/opos` i `rozgladacz/brama`; gałąź `Rozwoj` SZOP również wypchnięto. Nie wykonywano zmian na serwerze Oracle ani w DuckDNS.
 - 2026-09-02: Pierwszy workflow OPOS nie widział modułów przy bezpośrednim wywołaniu `pytest`; poprawiono go na `python -m pytest`. Workflow SZOP ujawnił brak deklaracji testowej `httpx`; dodano sprawdzoną wersję `0.27.0` wyłącznie do `requirements-dev.txt`.
 - 2026-09-02: GitHub Actions: `Validate gateway` w bramie, `Tests` i `OPOS Rules Drift` w OPOS oraz `Tests` w SZOP zakończone powodzeniem.
+- 2026-09-02: Preflight Oracle potwierdził Docker Compose 5.1.4, małe obciążenie hosta oraz storage Caddy jako bind mounty. Brama otrzymała obsługę istniejących katalogów `/data` i `/config`, walidowaną w CI dla obu wariantów storage.
+- 2026-09-02: Na Oracle utworzono chronione backupy konfiguracji, spójny backup SQLite SZOP oraz archiwum storage Caddy. Nie kopiowano ani nie wyświetlano sekretów.
+- 2026-09-02: OPOS uruchomiono bez publicznego portu i zweryfikowano jako healthy/HTTP 200 w `brama-opos`. SZOP przełączono na nowy Compose z niezmienionym obrazem i bazą; SQLite quick-check przed i po zmianie: `ok`, publiczny SZOP nadal HTTP 200.
+- 2026-09-02: Próba nowej bramy na loopback zakończona HTTP 200 dla obu rzeczywistych hostów. Testowy Caddy usunięto, a dotychczasowy Caddy nadal samodzielnie zajmuje 80/443 do czasu poprawnego DNS OPOS.
