@@ -11,7 +11,6 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_brama-opos-szop](docs/handoffs/HANDOFF_brama-opos-szop.md) | Wydzielenie Caddy do `brama` i niezależne stosy SZOP/OPOS | `docker-compose.yml`, `docker-compose.dev.yml`, `Makefile`, `DEPLOY.md`, `.env.example`, `README.md`, `Caddyfile` | Deploying — DNS pending |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
@@ -19,7 +18,6 @@
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `docker-compose.yml`, `docker-compose.dev.yml`, `Makefile`, `DEPLOY.md`, `.env.example`, `README.md`, `Caddyfile` | brama-opos-szop | rozdzielenie infrastruktury wejściowej i lokalnego uruchamiania |
 | `app/models.py` | rozmiar-podstawki | `+Unit.base_size` |
 | `app/services/costs/_engine.py` | rozmiar-podstawki | `BASE_SIZE_MELEE_LIMITS`, bump `COST_ENGINE_VERSION` |
 | `app/services/costs/crowding.py` | rozmiar-podstawki | nowy moduł (NEW) — SSOT zniżki „tłok" |
@@ -49,6 +47,10 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Starsze wpisy w [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).)*
+
+### 2026-09-02 — brama-opos-szop (archived)
+- Wydzielono Caddy do publicznego repo `rozgladacz/brama`, OPOS do `rozgladacz/opos`, a SZOP pozostawiono w `rozgladacz/szop`; na jednym serwerze Oracle działają niezależne stosy i sieci `brama-szop` / `brama-opos`, a wyłącznie brama publikuje porty 80/443 dla `szop.duckdns.org` i `figurki.duckdns.org`.
+- Weryfikacja: zielone CI (SZOP 329, OPOS 127 i rules drift, brama Compose/Caddy), produkcyjne HTTPS 200 z prawidłowymi certyfikatami, HTTP→HTTPS 308, nagłówki bezpieczeństwa i SQLite quick-check `ok`; stary Caddy pozostawiono zatrzymany jako szybki rollback, wykonano chronione kopie migracyjne, a wcześniejszego stanu kontenerów okresowego backupu nie zmieniano.
 
 ### 2026-08-01 — szop-hit-chance-sync (archived)
 - Zsynchronizowano Zasadzkę i osobne Dobrze/Źle strzela w katalogu oraz Markdown, a wycenę trafienia rozdzielono na clamp szansy bazowej i premie post-clamp bez zmiany API. Produkcyjną `data/szop.db` odświeżono funkcjami SSOT po kopii bezpieczeństwa; cache 275 broni i 84 jednostek zweryfikowano bez rozbieżności.
