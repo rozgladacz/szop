@@ -11,6 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
+| [HANDOFF_backup-scheduler](docs/handoffs/HANDOFF_backup-scheduler.md) | Naprawa startu i healthcheck schedulera kopii oraz weryfikacja wdrożenia SZOP | `app/db.py`, `app/scripts/backup_loop.py`, `docker-compose.yml`, `tests/test_backup_scheduler.py` | In progress |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
@@ -18,6 +19,10 @@
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
+| `app/db.py` | backup-scheduler | przeniesienie importów usług do funkcji |
+| `app/scripts/backup_loop.py` | backup-scheduler | start i kontrola życia schedulera |
+| `docker-compose.yml` | backup-scheduler | healthcheck sidecara |
+| `tests/test_backup_scheduler.py` | backup-scheduler | regresja i kopia SQLite |
 | `app/models.py` | rozmiar-podstawki | `+Unit.base_size` |
 | `app/services/costs/_engine.py` | rozmiar-podstawki | `BASE_SIZE_MELEE_LIMITS`, bump `COST_ENGINE_VERSION` |
 | `app/services/costs/crowding.py` | rozmiar-podstawki | nowy moduł (NEW) — SSOT zniżki „tłok" |

@@ -31,6 +31,12 @@ services:
     image: ${SZOP_IMAGE:-ghcr.io/rozgladacz/szop:latest}
     restart: unless-stopped
     entrypoint: ["python", "-m", "app.scripts.backup_loop"]
+    healthcheck:
+      test: ["CMD-SHELL", "grep -qa 'app.scripts.backup_loop' /proc/1/cmdline"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
     volumes:
       - ${SZOP_DATA_DIR:-./data}:/app/data
     env_file:

@@ -9,7 +9,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 from .config import DB_URL
-from .services import ability_registry, costs
 
 logger = logging.getLogger(__name__)
 
@@ -226,6 +225,8 @@ def _initialize_unit_base_sizes(connection) -> None:
     unit_is_hero (app/services/rules.py): link do zdolnosci "bohater" na
     jednostce, bez sprawdzania flagi default (jak w runtime).
     """
+    from .services import ability_registry
+
     logger.info("Backfilling base_size column on units table from toughness")
     ability_rows = connection.execute(
         text("SELECT id, config_json, name FROM abilities")
@@ -517,6 +518,7 @@ def init_db() -> None:
 
     from . import models
     from .security import hash_password
+    from .services import ability_registry, costs
 
     db_path = Path(DB_URL.split("///")[-1]) if DB_URL.startswith("sqlite") else None
     first_start = db_path is not None and not db_path.exists()
