@@ -11,7 +11,6 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_backup-scheduler](docs/handoffs/HANDOFF_backup-scheduler.md) | Naprawa startu i healthcheck schedulera kopii oraz weryfikacja wdrożenia SZOP | `app/db.py`, `app/scripts/backup_loop.py`, `docker-compose.yml`, `tests/test_backup_scheduler.py` | In progress |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
@@ -19,10 +18,6 @@
 
 | Plik / katalog | Wątek blokujący | Powód |
 |---|---|---|
-| `app/db.py` | backup-scheduler | przeniesienie importów usług do funkcji |
-| `app/scripts/backup_loop.py` | backup-scheduler | start i kontrola życia schedulera |
-| `docker-compose.yml` | backup-scheduler | healthcheck sidecara |
-| `tests/test_backup_scheduler.py` | backup-scheduler | regresja i kopia SQLite |
 | `app/models.py` | rozmiar-podstawki | `+Unit.base_size` |
 | `app/services/costs/_engine.py` | rozmiar-podstawki | `BASE_SIZE_MELEE_LIMITS`, bump `COST_ENGINE_VERSION` |
 | `app/services/costs/crowding.py` | rozmiar-podstawki | nowy moduł (NEW) — SSOT zniżki „tłok" |
@@ -52,6 +47,11 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Starsze wpisy w [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).)*
+
+### 2026-10-13 — backup-scheduler (archived)
+- Usunięto cykl importu `backup_loop → backup → db_restore → db → ability_registry → models → db.Base` przez przeniesienie importów usług w `app/db.py` do miejsc użycia; sidecar ma teraz własny healthcheck procesu. Dodano test świeżego startu i faktycznej kopii SQLite/WAL; pełne pytest 332/332, Compose zweryfikowany na serwerze.
+- Produkcja: z obrazu `szop-local:latest` zbudowano minimalny hotfix `szop-local:backup-fix-20261013` tylko dla `szop-backup`; `szop-app` pozostał na starym obrazie. Backup `running/healthy`, 0 restartów; nowa kopia `/srv/szop/data/backups/szop-backup-20261013-194255.db` (253952 B, `quick_check=ok`), SZOP/OPOS HTTP 200. Osobna kopia preflight: `pre-hotfix-20261013-192836.db`; rollback manifestu: `/srv/szop/docker-compose.pre-backup-hotfix-20261013.yml`. Przy kolejnym pełnym release zastąp lokalny pin backupu obrazem wydania; nocne uruchomienie 03:00 pozostaje do zaobserwowania.
+- Pliki: `app/db.py`, `docker-compose.yml`, `tests/test_backup_scheduler.py`.
 
 ### 2026-09-02 — brama-opos-szop (archived)
 - Wydzielono Caddy do publicznego repo `rozgladacz/brama`, OPOS do `rozgladacz/opos`, a SZOP pozostawiono w `rozgladacz/szop`; na jednym serwerze Oracle działają niezależne stosy i sieci `brama-szop` / `brama-opos`, a wyłącznie brama publikuje porty 80/443 dla `szop.duckdns.org` i `figurki.duckdns.org`.
