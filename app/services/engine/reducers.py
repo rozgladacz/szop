@@ -515,6 +515,8 @@ def _reduce_attack_interrupt_priority_passed(
     ):
         raise ValueError("AttackInterruptPriorityPassed does not match attack head")
     if event.next_priority_player is None:
+        if window.passed_players != (1 - event.passed_player,):
+            raise ValueError("closing attack pass requires the first player's pass")
         return replace(
             state,
             activation=replace(

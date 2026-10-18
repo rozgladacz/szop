@@ -3174,6 +3174,43 @@ def test_attack_trigger_and_override_reducers_update_only_attack_scope() -> None
     assert actor.ability_overrides == (("ordered", True),)
 
 
+def test_attack_replay_rejects_closing_pass_without_first_player_pass() -> None:
+    _, declared, _, _ = _closed_v3_attack(sequence=3750)
+    activation = declared.state.activation
+    attack = activation.attack
+    triggered = apply_events(
+        declared.state,
+        (
+            AttackInterruptTriggered(
+                sequence=declared.next_sequence,
+                activation_id=activation.activation_id,
+                activation_version=activation.version + 1,
+                attack_id=attack.attack_id,
+                attack_version=attack.version + 1,
+                attack_ordinal=attack.ordinal,
+                window_version=attack.window.version + 1,
+                priority_player=attack.window.priority_player,
+            ),
+        ),
+    )
+    activation = triggered.activation
+    attack = activation.attack
+    premature_close = AttackInterruptPriorityPassed(
+        sequence=declared.next_sequence + 1,
+        activation_id=activation.activation_id,
+        activation_version=activation.version + 1,
+        attack_id=attack.attack_id,
+        attack_version=attack.version + 1,
+        attack_ordinal=attack.ordinal,
+        window_version=attack.window.version + 1,
+        passed_player=attack.window.priority_player,
+        next_priority_player=None,
+    )
+
+    with pytest.raises(ValueError, match="requires the first player's pass"):
+        apply_events(triggered, (premature_close,))
+
+
 def test_v3_second_attack_declaration_uses_second_ordinal() -> None:
     initial = _action_idle_state()
     _, _, first_ready = _v3_ready_with_tail(initial, sequence=3800)
