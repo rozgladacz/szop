@@ -19,6 +19,7 @@ from app.services.engine.activation_protocol import (
     _commit_activation_action_v3,
     _pass_attack_interrupt_priority,
     _resolve_activation_attack,
+    _trigger_attack_interrupt,
     commit_activation_action,
     continue_activation,
     finalize_activation,
@@ -28,6 +29,7 @@ from app.services.engine.activation_protocol import (
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.interrupts import (
+    READY_INTERRUPT_HANDLERS,
     execute_ready_activation_interrupt_outcomes,
 )
 from app.services.engine.events import (
@@ -67,6 +69,7 @@ from app.services.engine.state import (
     WeaponProfile,
     apply_events,
     effective_passives,
+    effective_attack_passives,
 )
 from app.services.engine.state_codec import (
     _battle_state_from_json_v3,
@@ -3233,3 +3236,296 @@ def test_v3_second_attack_declaration_uses_second_ordinal() -> None:
     assert declared.events[0].attack_ordinal == 2
     assert declared.state.activation.action_count == 1
     assert declared.state.activation.action_types == ("defend",)
+
+
+# ---------------------------------------------------------------------------
+# B4.4d.C2b — private source-correct Oznaczenie attack scope
+# ---------------------------------------------------------------------------
+
+
+def _marked_idle_state(*, actor_overrides=()) -> BattleState:
+    base = _action_idle_state(actor_overrides=actor_overrides)
+    source = replace(
+        _unit(12, 0, passives=('oznaczenie',)),
+        position=Position(20, 0),  # edge gap to declared target at x=6 is 12
+    )
+    return replace(
+        base,
+        blobs=(*base.blobs, source),
+        activations_remaining=(2, 1),
+        initial_toughness_snapshot=((*base.initial_toughness_snapshot, (12, 3))),
+    )
+
+
+def _marked_declared(*, state=None, action=None):
+    initial = _marked_idle_state() if state is None else state
+    started, general_first, ready = _v3_ready_with_tail(initial, sequence=4000)
+    declared = _commit_v3(
+        ready.state,
+        ShootAction(11, 21, RIFLE) if action is None else action,
+        DeterministicDice(401),
+        sequence=ready.next_sequence,
+    )
+    return initial, started, general_first, ready, declared
+
+
+def _mark_attack(state, dice, *, sequence, payload=None, source_unit_id=12, **guards):
+    activation = state.activation
+    attack = activation.attack
+    args = dict(
+        caller_player=attack.window.priority_player,
+        activation_id=activation.activation_id,
+        expected_activation_version=activation.version,
+        attack_id=attack.attack_id,
+        expected_attack_version=attack.version,
+        expected_window_version=attack.window.version,
+        source_unit_id=source_unit_id,
+        ability_slug='oznaczenie',
+        payload={'ability': 'planowanie'} if payload is None else payload,
+        dice=dice,
+        sequence=sequence,
+    )
+    args.update(guards)
+    return _trigger_attack_interrupt(state, **args)
+
+
+def test_v3_oznaczenie_full_tail_restarts_rng_and_scope_cleanup() -> None:
+    initial = _marked_idle_state(actor_overrides=(('tarcza', True),))
+    initial, started, general_first, ready, declared = _marked_declared(state=initial)
+    tail = [*started.events, *general_first.events, *ready.events, *declared.events]
+    dice = DeterministicDice(403)
+    dice.roll_d6(3)
+    before = dice.to_checkpoint()
+
+    marked = _mark_attack(declared.state, dice, sequence=declared.next_sequence)
+    restarted = _mark_attack(
+        _restart_v3(declared.state),
+        DeterministicDice.from_checkpoint(before),
+        sequence=declared.next_sequence,
+    )
+    _assert_transition_equal(marked, restarted)
+    assert [type(event) for event in marked.events] == [
+        AttackInterruptTriggered, InterruptTriggered, AttackAbilityOverrideApplied,
+    ]
+    assert [event.sequence for event in marked.events] == list(
+        range(declared.next_sequence, marked.next_sequence)
+    )
+    assert marked.events[1].payload == {'ability': 'planowanie'}
+    assert marked.events[1].consumes_round_limit is True
+    assert marked.events[1].target_unit_id == 11
+    assert marked.state.used_interrupts_this_round == ((12, 'oznaczenie'),)
+    assert marked.state.activation.version == declared.state.activation.version + 1
+    assert marked.state.activation.attack.version == declared.state.activation.attack.version + 1
+    assert marked.state.activation.attack.window.version == declared.state.activation.attack.window.version + 1
+    assert marked.state.activation.attack.window.priority_player == 0
+    actor = next(blob for blob in marked.state.blobs if blob.id == 11)
+    target = next(blob for blob in marked.state.blobs if blob.id == 21)
+    assert actor.ability_overrides == (('tarcza', True),)
+    assert target.ability_overrides == ()
+    assert 'planowanie' in effective_attack_passives(actor, marked.state.activation.attack)
+    assert 'planowanie' not in effective_attack_passives(target, marked.state.activation.attack)
+    assert 'planowanie' not in effective_passives(actor)
+    assert dice.to_checkpoint() == before == marked.dice.to_checkpoint()
+    tail.extend(marked.events)
+    assert marked.state == apply_events(initial, tail)
+
+    first = _pass_attack(marked.state, caller_player=0, sequence=marked.next_sequence)
+    _assert_transition_equal(
+        first,
+        _pass_attack(_restart_v3(marked.state), caller_player=0, sequence=marked.next_sequence),
+    )
+    tail.extend(first.events)
+    assert first.state == apply_events(initial, tail)
+    closed = _pass_attack(first.state, caller_player=1, sequence=first.next_sequence)
+    _assert_transition_equal(
+        closed,
+        _pass_attack(_restart_v3(first.state), caller_player=1, sequence=first.next_sequence),
+    )
+    tail.extend(closed.events)
+    assert closed.state == apply_events(initial, tail)
+    assert closed.state.activation.attack.ability_overrides == marked.state.activation.attack.ability_overrides
+    assert dice.to_checkpoint() == before
+
+    resolved = _resolve_attack(closed.state, marked.dice, sequence=closed.next_sequence)
+    restarted_resolved = _resolve_attack(
+        _restart_v3(closed.state),
+        DeterministicDice.from_checkpoint(before),
+        sequence=closed.next_sequence,
+    )
+    _assert_transition_equal(resolved, restarted_resolved)
+    tail.extend(resolved.events)
+    assert resolved.state == apply_events(initial, tail)
+    assert resolved.state.activation.attack is None
+    assert next(blob for blob in resolved.state.blobs if blob.id == 11).ability_overrides == (('tarcza', True),)
+    assert resolved.dice.to_checkpoint() != before
+    assert dice.to_checkpoint() == before
+    assert resolved.dice.roll_d6(6) == restarted_resolved.dice.roll_d6(6)
+    assert READY_INTERRUPT_HANDLERS == {'rozkaz', 'klatwa', 'straznik'}
+
+
+def test_v3_oznaczenie_reaches_combat_only_for_declared_attacker(monkeypatch) -> None:
+    from app.services.engine import effects
+
+    seen = []
+
+    def marked_attack_modifier(context):
+        seen.append(context.blob.id)
+        return 5
+
+    monkeypatch.setitem(effects._ATTACK_MODIFIERS, 'planowanie', marked_attack_modifier)
+    initial, _, _, _, declared = _marked_declared()
+    marked = _mark_attack(declared.state, DeterministicDice(409), sequence=declared.next_sequence)
+    closed = _pass_attack(marked.state, caller_player=0, sequence=marked.next_sequence)
+    closed = _pass_attack(closed.state, caller_player=1, sequence=closed.next_sequence)
+    resolved = _resolve_attack(closed.state, DeterministicDice(411), sequence=closed.next_sequence)
+    assert seen == [11]
+    assert next(event for event in resolved.events if type(event).__name__ == 'ShotResolved').attacker_id == 11
+
+    # The defender attacks first in charge; the mark must not enter that role.
+    charge_target = replace(next(b for b in initial.blobs if b.id == 21), models_alive=1)
+    charge_initial = replace(
+        initial,
+        blobs=tuple(charge_target if b.id == 21 else b for b in initial.blobs),
+        initial_toughness_snapshot=((11, 15), (21, 3), (12, 3)),
+    )
+    _, _, _, _, charge_declared = _marked_declared(
+        state=charge_initial,
+        action=ChargeAction(11, 21, SWORD, counter_attack_declared=True),
+    )
+    charge_marked = _mark_attack(
+        charge_declared.state, DeterministicDice(413), sequence=charge_declared.next_sequence
+    )
+    charge_first = _pass_attack(
+        charge_marked.state, caller_player=0, sequence=charge_marked.next_sequence
+    )
+    charge_closed = _pass_attack(
+        charge_first.state, caller_player=1, sequence=charge_first.next_sequence
+    )
+    seen.clear()
+    charge_resolved = _resolve_attack(
+        charge_closed.state, DeterministicDice(419), sequence=charge_closed.next_sequence
+    )
+    assert seen == [11]
+    melee_attackers = [e.attacker_id for e in charge_resolved.events if type(e).__name__ == 'MeleeResolved']
+    assert melee_attackers == [21, 11]
+
+
+@pytest.mark.parametrize('payload', [
+    {}, {'ability': ''}, {'ability': True}, {'ability': 1},
+    {'ability': 'tarcza'}, {'ability': 'delikatny'},
+    {'ability': 'przygotowanie'}, {'ability': 'missing'},
+    {'ability': 'planowanie', 'target_id': 21},
+    {'ability': 'planowanie', 'sequence': 999},
+    {'ability': 'planowanie', 'granted': True},
+    {'ability': 'x' * 129},
+])
+def test_v3_oznaczenie_rejects_noncanonical_payload_without_mutation(payload) -> None:
+    _, _, _, _, declared = _marked_declared()
+    dice = DeterministicDice(421)
+    before = dice.to_checkpoint()
+    with pytest.raises(ActivationProtocolError) as error:
+        _mark_attack(declared.state, dice, sequence=declared.next_sequence, payload=payload)
+    assert error.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert dice.to_checkpoint() == before
+    assert declared.state.activation.attack.window.interrupt_count == 0
+    assert declared.state.used_interrupts_this_round == ()
+
+
+def test_v3_oznaczenie_guards_source_range_limit_and_cached_catalog(monkeypatch) -> None:
+    from app.services.rulesets import loader
+
+    _, _, _, _, declared = _marked_declared()
+    dice = DeterministicDice(423)
+    before = dice.to_checkpoint()
+    monkeypatch.setattr(loader, '_read_bytes', lambda _path: pytest.fail('runtime YAML I/O'))
+    marked = _mark_attack(declared.state, dice, sequence=declared.next_sequence)
+    assert marked.state.used_interrupts_this_round == ((12, 'oznaczenie'),)
+    with pytest.raises(ActivationProtocolError) as used:
+        _mark_attack(marked.state, dice, sequence=marked.next_sequence)
+    assert used.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    duplicate = replace(marked.state, used_interrupts_this_round=())
+    with pytest.raises(ActivationProtocolError):
+        _mark_attack(duplicate, dice, sequence=marked.next_sequence)
+
+    def changed_source(**changes):
+        source = next(b for b in declared.state.blobs if b.id == 12)
+        altered = replace(source, **changes)
+        return replace(
+            declared.state,
+            blobs=tuple(altered if b.id == 12 else b for b in declared.state.blobs),
+        )
+
+    for state in (
+        changed_source(models_alive=0),
+        changed_source(location=Lokalizacja.ZAPLECZE),
+        changed_source(passives=()),
+        changed_source(passives=(), ability_overrides=(('oznaczenie', True),)),
+        changed_source(position=Position(20.01, 0)),
+        changed_source(owner_player=1),
+    ):
+        with pytest.raises(ActivationProtocolError):
+            _mark_attack(state, dice, sequence=declared.next_sequence)
+    actor = next(b for b in declared.state.blobs if b.id == 11)
+    self_mark_state = replace(
+        declared.state,
+        blobs=tuple(replace(actor, passives=('oznaczenie',)) if b.id == 11 else b for b in declared.state.blobs),
+    )
+    with pytest.raises(ActivationProtocolError):
+        _mark_attack(self_mark_state, dice, sequence=declared.next_sequence, source_unit_id=11)
+    for guards, reason in (
+        ({'caller_player': 1}, ActivationProtocolErrorReason.INVALID_CALLER),
+        ({'expected_activation_version': 99}, ActivationProtocolErrorReason.STALE_ACTIVATION),
+        ({'expected_attack_version': 99}, ActivationProtocolErrorReason.STALE_ATTACK),
+        ({'expected_window_version': 99}, ActivationProtocolErrorReason.STALE_WINDOW),
+        ({'attack_id': True}, ActivationProtocolErrorReason.STALE_ATTACK),
+    ):
+        with pytest.raises(ActivationProtocolError) as error:
+            _mark_attack(declared.state, dice, sequence=declared.next_sequence, **guards)
+        assert error.value.reason is reason
+    assert dice.to_checkpoint() == before
+    assert declared.state.used_interrupts_this_round == ()
+
+    activation = declared.state.activation
+    attack = activation.attack
+    saturated_window = replace(attack.window, version=65, interrupt_count=64)
+    saturated = replace(
+        declared.state,
+        activation=replace(
+            activation, version=activation.version + 64,
+            attack=replace(attack, version=65, window=saturated_window),
+        ),
+    )
+    with pytest.raises(ActivationProtocolError) as error:
+        _mark_attack(saturated, dice, sequence=declared.next_sequence)
+    assert error.value.reason is ActivationProtocolErrorReason.INTERRUPT_LIMIT_REACHED
+
+
+def test_v3_oznaczenie_handler_failure_preserves_head_and_rng(monkeypatch) -> None:
+    from app.services.engine import activation_protocol
+
+    _, _, _, _, declared = _marked_declared()
+    dice = DeterministicDice(431)
+    before = dice.to_checkpoint()
+
+    def broken_handler(**_kwargs):
+        raise RuntimeError('late handler failure')
+
+    monkeypatch.setattr(
+        activation_protocol, 'execute_oznaczenie_attack_interrupt_outcomes',
+        broken_handler,
+    )
+    with pytest.raises(ActivationProtocolError) as error:
+        _mark_attack(declared.state, dice, sequence=declared.next_sequence)
+    assert error.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert declared.state.activation.attack.window.interrupt_count == 0
+    assert declared.state.used_interrupts_this_round == ()
+    assert dice.to_checkpoint() == before
+
+    monkeypatch.setattr(
+        activation_protocol, 'execute_oznaczenie_attack_interrupt_outcomes',
+        lambda **kwargs: (kwargs['state'], ()),
+    )
+    with pytest.raises(ActivationProtocolError) as malformed:
+        _mark_attack(declared.state, dice, sequence=declared.next_sequence)
+    assert malformed.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+    assert dice.to_checkpoint() == before

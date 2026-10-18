@@ -36,10 +36,12 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Callable
 
 from app.services.engine.state import (
+    AttackState,
     BattleState,
     UnitBlob,
     WeaponProfile,
     effective_passives,
+    effective_attack_passives,
 )
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
@@ -65,6 +67,7 @@ class EffectContext:
     BattleState dla zdolności wymagających queries (np. Maskowanie "gdy >3"
     od wrogów"). `weapon` (opcjonalny) = profil broni dla weapon-level modifiers.
     `is_charging` / `is_being_charged` = flagi szarży (Furia, Impet, Kontra).
+    `attack_state` = immutable pending v3 scope for the declared attacker.
     """
 
     blob: UnitBlob
@@ -72,6 +75,7 @@ class EffectContext:
     weapon: WeaponProfile | None = None
     is_charging: bool = False
     is_being_charged: bool = False
+    attack_state: AttackState | None = None
 
 
 # Hook function types
@@ -146,7 +150,7 @@ def aggregate_defense_modifier(context: EffectContext) -> int:
 def aggregate_attack_modifier(context: EffectContext) -> int:
     """Sum attack modifiers — analogicznie do defense."""
     total = 0
-    for slug in effective_passives(context.blob):
+    for slug in effective_attack_passives(context.blob, context.attack_state):
         fn = _ATTACK_MODIFIERS.get(slug)
         if fn is not None:
             total += fn(context)

@@ -40,7 +40,8 @@ Zawartość:
 - `get_eligible_interrupts(state, point)` — lista (blob, slug) which CAN trigger
 - `trigger_interrupt(...)` — wywołuje konkretny handler
 - Handlery registry: kompatybilny stub Strażnika, source-correct Rozkaz/Klątwa
-  (id 50/45) oraz historyczne uproszczenie Oznaczenia (id 49). Publiczny adapter
+  (id 50/45) oraz historyczne uproszczenie Oznaczenia (id 49). Prywatny
+  attack-scope v3 ma osobny handler Oznaczenia. Publiczny adapter
   activation-v2 wywołuje bezpośrednio prywatny outcome C1b pełnego Ostrzału
   + Wyczerpany, z pominięciem legacy stubu.
 
@@ -64,6 +65,7 @@ from app.services.engine.combat import (
 )
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
+    AttackAbilityOverrideApplied,
     AbilityOverrideApplied,
     BattleEvent,
     InterruptTriggered,
@@ -81,6 +83,7 @@ from app.services.engine.state import (
     effective_passives,
 )
 from app.services.engine.status import STATUS_WYCZERPANY
+from app.services.rulesets.loader import load_ruleset
 
 
 class InterruptPoint(Enum):
@@ -123,6 +126,13 @@ _INTERRUPT_HANDLERS: dict[tuple[InterruptPoint, str], InterruptHandlerFn] = {}
 
 # Public readiness is deliberately narrower than the internal registry.
 READY_INTERRUPT_HANDLERS = frozenset({"rozkaz", "klatwa", "straznik"})
+
+# Prepared once from the frozen ruleset. Attack handlers never read YAML or DB.
+_OZNACZENIE_CAPABLE_SLUGS = frozenset(
+    ability.slug
+    for ability in load_ruleset('v1').abilities
+    if ability.type == 'passive' and ability.oznaczenie_tak is True
+)
 
 
 def register_interrupt_handler(
@@ -1137,6 +1147,106 @@ def _oznaczenie_handler(
     trigger ataku — follow-up po wpięciu deklaracji przerwań w pętlę aktywacji.
     """
     return _apply_order_like(context, payload, slug="oznaczenie", require_enemy=False)
+
+
+def _validated_oznaczenie_attack_payload(payload: Mapping[str, Any]) -> str:
+    """Exact private v3 payload; canonical X comes only from oznaczenie_tak."""
+    if type(payload) is not dict or set(payload) != {'ability'}:
+        raise InvalidInterruptError('oznaczenie: expected exactly ability')
+    ability = payload['ability']
+    if type(ability) is not str or not ability or len(ability) > 128:
+        raise InvalidInterruptError('oznaczenie: ability must be a bounded slug')
+    if ability not in _OZNACZENIE_CAPABLE_SLUGS:
+        raise InvalidInterruptError('oznaczenie: ability lacks canonical tag')
+    return ability
+
+
+def execute_oznaczenie_attack_interrupt_outcomes(
+    *,
+    state: BattleState,
+    source: UnitBlob,
+    payload: Mapping[str, Any],
+    sequence: int,
+) -> tuple[BattleState, tuple[BattleEvent, ...]]:
+    """Private attack-scope outcome, independent of legacy UnitBlob overrides."""
+    ability = _validated_oznaczenie_attack_payload(payload)
+    if type(state) is not BattleState:
+        raise InvalidInterruptError('oznaczenie: battle state is invalid')
+    activation = state.activation
+    attack = activation.attack if activation is not None else None
+    window = attack.window if attack is not None else None
+    if (
+        type(sequence) is not int or sequence < 1
+        or attack is None or window is None
+        or activation.phase is not ActivationPhase.ATTACK_WINDOW
+        or type(source) is not UnitBlob
+    ):
+        raise InvalidInterruptError('oznaczenie: attack window is invalid')
+    current_source = next((blob for blob in state.blobs if blob.id == source.id), None)
+    attacker = next(
+        (blob for blob in state.blobs if blob.id == attack.intent.attacker_unit_id),
+        None,
+    )
+    target = next(
+        (blob for blob in state.blobs if blob.id == attack.intent.target_unit_id),
+        None,
+    )
+    if (
+        current_source != source
+        or current_source.models_alive <= 0
+        or current_source.location is not Lokalizacja.FRONT
+        or 'oznaczenie' not in current_source.passives
+        or current_source.owner_player != window.priority_player
+        or type(current_source.owner_player) is not int
+        or attacker is None or attacker.models_alive <= 0
+        or attacker.location is not Lokalizacja.FRONT
+        or attacker.id == source.id
+        or attacker.owner_player != source.owner_player
+        or type(attacker.owner_player) is not int
+        or target is None or target.models_alive <= 0
+        or target.location is not Lokalizacja.FRONT
+        or target.owner_player == attacker.owner_player
+        or type(target.owner_player) is not int
+        or (source.id, 'oznaczenie') in state.used_interrupts_this_round
+        or any(
+            override.source_unit_id == source.id
+            and override.ability_slug == ability
+            for override in attack.ability_overrides
+        )
+        or len(attack.ability_overrides) >= 64
+    ):
+        raise InvalidInterruptError('oznaczenie: source, target or limit is invalid')
+    gap = circle_edge_distance(
+        source.position, source.radius_inches,
+        target.position, target.radius_inches,
+    )
+    if gap > ORDER_RANGE_INCHES:
+        raise InvalidInterruptError('oznaczenie: declared target is out of range')
+
+    events: tuple[BattleEvent, ...] = (
+        InterruptTriggered(
+            sequence=sequence,
+            interrupt_point='attack',
+            slug='oznaczenie',
+            source_unit_id=source.id,
+            target_unit_id=attacker.id,
+            payload={'ability': ability},
+            consumes_round_limit=True,
+        ),
+        AttackAbilityOverrideApplied(
+            sequence=sequence + 1,
+            activation_id=activation.activation_id,
+            activation_version=activation.version,
+            attack_id=attack.attack_id,
+            attack_version=attack.version,
+            attack_ordinal=attack.ordinal,
+            window_version=window.version,
+            attacker_unit_id=attacker.id,
+            source_unit_id=source.id,
+            ability_slug=ability,
+        ),
+    )
+    return apply_events(state, events), events
 
 
 def execute_ready_activation_interrupt_outcomes(

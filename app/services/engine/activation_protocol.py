@@ -24,7 +24,9 @@ from app.services.engine.actions import (
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import (
     ActivePlayerChanged,
+    AttackAbilityOverrideApplied,
     AttackDeclared,
+    AttackInterruptTriggered,
     AttackInterruptPriorityPassed,
     AttackInterruptWindowClosed,
     AttackInterruptWindowOpened,
@@ -44,6 +46,7 @@ from app.services.engine.events import (
     StatusRemoved,
     _PROTOCOL_EVENT_TYPES,
 )
+from app.services.engine.interrupts import execute_oznaczenie_attack_interrupt_outcomes
 from app.services.engine.phases import _apply_single_action, _finalize_activation
 from app.services.engine.resolver import _validate_action
 from app.services.engine.state import (
@@ -1129,6 +1132,116 @@ def _pass_attack_interrupt_priority(
         window_version=window_version,
     )
     return _result(state, (pass_event, close_event), sequence=sequence)
+
+
+def _trigger_attack_interrupt(
+    state: BattleState,
+    *,
+    caller_player: int,
+    activation_id: int,
+    expected_activation_version: int,
+    attack_id: int,
+    expected_attack_version: int,
+    expected_window_version: int,
+    source_unit_id: int,
+    ability_slug: str,
+    payload: Mapping[str, Any],
+    dice: DeterministicDice,
+    sequence: int,
+) -> ActivationInterruptTransitionResult:
+    """Accept one private v3 Oznaczenie in the declared attack window."""
+    _require_protocol_v2(state)
+    activation = _require_activation(
+        state,
+        activation_id=activation_id,
+        expected_activation_version=expected_activation_version,
+    )
+    attack = _require_attack(
+        activation,
+        attack_id=attack_id,
+        expected_attack_version=expected_attack_version,
+    )
+    window = attack.window
+    if activation.phase is not ActivationPhase.ATTACK_WINDOW or window is None:
+        _reject(ActivationProtocolErrorReason.INVALID_PHASE)
+    if (
+        type(expected_window_version) is not int
+        or expected_window_version < 1
+        or expected_window_version != window.version
+    ):
+        _reject(ActivationProtocolErrorReason.STALE_WINDOW)
+    _require_caller(caller_player, window.priority_player)
+    if (
+        type(ability_slug) is not str or ability_slug != 'oznaczenie'
+        or type(sequence) is not int or sequence < 1
+    ):
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    if window.interrupt_count >= _MAX_ACCEPTED_INTERRUPTS_PER_WINDOW:
+        _reject(ActivationProtocolErrorReason.INTERRUPT_LIMIT_REACHED)
+    source = _interrupt_source(
+        state,
+        caller_player=caller_player,
+        source_unit_id=source_unit_id,
+        ability_slug=ability_slug,
+    )
+    if ability_slug not in source.passives:
+        _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    working_dice = _clone_dice(
+        dice,
+        reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+    )
+    trigger = AttackInterruptTriggered(
+        sequence=sequence,
+        activation_id=activation.activation_id,
+        activation_version=activation.version + 1,
+        attack_id=attack.attack_id,
+        attack_version=attack.version + 1,
+        attack_ordinal=attack.ordinal,
+        window_version=window.version + 1,
+        priority_player=caller_player,
+    )
+    try:
+        protocol_state = apply_events(state, (trigger,))
+        outcome_state, outcome_events = execute_oznaczenie_attack_interrupt_outcomes(
+            state=protocol_state,
+            source=source,
+            payload=payload,
+            sequence=sequence + 1,
+        )
+        if (
+            type(outcome_events) is not tuple
+            or len(outcome_events) != 2
+            or type(outcome_events[0]) is not InterruptTriggered
+            or type(outcome_events[1]) is not AttackAbilityOverrideApplied
+            or outcome_events[0].sequence != sequence + 1
+            or outcome_events[1].sequence != sequence + 2
+            or outcome_events[0].interrupt_point != 'attack'
+            or outcome_events[0].slug != 'oznaczenie'
+            or outcome_events[0].source_unit_id != source.id
+            or outcome_events[0].target_unit_id != attack.intent.attacker_unit_id
+            or outcome_events[0].consumes_round_limit is not True
+            or outcome_events[0].payload != payload
+            or outcome_events[1].source_unit_id != source.id
+            or outcome_events[1].attacker_unit_id != attack.intent.attacker_unit_id
+            or outcome_events[1].ability_slug != outcome_events[0].payload['ability']
+        ):
+            _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+        events = (trigger, *outcome_events)
+        result_state = apply_events(state, events)
+        if result_state != outcome_state:
+            _reject(ActivationProtocolErrorReason.ILLEGAL_INTERRUPT)
+    except ActivationProtocolError:
+        raise
+    except Exception as exc:
+        raise ActivationProtocolError(
+            ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
+        ) from exc
+    return ActivationInterruptTransitionResult(
+        state=result_state,
+        events=events,
+        next_sequence=sequence + len(events),
+        dice=working_dice,
+    )
 
 
 def _resolve_activation_attack(

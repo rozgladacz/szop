@@ -861,7 +861,8 @@ def _finalize_activation(
 
     (Odzyskiwanie ran pkt 21 — MVP N/A) + status Aktywowany (pkt 11.b.vi,
     StatusAdded) + safety reset damage_balance aktora + wygaśnięcie efektów „do
-    końca aktywacji" (czyszczenie `ability_overrides` — Rozkaz/Klątwa/Oznaczenie).
+    końca aktywacji" (czyszczenie `ability_overrides` — Rozkaz/Klątwa).
+    Attack scope Oznaczenia usuwa wcześniej `AttackResolved`.
     """
     events: list[BattleEvent] = []
     seq = sequence

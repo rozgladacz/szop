@@ -103,6 +103,7 @@ abilities:
   description: Może wykonywać tę samą akcję wielokrotnie w rundzie.
   rozkaz_tak: true
   rozkaz_kierunek: "+"
+  oznaczenie_tak: true
 - slug: ucieczka
   name: Ucieczka
   type: passive
@@ -119,11 +120,19 @@ abilities:
   description: Podczas szarży naturalne 6 dają dodatkowe zwykłe trafienie.
   rozkaz_tak: true
   rozkaz_kierunek: "+"
+  oznaczenie_tak: true
 - slug: przygotowanie
   name: Przygotowanie
   type: passive
   description: Jeżeli jest Ufortyfikowany, +1 do rzutów na trafienie.
   rozkaz_tak: true
+- slug: planowanie
+  name: Planowanie
+  type: passive
+  description: Jeżeli jest Przygotowany, +1 do rzutów na trafienie.
+  rozkaz_tak: true
+  rozkaz_kierunek: "+"
+  oznaczenie_tak: true
 - slug: kontra
   name: Kontra
   type: passive
@@ -141,6 +150,7 @@ abilities:
   description: Jeżeli jesteś bliżej strefy rozstawienia przeciwnika niż atakowany oddział, przed wykonaniem ataków przeciwnik wybiera, czy podwaja ich liczbę, czy zostaje Przyszpilony.
   rozkaz_tak: true
   rozkaz_kierunek: "+"
+  oznaczenie_tak: true
 - slug: szpica
   name: Szpica
   type: passive
@@ -176,6 +186,7 @@ abilities:
   description: Jeżeli nie ma wrogów w zasięgu 12” od oddziału modelu, +1 do rzutów na trafienie.
   rozkaz_tak: true
   rozkaz_kierunek: "+"
+  oznaczenie_tak: true
 - slug: tarcza
   name: Tarcza
   type: passive
@@ -232,6 +243,7 @@ abilities:
   description: Nie zostajesz wyczerpany po kontrataku.
   rozkaz_tak: true
   rozkaz_kierunek: "−"
+  oznaczenie_tak: true
 - slug: parowanie
   name: Parowanie
   type: passive
@@ -295,6 +307,7 @@ abilities:
   value_type: text
   rozkaz_tak: true
   rozkaz_kierunek: "+"
+  oznaczenie_tak: true
 - slug: mag
   name: Mag
   type: active

@@ -175,7 +175,7 @@ class UnitBlob:
     defense: int = 5  # obrona modelu (threshold for defense per pkt 17.b); default D5
     is_hero_unit: bool = False  # czy w oddziale jest model z zdolnością Bohater (id 2)
     passives: tuple[str, ...] = ()
-    # Czasowe override'y pasywów (Rozkaz/Klątwa/Oznaczenie id 50/45/49, pkt 12 +
+    # Czasowe override'y pasywów (Rozkaz/Klątwa id 50/45, pkt 12 +
     # 11.b.i) — krotka `(slug, granted)`: granted=True nadaje X, granted=False
     # odbiera/tłumi X. Aktywne **do końca aktywacji** (czyszczone w pkt 11.b.vi).
     # Efektywny zbiór pasywów liczy `effective_passives(blob)`; agregatory
@@ -704,7 +704,7 @@ def build_initial_state(
 def effective_passives(blob: UnitBlob) -> tuple[str, ...]:
     """Efektywny zbiór pasywów oddziału z uwzględnieniem czasowych override'ów.
 
-    Rozkaz(X)/Klątwa(X)/Oznaczenie(X) (id 50/45/49) nadają (`granted=True`) lub
+    Rozkaz(X)/Klątwa(X) (id 50/45) nadają (`granted=True`) lub
     odbierają (`granted=False`) pasywkę X do końca aktywacji. `effective_passives`
     łączy bazowe `blob.passives` z override'ami, **zachowując kolejność**
     rejestracji (agregatory `effects.py` iterują w kolejności — determinizm
@@ -725,6 +725,24 @@ def effective_passives(blob: UnitBlob) -> tuple[str, ...]:
         elif slug in result:
             result.remove(slug)
     return tuple(result)
+
+
+def effective_attack_passives(
+    blob: UnitBlob,
+    attack_state: AttackState | None,
+) -> tuple[str, ...]:
+    """Immutable passive view for the declared attacker in one pending attack."""
+    base = effective_passives(blob)
+    if attack_state is None or blob.id != attack_state.intent.attacker_unit_id:
+        return base
+    additions = tuple(
+        override.ability_slug
+        for override in attack_state.ability_overrides
+        if override.ability_slug not in base
+    )
+    if not additions:
+        return base
+    return (*base, *dict.fromkeys(additions))
 
 
 def effective_move_inches(blob: UnitBlob, ruleset_version: str = "v1") -> float:

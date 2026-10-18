@@ -406,6 +406,7 @@ def _resolve_ranged_profile_pools(
         attacker,
         state=state if source_correct else None,
         weapon=weapon,
+        attack_state=state.activation.attack if state.activation is not None else None,
     )
     defense_modifier += _aggregate_passive_defense(
         defender,
@@ -632,13 +633,17 @@ def resolve_melee_attack(
        - `attacker.damage_balance += wounds_dealt`
        - `defender.damage_balance -= wounds_dealt`
     """
-    del state, terrain  # melee MVP: brak osłony / cover (Parowanie id 24 → B3.5+)
+    del terrain  # melee MVP: brak osłony / cover (Parowanie id 24 → B3.5+)
     attack_quality = effective_attack_quality(weapon, attacker)
     is_precyzyjny = ABILITY_PRECYZYJNY in weapon.weapon_abilities
     is_brutalny = ABILITY_BRUTALNY in weapon.weapon_abilities
 
     # Passive modifiers (Cierpliwy/Tarcza dla obrońcy; Ostrożny/Przygotowanie/etc. dla atakującego)
-    attack_modifier = _aggregate_passive_attack(attacker, weapon=weapon)
+    attack_modifier = _aggregate_passive_attack(
+        attacker,
+        weapon=weapon,
+        attack_state=state.activation.attack if state.activation is not None else None,
+    )
     defense_modifier = -weapon.ap + _aggregate_passive_defense(defender, weapon=weapon)
 
     # Faza 2 — Dice

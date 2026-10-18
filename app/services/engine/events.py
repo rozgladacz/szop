@@ -149,8 +149,8 @@ class EffectApplied:
 class InterruptTriggered:
     """Wywołanie przerwania (pkt 12).
 
-    `interrupt_point` == "before_action" (pkt 11.b.i; jedyny punkt po korekcie
-    2026-06-09 — zob. ADR-0015). `slug` = zdolność triggerująca (Strażnik /
+    `interrupt_point` == "before_action" dla v1/v2 albo "attack" dla prywatnego
+    scope v3. `slug` = zdolność triggerująca (Strażnik /
     Rozkaz / Klątwa / etc.).
 
     `consumes_round_limit` (faza-b-order-interrupts) — czy to przerwanie zużywa

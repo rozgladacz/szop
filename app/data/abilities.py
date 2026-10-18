@@ -206,6 +206,13 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         description="Jeżeli jest Ufortyfikowany, +1 do rzutów na trafienie.",
     ),
     AbilityDefinition(
+        slug='planowanie',
+        name='Planowanie',
+        type='passive',
+        description='Jeżeli jest Przygotowany, +1 do rzutów na trafienie.',
+        blocked=True,  # Kanoniczny tag C2b; publiczna wycena/UI poza etapem.
+    ),
+    AbilityDefinition(
         slug="kontra",
         name="Kontra",
         type="passive",

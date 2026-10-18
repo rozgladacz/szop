@@ -460,6 +460,22 @@ tworzył pół-ataku. `AttackResolved` usuwa wyłącznie `ActivationState.attack
 nie może czyścić `UnitBlob.ability_overrides`, więc jeden atak nie usuwa
 Rozkazu ani Klątwy.
 
+**C2b DONE 2026-10-18:** prywatny transition używa osobnego handlera
+`execute_oznaczenie_attack_interrupt_outcomes`, a immutable katalog siedmiu X
+powstaje raz z jawnego `RulesetAbility.oznaczenie_tak`. Handler nie odczytuje
+rulesetu ani DB. `effective_attack_passives` składa bazowe pasywki i scope
+konkretnego `AttackState`; istniejący combat/effects SSOT czyta go tylko dla
+atakującego z intentu, także po ewentualnym kontrataku Szarży. Canonical
+outcome eventy pozostają jedynym źródłem zmian obrażeń. Prywatny accepted
+interrupt, passy i resolve mają complete-tail replay/restart/RNG parity;
+publiczna allowlista pozostaje `rozkaz|klatwa|straznik`.
+
+Kanon [pozycja 25](../../app/static/docs/SZOP_Zdolnosci.md) nazywa tagowaną
+pasywkę `Planowanie` i uzależnia premię od stanu Przygotowany. Dotychczasowy
+katalog miał tylko odmienne `Przygotowanie` (warunek Ufortyfikowany). C2b dodał
+`planowanie` addytywnie, zablokowane w publicznym katalogu i bez zmiany
+istniejącej wyceny `przygotowanie`; drift kosztów/mechaniki wymaga osobnego etapu.
+
 #### 5.5. RNG, transakcja i failure semantics
 
 Declaration, attack interrupt i pass nie wykonują rzutów i checkpointują
@@ -809,7 +825,7 @@ historyczny error contract ADR-0054.
 | Rozkaz(X) | Public-ready w pure engine i trwałym transporcie v2 od B4.4b.7/B4.4c.9. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
 | Klątwa(X) | Public-ready od B4.4d.C0; reużywa istniejący transport v2 i klienta. | Osobny validator `klatwa_tak`, pięć jawnych pasywek (`delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`), enemy target, 12″, oba kierunki strict bool, limit raz/rundę i wygaśnięcie przy finalizacji; nie reużywa `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
 | Strażnik | Public-ready od B4.4d.C1c przez istniejący activation protocol v2, durable service, FastAPI i `HttpClient.interrupt`. | Exact plan zawiera tylko `assignments[{weapon_slug,target_id}]`; private C1b rozwiązuje canonical inventory, legalny source/weapon/1–2 targets, pełny multi-profile Ostrzał z per-target pools, następnie Wyczerpany, bounded eventy, RNG/replay i no-nested. C1c dodaje strict preflight przed I/O, bezpośredni dispatch omijający legacy stub, atomowy event+RNG checkpoint, real-transport/auth/race/rollback/query gates i allowlistę dokładnie `rozkaz|klatwa|straznik` ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]). |
-| Oznaczenie(X) | C2a0 design DONE; implementacja i publikacja pozostają OPEN. | Protocol/checkpoint v3 z sekcji 5: deklaracja dopiero po zamknięciu ogólnego `BEFORE_ACTION`, osobny attack scope, cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, effect view tylko dla zadeklarowanego atakującego i usunięcie przez `AttackResolved` ([pozycja 49][Z49]). Przyszły handler użyje istniejącego `POST /interrupts`, ale nie `UnitBlob.ability_overrides`. |
+| Oznaczenie(X) | Prywatny C2b DONE; trwała/publiczna publikacja pozostaje w C2c. | Protocol/checkpoint v3 z sekcji 5: deklaracja po zamknięciu ogólnego `BEFORE_ACTION`, osobny attack scope, cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, effect view tylko dla zadeklarowanego atakującego i usunięcie przez `AttackResolved` ([pozycja 49][Z49]). Osobny prywatny handler nie używa `UnitBlob.ability_overrides`; przyszły transport użyje istniejącego `POST /interrupts`. |
 
 Registry może zawierać niegotowe handlery do testów engine; publiczna allowlista
 nie może ich eksportować.
@@ -1231,13 +1247,15 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   SSOT mechaniki, a wyłącznie `ActivationActionCommitted` zwiększa
   `action_count/action_types`. Bez metadata/handlera Oznaczenia, attack effect
   view/combat wiring, persistence/DB/router/FastAPI/klienta i allowlisty.
-- **C2b source-correct metadata/private handler OPEN:** dodać immutable
-  `oznaczenie_tak`, strict katalog/payload, source/ally/other-attacker/target
-  edge-to-edge 12″/raz-rundę oraz attack effect view widoczny tylko dla
-  zadeklarowanego atakującego, także z kontratakiem Szarży. Warunek zakończenia:
-  exact `InterruptTriggered` + `AttackAbilityOverrideApplied`, combat/replay
-  parity i brak mutacji/czyszczenia `UnitBlob.ability_overrides`; bez I/O,
-  publicznej allowlisty i transportu.
+- **C2b source-correct metadata/private handler DONE 2026-10-18:** immutable
+  `oznaczenie_tak` dla siedmiu source-correct X, exact payload, żywy/frontowy
+  source różny od sojuszniczego atakującego, edge-to-edge 12″ do utrwalonego
+  celu, limit raz/rundę i bounded attack scope. Accepted batch ma kolejność
+  `AttackInterruptTriggered`, `InterruptTriggered(consumes_round_limit=true)`,
+  `AttackAbilityOverrideApplied`. Widok efektów trafia do combat tylko dla
+  zadeklarowanego atakującego, także przy kontrataku Szarży; replay/restart/RNG
+  i cleanup zachowują activation overrides. Handler nie wykonuje I/O, a
+  publiczna allowlista i transport pozostają bez zmian.
 - **C2c durable/FastAPI/HttpClient OPEN:** rozszerzyć opt-in create/invite i DB
   constraint do protocol v3, rozdzielić durable declaration/resolve oraz
   activation/attack interrupt scope, dodać strict uniony na istniejących

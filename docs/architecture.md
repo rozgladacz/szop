@@ -365,6 +365,10 @@ Oznaczenie przyjmuje tylko exact `{"ability": X}`. Source musi być innym,
 Oznaczenie; pomiar edge-to-edge 12″ jest zawsze source→utrwalony cel ataku, a
 X pochodzi wyłącznie z `oznaczenie_tak: true`
 ([`SZOP_Zdolnosci.md` konwencje tagów i pozycja 49](../app/static/docs/SZOP_Zdolnosci.md)).
+Katalog siedmiu X jest przygotowany raz z frozen rulesetu, więc prywatny handler
+nie wykonuje I/O. `planowanie` dodano addytywnie dla kanonicznej
+[`pozycji 25`](../app/static/docs/SZOP_Zdolnosci.md); pozostaje zablokowane w
+publicznym katalogu, a historyczne `przygotowanie` i jego wycena są bez zmian.
 Wynika to z osobnego miejsca przerwania po legalnej deklaracji; ogólne
 `BEFORE_ACTION` nadal odpowiada
 [`SZOP_Rozjemca.md` pkt 11.b.i–ii i 12.a–c](../app/static/docs/SZOP_Rozjemca.md).
@@ -375,9 +379,10 @@ Nowe eventy v3 to `AttackDeclared`, `AttackInterruptWindowOpened`,
 `AttackResolved`; C2a2 rejestruje ich exact codec i reducery. Pass-only
 lifecycle emituje declaration/open, dwa jawne passy, close, istniejące outcome
 eventy, resolve i commit. `AttackInterruptTriggered` oraz
-`AttackAbilityOverrideApplied` są w C2a2 wyłącznie gotowym kontraktem
-event/reducer — metadata, handler i combat effect view należą do C2b.
-Docelowo Oznaczenie emituje marker protokołu, istniejący
+`AttackAbilityOverrideApplied` powstały jako kontrakt event/reducer w C2a2.
+C2b dodał immutable tagi `oznaczenie_tak`, osobny strict prywatny handler
+oraz attack effect view podpięty do combat SSOT.
+Prywatne Oznaczenie emituje marker protokołu, istniejący
 `InterruptTriggered(consumes_round_limit=true)` oraz attack-only override;
 nie emituje `AbilityOverrideApplied`. Resolve emituje istniejące outcome eventy
 combat/statusów, potem `AttackResolved` usuwający wyłącznie attack scope i na
@@ -400,12 +405,12 @@ checkpointu; każdy validation/domain/DB/race failure zachowuje poprzedni RNG
 i head. Pułapy pozostają dokładnie 5 SELECT-ów service, 6 session i 7 bearer,
 bez I/O per source/X/target/event.
 
-Implementacja pozostaje podzielona: C2a1 model+exact codec v3 oraz C2a2
-eventy/reducery/pure declare-pass-close-resolve są DONE; OPEN pozostają C2b
-source-correct `oznaczenie_tak`/private handler/combat effect view oraz C2c
+Implementacja pozostaje podzielona: C2a1 model+exact codec v3, C2a2
+eventy/reducery/pure declare-pass-close-resolve i C2b prywatny source-correct
+handler/attack effect view są DONE; OPEN pozostaje C2c
 durable service, constraint opt-in v3, FastAPI i HttpClient. Dopiero C2c może
 rozszerzyć
-allowlistę; po C2a2 nadal wynosi ona dokładnie
+allowlistę; po C2b nadal wynosi ona dokładnie
 `{"rozkaz", "klatwa", "straznik"}` i `oznaczenie` jest odrzucane bez zapisu.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
@@ -552,13 +557,13 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `state_codec.py` **(B4.4b.1 + B4.4d.C2a1)** | ~600 | Whitelist-based checkpoint codec z osobnymi zamkniętymi rejestrami typów, enumów i exact fields dla v1/v2/v3. Publiczny no-arg encoder pozostaje v1; v2 zachowuje dotychczasowy activation/window payload bez `attack`, a prywatny v3 koduje immutable pending attack i limituje głębokość do 64. Decoder nie auto-upgrade'uje starszych wersji. Persistence/router/client pozostają na allowliście v1/v2. |
 | `events.py` **(B4.4d.C2a2)** | ~915 | **33 event types**: 16 historycznych eventów mechanicznych, 10 eventów activation protocol B4.4b.2 i 7 strict attack-protocol eventów C2a2. Attack declaration ma zamknięty nested intent codec Shoot/Charge; historyczne tagi i payloady pozostają bez zmian. `ActivationActionCommitted` nadal reużywa SSOT discriminatorów `Action`. |
 | `reducers.py` **(B3.9.d + B4.4b.2 + B4.4d.C2a2)** | ~1015 | `@register_reducer` dla wszystkich 33 event types. Historyczne outcome reducerry pozostają SSOT skutków mechanicznych; 10 reducerów activation protocol i 7 reducerów attack protocol zmienia wyłącznie właściwy scope. `AttackResolved` usuwa attack scope, a tylko `ActivationActionCommitted` zwiększa `action_count/action_types`. Auto-rejestracja przez side-effect import w `__init__.py`; gate kompletności porównuje registry eventów i reducerów. |
-| `activation_protocol.py` **(B4.4b.3–6, B4.4d.C1a/C2a2)** | ~1355 | Pure transition core v2 oraz prywatny lifecycle v3. Deklaracja canonicalizuje minimalny attack intent z `UnitBlob` inventory, dwa jawne passy zamykają attack window, a resolve rekonstruuje akcję i reużywa istniejący outcome/commit bridge. Wszystkie mutacje RNG działają na prywatnym klonie; validation/outcome failure zachowuje input, a live checkpoint jest sprawdzany przeciw complete event tail. Nonattack v3 deleguje do v2. Bez metadata/handlera Oznaczenia, combat effect view, built-in wiring/allowlisty, I/O i persistence. |
+| `activation_protocol.py` **(B4.4b.3–6, B4.4d.C1a/C2a2/C2b)** | ~1450 | Pure transition core v2 oraz prywatny lifecycle v3. Deklaracja canonicalizuje minimalny attack intent z `UnitBlob` inventory, dwa jawne passy zamykają attack window, a resolve rekonstruuje akcję i reużywa istniejący outcome/commit bridge. C2b dodaje prywatny strict attack interrupt i exact trzyzdarzeniowy batch. Wszystkie mutacje RNG działają na prywatnym klonie; validation/outcome failure zachowuje input, a live checkpoint jest sprawdzany przeciw complete event tail. Nonattack v3 deleguje do v2; bez publicznej allowlisty, I/O i persistence v3. |
 | `dice.py` | ~110 | `DeterministicDice(seed)` na `random.Random` (ADR-0012), `RollResult` z natural rolls, `roll_with_threshold` pełna semantyka pkt 1 (a/b/c/d) |
 | `los.py` | ~175 | `check_los` 3-state (WIDZI/NIE_WIDZI/OSŁONA) z sampling N=16 (ADR-0043), Zasłaniający exception pkt 4.c.iii. **B3.9.b**: importuje primitive z `geometry.py`; `UNIT_CIRCLE_16` precomputed dla perf (16× math.cos/sin → 0 per call). |
 | `prediction.py` | ~210 | Analytic binomial bez RNG (ADR-0044), `expected_damage(...) → DamageDistribution`, `would_see` hipotetyczny LoS. **Monte Carlo parity** ±3σ z combat.resolve_ranged_attack |
 | `combat.py` | ~700 | `CombatResult` + `ChargeResult` + wspólny single-/multi-profile ranged SSOT: wszystkie testy przed per-target alokacją pul pkt 17; legacy `resolve_ranged_attack` deleguje do tego samego core. Dalej `resolve_melee_attack` (damage_balance pkt 20.c) + `resolve_charge_attack` (pkt 14.d + reactive kontratak ADR-0015a). **B3.9.b fix #4**: `circle_edge_distance` w `min_gap`. **B3.9.d**: `StatusAdded(Wyczerpany)` po kontrataku. **B3.9.e fix #7**: counter bierze inventory obrońcy. Ranged core honoruje AP/Brutalny/Precyzyjny/Niezawodny/Podwójny, target Delikatny/Niewrażliwy/Przygotowany i Namierzanie. |
 | `effects.py` | ~340 | Per-hook passive registry (3 kategorie: defense/attack/weapon modifiers; morale-modifier usunięty 2026-06 — drift pkt 20.e, Nieustraszony binarny w `phases._regroup_test`) + **`_ACTIVE_ABILITY_REGISTRY`** (B3.9.e/ADR-0047) z `register_active_ability(slug)` dekoratorem + `get_active_ability(slug)` lookup. MVP passive: Cierpliwy/Tarcza (defense). Built-in active: pełen `discard_exhausted` + 6 stubów (Łatanie/Mag/Mobilizacja/Presja/Przepowiednia/Męczennik). |
-| `interrupts.py` | ~1100 | `InterruptManager` z jednym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. Publiczny `READY_INTERRUPT_HANDLERS={"rozkaz", "klatwa", "straznik"}` jest węższy od registry. Built-in adapter ma osobne strict preflighty Rozkazu, Klątwy i planu Strażnika. C1b private outcome rozwiązuje canonical ranged inventory, multi-target Ostrzał, Wyczerpany, bounded eventy i unsupported mechanics; C1c dispatchuje do niego bezpośrednio z RNG, omijając kompatybilny legacy registry stub. Oznaczenie nadal jest historycznym uproszczeniem niedostępnym publicznie. |
+| `interrupts.py` | ~1200 | `InterruptManager` z jednym ogólnym punktem `BEFORE_ACTION` ([`SZOP_Rozjemca.md` pkt 11.b.i](../app/static/docs/SZOP_Rozjemca.md); korekta ADR-0015), registry i `get_eligible_interrupts`. Publiczny `READY_INTERRUPT_HANDLERS={"rozkaz", "klatwa", "straznik"}` pozostaje węższy od registry. Built-in adapter ma osobne strict preflighty Rozkazu, Klątwy i planu Strażnika. C2b ma odrębny prywatny handler Oznaczenia z procesowo przygotowanym katalogiem `oznaczenie_tak`, bez reużycia historycznego `_oznaczenie_handler`; source/ally/range/limit są sprawdzane z immutable state. |
 | `actions.py` | ~145 | 6 Action types frozen (`DeploymentAction/ManeuverAction/DefendAction/ShootAction/ChargeAction/SpecialAction`) + `Action` Union alias, kanoniczne discriminators oraz współdzielona walidacja trwałej historii follow-up |
 | `phases.py` | ~1030 | `setup_phase`, `deployment_round` oraz split aktywacji: `_begin_activation` raz, `_apply_single_action` = akcja + Przegrupowanie, `_finalize_activation` = Odzyskiwanie ran placeholder + Aktywowany + clear override'ów ([`SZOP_Rozjemca.md` pkt 11.b.i–vi](../app/static/docs/SZOP_Rozjemca.md)). **B3.9.c**: `ActivationContext` frozen dataclass + `_build_activation_context` (delta `wounds_received_this_activation` per blob + `melee_combatants` frozenset). **B3.9.d**: emit Status* + MeleeBalanceReset. **B3.9.e**: `_apply_special` deleguje do `effects.get_active_ability`. |
 | `resolver.py` | ~360 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` zamyka legacy jednoakcyjną aktywację; `apply_activation(..., continuation)` wykonuje do dwóch akcji, ale `actions_taken` jest tylko procesowe. `should_end_round` / `is_battle_over`. Trwałe przerwanie między krokami wymaga event-sourced activation/window z ADR-0056; obecny resolver nie jest restart-safe seam dla osobnego interrupt requestu. |

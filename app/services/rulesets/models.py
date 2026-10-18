@@ -151,7 +151,8 @@ class RulesetAbility(BaseModel):
     `rozkaz_tak` (R4 2026-06): czy ability może być X w Rozkaz(X).
     `rozkaz_kierunek` zachowuje kanoniczny znacznik efektu: "+" nadaje
     korzystną zdolność, "−" odbiera niekorzystną. `klatwa_tak` określa osobny
-    katalog X dla Klątwy(X). Tylko passive abilities mogą być legalnym X;
+    katalog X dla Klątwy(X), a `oznaczenie_tak` dla Oznaczenia(X).
+    Tylko passive abilities mogą być legalnym X;
     None = brak jawnego tagu/false.
     """
 
@@ -167,6 +168,7 @@ class RulesetAbility(BaseModel):
     rozkaz_tak: bool | None = None
     rozkaz_kierunek: Literal["+", "−"] | None = None
     klatwa_tak: StrictBool | None = None
+    oznaczenie_tak: StrictBool | None = None
 
 
 class RulesetAbilitiesDocument(BaseModel):
