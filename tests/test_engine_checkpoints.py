@@ -1025,7 +1025,7 @@ def test_v1_v2_reject_attack_fields_and_new_phases() -> None:
         battle_state_to_json(attack_state, version=2)
 
 
-def test_public_codec_entrypoints_reject_private_v3() -> None:
+def test_public_codec_entrypoints_accept_exact_v3() -> None:
     state = _v3_state(
         _attack_activation(
             ActivationPhase.ATTACK_WINDOW,
@@ -1034,10 +1034,8 @@ def test_public_codec_entrypoints_reject_private_v3() -> None:
     )
     payload = _battle_state_to_json_v3(state)
 
-    with pytest.raises(BattleStateCodecError):
-        battle_state_to_json(state, version=3)
-    with pytest.raises(BattleStateCodecError):
-        battle_state_from_json(payload)
+    assert battle_state_to_json(state, version=3) == payload
+    assert battle_state_from_json(payload) == state
 
 
 def test_v3_rejects_legacy_and_unknown_registry_entries() -> None:

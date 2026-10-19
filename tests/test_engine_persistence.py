@@ -267,7 +267,7 @@ def test_checkpoint_explicit_v2_preserves_durable_initiative() -> None:
     assert loaded.state.initiative_player == state.active_player
 
 
-@pytest.mark.parametrize("state_version", [None, True, 0, 3, 1.0, "2"])
+@pytest.mark.parametrize("state_version", [None, True, 0, 4, 1.0, "2"])
 def test_checkpoint_rejects_invalid_state_version_before_insert(state_version) -> None:
     session = _build_session()
     battle = _new_battle(session)

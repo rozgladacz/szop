@@ -11,13 +11,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..battle_protocol import ACTIVATION_PROTOCOL_VERSION_V2
+from ..battle_protocol import (
+    ACTIVATION_PROTOCOL_VERSIONS,
+    ACTIVATION_PROTOCOL_VERSION_V2,
+    ACTIVATION_PROTOCOL_VERSION_V3,
+)
 from .engine.action_codec import ActionCodecError, action_from_json, action_to_json
 from .engine.activation_protocol import (
     ActivationInterruptOutcomeExecutor,
     ActivationProtocolError,
     ActivationProtocolErrorReason,
     commit_activation_action,
+    _commit_activation_action_v3,
+    _pass_attack_interrupt_priority,
+    _resolve_activation_attack,
+    _trigger_attack_interrupt,
     continue_activation,
     finalize_activation,
     pass_interrupt_priority,
@@ -41,6 +49,8 @@ from .engine.persistence import (
     save_events,
 )
 from .engine.state import BattleState
+
+_READY_ATTACK_X: frozenset[str] = frozenset()
 
 
 class BattleActivationStartError(RuntimeError):
@@ -209,6 +219,16 @@ class BattleActivationInterruptUnsupported(BattleActivationInterruptInvalid):
     def __init__(self) -> None:
         super().__init__(
             "Unsupported interrupt",
+            reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+        )
+
+
+class BattleActivationAttackScopeRequired(BattleActivationInterruptInvalid):
+    """Oznaczenie in v3 needs an explicit pending attack scope."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Attack scope is required",
             reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
         )
 
@@ -395,6 +415,7 @@ class StagedBattleActivationStart:
     state: BattleState
     events: tuple[BattleEvent, ...]
     dice: DeterministicDice
+    protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V2
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,6 +428,7 @@ class StagedBattleActivationPass:
     state: BattleState
     events: tuple[BattleEvent, ...]
     dice: DeterministicDice
+    protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V2
 
 
 @dataclass(frozen=True, slots=True)
@@ -419,6 +441,7 @@ class StagedBattleActivationInterrupt:
     state: BattleState
     events: tuple[BattleEvent, ...]
     dice: DeterministicDice
+    protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V2
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,6 +455,7 @@ class StagedBattleActivationAction:
     state: BattleState
     events: tuple[BattleEvent, ...]
     dice: DeterministicDice
+    protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V2
 
 
 @dataclass(frozen=True, slots=True)
@@ -444,6 +468,7 @@ class StagedBattleActivationContinue:
     state: BattleState
     events: tuple[BattleEvent, ...]
     dice: DeterministicDice
+    protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V2
 
 
 @dataclass(frozen=True, slots=True)
@@ -456,6 +481,7 @@ class StagedBattleActivationFinalize:
     state: BattleState
     events: tuple[BattleEvent, ...]
     dice: DeterministicDice
+    protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V2
 
 
 def stage_battle_activation_start(
@@ -482,7 +508,7 @@ def stage_battle_activation_start(
         battle_id=battle_id,
         caller_user_id=caller_user_id,
     )
-    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+    if battle.activation_protocol_version not in ACTIVATION_PROTOCOL_VERSIONS[1:]:
         raise BattleActivationStartUpgradeRequired
     if battle.status != "active":
         raise BattleActivationStartInvalid(
@@ -498,6 +524,8 @@ def stage_battle_activation_start(
         raise BattleActivationStartUnavailable(
             actual_sequence=latest_event_sequence(db, battle.id)
         )
+    if checkpoint.version != battle.activation_protocol_version:
+        raise BattleActivationStartUnavailable(actual_sequence=checkpoint.sequence_at)
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActivationStartSequenceConflict(
             expected_sequence=expected_sequence,
@@ -549,7 +577,7 @@ def stage_battle_activation_start(
             new_sequence,
             transition.state,
             checkpoint.dice,
-            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+            state_version=battle.activation_protocol_version,
         )
     except BattleEventSequenceConflict as exc:
         raise BattleActivationStartSequenceConflict(
@@ -566,6 +594,7 @@ def stage_battle_activation_start(
         state=transition.state,
         events=transition.events,
         dice=checkpoint.dice,
+        protocol_version=battle.activation_protocol_version,
     )
 
 
@@ -578,6 +607,8 @@ def stage_battle_activation_pass(
     activation_id: int,
     expected_activation_version: int,
     expected_window_version: int,
+    attack_id: int | None = None,
+    expected_attack_version: int | None = None,
 ) -> StagedBattleActivationPass:
     """Stage exactly one explicit v2 priority pass without ending a transaction."""
 
@@ -608,6 +639,12 @@ def stage_battle_activation_pass(
             "Invalid window guard",
             reason=ActivationProtocolErrorReason.STALE_WINDOW,
         )
+    attack_scope = attack_id is not None or expected_attack_version is not None
+    if attack_scope and (
+        type(attack_id) is not int or attack_id < 1
+        or type(expected_attack_version) is not int or expected_attack_version < 1
+    ):
+        raise BattleActivationPassInvalid("Invalid attack guard", reason=ActivationProtocolErrorReason.STALE_ATTACK)
 
     try:
         battle = _get_participant_battle(
@@ -617,7 +654,9 @@ def stage_battle_activation_pass(
         )
     except BattleActivationStartNotFound as exc:
         raise BattleActivationPassNotFound from exc
-    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+    if battle.activation_protocol_version not in ACTIVATION_PROTOCOL_VERSIONS[1:]:
+        raise BattleActivationPassUpgradeRequired
+    if attack_scope and battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V3:
         raise BattleActivationPassUpgradeRequired
     if battle.status != "active":
         raise BattleActivationPassInvalid(
@@ -633,6 +672,8 @@ def stage_battle_activation_pass(
         raise BattleActivationPassUnavailable(
             actual_sequence=latest_event_sequence(db, battle.id)
         )
+    if checkpoint.version != battle.activation_protocol_version:
+        raise BattleActivationPassUnavailable(actual_sequence=checkpoint.sequence_at)
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActivationPassSequenceConflict(
             expected_sequence=expected_sequence,
@@ -647,11 +688,12 @@ def stage_battle_activation_pass(
         )
 
     activation = checkpoint.state.activation
-    priority_player = (
-        activation.window.priority_player
-        if activation is not None and activation.window is not None
-        else 0
+    window = (
+        activation.attack.window
+        if attack_scope and activation is not None and activation.attack is not None
+        else activation.window if activation is not None else None
     )
+    priority_player = window.priority_player if window is not None else 0
     try:
         caller_player = _caller_player(
             battle,
@@ -664,12 +706,14 @@ def stage_battle_activation_pass(
         ) from exc
 
     try:
-        transition = pass_interrupt_priority(
+        transition_fn = _pass_attack_interrupt_priority if attack_scope else pass_interrupt_priority
+        transition = transition_fn(
             checkpoint.state,
             caller_player=caller_player,
             activation_id=activation_id,
             expected_activation_version=expected_activation_version,
             expected_window_version=expected_window_version,
+            **({"attack_id": attack_id, "expected_attack_version": expected_attack_version} if attack_scope else {}),
             sequence=checkpoint.sequence_at + 1,
         )
     except ActivationProtocolError as exc:
@@ -696,7 +740,7 @@ def stage_battle_activation_pass(
             new_sequence,
             transition.state,
             checkpoint.dice,
-            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+            state_version=battle.activation_protocol_version,
         )
     except BattleEventSequenceConflict as exc:
         raise BattleActivationPassSequenceConflict(
@@ -713,6 +757,7 @@ def stage_battle_activation_pass(
         state=transition.state,
         events=transition.events,
         dice=checkpoint.dice,
+        protocol_version=battle.activation_protocol_version,
     )
 
 
@@ -728,6 +773,8 @@ def stage_battle_activation_interrupt(
     source_unit_id: int,
     ability_slug: str,
     payload: Mapping[str, Any],
+    attack_id: int | None = None,
+    expected_attack_version: int | None = None,
     outcome_executor: ActivationInterruptOutcomeExecutor = (
         execute_ready_activation_interrupt_outcomes
     ),
@@ -772,18 +819,26 @@ def stage_battle_activation_interrupt(
             "Invalid interrupt request",
             reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
         )
-    if ability_slug not in READY_INTERRUPT_HANDLERS:
-        raise BattleActivationInterruptUnsupported
-    try:
-        canonical_payload = validate_ready_activation_interrupt_request(
-            ability_slug=ability_slug,
-            payload=payload,
-        )
-    except InvalidInterruptError as exc:
-        raise BattleActivationInterruptInvalid(
-            "Invalid interrupt request",
-            reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
-        ) from exc
+    attack_scope = attack_id is not None or expected_attack_version is not None
+    if attack_scope and (
+        type(attack_id) is not int or attack_id < 1
+        or type(expected_attack_version) is not int or expected_attack_version < 1
+    ):
+        raise BattleActivationInterruptInvalid("Invalid attack guard", reason=ActivationProtocolErrorReason.STALE_ATTACK)
+    needs_attack_scope = not attack_scope and ability_slug == "oznaczenie"
+    if not attack_scope and not needs_attack_scope:
+        if ability_slug not in READY_INTERRUPT_HANDLERS:
+            raise BattleActivationInterruptUnsupported
+        try:
+            canonical_payload = validate_ready_activation_interrupt_request(
+                ability_slug=ability_slug,
+                payload=payload,
+            )
+        except InvalidInterruptError as exc:
+            raise BattleActivationInterruptInvalid(
+                "Invalid interrupt request",
+                reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+            ) from exc
 
     try:
         battle = _get_participant_battle(
@@ -793,13 +848,37 @@ def stage_battle_activation_interrupt(
         )
     except BattleActivationStartNotFound as exc:
         raise BattleActivationInterruptNotFound from exc
-    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+    if battle.activation_protocol_version not in ACTIVATION_PROTOCOL_VERSIONS[1:]:
         raise BattleActivationInterruptUpgradeRequired
+    if attack_scope and battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V3:
+        raise BattleActivationInterruptUpgradeRequired
+    if needs_attack_scope:
+        if battle.activation_protocol_version == ACTIVATION_PROTOCOL_VERSION_V3:
+            raise BattleActivationAttackScopeRequired
+        raise BattleActivationInterruptUnsupported
     if battle.status != "active":
         raise BattleActivationInterruptInvalid(
             "Battle is not active",
             reason=ActivationProtocolErrorReason.INVALID_PHASE,
         )
+    if attack_scope:
+        if (
+            ability_slug != "oznaczenie"
+            or type(payload) is not dict
+            or set(payload) != {"ability"}
+            or type(payload["ability"]) is not str
+            or not payload["ability"]
+            or len(payload["ability"]) > 128
+        ):
+            raise BattleActivationInterruptInvalid(
+                "Invalid attack interrupt",
+                reason=ActivationProtocolErrorReason.ILLEGAL_INTERRUPT,
+            )
+        # Canonical tags alone do not prove an attacker-side effect. The public
+        # readiness set stays empty until those mechanics have their own gate.
+        if payload["ability"] not in _READY_ATTACK_X:
+            raise BattleActivationInterruptUnsupported
+        canonical_payload = dict(payload)
 
     try:
         checkpoint = load_latest_checkpoint(db, battle.id)
@@ -809,6 +888,8 @@ def stage_battle_activation_interrupt(
         raise BattleActivationInterruptUnavailable(
             actual_sequence=latest_event_sequence(db, battle.id)
         )
+    if checkpoint.version != battle.activation_protocol_version:
+        raise BattleActivationInterruptUnavailable(actual_sequence=checkpoint.sequence_at)
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActivationInterruptSequenceConflict(
             expected_sequence=expected_sequence,
@@ -823,11 +904,12 @@ def stage_battle_activation_interrupt(
         )
 
     activation = checkpoint.state.activation
-    priority_player = (
-        activation.window.priority_player
-        if activation is not None and activation.window is not None
-        else 0
+    window = (
+        activation.attack.window
+        if attack_scope and activation is not None and activation.attack is not None
+        else activation.window if activation is not None else None
     )
+    priority_player = window.priority_player if window is not None else 0
     try:
         caller_player = _caller_player(
             battle,
@@ -839,18 +921,20 @@ def stage_battle_activation_interrupt(
             actual_sequence=checkpoint.sequence_at
         ) from exc
     try:
-        transition = trigger_activation_interrupt(
+        transition_fn = _trigger_attack_interrupt if attack_scope else trigger_activation_interrupt
+        transition = transition_fn(
             checkpoint.state,
             caller_player=caller_player,
             activation_id=activation_id,
             expected_activation_version=expected_activation_version,
             expected_window_version=expected_window_version,
+            **({"attack_id": attack_id, "expected_attack_version": expected_attack_version} if attack_scope else {}),
             source_unit_id=source_unit_id,
             ability_slug=ability_slug,
             payload=canonical_payload,
             dice=checkpoint.dice,
             sequence=checkpoint.sequence_at + 1,
-            outcome_executor=outcome_executor,
+            **({} if attack_scope else {"outcome_executor": outcome_executor}),
         )
     except ActivationProtocolError as exc:
         if exc.reason is ActivationProtocolErrorReason.PROTOCOL_UPGRADE_REQUIRED:
@@ -891,7 +975,7 @@ def stage_battle_activation_interrupt(
             new_sequence,
             transition.state,
             transition.dice,
-            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+            state_version=battle.activation_protocol_version,
         )
     except BattleEventSequenceConflict as exc:
         raise BattleActivationInterruptSequenceConflict(
@@ -908,6 +992,7 @@ def stage_battle_activation_interrupt(
         state=transition.state,
         events=transition.events,
         dice=transition.dice,
+        protocol_version=battle.activation_protocol_version,
     )
 
 
@@ -919,7 +1004,9 @@ def stage_battle_activation_action(
     expected_sequence: int,
     activation_id: int,
     expected_activation_version: int,
-    action_payload: Mapping[str, Any],
+    action_payload: Mapping[str, Any] | None = None,
+    attack_id: int | None = None,
+    expected_attack_version: int | None = None,
 ) -> StagedBattleActivationAction:
     """Stage exactly one legal v2 activation action without ending a transaction."""
 
@@ -943,6 +1030,16 @@ def stage_battle_activation_action(
             reason=ActivationProtocolErrorReason.STALE_ACTIVATION,
         )
 
+    resolving = attack_id is not None or expected_attack_version is not None
+    if resolving and (
+        type(attack_id) is not int or attack_id < 1
+        or type(expected_attack_version) is not int or expected_attack_version < 1
+        or action_payload is not None
+    ):
+        raise BattleActivationActionInvalid("Invalid attack guard", reason=ActivationProtocolErrorReason.STALE_ATTACK)
+    if not resolving and action_payload is None:
+        raise BattleActivationActionInvalid("Invalid action payload")
+
     try:
         battle = _get_participant_battle(
             db,
@@ -951,7 +1048,9 @@ def stage_battle_activation_action(
         )
     except BattleActivationStartNotFound as exc:
         raise BattleActivationActionNotFound from exc
-    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+    if battle.activation_protocol_version not in ACTIVATION_PROTOCOL_VERSIONS[1:]:
+        raise BattleActivationActionUpgradeRequired
+    if resolving and battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V3:
         raise BattleActivationActionUpgradeRequired
     if battle.status != "active":
         raise BattleActivationActionInvalid(
@@ -967,6 +1066,8 @@ def stage_battle_activation_action(
         raise BattleActivationActionUnavailable(
             actual_sequence=latest_event_sequence(db, battle.id)
         )
+    if checkpoint.version != battle.activation_protocol_version:
+        raise BattleActivationActionUnavailable(actual_sequence=checkpoint.sequence_at)
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActivationActionSequenceConflict(
             expected_sequence=expected_sequence,
@@ -980,11 +1081,14 @@ def stage_battle_activation_action(
             actual_sequence=checkpoint.sequence_at
         )
 
-    try:
-        action = action_from_json(action_payload)
-        canonical_action = action_to_json(action)
-    except (ActionCodecError, TypeError, ValueError) as exc:
-        raise BattleActivationActionInvalid("Invalid action payload") from exc
+    if not resolving:
+        try:
+            action = action_from_json(action_payload)
+            canonical_action = action_to_json(action)
+        except (ActionCodecError, TypeError, ValueError) as exc:
+            raise BattleActivationActionInvalid("Invalid action payload") from exc
+    else:
+        canonical_action = {}
 
     activation = checkpoint.state.activation
     controlled_player = (
@@ -1002,12 +1106,17 @@ def stage_battle_activation_action(
         ) from exc
 
     try:
-        transition = commit_activation_action(
+        transition_fn = (
+            _resolve_activation_attack if resolving
+            else _commit_activation_action_v3 if battle.activation_protocol_version == ACTIVATION_PROTOCOL_VERSION_V3
+            else commit_activation_action
+        )
+        transition = transition_fn(
             checkpoint.state,
             caller_player=caller_player,
             activation_id=activation_id,
             expected_activation_version=expected_activation_version,
-            action=action,
+            **({"attack_id": attack_id, "expected_attack_version": expected_attack_version} if resolving else {"action": action}),
             dice=checkpoint.dice,
             sequence=checkpoint.sequence_at + 1,
         )
@@ -1037,7 +1146,7 @@ def stage_battle_activation_action(
             new_sequence,
             transition.state,
             transition.dice,
-            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+            state_version=battle.activation_protocol_version,
         )
     except BattleEventSequenceConflict as exc:
         raise BattleActivationActionSequenceConflict(
@@ -1055,6 +1164,7 @@ def stage_battle_activation_action(
         state=transition.state,
         events=transition.events,
         dice=transition.dice,
+        protocol_version=battle.activation_protocol_version,
     )
 
 
@@ -1097,7 +1207,7 @@ def stage_battle_activation_continue(
         )
     except BattleActivationStartNotFound as exc:
         raise BattleActivationContinueNotFound from exc
-    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+    if battle.activation_protocol_version not in ACTIVATION_PROTOCOL_VERSIONS[1:]:
         raise BattleActivationContinueUpgradeRequired
     if battle.status != "active":
         raise BattleActivationContinueInvalid(
@@ -1113,6 +1223,8 @@ def stage_battle_activation_continue(
         raise BattleActivationContinueUnavailable(
             actual_sequence=latest_event_sequence(db, battle.id)
         )
+    if checkpoint.version != battle.activation_protocol_version:
+        raise BattleActivationContinueUnavailable(actual_sequence=checkpoint.sequence_at)
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActivationContinueSequenceConflict(
             expected_sequence=expected_sequence,
@@ -1175,7 +1287,7 @@ def stage_battle_activation_continue(
             new_sequence,
             transition.state,
             checkpoint.dice,
-            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+            state_version=battle.activation_protocol_version,
         )
     except BattleEventSequenceConflict as exc:
         raise BattleActivationContinueSequenceConflict(
@@ -1192,6 +1304,7 @@ def stage_battle_activation_continue(
         state=transition.state,
         events=transition.events,
         dice=checkpoint.dice,
+        protocol_version=battle.activation_protocol_version,
     )
 
 
@@ -1240,7 +1353,7 @@ def stage_battle_activation_finalize(
         )
     except BattleActivationStartNotFound as exc:
         raise BattleActivationFinalizeNotFound from exc
-    if battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V2:
+    if battle.activation_protocol_version not in ACTIVATION_PROTOCOL_VERSIONS[1:]:
         raise BattleActivationFinalizeUpgradeRequired
     if battle.status != "active":
         raise BattleActivationFinalizeInvalid(
@@ -1256,6 +1369,8 @@ def stage_battle_activation_finalize(
         raise BattleActivationFinalizeUnavailable(
             actual_sequence=latest_event_sequence(db, battle.id)
         )
+    if checkpoint.version != battle.activation_protocol_version:
+        raise BattleActivationFinalizeUnavailable(actual_sequence=checkpoint.sequence_at)
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActivationFinalizeSequenceConflict(
             expected_sequence=expected_sequence,
@@ -1319,7 +1434,7 @@ def stage_battle_activation_finalize(
             new_sequence,
             transition.state,
             checkpoint.dice,
-            state_version=ACTIVATION_PROTOCOL_VERSION_V2,
+            state_version=battle.activation_protocol_version,
         )
     except BattleEventSequenceConflict as exc:
         raise BattleActivationFinalizeSequenceConflict(
@@ -1336,6 +1451,7 @@ def stage_battle_activation_finalize(
         state=transition.state,
         events=transition.events,
         dice=checkpoint.dice,
+        protocol_version=battle.activation_protocol_version,
     )
 
 

@@ -96,7 +96,7 @@ def test_stage_battle_creation_explicit_v2_is_coherent_and_idle(
     assert checkpoint.state.activation is None
 
 
-@pytest.mark.parametrize("version", [None, True, 0, 3, 1.0, "2"])
+@pytest.mark.parametrize("version", [None, True, 0, 4, 1.0, "2"])
 def test_stage_battle_creation_rejects_invalid_version_without_writes(
     monkeypatch: pytest.MonkeyPatch,
     version,

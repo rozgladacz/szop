@@ -179,7 +179,7 @@ def test_schema_contract_has_exact_columns_constraints_and_indexes(database):
     status_check = checks["ck_battle_invites_status_valid"]
     assert all(status in status_check for status in models.BATTLE_INVITE_STATUSES)
     assert (
-        "activation_protocol_version IN (1, 2)"
+        "activation_protocol_version IN (1, 2, 3)"
         in checks["ck_battle_invites_activation_protocol_version_valid"]
     )
 
@@ -254,7 +254,7 @@ def test_direct_and_open_pending_round_trip_with_default_and_timestamps(database
         assert loaded_open.to_user is None
 
 
-@pytest.mark.parametrize("invalid_version", [0, 3, True, "2", 2.0, None])
+@pytest.mark.parametrize("invalid_version", [0, 4, True, "2", 2.0, None])
 def test_activation_protocol_version_is_strict_before_flush(
     database,
     invalid_version,

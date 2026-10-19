@@ -21,6 +21,7 @@ from urllib.request import Request, urlopen
 from app.battle_protocol import (
     ACTIVATION_PROTOCOL_VERSION_V1,
     ACTIVATION_PROTOCOL_VERSION_V2,
+    ACTIVATION_PROTOCOL_VERSION_V3,
     validate_activation_protocol_version,
 )
 from app.services.engine.action_codec import (
@@ -98,12 +99,16 @@ _ACTIVATION_ERROR_STATUS_CODES = {
     "stale_sequence": 409,
     "stale_activation": 409,
     "stale_window": 409,
+    "stale_attack": 409,
     "invalid_phase": 409,
     "not_current_priority": 409,
     "battle_protocol_upgrade_required": 409,
     "write_conflict": 409,
     "invalid_selection": 422,
     "activation_guard_required": 422,
+    "attack_guard_required": 422,
+    "attack_scope_required": 422,
+    "illegal_attack_resolution": frozenset({409, 422}),
     "illegal_action": 422,
     "unsupported_interrupt": 422,
     "illegal_interrupt": 422,
@@ -747,6 +752,9 @@ class HttpClient:
         source_unit_id: int,
         ability_slug: str,
         payload: dict[str, Any],
+        scope: str | None = None,
+        attack_id: int | None = None,
+        expected_attack_version: int | None = None,
     ) -> ActivationMutationResult:
         """Execute one explicit interrupt without passing priority."""
         _validate_activation_mutation_guards(
@@ -764,6 +772,19 @@ class HttpClient:
         if type(ability_slug) is not str or not ability_slug:
             raise ValueError("ability_slug must be a non-empty string")
         canonical_payload = _canonical_json_object(payload, label="payload")
+        attack_fields = _attack_scope_body(
+            scope=scope,
+            attack_id=attack_id,
+            expected_attack_version=expected_attack_version,
+        )
+        if attack_fields and (
+            ability_slug != "oznaczenie"
+            or set(canonical_payload) != {"ability"}
+            or type(canonical_payload["ability"]) is not str
+            or not canonical_payload["ability"]
+            or len(canonical_payload["ability"]) > 128
+        ):
+            raise ValueError("attack interrupt requires exact Oznaczenie payload")
         return self._post_activation_mutation(
             battle_id=battle_id,
             path=f"/battles/{battle_id}/interrupts",
@@ -776,6 +797,7 @@ class HttpClient:
                 "source_unit_id": source_unit_id,
                 "ability_slug": ability_slug,
                 "payload": canonical_payload,
+                **attack_fields,
             },
             expected_statuses=frozenset({200}),
             error_label="POST battle activation interrupt",
@@ -789,6 +811,9 @@ class HttpClient:
         activation_id: int,
         expected_activation_version: int,
         expected_window_version: int,
+        scope: str | None = None,
+        attack_id: int | None = None,
+        expected_attack_version: int | None = None,
     ) -> ActivationMutationResult:
         """Pass the caller's current interrupt priority exactly once."""
         _validate_activation_mutation_guards(
@@ -802,6 +827,11 @@ class HttpClient:
             name="expected_window_version",
             minimum=1,
         )
+        attack_fields = _attack_scope_body(
+            scope=scope,
+            attack_id=attack_id,
+            expected_attack_version=expected_attack_version,
+        )
         return self._post_activation_mutation(
             battle_id=battle_id,
             path=f"/battles/{battle_id}/interrupts",
@@ -811,10 +841,12 @@ class HttpClient:
                 "activation_id": activation_id,
                 "expected_activation_version": expected_activation_version,
                 "expected_window_version": expected_window_version,
+                **attack_fields,
             },
             expected_statuses=frozenset({200, 202}),
             error_label="POST pass battle interrupt priority",
             status_by_open_window=True,
+            status_by_attack_window=bool(attack_fields),
         )
 
     def commit_activation_action(
@@ -848,6 +880,42 @@ class HttpClient:
             },
             expected_statuses=frozenset({202}),
             error_label="POST commit battle activation action",
+        )
+
+    def resolve_activation_attack(
+        self,
+        battle_id: int,
+        *,
+        expected_sequence: int,
+        activation_id: int,
+        expected_activation_version: int,
+        attack_id: int,
+        expected_attack_version: int,
+    ) -> ActivationMutationResult:
+        """Resolve one closed protocol-v3 attack with one explicit POST."""
+        _validate_activation_mutation_guards(
+            battle_id=battle_id,
+            expected_sequence=expected_sequence,
+            activation_id=activation_id,
+            expected_activation_version=expected_activation_version,
+        )
+        _validate_int_at_least(attack_id, name="attack_id", minimum=1)
+        _validate_int_at_least(
+            expected_attack_version, name="expected_attack_version", minimum=1
+        )
+        return self._post_activation_mutation(
+            battle_id=battle_id,
+            path=f"/battles/{battle_id}/actions",
+            body={
+                "operation": "resolve_attack",
+                "expected_sequence": expected_sequence,
+                "activation_id": activation_id,
+                "expected_activation_version": expected_activation_version,
+                "attack_id": attack_id,
+                "expected_attack_version": expected_attack_version,
+            },
+            expected_statuses=frozenset({202}),
+            error_label="POST resolve battle activation attack",
         )
 
     def continue_activation(
@@ -917,6 +985,7 @@ class HttpClient:
         expected_statuses: frozenset[int],
         error_label: str,
         status_by_open_window: bool = False,
+        status_by_attack_window: bool = False,
     ) -> ActivationMutationResult:
         expected_sequence = body["expected_sequence"]
         payload, status_code = self._request_activation_json(
@@ -933,10 +1002,14 @@ class HttpClient:
         )
         if status_by_open_window:
             activation = result.state.activation
+            window = (
+                activation.attack.window
+                if status_by_attack_window and activation is not None
+                and activation.attack is not None
+                else activation.window if activation is not None else None
+            )
             expected_status = (
-                202
-                if activation is not None and activation.window is not None
-                else 200
+                202 if window is not None else 200
             )
             if status_code != expected_status:
                 raise HttpClientError(
@@ -1117,8 +1190,9 @@ def _activation_error_from_response(
         and type(payload["detail"]) is dict
         and set(payload["detail"]) == {"code"}
         and type(payload["detail"]["code"]) is str
-        and _ACTIVATION_ERROR_STATUS_CODES.get(payload["detail"]["code"])
-        == response.status_code
+        and _activation_error_status_matches(
+            payload["detail"]["code"], response.status_code
+        )
     ):
         detail_code = payload["detail"]["code"]
         if detail_code == "activation_guard_required":
@@ -1143,6 +1217,13 @@ def _activation_error_from_response(
     else:
         message = f"{error_label} failed with HTTP {response.status_code}"
     return HttpClientError(message, status_code=response.status_code)
+
+
+def _activation_error_status_matches(code: str, status_code: int) -> bool:
+    expected = _ACTIVATION_ERROR_STATUS_CODES.get(code)
+    if isinstance(expected, frozenset):
+        return status_code in expected
+    return expected == status_code
 
 
 def _normalize_reference_query(query: str, *, max_length: int) -> str:
@@ -1183,6 +1264,27 @@ def _validate_activation_mutation_guards(
         name="expected_activation_version",
         minimum=1,
     )
+
+
+def _attack_scope_body(
+    *,
+    scope: str | None,
+    attack_id: int | None,
+    expected_attack_version: int | None,
+) -> dict[str, Any]:
+    if scope is None and attack_id is None and expected_attack_version is None:
+        return {}
+    if scope != "attack":
+        raise ValueError("scope must be attack with both attack guards")
+    _validate_int_at_least(attack_id, name="attack_id", minimum=1)
+    _validate_int_at_least(
+        expected_attack_version, name="expected_attack_version", minimum=1
+    )
+    return {
+        "scope": "attack",
+        "attack_id": attack_id,
+        "expected_attack_version": expected_attack_version,
+    }
 
 
 def _is_strict_json_value(value: Any) -> bool:
@@ -2625,7 +2727,7 @@ def _activation_mutation_result_from_payload(
         if (
             _required_str(state_payload, "schema") != STATE_CHECKPOINT_SCHEMA
             or _required_int(state_payload, "version")
-            != ACTIVATION_PROTOCOL_VERSION_V2
+            not in (ACTIVATION_PROTOCOL_VERSION_V2, ACTIVATION_PROTOCOL_VERSION_V3)
         ):
             raise TypeError("state version")
         state = battle_state_from_json(state_payload)

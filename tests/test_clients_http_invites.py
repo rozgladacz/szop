@@ -205,7 +205,7 @@ def test_create_battle_invite_explicit_v2_emits_only_opt_in_field() -> None:
         {"roster_id": 1, "expires_in_hours": 0},
         {"roster_id": 1, "expires_in_hours": 169},
         {"roster_id": 1, "activation_protocol_version": 0},
-        {"roster_id": 1, "activation_protocol_version": 3},
+        {"roster_id": 1, "activation_protocol_version": 4},
         {"roster_id": 1, "activation_protocol_version": True},
         {"roster_id": 1, "activation_protocol_version": "2"},
         {"roster_id": 1, "activation_protocol_version": 2.0},
@@ -264,7 +264,7 @@ def _without(payload: dict[str, Any], key: str) -> dict[str, Any]:
         {**_invite_payload(), "updated_at": 123},
         _without(_invite_payload(), "activation_protocol_version"),
         {**_invite_payload(), "activation_protocol_version": True},
-        {**_invite_payload(), "activation_protocol_version": 3},
+        {**_invite_payload(), "activation_protocol_version": 4},
         {**_invite_payload(), "battle_id": 41},
     ],
 )
@@ -290,7 +290,7 @@ def test_create_battle_invite_rejects_malformed_payload(payload: Any) -> None:
         {**_battle_payload(), "p2_roster_id": True},
         _without(_battle_payload(), "activation_protocol_version"),
         {**_battle_payload(), "activation_protocol_version": True},
-        {**_battle_payload(), "activation_protocol_version": 3},
+        {**_battle_payload(), "activation_protocol_version": 4},
         {**_battle_payload(), "unexpected": "field"},
     ],
 )
@@ -355,7 +355,7 @@ def test_public_invite_type_rejects_invalid_values() -> None:
         ("scenario", ""),
         ("status", "accepted"),
         ("activation_protocol_version", True),
-        ("activation_protocol_version", 3),
+        ("activation_protocol_version", 4),
         ("expires_at", datetime.fromisoformat("2026-07-20T10:00:00+00:00")),
     )
 

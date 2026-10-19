@@ -19,6 +19,8 @@ from typing import Any, Union, get_args, get_origin, get_type_hints
 from app.battle_protocol import (
     ACTIVATION_PROTOCOL_VERSION_V1,
     ACTIVATION_PROTOCOL_VERSION_V2,
+    ACTIVATION_PROTOCOL_VERSION_V3,
+    ACTIVATION_PROTOCOL_VERSIONS,
 )
 from app.services.engine.state import (
     ActivationPhase,
@@ -42,7 +44,7 @@ from app.services.engine.status import StatusFlag
 STATE_CHECKPOINT_SCHEMA = "szop.battle_state"
 STATE_CHECKPOINT_VERSION = ACTIVATION_PROTOCOL_VERSION_V1
 STATE_CHECKPOINT_VERSION_V2 = ACTIVATION_PROTOCOL_VERSION_V2
-STATE_CHECKPOINT_VERSION_V3 = 3
+STATE_CHECKPOINT_VERSION_V3 = ACTIVATION_PROTOCOL_VERSION_V3
 _MAX_JSON_DEPTH = 64
 
 _V1_BATTLE_STATE_FIELDS = (
@@ -219,14 +221,11 @@ def battle_state_to_json(
     *,
     version: int = STATE_CHECKPOINT_VERSION,
 ) -> dict[str, Any]:
-    """Return a public-runtime v1/v2 JSON representation of ``state``."""
+    """Return a public-runtime versioned JSON representation of ``state``."""
     return _battle_state_to_json(
         state,
         version=version,
-        allowed_versions=(
-            STATE_CHECKPOINT_VERSION,
-            STATE_CHECKPOINT_VERSION_V2,
-        ),
+        allowed_versions=ACTIVATION_PROTOCOL_VERSIONS,
     )
 
 
@@ -279,13 +278,10 @@ def _battle_state_to_json(
 
 
 def battle_state_from_json(payload: Mapping[str, Any]) -> BattleState:
-    """Restore a public-runtime v1/v2 ``BattleState`` checkpoint."""
+    """Restore a public-runtime versioned ``BattleState`` checkpoint."""
     return _battle_state_from_json(
         payload,
-        allowed_versions=(
-            STATE_CHECKPOINT_VERSION,
-            STATE_CHECKPOINT_VERSION_V2,
-        ),
+        allowed_versions=ACTIVATION_PROTOCOL_VERSIONS,
     )
 
 

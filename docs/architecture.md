@@ -336,8 +336,8 @@ wyłącznie immutable pending-attack model oraz prywatny exact codec v3.
 strict attack-protocol eventów, kompletne reducery i prywatne pure
 declare/pass/close/resolve dla pass-only Shoot/Charge.
 Istniejące v1 i v2 pozostają dokładnie dekodowalne i byte-for-byte kodowane;
-persistence, DB, serwis, publiczny wire i klient nadal dopuszczają wyłącznie
-v1/v2. V2 nadal atomowo rozstrzyga ataki, aby nie zmienić po cichu kontraktu
+C2c udostępnia v3 w persistence, DB, serwisie, publicznym wire i kliencie
+wyłącznie przez jawny opt-in. V2 nadal atomowo rozstrzyga ataki, aby zachować kontrakt
 obecnego klienta. Prywatny runtime v3 zachowuje
 nieatakujące maneuver/defend/special jak v2, lecz po zamknięciu ogólnego
 `BEFORE_ACTION` przyjęcie `ShootAction`/`ChargeAction` tylko deklaruje attack,
@@ -398,20 +398,22 @@ atak, `POST /interrupts` dostaje strict `scope="attack"` i attack guardy, a
 `POST /actions` z `operation="resolve_attack"` rozstrzyga utrwalony intent bez
 ponownego action body. Klient rozpoznaje pending scope z participant-scoped
 state v3; intent nie istnieje w trwałym/publicznym stanie przed accepted
-declaration. C2c doda tylko `HttpClient.resolve_activation_attack`; pozostałe
+declaration. C2c dodał tylko `HttpClient.resolve_activation_attack`; pozostałe
 mutation methods zachowują one-POST. Declaration/interrupt/pass nie przesuwają
 RNG. Resolve używa prywatnego klonu, jednego guarded event batcha i jednego
 checkpointu; każdy validation/domain/DB/race failure zachowuje poprzedni RNG
 i head. Pułapy pozostają dokładnie 5 SELECT-ów service, 6 session i 7 bearer,
 bez I/O per source/X/target/event.
 
-Implementacja pozostaje podzielona: C2a1 model+exact codec v3, C2a2
-eventy/reducery/pure declare-pass-close-resolve i C2b prywatny source-correct
-handler/attack effect view są DONE; OPEN pozostaje C2c
-durable service, constraint opt-in v3, FastAPI i HttpClient. Dopiero C2c może
-rozszerzyć
-allowlistę; po C2b nadal wynosi ona dokładnie
-`{"rozkaz", "klatwa", "straznik"}` i `oznaczenie` jest odrzucane bez zapisu.
+Implementacja jest podzielona: C2a1 model+exact codec v3, C2a2
+eventy/reducery/pure declare-pass-close-resolve, C2b prywatny source-correct
+handler/attack effect view i C2c trwały serwis, constraint opt-in v3,
+FastAPI oraz HttpClient są DONE. Publiczne Oznaczenie pozostaje fail-closed:
+żaden z siedmiu kanonicznych X nie ma jeszcze wykonywanego skutku po stronie
+atakującego. Próba zwraca `unsupported_interrupt` bez zapisu; osobny etap
+mechanik może otworzyć allowlistę po testach efektu. Ogólna allowlista
+`READY_INTERRUPT_HANDLERS` nadal wynosi dokładnie
+`{"rozkaz", "klatwa", "straznik"}`.
 Checkpointy v1 oraz obecny
 single-action `POST /actions` pozostają trybem legacy; nie odzyskuje się
 brakującej inicjatywy z `active_player`.
@@ -554,10 +556,10 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `status.py` **(B3.9.a)** | ~95 | `StatusFlag(str, Enum)` (Aktywowany/Wyczerpany/Przyszpilony/Ufortyfikowany) + module-level `STATUS_*` aliasy + idempotentne `add_status(blob, flag)`/`remove_status(blob, flag)`. Konsolidacja 3 kopii STATUS_* z effects/phases/combat. |
 | `geometry.py` **(B3.9.b)** | ~175 | Pure prymityki: `distance` (math.hypot), `point_in_circle`, `segment_intersects_circle`, `segments_intersect`, **`circle_edge_distance`** (fix bug #4), `UNIT_CIRCLE_16` precomputed. Konsolidacja 4 kopii `_distance` z los/phases/combat. |
 | `state.py` | ~820 | `UnitBlob` (4 kategorie ran per ADR-0014 + **`wounds_eliminating` licznik Zguby [ADR-0048]**, B3.9.e `melee_weapons`/`ranged_weapons` inventory), **`Lokalizacja` enum + `UnitBlob.location` [ADR-0048, pkt 26]**, `BattleState` (B3.9.c `initial_toughness_snapshot` frozen; B4.4b.1 nullable `initiative_player`/`activation`), frozen `ActivationState` / `InterruptWindowState` oraz B4.4d.C2a1 `ShootAttackIntent`/`ChargeAttackIntent`/`AttackAbilityOverride`/`AttackState` + `ActivationPhase` z konstrukcyjną walidacją osiągalności, `Position`, `TerrainCircle/Line`, `Objective`, `WeaponProfile`, `apply_events` + `register_reducer`, `initial_toughness_for`, `build_initial_state` |
-| `state_codec.py` **(B4.4b.1 + B4.4d.C2a1)** | ~600 | Whitelist-based checkpoint codec z osobnymi zamkniętymi rejestrami typów, enumów i exact fields dla v1/v2/v3. Publiczny no-arg encoder pozostaje v1; v2 zachowuje dotychczasowy activation/window payload bez `attack`, a prywatny v3 koduje immutable pending attack i limituje głębokość do 64. Decoder nie auto-upgrade'uje starszych wersji. Persistence/router/client pozostają na allowliście v1/v2. |
+| `state_codec.py` **(B4.4b.1 + B4.4d.C2a1/C2c)** | ~600 | Whitelist-based checkpoint codec z osobnymi zamkniętymi rejestrami typów, enumów i exact fields dla v1/v2/v3. Publiczny no-arg encoder pozostaje v1; v2 zachowuje dotychczasowy activation/window payload bez `attack`, a v3 koduje immutable pending attack i limituje głębokość do 64. Decoder nie auto-upgrade'uje starszych wersji. Persistence/router/client przyjmują v3 po jawnym opt-in. |
 | `events.py` **(B4.4d.C2a2)** | ~915 | **33 event types**: 16 historycznych eventów mechanicznych, 10 eventów activation protocol B4.4b.2 i 7 strict attack-protocol eventów C2a2. Attack declaration ma zamknięty nested intent codec Shoot/Charge; historyczne tagi i payloady pozostają bez zmian. `ActivationActionCommitted` nadal reużywa SSOT discriminatorów `Action`. |
 | `reducers.py` **(B3.9.d + B4.4b.2 + B4.4d.C2a2)** | ~1015 | `@register_reducer` dla wszystkich 33 event types. Historyczne outcome reducerry pozostają SSOT skutków mechanicznych; 10 reducerów activation protocol i 7 reducerów attack protocol zmienia wyłącznie właściwy scope. `AttackResolved` usuwa attack scope, a tylko `ActivationActionCommitted` zwiększa `action_count/action_types`. Auto-rejestracja przez side-effect import w `__init__.py`; gate kompletności porównuje registry eventów i reducerów. |
-| `activation_protocol.py` **(B4.4b.3–6, B4.4d.C1a/C2a2/C2b)** | ~1450 | Pure transition core v2 oraz prywatny lifecycle v3. Deklaracja canonicalizuje minimalny attack intent z `UnitBlob` inventory, dwa jawne passy zamykają attack window, a resolve rekonstruuje akcję i reużywa istniejący outcome/commit bridge. C2b dodaje prywatny strict attack interrupt i exact trzyzdarzeniowy batch. Wszystkie mutacje RNG działają na prywatnym klonie; validation/outcome failure zachowuje input, a live checkpoint jest sprawdzany przeciw complete event tail. Nonattack v3 deleguje do v2; bez publicznej allowlisty, I/O i persistence v3. |
+| `activation_protocol.py` **(B4.4b.3–6, B4.4d.C1a/C2a2/C2b)** | ~1450 | Pure transition core v2 oraz lifecycle v3. Deklaracja canonicalizuje minimalny attack intent z `UnitBlob` inventory, dwa jawne passy zamykają attack window, a resolve rekonstruuje akcję i reużywa istniejący outcome/commit bridge. C2b dodaje prywatny strict attack interrupt i exact trzyzdarzeniowy batch. Wszystkie mutacje RNG działają na prywatnym klonie; validation/outcome failure zachowuje input, a live checkpoint jest sprawdzany przeciw complete event tail. Nonattack v3 deleguje do v2; C2c wiąże transitions z trwałym serwisem. |
 | `dice.py` | ~110 | `DeterministicDice(seed)` na `random.Random` (ADR-0012), `RollResult` z natural rolls, `roll_with_threshold` pełna semantyka pkt 1 (a/b/c/d) |
 | `los.py` | ~175 | `check_los` 3-state (WIDZI/NIE_WIDZI/OSŁONA) z sampling N=16 (ADR-0043), Zasłaniający exception pkt 4.c.iii. **B3.9.b**: importuje primitive z `geometry.py`; `UNIT_CIRCLE_16` precomputed dla perf (16× math.cos/sin → 0 per call). |
 | `prediction.py` | ~210 | Analytic binomial bez RNG (ADR-0044), `expected_damage(...) → DamageDistribution`, `would_see` hipotetyczny LoS. **Monte Carlo parity** ±3σ z combat.resolve_ranged_attack |

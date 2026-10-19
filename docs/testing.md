@@ -584,3 +584,19 @@ direct `app.services.exploit_candidates`, scoped endpoint
 Snapshot armii, rosterów, roster units, bitew, eventów, katalogu i `AgentToken`
 pozostaje identyczny; dozwolone są wyłącznie body-blind audyty. Produkcyjna
 `data/szop.db` nie jest używana ani modyfikowana.
+
+## B4.4d.C2c — trwały protokół aktywacji v3
+
+Po zmianie warstwy protokołu uruchom:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q tests/test_battle_activations.py tests/test_battle_activation_transport.py tests/test_battle_creation.py tests/test_battle_invite_model.py tests/test_battle_invites_router.py tests/test_battles_router.py tests/test_clients_http.py tests/test_clients_http_invites.py tests/test_db_schema_migrations.py tests/test_engine_checkpoints.py tests/test_engine_persistence.py
+.\.venv\Scripts\python.exe -X utf8 -m pytest -q
+```
+
+Gate obejmuje jawny opt-in v3 i migrację constraintów SQLite, same-owner oraz
+dwa bearery, trwałe heady declaration/pass/resolve, replay i prywatny RNG,
+strict guardy, rollback, body-blind audit i no-oracle. Pełne listy SELECT
+muszą pozostać identyczne dla małego i dużego stanu: 5 w serwisie, 6 w
+request session, 7 dla bearera. Publiczne Oznaczenie ma zwracać
+`unsupported_interrupt` bez zapisu, dopóki osobny etap nie dostarczy skutków X.

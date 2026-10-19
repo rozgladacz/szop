@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Generator
@@ -303,11 +304,102 @@ def _rebuild_roster_units_table(connection) -> None:
         connection.execute(text("PRAGMA foreign_keys=ON"))
 
 
+def _upgrade_activation_protocol_checks() -> None:
+    """Rebuild old SQLite CHECKs without changing child FK targets or rows."""
+    old_check = re.compile(
+        r"activation_protocol_version\s+IN\s*\(\s*1\s*,\s*2\s*\)",
+        re.IGNORECASE,
+    )
+    new_check = "activation_protocol_version IN (" + ", ".join(
+        str(version) for version in ACTIVATION_PROTOCOL_VERSIONS
+    ) + ")"
+    with engine.connect() as connection:
+        table_sql = {
+            row.name: row.sql
+            for row in connection.execute(
+                text(
+                    "SELECT name, sql FROM sqlite_master "
+                    "WHERE type = 'table' AND name IN ('battles', 'battle_invites')"
+                )
+            )
+        }
+        pending = {
+            name: sql for name, sql in table_sql.items()
+            if old_check.search(sql or "")
+        }
+        connection.commit()
+        if not pending:
+            return
+        existing_violations = sorted(
+            tuple(row) for row in connection.exec_driver_sql(
+                "PRAGMA foreign_key_check"
+            ).fetchall()
+        )
+        connection.commit()
+        connection.exec_driver_sql("PRAGMA foreign_keys=OFF")
+        connection.commit()
+        try:
+            with connection.begin():
+                for name, sql in pending.items():
+                    quoted_name = f'"{name}"'
+                    temp_name = f'"__c2c_{name}_new"'
+                    replacement, count = old_check.subn(new_check, sql)
+                    if count != 1:
+                        raise RuntimeError("Unexpected activation protocol CHECK")
+                    replacement, count = re.subn(
+                        rf"^(CREATE\s+TABLE\s+)(?:\"{name}\"|{name})",
+                        lambda match: match.group(1) + temp_name,
+                        replacement,
+                        count=1,
+                        flags=re.IGNORECASE,
+                    )
+                    if count != 1:
+                        raise RuntimeError("Unexpected activation protocol table SQL")
+                    objects = [
+                        row.sql for row in connection.execute(
+                            text(
+                                "SELECT sql FROM sqlite_master WHERE tbl_name = :name "
+                                "AND type IN ('index', 'trigger') AND sql IS NOT NULL"
+                            ),
+                            {"name": name},
+                        )
+                    ]
+                    columns = [
+                        row.name for row in connection.exec_driver_sql(
+                            f"PRAGMA table_info({quoted_name})"
+                        )
+                    ]
+                    column_sql = ", ".join(f'"{column}"' for column in columns)
+                    connection.exec_driver_sql(replacement)
+                    connection.exec_driver_sql(
+                        f"INSERT INTO {temp_name} ({column_sql}) "
+                        f"SELECT {column_sql} FROM {quoted_name}"
+                    )
+                    connection.exec_driver_sql(f"DROP TABLE {quoted_name}")
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE {temp_name} RENAME TO {quoted_name}"
+                    )
+                    for object_sql in objects:
+                        connection.exec_driver_sql(object_sql)
+                violations = sorted(
+                    tuple(row) for row in connection.exec_driver_sql(
+                        "PRAGMA foreign_key_check"
+                    ).fetchall()
+                )
+                if violations != existing_violations:
+                    raise RuntimeError("Activation protocol migration broke foreign keys")
+        finally:
+            connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+            connection.commit()
+
+
 def _migrate_schema() -> None:
     from sqlalchemy import inspect
 
     if not DB_URL.startswith("sqlite"):
         return
+
+    _upgrade_activation_protocol_checks()
 
     with engine.begin() as connection:
         inspector = inspect(connection)

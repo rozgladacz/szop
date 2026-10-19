@@ -62,7 +62,7 @@ from app.services.battle_activations import (
     stage_battle_activation_start,
 )
 from app.services.engine.action_codec import action_to_json
-from app.services.engine.actions import DefendAction, ManeuverAction
+from app.services.engine.actions import DefendAction, ManeuverAction, ShootAction
 from app.services.engine.activation_protocol import (
     ActivationProtocolErrorReason,
     commit_activation_action,
@@ -2373,6 +2373,173 @@ def test_action_success_is_one_batch_one_checkpoint_and_five_selects(
     assert select_counts == [5, 5]
     assert save_event_calls == 2
     assert save_checkpoint_calls == 2
+
+
+def test_v3_service_attack_steps_keep_five_exact_selects_for_small_and_large_state(
+    activation_world: ActivationWorld,
+) -> None:
+    select_shapes: list[tuple[tuple[str, ...], ...]] = []
+    for extra_units, extra_profiles in ((0, 0), (30, 15)):
+        initial = _idle_state(extra_units_per_player=extra_units)
+        profiles = (_STRAZNIK_RIFLE,) + tuple(
+            replace(_STRAZNIK_RIFLE, slug=f"extra_{index}")
+            for index in range(extra_profiles)
+        )
+        initial = replace(
+            initial,
+            blobs=(replace(initial.blobs[0], ranged_weapons=profiles), *initial.blobs[1:]),
+        )
+        battle_id = _persist_battle(
+            activation_world, state=initial, protocol_version=3
+        )
+        requests: list[tuple[str, ...]] = []
+
+        def stage(call):
+            statements: list[str] = []
+
+            def capture(_conn, _cursor, statement, _parameters, _context, _many):
+                if statement.lstrip().upper().startswith("SELECT"):
+                    statements.append(" ".join(statement.split()))
+
+            with activation_world.sessions() as session:
+                checkpoint = load_latest_checkpoint(session, battle_id)
+                assert checkpoint is not None and checkpoint.version == 3
+                event.listen(activation_world.engine, "before_cursor_execute", capture)
+                try:
+                    result = call(session, checkpoint)
+                    session.commit()
+                finally:
+                    event.remove(activation_world.engine, "before_cursor_execute", capture)
+            requests.append(tuple(statements))
+            return result
+
+        started = stage(lambda session, head: stage_battle_activation_start(
+            session, battle_id=battle_id, caller_user_id=activation_world.p1_id,
+            selected_unit_id=11, expected_sequence=head.sequence_at,
+        ))
+        first = stage(lambda session, head: stage_battle_activation_pass(
+            session, battle_id=battle_id, caller_user_id=activation_world.p1_id,
+            expected_sequence=head.sequence_at, **_pass_guards(head.state),
+        ))
+        second = stage(lambda session, head: stage_battle_activation_pass(
+            session, battle_id=battle_id, caller_user_id=activation_world.p2_id,
+            expected_sequence=head.sequence_at, **_pass_guards(head.state),
+        ))
+        assert second.state.activation.phase is ActivationPhase.ACTION_READY
+        declared = stage(lambda session, head: stage_battle_activation_action(
+            session, battle_id=battle_id, caller_user_id=activation_world.p1_id,
+            expected_sequence=head.sequence_at,
+            action_payload=action_to_json(ShootAction(11, 21, profiles[0])),
+            **_action_guards(head.state),
+        ))
+        assert declared.state.activation.phase is ActivationPhase.ATTACK_WINDOW
+
+        def attack_pass(session, head, caller_user_id):
+            activation = head.state.activation
+            attack = activation.attack
+            return stage_battle_activation_pass(
+                session, battle_id=battle_id, caller_user_id=caller_user_id,
+                expected_sequence=head.sequence_at,
+                activation_id=activation.activation_id,
+                expected_activation_version=activation.version,
+                attack_id=attack.attack_id,
+                expected_attack_version=attack.version,
+                expected_window_version=attack.window.version,
+            )
+
+        first_attack = stage(lambda session, head: attack_pass(
+            session, head, activation_world.p1_id
+        ))
+        closed = stage(lambda session, head: attack_pass(
+            session, head, activation_world.p2_id
+        ))
+        assert closed.state.activation.phase is ActivationPhase.ATTACK_RESOLUTION_READY
+        resolved = stage(lambda session, head: stage_battle_activation_action(
+            session, battle_id=battle_id, caller_user_id=activation_world.p1_id,
+            expected_sequence=head.sequence_at,
+            activation_id=head.state.activation.activation_id,
+            expected_activation_version=head.state.activation.version,
+            attack_id=head.state.activation.attack.attack_id,
+            expected_attack_version=head.state.activation.attack.version,
+        ))
+        assert resolved.state.activation.attack is None
+        assert all(len(request) == 5 for request in requests)
+        select_shapes.append(tuple(requests))
+    assert select_shapes[0] == select_shapes[1]
+
+
+def test_v3_attack_interrupt_durable_seam_uses_one_batch_and_preserves_rng(
+    activation_world: ActivationWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    initial = _idle_state()
+    source = _unit(12, 0, passives=("oznaczenie",))
+    initial = replace(
+        initial,
+        blobs=(replace(initial.blobs[0], ranged_weapons=(_STRAZNIK_RIFLE,)),
+               *initial.blobs[1:], source),
+        activations_remaining=(2, 1),
+    )
+    battle_id = _persist_battle(activation_world, state=initial, protocol_version=3)
+    with activation_world.sessions() as session:
+        started = stage_battle_activation_start(
+            session, battle_id=battle_id, caller_user_id=activation_world.p1_id,
+            selected_unit_id=11, expected_sequence=0,
+        )
+        session.commit()
+    for caller in (activation_world.p1_id, activation_world.p2_id):
+        with activation_world.sessions() as session:
+            head = load_latest_checkpoint(session, battle_id)
+            stage_battle_activation_pass(
+                session, battle_id=battle_id, caller_user_id=caller,
+                expected_sequence=head.sequence_at, **_pass_guards(head.state),
+            )
+            session.commit()
+    with activation_world.sessions() as session:
+        head = load_latest_checkpoint(session, battle_id)
+        declared = stage_battle_activation_action(
+            session, battle_id=battle_id, caller_user_id=activation_world.p1_id,
+            expected_sequence=head.sequence_at,
+            action_payload=action_to_json(ShootAction(11, 21, _STRAZNIK_RIFLE)),
+            **_action_guards(head.state),
+        )
+        session.commit()
+    monkeypatch.setattr(activation_service, "_READY_ATTACK_X", frozenset({"furia"}))
+    before_rng = declared.dice.to_checkpoint()
+    selects: list[str] = []
+
+    def capture(_conn, _cursor, statement, _parameters, _context, _many):
+        if statement.lstrip().upper().startswith("SELECT"):
+            selects.append(" ".join(statement.split()))
+
+    with activation_world.sessions() as session:
+        attack = declared.state.activation.attack
+        event.listen(activation_world.engine, "before_cursor_execute", capture)
+        try:
+            interrupted = stage_battle_activation_interrupt(
+                session, battle_id=battle_id, caller_user_id=activation_world.p1_id,
+                expected_sequence=declared.new_sequence,
+                activation_id=declared.state.activation.activation_id,
+                expected_activation_version=declared.state.activation.version,
+                attack_id=attack.attack_id,
+                expected_attack_version=attack.version,
+                expected_window_version=attack.window.version,
+                source_unit_id=12, ability_slug="oznaczenie",
+                payload={"ability": "furia"},
+            )
+        finally:
+            event.remove(activation_world.engine, "before_cursor_execute", capture)
+        assert len(selects) == 5
+        assert interrupted.dice.to_checkpoint() == before_rng
+        assert [type(item).__name__ for item in interrupted.events] == [
+            "AttackInterruptTriggered", "InterruptTriggered", "AttackAbilityOverrideApplied"
+        ]
+        session.commit()
+    with activation_world.sessions() as session:
+        durable = load_latest_checkpoint(session, battle_id)
+        assert durable is not None and durable.state == interrupted.state
+        assert durable.dice.to_checkpoint() == before_rng
+        assert apply_events(initial, load_events(session, battle_id)) == durable.state
 
 
 def test_continue_opens_durable_second_window_and_completes_second_action_chain(

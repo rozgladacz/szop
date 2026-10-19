@@ -489,7 +489,7 @@ def test_missing_self_and_agent_targets_share_bodyless_404_without_insert(
         {"roster_id": 1, "expires_in_hours": 169},
         {"roster_id": 1, "expires_in_hours": True},
         {"roster_id": 1, "activation_protocol_version": 0},
-        {"roster_id": 1, "activation_protocol_version": 3},
+        {"roster_id": 1, "activation_protocol_version": 4},
         {"roster_id": 1, "activation_protocol_version": True},
         {"roster_id": 1, "activation_protocol_version": "2"},
         {"roster_id": 1, "activation_protocol_version": 2.0},

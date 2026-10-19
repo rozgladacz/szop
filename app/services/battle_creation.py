@@ -52,7 +52,7 @@ def stage_battle_creation(
         objectives=objectives,
         initiative_player=initiative_player,
     )
-    if protocol_version == ACTIVATION_PROTOCOL_VERSION_V2:
+    if protocol_version >= ACTIVATION_PROTOCOL_VERSION_V2:
         state = replace(state, initiative_player=initiative_player)
     state, deploy_events = deployment_round(state, ())
     battle = models.Battle(

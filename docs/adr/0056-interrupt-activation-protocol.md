@@ -522,7 +522,7 @@ event logu, checkpointcie, response ani audit. Closing pass zwraca **200** i
 **202**, drugi pass **200**.
 
 `HttpClient.commit_activation_action` pozostaje metodą deklaracji/commit:
-dla ataku v3 caller musi sprawdzić zwrócony phase. C2c dodaje tylko jedną nową
+dla ataku v3 caller musi sprawdzić zwrócony phase. C2c dodał tylko jedną nową
 metodę `resolve_activation_attack`; istniejące `interrupt` i
 `pass_interrupt_priority` dostają addytywne attack guardy/scope bez GET,
 retry ani cache. Protocol v1 i v2 zachowują dotychczasowy wire, statusy i
@@ -541,14 +541,15 @@ participant-scoped lookupie jednego checkpointu, aby preflight nie stał się
 oracle obcej bitwy. Error response i body-blind audit nie echo-ują
 raw intentu, weapon fields, X, source/target ani cudzych identyfikatorów;
 participant-scoped success state po legalnej deklaracji zawiera wyłącznie
-kanoniczny minimalny intent potrzebny do restartu. Publiczny
-`READY_INTERRUPT_HANDLERS` pozostaje dokładnie
-`rozkaz|klatwa|straznik` do C2c; activation scope nadal odrzuca
-`oznaczenie` bez zapisu.
+kanoniczny minimalny intent potrzebny do restartu. C2c zachował publiczny
+`READY_INTERRUPT_HANDLERS` dokładnie `rozkaz|klatwa|straznik`. Publiczne
+`oznaczenie` w attack scope jest fail-closed (`unsupported_interrupt` bez
+zapisu), ponieważ siedem kanonicznych X nie wykonuje jeszcze skutku po stronie
+atakującego; activation scope nadal je odrzuca.
 
 #### 5.7. Query/performance gate
 
-Każda przyszła mutacja declaration, attack interrupt/pass i resolve ma zachować
+Każda mutacja declaration, attack interrupt/pass i resolve ma zachować
 obecny ceiling: 5 SELECT-ów w serwisie, 6 w pełnym request session i 7 dla
 bearera. Liczba oddziałów, profili, source, X, targetów i eventów nie może
 zwiększać liczby SELECT-ów. Jeden request zapisuje jeden guarded batch i jeden
@@ -558,12 +559,14 @@ Participant battle, event head i checkpoint są ładowane istniejącym O(1)
 seamem. Intent, source, target i inventory są rozwiązywane z jednego frozen
 `BattleState`; katalog `oznaczenie_tak` jest immutable i procesowo cache'owany.
 CPU może liniowo przeskanować już załadowane bloby/inventory, ale nie wykonuje
-I/O. C2c musi mierzyć pełne listy SELECT dla declaration, first/closing pass,
-Oznaczenia i resolve w małym oraz dużym stanie, a nie tylko ich liczbę.
+I/O. C2c mierzy pełne listy SELECT dla declaration, first/closing pass
+i resolve w małym oraz dużym stanie, a nie tylko ich liczbę. Prywatny
+accepted-interrupt seam mierzy 5 SELECT-ów; publiczna próba Oznaczenia
+pozostaje fail-closed.
 
 #### 5.8. Call-site impact audit
 
-| Aktualny call site | Zamrożony wpływ przyszłej migracji |
+| Aktualny call site | Wpływ migracji v3 |
 |---|---|
 | `state.py` / `state_codec.py` | C2a1 dodaje v3-only immutable attack types, fazy, exact registry i reachable snapshots; v1/v2 payloady pozostają byte-for-byte kontraktem. |
 | `events.py` / `reducers.py` / `apply_events` | C2a2 dodaje siedem attack eventów i reducery; outcome reducery pozostają SSOT, registry kompletności i complete-tail parity obejmują każdy restart head. |
@@ -735,19 +738,20 @@ Protocol v2 używa jednego error envelope bez echo wejścia:
 ```
 
 Zamknięty zestaw kodów to: `unauthorized`, `forbidden`, `battle_not_found`,
-`stale_sequence`, `stale_activation`, `stale_window`, `invalid_phase`,
+`stale_sequence`, `stale_activation`, `stale_window`, `stale_attack`, `invalid_phase`,
 `not_current_priority`, `battle_protocol_upgrade_required`, `write_conflict`,
-`invalid_selection`, `activation_guard_required`, `illegal_action`,
+`invalid_selection`, `activation_guard_required`, `attack_guard_required`,
+`attack_scope_required`, `illegal_action`, `illegal_attack_resolution`,
 `unsupported_interrupt`, `illegal_interrupt`, `interrupt_limit_reached` i
 `illegal_recovery`. Kody 404 nie rozróżniają foreign/missing. V1 zachowuje
 historyczny error contract ADR-0054.
 
 ## Persistence / concurrency
 
-1. `Battle.activation_protocol_version` jest obecnie trwałym `1 | 2`.
-   Istniejące wiersze dostają `1`; nowe sandboxy/invite'y wybierają v2 jawnie
-   w wersjonowanym create contract. C2c rozszerzy constraint do `1 | 2 | 3`
-   wyłącznie dla jawnego opt-inu z sekcji 5. Wartość zawsze musi zgadzać się
+1. `Battle.activation_protocol_version` jest trwałym `1 | 2 | 3`.
+   Istniejące wiersze dostają `1`; nowe sandboxy/invite'y wybierają v2/v3 jawnie
+   w wersjonowanym create contract. C2c rozszerzył constraint do `1 | 2 | 3`
+   bez automatycznego upgrade'u. Wartość zawsze musi zgadzać się
    z wersją checkpointu.
 2. Event log pozostaje kanonem, a activation/window żyją w checkpoint v2. Nie
    powstaje drugi mutable `current_activation` row ani kolumny duplikujące phase.
@@ -825,7 +829,7 @@ historyczny error contract ADR-0054.
 | Rozkaz(X) | Public-ready w pure engine i trwałym transporcie v2 od B4.4b.7/B4.4c.9. | Osobny validator `rozkaz_tak` + `rozkaz_kierunek`, source naprawdę ma Rozkaz, ally target, 12″, `granted` strict bool zgodny z kierunkiem, limit raz/rundę i wygaśnięcie przy finalizacji ([konwencje][ZCONV], [pozycja 50][Z50]). |
 | Klątwa(X) | Public-ready od B4.4d.C0; reużywa istniejący transport v2 i klienta. | Osobny validator `klatwa_tak`, pięć jawnych pasywek (`delikatny`, `instynkt`, `nieruchomy`, `niezgrabny`, `wolny`), enemy target, 12″, oba kierunki strict bool, limit raz/rundę i wygaśnięcie przy finalizacji; nie reużywa `_rozkaz_capable_slugs` ([pozycja 45][Z45]). |
 | Strażnik | Public-ready od B4.4d.C1c przez istniejący activation protocol v2, durable service, FastAPI i `HttpClient.interrupt`. | Exact plan zawiera tylko `assignments[{weapon_slug,target_id}]`; private C1b rozwiązuje canonical inventory, legalny source/weapon/1–2 targets, pełny multi-profile Ostrzał z per-target pools, następnie Wyczerpany, bounded eventy, RNG/replay i no-nested. C1c dodaje strict preflight przed I/O, bezpośredni dispatch omijający legacy stub, atomowy event+RNG checkpoint, real-transport/auth/race/rollback/query gates i allowlistę dokładnie `rozkaz|klatwa|straznik` ([pozycja 31][Z31], [pkt 14.c][R14S], [pkt 17][R17], [pkt 22.a][R22A]). |
-| Oznaczenie(X) | Prywatny C2b DONE; trwała/publiczna publikacja pozostaje w C2c. | Protocol/checkpoint v3 z sekcji 5: deklaracja po zamknięciu ogólnego `BEFORE_ACTION`, osobny attack scope, cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, effect view tylko dla zadeklarowanego atakującego i usunięcie przez `AttackResolved` ([pozycja 49][Z49]). Osobny prywatny handler nie używa `UnitBlob.ability_overrides`; przyszły transport użyje istniejącego `POST /interrupts`. |
+| Oznaczenie(X) | Prywatny C2b DONE; C2c utrwala attack scope, lecz publiczny interrupt pozostaje fail-closed do etapu mechanik X. | Protocol/checkpoint v3 z sekcji 5: deklaracja po zamknięciu ogólnego `BEFORE_ACTION`, osobny attack scope, cel ataku w 12″ od source, inny sojuszniczy atakujący, X z `oznaczenie_tak`, effect view tylko dla zadeklarowanego atakującego i usunięcie przez `AttackResolved` ([pozycja 49][Z49]). Osobny prywatny handler nie używa `UnitBlob.ability_overrides`; transport używa istniejącego `POST /interrupts`. |
 
 Registry może zawierać niegotowe handlery do testów engine; publiczna allowlista
 nie może ich eksportować.
@@ -1174,7 +1178,8 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   DB/schema, metody klienta ani zmian v1.
 - **OPEN:** niepuste recovery handlery, `LocalClient`/`GameClient`/MCP oraz
   pakowanie pozostają osobnymi slice'ami; C2a0 design Oznaczenia jest DONE,
-  C2a1 model+codec i C2a2 pure lifecycle są DONE, a C2b/C2c pozostają OPEN.
+  C2a1 model+codec i C2a2 pure lifecycle były DONE, a C2b/C2c były wtedy OPEN
+  (aktualny status w sekcji C poniżej).
 
 ### B. Persistence/model + activation API state machine — IN PROGRESS
 
@@ -1256,15 +1261,15 @@ Każdy etap kończy się osobno i nie uruchamia następnego automatycznie.
   zadeklarowanego atakującego, także przy kontrataku Szarży; replay/restart/RNG
   i cleanup zachowują activation overrides. Handler nie wykonuje I/O, a
   publiczna allowlista i transport pozostają bez zmian.
-- **C2c durable/FastAPI/HttpClient OPEN:** rozszerzyć opt-in create/invite i DB
-  constraint do protocol v3, rozdzielić durable declaration/resolve oraz
-  activation/attack interrupt scope, dodać strict uniony na istniejących
-  `/actions` i `/interrupts`, decoder state v3 i jedną metodę klienta
-  `resolve_activation_attack`. Dopiero ten slice dodaje `oznaczenie` do
-  publicznej allowlisty. Warunek zakończenia: same-owner/two-bearer,
-  restart po każdym headzie, stale/duplicate/race/rollback, body-blind audit,
-  no-oracle, scope'y, v1/v2/nonattack parity, one-POST client i dokładne
-  5/6/7 SELECT bez N+1.
+- **C2c durable/FastAPI/HttpClient DONE 2026-10-19:** jawny opt-in create/invite
+  i DB constraint v3, durable declaration/resolve i activation/attack interrupt
+  scope, strict uniony na istniejących `/actions` i `/interrupts`, state v3
+  w persistence/router/kliencie oraz `HttpClient.resolve_activation_attack`.
+  Testy obejmują same-owner/two-bearer, restart/replay każdego headu,
+  stale/duplicate/rollback, body-blind audit, no-oracle, v1/v2/nonattack parity,
+  one-POST client i dokładne 5/6/7 SELECT bez N+1. Publiczne Oznaczenie
+  pozostaje fail-closed do osobnego etapu mechanik X; potwierdzono, że żadna
+  z siedmiu kanonicznych wartości nie ma obecnie skutku atakującego.
 
 ### D. HttpClient real-transport parity
 

@@ -122,7 +122,7 @@ def test_battle_activation_protocol_version_fresh_schema_is_strict_v1_default():
     assert str(protocol_column["default"]).strip("'\"()") == "1"
     checks = inspect(engine).get_check_constraints("battles")
     assert any(
-        "activation_protocol_version IN (1, 2)" in check["sqltext"]
+        "activation_protocol_version IN (1, 2, 3)" in check["sqltext"]
         for check in checks
     )
 
@@ -142,7 +142,7 @@ def test_battle_activation_protocol_version_fresh_schema_is_strict_v1_default():
             text("SELECT activation_protocol_version FROM battles")
         ).scalar_one() == 1
 
-    for invalid_version in (0, 3):
+    for invalid_version in (0, 4):
         with pytest.raises(IntegrityError):
             with engine.begin() as connection:
                 connection.execute(
@@ -285,14 +285,11 @@ def test_migrate_schema_marks_legacy_battles_v1_once_without_rewriting_logs(
     assert first_snapshot["event"][0]["payload_json"] == '{"event_type":"legacy"}'
     assert '"version":1' in first_snapshot["checkpoint"][0]["state_json"]
 
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE battles SET activation_protocol_version = 3 WHERE id = 7"))
     with pytest.raises(IntegrityError):
         with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "UPDATE battles SET activation_protocol_version = 3 "
-                    "WHERE id = 7"
-                )
-            )
+            connection.execute(text("UPDATE battles SET activation_protocol_version = 4 WHERE id = 7"))
 
 
 def test_migrate_schema_marks_legacy_invites_v1_idempotently(monkeypatch):
@@ -335,14 +332,96 @@ def test_migrate_schema_marks_legacy_invites_v1_idempotently(monkeypatch):
             )
         ).scalar_one() == 1
 
+    with engine.begin() as connection:
+        connection.execute(text("UPDATE battle_invites SET activation_protocol_version = 3 WHERE id = 9"))
     with pytest.raises(IntegrityError):
         with engine.begin() as connection:
-            connection.execute(
-                text(
-                    "UPDATE battle_invites "
-                    "SET activation_protocol_version = 3 WHERE id = 9"
-                )
+            connection.execute(text("UPDATE battle_invites SET activation_protocol_version = 4 WHERE id = 9"))
+
+
+def test_migrate_existing_v2_checks_preserves_related_rows_and_indexes(monkeypatch):
+    engine = _memory_engine()
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        for statement in (
+            "CREATE TABLE users (id INTEGER PRIMARY KEY)",
+            "CREATE TABLE battles (id INTEGER PRIMARY KEY, p1_user_id INTEGER REFERENCES users(id), "
+            "activation_protocol_version INTEGER NOT NULL CHECK (activation_protocol_version IN (1, 2)))",
+            "CREATE TABLE battle_events (id INTEGER PRIMARY KEY, battle_id INTEGER NOT NULL "
+            "REFERENCES battles(id), sequence INTEGER NOT NULL, payload_json TEXT NOT NULL)",
+            "CREATE TABLE battle_checkpoints (id INTEGER PRIMARY KEY, battle_id INTEGER NOT NULL "
+            "REFERENCES battles(id), sequence_at INTEGER NOT NULL, state_json TEXT NOT NULL)",
+            "CREATE TABLE battle_invites (id INTEGER PRIMARY KEY, battle_id INTEGER REFERENCES battles(id), "
+            "activation_protocol_version INTEGER NOT NULL CHECK (activation_protocol_version IN (1, 2)))",
+            "CREATE INDEX ix_battle_events_head ON battle_events (battle_id, sequence)",
+            "CREATE INDEX ix_battle_invites_result ON battle_invites (battle_id)",
+            "INSERT INTO users VALUES (1)",
+            "INSERT INTO battles VALUES (10, 1, 1), (20, 1, 2)",
+            "INSERT INTO battle_events VALUES (101, 10, 1, '{\"event_type\":\"old\"}')",
+            "INSERT INTO battle_checkpoints VALUES (201, 20, 2, '{\"version\":2}')",
+            "INSERT INTO battle_invites VALUES (301, 20, 2)",
+        ):
+            connection.exec_driver_sql(statement)
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DB_URL", "sqlite://")
+    with engine.connect() as connection:
+        before = {
+            table: connection.exec_driver_sql(f"SELECT * FROM {table}").fetchall()
+            for table in ("battles", "battle_events", "battle_checkpoints", "battle_invites")
+        }
+    db._migrate_schema()
+    db._migrate_schema()
+    with engine.connect() as connection:
+        after = {
+            table: connection.exec_driver_sql(f"SELECT * FROM {table}").fetchall()
+            for table in before
+        }
+        assert after == before
+        assert connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall() == []
+        indexes = {
+            row.name for row in connection.exec_driver_sql(
+                "SELECT name FROM sqlite_master WHERE type = 'index'"
             )
+        }
+        assert {"ix_battle_events_head", "ix_battle_invites_result"} <= indexes
+        connection.exec_driver_sql("UPDATE battles SET activation_protocol_version = 3 WHERE id = 10")
+        connection.exec_driver_sql("UPDATE battle_invites SET activation_protocol_version = 3 WHERE id = 301")
+        connection.commit()
+    with pytest.raises(IntegrityError):
+        with engine.begin() as connection:
+            connection.exec_driver_sql("UPDATE battles SET activation_protocol_version = 4 WHERE id = 10")
+
+
+def test_migrate_v2_checks_preserves_preexisting_unrelated_fk_violations(monkeypatch):
+    engine = _memory_engine()
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            "CREATE TABLE battles (id INTEGER PRIMARY KEY, "
+            "activation_protocol_version INTEGER NOT NULL "
+            "CHECK (activation_protocol_version IN (1, 2)))"
+        )
+        connection.exec_driver_sql("INSERT INTO battles VALUES (1, 2)")
+        connection.exec_driver_sql(
+            "CREATE TABLE unrelated_parent (id INTEGER PRIMARY KEY)"
+        )
+        connection.exec_driver_sql(
+            "CREATE TABLE unrelated_child (id INTEGER PRIMARY KEY, "
+            "parent_id INTEGER REFERENCES unrelated_parent(id))"
+        )
+        connection.exec_driver_sql("INSERT INTO unrelated_child VALUES (4, 999)")
+    monkeypatch.setattr(db, "engine", engine)
+    monkeypatch.setattr(db, "DB_URL", "sqlite://")
+    with engine.connect() as connection:
+        before = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+    assert len(before) == 1
+
+    db._migrate_schema()
+
+    with engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall() == before
+        assert connection.exec_driver_sql(
+            "SELECT activation_protocol_version FROM battles WHERE id = 1"
+        ).scalar_one() == 2
 
 
 def test_migrate_schema_adds_unit_base_geometry_columns(monkeypatch):

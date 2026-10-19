@@ -19,6 +19,7 @@ from .. import models
 from ..battle_protocol import (
     ACTIVATION_PROTOCOL_VERSION_V1,
     ACTIVATION_PROTOCOL_VERSION_V2,
+    ACTIVATION_PROTOCOL_VERSION_V3,
     validate_activation_protocol_version,
 )
 from ..db import get_db
@@ -70,6 +71,8 @@ def _protocol_validation_error_code(
     if path.endswith("/activations"):
         return "invalid_selection"
     if path.endswith("/interrupts"):
+        if isinstance(body, dict) and body.get("scope") == "attack":
+            return "attack_guard_required"
         return "illegal_interrupt"
     if path.endswith("/activations/{activation_id}/transitions"):
         if isinstance(body, dict) and body.get("operation") == "finalize":
@@ -78,6 +81,8 @@ def _protocol_validation_error_code(
         return "invalid_phase"
     if not path.endswith("/actions") or not isinstance(body, dict):
         return None
+    if body.get("operation") == "resolve_attack":
+        return "attack_guard_required"
 
     guard_fields = {"activation_id", "expected_activation_version"}
     present_guards = guard_fields & set(body)
@@ -331,6 +336,20 @@ class BattleActionCreate(BaseModel):
     action: dict[str, Any]
 
 
+class BattleAttackResolveCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: Literal["resolve_attack"]
+    expected_sequence: int = Field(..., ge=0, strict=True)
+    activation_id: int = Field(..., ge=1, strict=True)
+    expected_activation_version: int = Field(..., ge=1, strict=True)
+    attack_id: int = Field(..., ge=1, strict=True)
+    expected_attack_version: int = Field(..., ge=1, strict=True)
+
+
+BattleActionOperation = BattleActionCreate | BattleAttackResolveCreate
+
+
 class BattleActivationStartCreate(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -361,10 +380,39 @@ class BattleActivationPassCreate(BaseModel):
     expected_window_version: int = Field(..., ge=1, strict=True)
 
 
-BattleActivationInterruptOperation = Annotated[
-    BattleActivationInterruptCreate | BattleActivationPassCreate,
-    Field(discriminator="operation"),
-]
+class BattleAttackInterruptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: Literal["interrupt"]
+    scope: Literal["attack"]
+    expected_sequence: int = Field(..., ge=0, strict=True)
+    activation_id: int = Field(..., ge=1, strict=True)
+    expected_activation_version: int = Field(..., ge=1, strict=True)
+    attack_id: int = Field(..., ge=1, strict=True)
+    expected_attack_version: int = Field(..., ge=1, strict=True)
+    expected_window_version: int = Field(..., ge=1, strict=True)
+    source_unit_id: int = Field(..., ge=0, strict=True)
+    ability_slug: Literal["oznaczenie"]
+    payload: dict[str, Any]
+
+
+class BattleAttackPassCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    operation: Literal["pass"]
+    scope: Literal["attack"]
+    expected_sequence: int = Field(..., ge=0, strict=True)
+    activation_id: int = Field(..., ge=1, strict=True)
+    expected_activation_version: int = Field(..., ge=1, strict=True)
+    attack_id: int = Field(..., ge=1, strict=True)
+    expected_attack_version: int = Field(..., ge=1, strict=True)
+    expected_window_version: int = Field(..., ge=1, strict=True)
+
+
+BattleActivationInterruptOperation = (
+    BattleActivationInterruptCreate | BattleActivationPassCreate
+    | BattleAttackInterruptCreate | BattleAttackPassCreate
+)
 
 
 class BattleActivationRecoveryUse(BaseModel):
@@ -732,13 +780,23 @@ def _activation_protocol_http_error(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "unsupported_interrupt"},
         )
+    if isinstance(exc, battle_activation_service.BattleActivationAttackScopeRequired):
+        return HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "attack_scope_required"},
+        )
     reason = exc.reason
     if reason is ActivationProtocolErrorReason.STALE_ACTIVATION:
         code, status_code = "stale_activation", status.HTTP_409_CONFLICT
     elif reason is ActivationProtocolErrorReason.STALE_WINDOW:
         code, status_code = "stale_window", status.HTTP_409_CONFLICT
+    elif reason is ActivationProtocolErrorReason.STALE_ATTACK:
+        code, status_code = "stale_attack", status.HTTP_409_CONFLICT
     elif reason is ActivationProtocolErrorReason.INVALID_PHASE:
-        code, status_code = "invalid_phase", status.HTTP_409_CONFLICT
+        code, status_code = (
+            "illegal_attack_resolution" if operation == "resolve_attack" else "invalid_phase",
+            status.HTTP_409_CONFLICT,
+        )
     elif reason is ActivationProtocolErrorReason.INVALID_CALLER:
         code, status_code = (
             ("not_current_priority", status.HTTP_409_CONFLICT)
@@ -748,7 +806,10 @@ def _activation_protocol_http_error(
     elif reason is ActivationProtocolErrorReason.INVALID_SELECTION:
         code, status_code = "invalid_selection", status.HTTP_422_UNPROCESSABLE_ENTITY
     elif reason is ActivationProtocolErrorReason.ILLEGAL_ACTION:
-        code, status_code = "illegal_action", status.HTTP_422_UNPROCESSABLE_ENTITY
+        code, status_code = (
+            "illegal_attack_resolution" if operation == "resolve_attack" else "illegal_action",
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
     elif reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT:
         code, status_code = "illegal_interrupt", status.HTTP_422_UNPROCESSABLE_ENTITY
     elif reason is ActivationProtocolErrorReason.INTERRUPT_LIMIT_REACHED:
@@ -766,6 +827,7 @@ def _activation_protocol_http_error(
             "pass": "invalid_phase",
             "interrupt": "illegal_interrupt",
             "action": "illegal_action",
+            "resolve_attack": "illegal_attack_resolution",
             "continue": "invalid_phase",
             "finalize": "illegal_recovery",
         }
@@ -805,7 +867,7 @@ def _stage_activation_mutation(
 def _public_activation_mutation(prepared: Any) -> BattleActionPublic:
     serialized_state = battle_state_to_json(
         prepared.state,
-        version=ACTIVATION_PROTOCOL_VERSION_V2,
+        version=prepared.protocol_version,
     )
     return BattleActionPublic(
         battle_id=prepared.battle_id,
@@ -1229,7 +1291,8 @@ def mutate_battle_activation_interrupt(
     db: Session = Depends(get_db),
     interrupter: BattleInterrupter = Depends(_battle_interrupter),
 ) -> BattleActionPublic | JSONResponse:
-    if isinstance(payload, BattleActivationPassCreate):
+    if isinstance(payload, (BattleActivationPassCreate, BattleAttackPassCreate)):
+        attack_scope = isinstance(payload, BattleAttackPassCreate)
         return _stage_activation_mutation(
             db,
             operation="pass",
@@ -1241,11 +1304,16 @@ def mutate_battle_activation_interrupt(
                 activation_id=payload.activation_id,
                 expected_activation_version=payload.expected_activation_version,
                 expected_window_version=payload.expected_window_version,
+                **({"attack_id": payload.attack_id, "expected_attack_version": payload.expected_attack_version} if attack_scope else {}),
             ),
             success_status=lambda prepared: (
                 status.HTTP_202_ACCEPTED
                 if prepared.state.activation is not None
-                and prepared.state.activation.window is not None
+                and (
+                    prepared.state.activation.attack.window is not None
+                    if attack_scope and prepared.state.activation.attack is not None
+                    else prepared.state.activation.window is not None
+                )
                 else status.HTTP_200_OK
             ),
         )
@@ -1263,6 +1331,7 @@ def mutate_battle_activation_interrupt(
             source_unit_id=payload.source_unit_id,
             ability_slug=payload.ability_slug,
             payload=payload.payload,
+            **({"attack_id": payload.attack_id, "expected_attack_version": payload.expected_attack_version} if isinstance(payload, BattleAttackInterruptCreate) else {}),
         ),
         success_status=status.HTTP_200_OK,
     )
@@ -1369,10 +1438,26 @@ def _take_v1_battle_action(
 )
 def take_battle_action(
     battle_id: int,
-    payload: BattleActionCreate,
+    payload: BattleActionOperation,
     db: Session = Depends(get_db),
     actor: BattleActor = Depends(_battle_actor),
 ) -> BattleActionPublic | JSONResponse:
+    if isinstance(payload, BattleAttackResolveCreate):
+        return _stage_activation_mutation(
+            db,
+            operation="resolve_attack",
+            stage=lambda: battle_activation_service.stage_battle_activation_action(
+                db,
+                battle_id=battle_id,
+                caller_user_id=actor.user_id,
+                expected_sequence=payload.expected_sequence,
+                activation_id=payload.activation_id,
+                expected_activation_version=payload.expected_activation_version,
+                attack_id=payload.attack_id,
+                expected_attack_version=payload.expected_attack_version,
+            ),
+            success_status=status.HTTP_202_ACCEPTED,
+        )
     has_activation_id = payload.activation_id is not None
     has_activation_version = payload.expected_activation_version is not None
     if has_activation_id and has_activation_version:
@@ -1393,7 +1478,9 @@ def take_battle_action(
 
     battle = _get_accessible_battle(db, battle_id=battle_id, reader=actor)
     if (
-        battle.activation_protocol_version == ACTIVATION_PROTOCOL_VERSION_V2
+        battle.activation_protocol_version in (
+            ACTIVATION_PROTOCOL_VERSION_V2, ACTIVATION_PROTOCOL_VERSION_V3
+        )
         or has_activation_id
         or has_activation_version
     ):
@@ -1474,6 +1561,11 @@ def get_battle_state(
     battle = _get_accessible_battle(db, battle_id=battle_id, reader=reader)
     checkpoint = load_latest_checkpoint(db, battle.id)
     if checkpoint is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Current battle checkpoint is unavailable",
+        )
+    if checkpoint.version != battle.activation_protocol_version:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Current battle checkpoint is unavailable",

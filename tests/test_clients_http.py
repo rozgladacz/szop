@@ -1106,7 +1106,7 @@ def test_create_battle_explicit_v2_emits_opt_in() -> None:
     assert json.loads(seen[0].body or b"")["activation_protocol_version"] == 2
 
 
-@pytest.mark.parametrize("invalid_version", [0, 3, True, "2", 2.0, None])
+@pytest.mark.parametrize("invalid_version", [0, 4, True, "2", 2.0, None])
 def test_create_battle_rejects_invalid_protocol_before_transport(
     invalid_version,
 ) -> None:
@@ -1152,7 +1152,7 @@ def test_create_battle_raises_create_label_for_malformed_payload() -> None:
         {key: value for key, value in _battle_public_payload(77).items()
          if key != "activation_protocol_version"},
         {**_battle_public_payload(77), "activation_protocol_version": True},
-        {**_battle_public_payload(77), "activation_protocol_version": 3},
+        {**_battle_public_payload(77), "activation_protocol_version": 4},
         {**_battle_public_payload(77), "unexpected": "field"},
     ],
 )

@@ -20,7 +20,12 @@ from app import models
 from app.db import Base, get_db
 from app.routers import battles
 from app.security import hash_agent_token
-from app.services.engine.actions import DefendAction
+from app.services.engine.actions import DefendAction, ShootAction
+from app.services.engine.action_codec import action_to_json
+from app.services.engine.activation_protocol import (
+    ActivationProtocolError,
+    ActivationProtocolErrorReason,
+)
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.persistence import load_latest_checkpoint
 from app.services.engine.state import ActivationPhase
@@ -301,13 +306,15 @@ def _create_same_owner_battle(
     return response.json()
 
 
-def _create_two_owner_battle(world: ActivationTransportWorld) -> dict[str, Any]:
+def _create_two_owner_battle(
+    world: ActivationTransportWorld, *, protocol_version: int = 2
+) -> dict[str, Any]:
     invited = world.p0.post(
         "/battles/invite",
         json={
             "to_user_id": world.ids.p1_user_id,
             "roster_id": world.ids.p0_roster_id,
-            "activation_protocol_version": 2,
+            "activation_protocol_version": protocol_version,
         },
     )
     assert invited.status_code == 201, invited.text
@@ -416,6 +423,24 @@ def _defend_action(unit_id: int = 1) -> dict[str, Any]:
         "action_type": "defend",
         "payload": {"unit_id": unit_id},
     }
+
+
+def _attack_guards(response, *, window: bool) -> dict[str, int]:
+    state = _wire_state(response)
+    activation = state.activation
+    assert activation is not None and activation.attack is not None
+    attack = activation.attack
+    guards = {
+        "expected_sequence": response.json()["new_sequence"],
+        "activation_id": activation.activation_id,
+        "expected_activation_version": activation.version,
+        "attack_id": attack.attack_id,
+        "expected_attack_version": attack.version,
+    }
+    if window:
+        assert attack.window is not None
+        guards["expected_window_version"] = attack.window.version
+    return guards
 
 
 def _start(world_client: TestClient, battle: dict[str, Any]):
@@ -564,6 +589,472 @@ def test_same_owner_real_transport_completes_v2_activation_to_idle(
     assert finalized.status_code == 200, finalized.text
     _assert_exact_envelope(finalized, battle_id)
     assert _wire_state(finalized).activation is None
+
+
+def test_v3_same_owner_attack_declaration_passes_and_resolve_are_durable(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=3)
+    battle_id = battle["battle_id"]
+    with world.sessions() as session:
+        initial = load_latest_checkpoint(session, battle_id)
+        assert initial is not None
+        assert battle["activation_protocol_version"] == 3
+        assert initial.state.activation is None
+
+    started = _start(world.p0, battle)
+    assert started.status_code == 201, started.text
+    _assert_exact_envelope(started, battle_id, 3)
+    first = _pass(world.p0, battle_id, started)
+    second = _pass(world.p0, battle_id, first)
+    assert second.status_code == 200, second.text
+    state = _wire_state(second)
+    attacker = next(blob for blob in state.blobs if blob.id == 1)
+    target = next(blob for blob in state.blobs if blob.owner_player == 1)
+    action = action_to_json(ShootAction(1, target.id, attacker.ranged_weapons[0]))
+    declared = world.p0.post(
+        f"/battles/{battle_id}/actions",
+        json={**_activation_guards(second), "action": action},
+    )
+    assert declared.status_code == 202, declared.text
+    _assert_exact_envelope(declared, battle_id, 3)
+    assert _wire_state(declared).activation.phase is ActivationPhase.ATTACK_WINDOW
+    with world.sessions() as session:
+        pending = load_latest_checkpoint(session, battle_id)
+        assert pending is not None
+        assert pending.state == _wire_state(declared)
+        before_rng = pending.dice.to_checkpoint()
+    replay = world.p0.post(f"/battles/{battle_id}/replay")
+    assert replay.status_code == 200, replay.text
+    assert battle_state_from_json(replay.json()["state"]) == _wire_state(declared)
+
+    attack_pass = lambda previous: world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        json={"operation": "pass", "scope": "attack", **_attack_guards(previous, window=True)},
+    )
+    first_attack_pass = attack_pass(declared)
+    assert first_attack_pass.status_code == 202, first_attack_pass.text
+    closed = attack_pass(first_attack_pass)
+    assert closed.status_code == 200, closed.text
+    assert _wire_state(closed).activation.phase is ActivationPhase.ATTACK_RESOLUTION_READY
+    with world.sessions() as session:
+        pending = load_latest_checkpoint(session, battle_id)
+        assert pending is not None and pending.dice.to_checkpoint() == before_rng
+    replay = world.p0.post(f"/battles/{battle_id}/replay")
+    assert replay.status_code == 200, replay.text
+    assert battle_state_from_json(replay.json()["state"]) == _wire_state(closed)
+
+    resolution = world.p0.post(
+        f"/battles/{battle_id}/actions",
+        json={"operation": "resolve_attack", **_attack_guards(closed, window=False)},
+    )
+    assert resolution.status_code == 202, resolution.text
+    _assert_exact_envelope(resolution, battle_id, 3)
+    resolved_state = _wire_state(resolution)
+    assert resolved_state.activation.attack is None
+    assert resolved_state.activation.phase is ActivationPhase.AWAITING_CONTINUATION
+    with world.sessions() as session:
+        durable = load_latest_checkpoint(session, battle_id)
+        assert durable is not None and durable.state == resolved_state
+    replay = world.p0.post(f"/battles/{battle_id}/replay")
+    assert replay.status_code == 200, replay.text
+    assert battle_state_from_json(replay.json()["state"]) == resolved_state
+
+
+def test_v3_public_oznaczenie_is_fail_closed_without_oracle(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=3)
+    battle_id = battle["battle_id"]
+    started = _start(world.p0, battle)
+    second = _pass(world.p0, battle_id, _pass(world.p0, battle_id, started))
+    state = _wire_state(second)
+    attacker = next(blob for blob in state.blobs if blob.id == 1)
+    target = next(blob for blob in state.blobs if blob.owner_player == 1)
+    declared = world.p0.post(
+        f"/battles/{battle_id}/actions",
+        json={**_activation_guards(second), "action": action_to_json(ShootAction(1, target.id, attacker.ranged_weapons[0]))},
+    )
+    assert declared.status_code == 202, declared.text
+    body = {
+        "operation": "interrupt", "scope": "attack",
+        **_attack_guards(declared, window=True),
+        "source_unit_id": 1, "ability_slug": "oznaczenie",
+        "payload": {"ability": "planowanie"},
+    }
+    before = _stream_counts(world, battle_id)
+    rejected = world.p0.post(f"/battles/{battle_id}/interrupts", json=body)
+    assert rejected.status_code == 422
+    assert rejected.json() == {"detail": {"code": "unsupported_interrupt"}}
+    assert _stream_counts(world, battle_id) == before
+    foreign = world.outsider.post(f"/battles/{battle_id}/interrupts", json=body)
+    missing = world.outsider.post("/battles/999999/interrupts", json=body)
+    assert foreign.status_code == missing.status_code == 404
+    assert foreign.json() == missing.json()
+
+
+def test_v3_attack_strict_guards_are_write_free(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=3)
+    battle_id = battle["battle_id"]
+    started = _start(world.p0, battle)
+    second = _pass(world.p0, battle_id, _pass(world.p0, battle_id, started))
+    state = _wire_state(second)
+    attacker = next(blob for blob in state.blobs if blob.id == 1)
+    target = next(blob for blob in state.blobs if blob.owner_player == 1)
+    declared = world.p0.post(
+        f"/battles/{battle_id}/actions",
+        json={**_activation_guards(second), "action": action_to_json(ShootAction(1, target.id, attacker.ranged_weapons[0]))},
+    )
+    assert declared.status_code == 202, declared.text
+    guards = _attack_guards(declared, window=True)
+    before = _stream_counts(world, battle_id)
+    for mutation in (
+        {"operation": "pass", "scope": "attack", **{k: v for k, v in guards.items() if k != "attack_id"}},
+        {"operation": "pass", "scope": "attack", **{**guards, "attack_id": True}},
+        {"operation": "pass", "scope": "attack", **guards, "extra": 1},
+    ):
+        response = world.p0.post(f"/battles/{battle_id}/interrupts", json=mutation)
+        assert response.status_code == 422
+        assert response.json() == {"detail": {"code": "attack_guard_required"}}
+        assert _stream_counts(world, battle_id) == before
+    no_scope = world.p0.post(
+        f"/battles/{battle_id}/interrupts",
+        json={"operation": "interrupt", **_activation_guards(declared),
+              "expected_window_version": 1, "source_unit_id": 1,
+              "ability_slug": "oznaczenie", "payload": {"ability": "planowanie"}},
+    )
+    assert no_scope.status_code == 422
+    assert no_scope.json() == {"detail": {"code": "attack_scope_required"}}
+    assert _stream_counts(world, battle_id) == before
+
+    first = world.p0.post(f"/battles/{battle_id}/interrupts", json={"operation": "pass", "scope": "attack", **guards})
+    closed = world.p0.post(f"/battles/{battle_id}/interrupts", json={"operation": "pass", "scope": "attack", **_attack_guards(first, window=True)})
+    assert closed.status_code == 200
+    resolve = _attack_guards(closed, window=False)
+    before = _stream_counts(world, battle_id)
+    for mutation in (
+        {"operation": "resolve_attack", **{k: v for k, v in resolve.items() if k != "attack_id"}},
+        {"operation": "resolve_attack", **{**resolve, "expected_attack_version": True}},
+        {"operation": "resolve_attack", **resolve, "action": action_to_json(ShootAction(1, target.id, attacker.ranged_weapons[0]))},
+    ):
+        response = world.p0.post(f"/battles/{battle_id}/actions", json=mutation)
+        assert response.status_code == 422
+        assert response.json() == {"detail": {"code": "attack_guard_required"}}
+        assert _stream_counts(world, battle_id) == before
+    stale = world.p0.post(
+        f"/battles/{battle_id}/actions",
+        json={"operation": "resolve_attack", **{**resolve, "attack_id": resolve["attack_id"] + 1}},
+    )
+    assert stale.status_code == 409
+    assert stale.json() == {"detail": {"code": "stale_attack"}}
+    assert _stream_counts(world, battle_id) == before
+
+
+def test_v3_two_bearers_enforce_priority_and_control(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_two_owner_battle(world, protocol_version=3)
+    battle_id = battle["battle_id"]
+    assert battle["activation_protocol_version"] == 3
+    tokens = {world.ids.p0_user_id: "v3-owner-0", world.ids.p1_user_id: "v3-owner-1"}
+    for user_id, token in tokens.items():
+        _seed_token(world, owner_user_id=user_id, raw_token=token,
+                    scopes={battles.BATTLE_ACT_SCOPE: True, battles.BATTLE_INTERRUPT_SCOPE: True})
+    state_response = world.p0.get(f"/battles/{battle_id}/state")
+    initial = battle_state_from_json({k: state_response.json()[k] for k in ("schema", "version", "state")})
+    actor_player = initial.active_player
+    selected_id = next(blob.id for blob in initial.blobs if blob.owner_player == actor_player and blob.id >= 1)
+    token_by_player = (
+        tokens[battle["p1_user_id"]],
+        tokens[battle["p2_user_id"]],
+    )
+    actor_token = token_by_player[actor_player]
+    other_token = token_by_player[1 - actor_player]
+    started = world.outsider.post(
+        f"/battles/{battle_id}/activations", headers=_bearer(actor_token),
+        json={"expected_sequence": battle["latest_sequence"], "selected_unit_id": selected_id},
+    )
+    assert started.status_code == 201, started.text
+    first_priority = _wire_state(started).activation.window.priority_player
+    priority_token = token_by_player[first_priority]
+    next_token = token_by_player[1 - first_priority]
+    wrong_priority = world.outsider.post(
+        f"/battles/{battle_id}/interrupts", headers=_bearer(next_token),
+        json={"operation": "pass", **_activation_guards(started)},
+    )
+    assert wrong_priority.status_code == 409
+    first = world.outsider.post(
+        f"/battles/{battle_id}/interrupts", headers=_bearer(priority_token),
+        json={"operation": "pass", **_activation_guards(started)},
+    )
+    second = world.outsider.post(
+        f"/battles/{battle_id}/interrupts", headers=_bearer(next_token),
+        json={"operation": "pass", **_activation_guards(first)},
+    )
+    assert second.status_code == 200, second.text
+    state = _wire_state(second)
+    attacker = next(blob for blob in state.blobs if blob.id == selected_id)
+    target = next(blob for blob in state.blobs if blob.owner_player != actor_player)
+    action_body = {**_activation_guards(second), "action": action_to_json(ShootAction(selected_id, target.id, attacker.ranged_weapons[0]))}
+    forbidden_action = world.outsider.post(
+        f"/battles/{battle_id}/actions", headers=_bearer(other_token), json=action_body,
+    )
+    assert forbidden_action.status_code == 403
+    declared = world.outsider.post(
+        f"/battles/{battle_id}/actions", headers=_bearer(actor_token), json=action_body,
+    )
+    assert declared.status_code == 202, declared.text
+    wrong_attack_priority = world.outsider.post(
+        f"/battles/{battle_id}/interrupts", headers=_bearer(next_token),
+        json={"operation": "pass", "scope": "attack", **_attack_guards(declared, window=True)},
+    )
+    assert wrong_attack_priority.status_code == 409
+    first_attack = world.outsider.post(
+        f"/battles/{battle_id}/interrupts", headers=_bearer(priority_token),
+        json={"operation": "pass", "scope": "attack", **_attack_guards(declared, window=True)},
+    )
+    closed = world.outsider.post(
+        f"/battles/{battle_id}/interrupts", headers=_bearer(next_token),
+        json={"operation": "pass", "scope": "attack", **_attack_guards(first_attack, window=True)},
+    )
+    assert closed.status_code == 200, closed.text
+    forbidden_resolve = world.outsider.post(
+        f"/battles/{battle_id}/actions", headers=_bearer(other_token),
+        json={"operation": "resolve_attack", **_attack_guards(closed, window=False)},
+    )
+    assert forbidden_resolve.status_code == 403
+    resolved = world.outsider.post(
+        f"/battles/{battle_id}/actions", headers=_bearer(actor_token),
+        json={"operation": "resolve_attack", **_attack_guards(closed, window=False)},
+    )
+    assert resolved.status_code == 202, resolved.text
+
+
+def test_v3_http_client_decodes_pending_scope_and_posts_once_per_mutation(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=3)
+    battle_id = battle["battle_id"]
+    transport = CountingTestClientTransport(world.p0)
+    client = HttpClient("http://testserver", transport=transport)
+    initial = client.get_state_checkpoint(battle_id)
+    assert initial.version == 3
+    assert len(transport.requests) == 1 and transport.requests[-1].method == "GET"
+    started = client.start_activation(
+        battle_id, expected_sequence=initial.sequence_at, selected_unit_id=1
+    )
+    assert len(transport.requests) == 2 and transport.requests[-1].method == "POST"
+    activation = started.state.activation
+    first = client.pass_interrupt_priority(
+        battle_id, expected_sequence=started.new_sequence,
+        activation_id=activation.activation_id,
+        expected_activation_version=activation.version,
+        expected_window_version=activation.window.version,
+    )
+    activation = first.state.activation
+    second = client.pass_interrupt_priority(
+        battle_id, expected_sequence=first.new_sequence,
+        activation_id=activation.activation_id,
+        expected_activation_version=activation.version,
+        expected_window_version=activation.window.version,
+    )
+    state = second.state
+    activation = state.activation
+    attacker = next(blob for blob in state.blobs if blob.id == 1)
+    target = next(blob for blob in state.blobs if blob.owner_player == 1)
+    declared = client.commit_activation_action(
+        battle_id, ShootAction(1, target.id, attacker.ranged_weapons[0]),
+        expected_sequence=second.new_sequence,
+        activation_id=activation.activation_id,
+        expected_activation_version=activation.version,
+    )
+    assert declared.state.activation.phase is ActivationPhase.ATTACK_WINDOW
+    pending = declared.state.activation.attack
+    assert pending is not None and pending.window is not None
+    request_count = len(transport.requests)
+    with pytest.raises(HttpClientActivationError) as exc_info:
+        client.interrupt(
+            battle_id, expected_sequence=declared.new_sequence,
+            activation_id=declared.state.activation.activation_id,
+            expected_activation_version=declared.state.activation.version,
+            expected_window_version=pending.window.version,
+            scope="attack", attack_id=pending.attack_id,
+            expected_attack_version=pending.version,
+            source_unit_id=2, ability_slug="oznaczenie",
+            payload={"ability": "planowanie"},
+        )
+    assert exc_info.value.detail_code == "unsupported_interrupt"
+    assert len(transport.requests) == request_count + 1
+    first_attack = client.pass_interrupt_priority(
+        battle_id, expected_sequence=declared.new_sequence,
+        activation_id=declared.state.activation.activation_id,
+        expected_activation_version=declared.state.activation.version,
+        expected_window_version=pending.window.version,
+        scope="attack", attack_id=pending.attack_id,
+        expected_attack_version=pending.version,
+    )
+    pending = first_attack.state.activation.attack
+    closed = client.pass_interrupt_priority(
+        battle_id, expected_sequence=first_attack.new_sequence,
+        activation_id=first_attack.state.activation.activation_id,
+        expected_activation_version=first_attack.state.activation.version,
+        expected_window_version=pending.window.version,
+        scope="attack", attack_id=pending.attack_id,
+        expected_attack_version=pending.version,
+    )
+    assert closed.state.activation.phase is ActivationPhase.ATTACK_RESOLUTION_READY
+    pending = closed.state.activation.attack
+    request_count = len(transport.requests)
+    resolved = client.resolve_activation_attack(
+        battle_id, expected_sequence=closed.new_sequence,
+        activation_id=closed.state.activation.activation_id,
+        expected_activation_version=closed.state.activation.version,
+        attack_id=pending.attack_id, expected_attack_version=pending.version,
+    )
+    assert len(transport.requests) == request_count + 1
+    assert transport.requests[-1].method == "POST"
+    assert resolved.state.activation.attack is None
+
+
+def test_v3_full_request_select_lists_stay_at_six_session_seven_bearer(
+    activation_transport_world: ActivationTransportWorld,
+) -> None:
+    world = activation_transport_world
+    _seed_token(
+        world, owner_user_id=world.ids.p0_user_id, raw_token="v3-sql-bearer",
+        scopes={battles.BATTLE_ACT_SCOPE: True, battles.BATTLE_INTERRUPT_SCOPE: True},
+    )
+
+    def counted(request):
+        statements: list[str] = []
+
+        def capture(_conn, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT"):
+                statements.append(" ".join(statement.split()))
+
+        event.listen(world.engine, "before_cursor_execute", capture)
+        try:
+            response = request()
+        finally:
+            event.remove(world.engine, "before_cursor_execute", capture)
+        assert response.status_code in (200, 201, 202), response.text
+        return response, tuple(statements)
+
+    def flow(headers):
+        battle = _create_same_owner_battle(world, protocol_version=3)
+        battle_id = battle["battle_id"]
+        selects: list[tuple[str, ...]] = []
+        client = world.outsider if headers else world.p0
+        if headers:
+            client.cookies.clear()
+
+        def post(path, body):
+            response, shape = counted(
+                lambda: client.post(path, headers=headers, json=body)
+            )
+            selects.append(shape)
+            return response
+
+        started = post(
+            f"/battles/{battle_id}/activations",
+            {"expected_sequence": battle["latest_sequence"], "selected_unit_id": 1},
+        )
+        first = post(f"/battles/{battle_id}/interrupts", {"operation": "pass", **_activation_guards(started)})
+        second = post(f"/battles/{battle_id}/interrupts", {"operation": "pass", **_activation_guards(first)})
+        state = _wire_state(second)
+        attacker = next(blob for blob in state.blobs if blob.id == 1)
+        target = next(blob for blob in state.blobs if blob.owner_player == 1)
+        declared = post(
+            f"/battles/{battle_id}/actions",
+            {**_activation_guards(second), "action": action_to_json(ShootAction(1, target.id, attacker.ranged_weapons[0]))},
+        )
+        first_attack = post(
+            f"/battles/{battle_id}/interrupts",
+            {"operation": "pass", "scope": "attack", **_attack_guards(declared, window=True)},
+        )
+        closed = post(
+            f"/battles/{battle_id}/interrupts",
+            {"operation": "pass", "scope": "attack", **_attack_guards(first_attack, window=True)},
+        )
+        post(
+            f"/battles/{battle_id}/actions",
+            {"operation": "resolve_attack", **_attack_guards(closed, window=False)},
+        )
+        return selects
+
+    session_shapes = flow({})
+    bearer_shapes = flow(_bearer("v3-sql-bearer"))
+    assert all(len(shape) == 6 for shape in session_shapes)
+    assert all(len(shape) == 7 for shape in bearer_shapes)
+    assert all(
+        session_shape == bearer_shape[1:]
+        for session_shape, bearer_shape in zip(session_shapes, bearer_shapes)
+    )
+
+
+def test_v3_resolve_failure_after_private_rng_use_is_retry_safe(
+    activation_transport_world: ActivationTransportWorld,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    world = activation_transport_world
+
+    def closed_attack():
+        battle = _create_same_owner_battle(world, protocol_version=3)
+        battle_id = battle["battle_id"]
+        started = _start(world.p0, battle)
+        second = _pass(world.p0, battle_id, _pass(world.p0, battle_id, started))
+        state = _wire_state(second)
+        attacker = next(blob for blob in state.blobs if blob.id == 1)
+        target = next(blob for blob in state.blobs if blob.owner_player == 1)
+        declared = world.p0.post(
+            f"/battles/{battle_id}/actions",
+            json={**_activation_guards(second), "action": action_to_json(ShootAction(1, target.id, attacker.ranged_weapons[0]))},
+        )
+        first = world.p0.post(
+            f"/battles/{battle_id}/interrupts",
+            json={"operation": "pass", "scope": "attack", **_attack_guards(declared, window=True)},
+        )
+        closed = world.p0.post(
+            f"/battles/{battle_id}/interrupts",
+            json={"operation": "pass", "scope": "attack", **_attack_guards(first, window=True)},
+        )
+        assert closed.status_code == 200, closed.text
+        return battle_id, {"operation": "resolve_attack", **_attack_guards(closed, window=False)}
+
+    battle_id, resolve_body = closed_attack()
+    before = _stream_counts(world, battle_id)
+    real_resolve = battles.battle_activation_service._resolve_activation_attack
+
+    def fail_after_rng(*args, **kwargs):
+        kwargs["dice"].roll_d6(4)
+        raise ActivationProtocolError(ActivationProtocolErrorReason.ILLEGAL_ACTION)
+
+    monkeypatch.setattr(battles.battle_activation_service, "_resolve_activation_attack", fail_after_rng)
+    failed = world.p0.post(f"/battles/{battle_id}/actions", json=resolve_body)
+    assert failed.status_code == 422
+    assert failed.json() == {"detail": {"code": "illegal_attack_resolution"}}
+    assert _stream_counts(world, battle_id) == before
+    monkeypatch.setattr(battles.battle_activation_service, "_resolve_activation_attack", real_resolve)
+    retried = world.p0.post(f"/battles/{battle_id}/actions", json=resolve_body)
+    assert retried.status_code == 202, retried.text
+    after_retry = _stream_counts(world, battle_id)
+    duplicate = world.p0.post(f"/battles/{battle_id}/actions", json=resolve_body)
+    assert duplicate.status_code == 409
+    assert duplicate.json() == {"detail": {"code": "stale_sequence"}}
+    assert _stream_counts(world, battle_id) == after_retry
+
+    control_id, control_body = closed_attack()
+    control = world.p0.post(f"/battles/{control_id}/actions", json=control_body)
+    assert control.status_code == 202, control.text
+    assert retried.json()["events"] == control.json()["events"]
+    assert _stream_counts(world, control_id)[3] == after_retry[3]
 
 
 def test_public_v2_flow_accepts_existing_first_roster_unit_id_zero(
@@ -940,7 +1431,7 @@ def test_route_inventory_and_openapi_expose_activation_transport() -> None:
     interrupt_schema = openapi["paths"]["/battles/{battle_id}/interrupts"][
         "post"
     ]["requestBody"]["content"]["application/json"]["schema"]
-    assert interrupt_schema["discriminator"]["propertyName"] == "operation"
+    assert len(interrupt_schema["anyOf"]) == 4
     assert set(
         openapi["paths"]["/battles/{battle_id}/interrupts"]["post"]["responses"]
     ) >= {"200", "202"}

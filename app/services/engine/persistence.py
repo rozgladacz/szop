@@ -92,6 +92,7 @@ class LoadedBattleCheckpoint:
     sequence_at: int
     state: BattleState
     dice: DeterministicDice
+    version: int
 
 
 def latest_event_sequence(session: "Session", battle_id: int) -> int:
@@ -310,11 +311,13 @@ def load_earliest_checkpoint(
 
 def _decode_checkpoint_row(row) -> LoadedBattleCheckpoint:
     """Decode one ORM checkpoint through the shared state and RNG codecs."""
+    payload = json.loads(row.state_json)
     return LoadedBattleCheckpoint(
         battle_id=row.battle_id,
         sequence_at=row.sequence_at,
-        state=battle_state_from_json(json.loads(row.state_json)),
+        state=battle_state_from_json(payload),
         dice=DeterministicDice.from_checkpoint(json.loads(row.rng_json)),
+        version=payload["version"],
     )
 
 

@@ -413,7 +413,7 @@ def test_create_battle_explicit_v2_persists_coherent_idle_checkpoint() -> None:
     assert json.loads(checkpoint_row.state_json)["version"] == 2
 
 
-@pytest.mark.parametrize("invalid_version", [0, 3, True, "2", 2.0, None])
+@pytest.mark.parametrize("invalid_version", [0, 4, True, "2", 2.0, None])
 def test_create_battle_protocol_version_is_strict_before_write(
     invalid_version,
 ) -> None:
