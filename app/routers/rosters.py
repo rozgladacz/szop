@@ -2230,6 +2230,7 @@ def _unit_weapon_options(unit: models.Unit) -> list[dict]:
     return options
 def _passive_entries(unit: models.Unit) -> list[dict]:
     payload = utils.passive_flags_to_payload(unit.flags)
+    custom_names = ability_registry.passive_custom_names(unit)
     entries: list[dict] = []
     flags = _unit_army_flags(unit)
     unit_traits = costs.flags_to_ability_list(flags)
@@ -2300,27 +2301,31 @@ def _passive_entries(unit: models.Unit) -> list[dict]:
             cost_base_value = -float(disable_components.base)
             cost_weapon_delta = -float(disable_components.weapon_delta)
             cost_value = cost_base_value + cost_weapon_delta
-        entries.append(
-            {
-                "slug": slug,
-                "value": "" if value is None else str(value),
-                "label": label,
-                "description": description,
-                "cost": cost_value,
-                "cost_base": cost_base_value,
-                "cost_weapon_delta": cost_weapon_delta,
-                "is_default": is_default,
-                "default_count": default_count,
-                "is_mandatory": is_mandatory,
-            }
-        )
+        entry = {
+            "slug": slug,
+            "value": "" if value is None else str(value),
+            "label": label,
+            "description": description,
+            "cost": cost_value,
+            "cost_base": cost_base_value,
+            "cost_weapon_delta": cost_weapon_delta,
+            "is_default": is_default,
+            "default_count": default_count,
+            "is_mandatory": is_mandatory,
+        }
+        value_key = str(value or '').strip()
+        custom_key = f'{slug}={value_key}' if value_key else slug
+        if custom_name := custom_names.get(custom_key):
+            entry['custom_name'] = custom_name
+            entry['display_label'] = _ability_label_with_count(entry)
+        entries.append(entry)
 
     return entries
 
 
 def _passive_labels(unit: models.Unit) -> list[str]:
     return [
-        entry["label"]
+        _ability_label_with_count(entry)
         for entry in _passive_entries(unit)
         if entry.get("label")
     ]
@@ -3686,7 +3691,7 @@ def _roster_unit_export_data(
     selected_actives = _selected_ability_entries(loadout, active_items, "active")
     selected_auras = _selected_ability_entries(loadout, aura_items, "aura")
     passive_labels = [
-        entry.get("label") or entry.get("raw") or entry.get("slug") or ""
+        _ability_label_with_count(entry)
         for entry in selected_passives
         if entry
     ]
@@ -3776,7 +3781,7 @@ def _selected_passive_labels(
         roster_unit, loadout, passive_items, classification
     )
     return [
-        entry.get("label") or entry.get("raw") or entry.get("slug") or ""
+        _ability_label_with_count(entry)
         for entry in selected_entries
         if entry
     ]

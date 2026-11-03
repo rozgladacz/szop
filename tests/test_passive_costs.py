@@ -29,6 +29,15 @@ def _make_army(passive_rules: str) -> models.Army:
     )
 
 
+@pytest.mark.parametrize('name,extra', [('Transport', 0), ('Otwarty transport', 0.25), ('Platforma strzelecka', 0.25)])
+@pytest.mark.parametrize('mobility,multiplier', [('', 1), ('Samolot', 4), ('Skok', 1.5), ('Szybki', 1.25), ('Zwinny', 1.25)])
+def test_transport_cost_is_shared_by_base_and_ability_prices(name, extra, mobility, multiplier):
+    traits = [mobility] if mobility else []
+    expected = 11 * (multiplier + extra)
+    assert costs.passive_cost(f'{name}(11)', abilities=traits) == pytest.approx(expected)
+    assert costs.ability_cost_from_name(name, '11', traits) == pytest.approx(expected)
+
+
 def _make_unit_with_default_passive() -> models.Unit:
     ability = models.Ability(name="Nieustraszony", type="passive", description="")
     link = models.UnitAbility(position=0)

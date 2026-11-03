@@ -313,6 +313,22 @@ def _get_ability_lookup_maps(
     return cached
 
 
+def passive_custom_names(unit: models.Unit | None) -> dict[str, str]:
+    raw = getattr(unit, 'passive_custom_names_json', None)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {
+        key: value.strip() for key, value in parsed.items()
+        if isinstance(value, str) and value.strip()
+    }
+
+
 def unit_ability_payload(unit: models.Unit, ability_type: str) -> list[dict]:
     items: list[dict] = []
     links = [

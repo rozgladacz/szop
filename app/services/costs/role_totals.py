@@ -36,7 +36,7 @@ from typing import Any, Mapping, Sequence
 from ... import models
 from ..utils import ARMY_RULE_OFF_PREFIX
 from ._engine import ROLE_SLUGS, PassiveState
-from .abilities import ability_cost_components_from_name, base_model_cost
+from .abilities import _transport_cost, ability_cost_components_from_name, base_model_cost
 from .passive_state import (
     _active_traits_from_payload,
     _ensure_extra_data,
@@ -266,6 +266,8 @@ def roster_unit_role_totals(
             entries.append(
                 {
                     "slug": slug,
+                    "label": label,
+                    "value": value,
                     "default_count": default_count,
                     "cost": float(components.base),
                 }
@@ -382,6 +384,15 @@ def roster_unit_role_totals(
         if active_counts.get(_aid_key, 0) > 0 or aura_counts.get(_aid_key, 0) > 0:
             _selected_active_set_precomputed.add(_ident)
 
+    # Transport mobility can be passive (e.g. Valkyria's Samolot) or active.
+    # Keep these role-independent sets outside the twice-called total loop.
+    base_effective_set = _base_active_set_precomputed | {
+        ability_identifier(trait) for trait in default_base_traits
+    }
+    selected_effective_set = _selected_active_set_precomputed | {
+        ability_identifier(trait) for trait in base_traits
+    }
+
     def _compute_total(current_traits: Sequence[str], selected_role: str) -> float:
         ability_map, passive_total, _ = _ability_cost_map(current_traits)
         default_traits_with_role = _with_role_trait(default_base_traits, selected_role)
@@ -417,20 +428,11 @@ def roster_unit_role_totals(
 
         # Reuse role-independent precomputes (was: rebuilt every call with
         # an O(N²) next(...) lookup over unit.abilities).
-        base_active_set = _base_active_set_precomputed
-        selected_active_set = _selected_active_set_precomputed
+        base_active_set = base_effective_set
+        selected_active_set = selected_effective_set
 
         def _is_odwody_blocked(active_set: set[str]) -> bool:
             return bool({"rezerwa", "zwiadowca", "zasadzka"} & active_set)
-
-        def _transport_multiplier(active_set: set[str]) -> float:
-            if "samolot" in active_set:
-                return 4.0
-            if "skok" in active_set:
-                return 1.5
-            if "szybki" in active_set or "zwinny" in active_set:
-                return 1.25
-            return 1.0
 
         def _effective_passive_cost(entry: dict[str, Any], active_set: set[str], cost_value: float) -> float:
             slug = str(entry.get("slug") or "")
@@ -452,10 +454,7 @@ def roster_unit_role_totals(
                     )
                 )
                 if capacity > 0:
-                    multiplier = _transport_multiplier(active_set)
-                    if is_open_transport:
-                        multiplier += 0.25
-                    return capacity * multiplier
+                    return _transport_cost(ident.replace(' ', '_'), capacity, active_set)
             return cost_value
 
         passive_diff = 0.0
@@ -467,8 +466,6 @@ def roster_unit_role_totals(
             selected_value = passive_counts.get(str(slug), default_value)
             selected_flag = 1 if selected_value else 0
             diff = selected_flag - default_value
-            if diff == 0:
-                continue
             cost_value = float(entry.get("cost") or 0.0)
             # Compute identifier ONCE per entry — was previously called twice
             # (lines `ident = ...` and `passive_ident = ...`) which doubled
@@ -481,6 +478,8 @@ def roster_unit_role_totals(
                 "otwarty transport",
                 "platforma strzelecka",
             }
+            if diff == 0 and not is_dynamic_transport:
+                continue
             if cost_value == 0.0 and not is_dynamic_transport:
                 continue
             default_cost = (

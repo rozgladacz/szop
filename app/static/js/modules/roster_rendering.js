@@ -246,7 +246,7 @@ function renderPassiveEditor(
     info.className = 'roster-ability-details flex-grow-1';
     const name = document.createElement('span');
     name.className = 'roster-ability-label';
-    name.textContent = entry.label || entry.raw || slug;
+    name.textContent = entry.display_label || entry.label || entry.raw || slug;
     if (entry.description) {
       name.title = entry.description;
     }
@@ -376,7 +376,12 @@ function renderPassiveEditor(
           init.headers['Content-Type'] = 'application/json';
           init.body = JSON.stringify({ parent_roster_unit_id: Number(newParentId) });
         }
-        fetch(url, init)
+        Promise.resolve()
+          .then(() => typeof heroContext.beforeAttach === 'function' ? heroContext.beforeAttach() : true)
+          .then((saved) => {
+            if (saved === false) throw new Error('Najpierw zapisz poprawną kompozycję modeli.');
+            return fetch(url, init);
+          })
           .then((r) => {
             if (!r.ok) {
               return r.text().then((t) => { throw new Error(t || `HTTP ${r.status}`); });

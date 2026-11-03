@@ -57,6 +57,27 @@ def test_calculate_roster_unit_quote_returns_contract_fields() -> None:
     assert quote["selected_total"] == max(quote["warrior_total"], quote["shooter_total"])
 
 
+@pytest.mark.parametrize('mode,count', [('per_model', 1), ('per_model', 3), ('total', 3)])
+@pytest.mark.parametrize('optional', [False, True])
+@pytest.mark.parametrize('flying', [False, True])
+def test_transport_quote_toggle_and_item_delta_include_passive_mobility(mode, count, optional, flying):
+    unit = _unit()
+    unit.toughness = 9
+    unit.flags = f'samolot!,transport=11{"?" if optional else ""}'
+    loadout = {'mode': mode, 'passive': {'samolot': int(flying)}}
+    quotes = [costs.calculate_roster_unit_quote(
+        unit, loadout={**loadout, 'passive': {**loadout['passive'], 'transport': enabled}},
+        count=count, include_item_costs=True,
+    ) for enabled in (0, 1)]
+    expected = 11 * (4 if flying else 1) * count
+    assert quotes[1]['selected_total'] - quotes[0]['selected_total'] == pytest.approx(expected)
+    for quote in quotes:
+        assert quote['item_costs']['passive_deltas']['transport'] == pytest.approx(expected)
+    unit.flags = 'samolot!'
+    without = costs.calculate_roster_unit_quote(unit, loadout=loadout, count=count)
+    assert quotes[0]['selected_total'] == without['selected_total']
+
+
 def test_calculate_roster_unit_quote_normalizes_loadout() -> None:
     raw_loadout = {
         "mode": "TOTAL",

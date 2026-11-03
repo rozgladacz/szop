@@ -47,6 +47,16 @@ from .primitives import (
 from .weapons import _weapon_cost, weapon_cost
 
 
+def _transport_cost(slug: str, capacity: float, ability_set: set[str]) -> float:
+    multiplier = next(
+        (value for options, value in TRANSPORT_MULTIPLIERS if ability_set & options),
+        1.0,
+    )
+    if slug in {'otwarty_transport', 'platforma_strzelecka'}:
+        multiplier += 0.25
+    return capacity * multiplier
+
+
 def passive_cost(
     ability_name: str,
     tou: float = 1.0,
@@ -58,6 +68,12 @@ def passive_cost(
     key = slug or norm
     if not key:
         return 0.0
+
+    if slug in {'transport', 'otwarty_transport', 'platforma_strzelecka'}:
+        return _transport_cost(
+            slug, extract_number(ability_name),
+            {ability_identifier(trait) for trait in (abilities or [])},
+        )
 
     tou = float(tou)
 
@@ -325,20 +341,8 @@ def ability_cost_components_from_name(
             total_without += weapon_cost(wpn, int(quality), traits_without)
         weapon_delta = total_with - total_without
 
-    if desc.startswith("transport"):
-        capacity = extract_number(value or name)
-        multiplier = 1.0
-        for options, value in TRANSPORT_MULTIPLIERS:
-            if ability_set & options:
-                multiplier = value
-        base_result = capacity * multiplier
-    if desc.startswith("otwarty transport") or desc.startswith("platforma strzelecka"):
-        capacity = extract_number(value or name)
-        multiplier = 1.0
-        for options, value in TRANSPORT_MULTIPLIERS:
-            if ability_set & options:
-                multiplier = value
-        base_result = capacity * (multiplier + 0.25)
+    if slug in {'transport', 'otwarty_transport', 'platforma_strzelecka'}:
+        base_result = _transport_cost(slug, extract_number(value or name), ability_set)
     elif desc.startswith("aura"):
         if value and value.startswith("mistrzostwo:"):
             parts = value.split("|", 1)

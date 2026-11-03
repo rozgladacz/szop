@@ -17,6 +17,9 @@ Mapa zaleznosci po Fazie III podzialu `app/static/js/app.js`. Moduly sa klasyczn
 11. istniejace stuby: `ability_picker.js`, `weapon_picker.js`, `roster_editor.js`, `armory_tree.js`
 12. `app.js`
 
+`model_count_controls.js` jest ładowany po `roster_collection_models.js` w `base.html`.
+Sam rejestruje delegację kliknięć liczników; nie wymaga wywołania z bootstrapu.
+
 ## Kontrakty
 
 - Bootstrap w `app.js` zachowuje kolejnosc init: `initAbilityPickers`, `initNumberPickers`, `initRangePickers`, `initWeaponPickers`, `initRosterEditor`, `initWeaponDefaults`, `initSpellAbilityForms`, `initArmoryWeaponTree`, `initSpellWeaponCostPreview`, `initWeaponInheritancePanel`, `initWeaponImportPanel`.
@@ -36,6 +39,7 @@ Mapa zaleznosci po Fazie III podzialu `app/static/js/app.js`. Moduly sa klasyczn
 | `loadout_state.js` | `SZOPRosterRendering.formatPoints` | `SZOPLoadoutState` with loadout state create/clone/serialize/ensure helpers, labels, mode helpers | roster editor closure, `editor_renderers.js`, Node frontend tests |
 | `editor_renderers.js` | `SZOPRosterRendering`, `SZOPLoadoutState`, `SZOPTextParsing` | `SZOPEditorRenderers.renderAbilityEditor`, `renderWeaponEditor`, `toggleSectionVisibility` | roster editor closure, Node frontend tests |
 | `roster_adders.js` | DOM/fetch roster add endpoint | `SZOPRosterAdders.initRosterAdders` | `initRosterEditor` in `app.js` |
+| `model_count_controls.js` | DOM, natywne `input.stepUp` | brak globalnego API; `[data-model-count-control]` + `[data-model-count-step]` | liczebność w `roster_edit.html`, modele/proxy w `roster_collection_models.js`; emituje istniejące `change` / `input` dla autosave |
 
 ## Call-site checklist per PR
 

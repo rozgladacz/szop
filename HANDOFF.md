@@ -11,6 +11,7 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
+| [HANDOFF_wydanie-poprawek](docs/handoffs/HANDOFF_wydanie-poprawek.md) | Commit main i publikacja obrazu dla aktualizatora | Git / release | In progress |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
@@ -47,6 +48,15 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Starsze wpisy w [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).)*
+
+### 2026-11-02 — nazwy-liczebnosc-mobile (archived)
+- Rozpiska przekazuje własne nazwy pasywnych z Armii przez wspólny parser `ability_registry.passive_custom_names`; lista, oba edytory i eksport pokazują „Nazwa [Reguła]”, zachowując kanoniczne etykiety wyceny. Dodano jawne −/+ dla liczebności klasycznej, kolekcji i proxy: delegacja `model_count_controls.js`, natywne ograniczenia i istniejący autosave, cele dotykowe 44×44 px.
+- Weryfikacja: pełny pytest **370 passed** (+8 przypadków), frontend parity, simplify/review/security-review, call-site audit i czysty diff check. Smoke desktop oraz 320/390 px na kopii realnej bazy: nazwy (także Transport(11)), granice 1/0, autosave po reload, brak overflow kontrolek i błędów konsoli, Zbrojownia/Armie/Rozpiski OK. A/B payloadu 51 jednostek 20,17→20,76 ms (+2,9%), 0 zapytań DB; silnik kosztów bez zmian. Poprzednie poprawki zachowane; zmiany lokalne, bez wdrożenia i bez zmiany źródłowej bazy.
+
+### 2026-10-29 — transport-bohater-modele (archived)
+- Transport ma wspólną wycenę SSOT w kosztach bazowych, zdolnościach i quote; zachowane parametry pojemności oraz kontekst mobilności default/selected. Valkyria Transport(11) + Samolot: +44 pkt, zweryfikowane UI 216,18→260,18. Tryb modeli udostępnia istniejący selektor bohatera „Dołącz do”, zapisuje kompozycję przed attach/detach i blokuje akcję po błędzie/abort zapisu.
+- Weryfikacja: pytest **362 passed** (30 nowych przypadków, frontend parity), smoke Zbrojownia / Armie / Rozpiski i attach/detach na kopii realnej bazy, call-site audit, simplify/review/security-review oraz czysty diff check. A/B roster 10 −3,9% full / −3,7% badge, roster 13 +3,4% / +7,5%; zero nowych zapytań DB, szczegóły w `docs/PERFORMANCE.md`. Zmiany lokalne, bez wdrożenia i bez zmiany źródłowej bazy.
+- Pliki: `app/services/costs/{abilities,role_totals}.py`, `app/static/js/modules/{roster_collection_models,roster_rendering}.js`, `tests/test_{passive_costs,roster_unit_quote,frontend_models_hero}.py`.
 
 ### 2026-10-13 — backup-scheduler (archived)
 - Usunięto cykl importu `backup_loop → backup → db_restore → db → ability_registry → models → db.Base` przez przeniesienie importów usług w `app/db.py` do miejsc użycia; sidecar ma teraz własny healthcheck procesu. Dodano test świeżego startu i faktycznej kopii SQLite/WAL; pełne pytest 332/332, Compose zweryfikowany na serwerze.

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import pytest
 
 import sys
 from pathlib import Path
@@ -52,6 +53,36 @@ def _make_unit() -> models.Unit:
     unit.abilities = []
     unit.weapon_links = []
     return unit
+
+
+def test_roster_passive_entries_preserve_army_custom_names_and_canonical_costs():
+    from app.routers import armies
+
+    unit = _make_unit()
+    unit.flags = 'okopany!,transport=11'
+    original = rosters._passive_entries(unit)
+    unit.passive_custom_names_json = json.dumps({'okopany': '  Weterani <A>  ', 'transport=11': 'Desant'})
+    entries = rosters._passive_entries(unit)
+    army_entries = armies._passive_payload(unit)
+    assert [entry['label'] for entry in entries] == [entry['label'] for entry in original]
+    assert [entry['cost'] for entry in entries] == [entry['cost'] for entry in original]
+    assert entries[0]['custom_name'] == army_entries[0]['custom_name'] == 'Weterani <A>'
+    assert entries[0]['display_label'] == 'Weterani <A> [Okopany]'
+    assert entries[1]['custom_name'] == 'Desant'
+    ru = models.RosterUnit(unit=unit, count=1)
+    assert rosters._selected_passive_labels(ru, {}, entries) == ['Weterani <A> [Okopany]', 'Desant [Transport(11)]']
+    exported = rosters._roster_unit_export_data(ru, loadout_override={})
+    assert exported['passive_labels'] == ['Weterani <A> [Okopany]', 'Desant [Transport(11)]']
+
+
+@pytest.mark.parametrize('raw', [None, '{broken', '[]', 'null', '{"okopany": 7}', '{"okopany": "  "}'])
+def test_roster_passive_custom_names_ignore_invalid_or_empty_data(raw):
+    unit = _make_unit()
+    unit.flags = 'okopany!'
+    unit.passive_custom_names_json = raw
+    entry = rosters._passive_entries(unit)[0]
+    assert not entry.get('custom_name')
+    assert entry.get('display_label', entry['label']) == 'Okopany'
 
 
 def test_szop_catalog_has_updated_zasadzka_and_separate_shooting_traits() -> None:

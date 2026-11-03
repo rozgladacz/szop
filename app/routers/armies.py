@@ -775,15 +775,7 @@ def _passive_payload(unit: models.Unit | None) -> list[dict]:
     defense = getattr(unit, "defense", 4) or 4
     toughness = getattr(unit, "toughness", 1) or 1
     default_weapons = unit.default_weapons if unit else []
-    custom_names: dict[str, str] = {}
-    raw_cn = getattr(unit, "passive_custom_names_json", None) if unit else None
-    if raw_cn:
-        try:
-            parsed = json.loads(raw_cn)
-            if isinstance(parsed, dict):
-                custom_names = {k: v for k, v in parsed.items() if isinstance(v, str) and v}
-        except json.JSONDecodeError:
-            pass
+    custom_names = ability_registry.passive_custom_names(unit)
     result: list[dict] = []
     for item in payload:
         if not item:

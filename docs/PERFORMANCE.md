@@ -17,6 +17,22 @@ Wymagania:
 
 ## Aktualny baseline
 
+**Data:** 2026-10-29, `Rozwoj`, naprawa Transportu Valkyrii.
+
+Kontrola A/B w jednym procesie: kod `HEAD` vs poprawka, te same rozpiski i
+loadouty, 7 mierzonych przebiegów po rozgrzewce, naprzemienna kolejność.
+Mediany sum czasów dla wszystkich oddziałów:
+
+| Roster | Przed full / badge (ms) | Po full / badge (ms) | Zmiana full / badge |
+|---:|---:|---:|---:|
+| 10 | 274,1 / 20,8 | 263,4 / 20,1 | −3,9% / −3,7% |
+| 13 | 251,6 / 20,5 | 260,2 / 22,1 | +3,4% / +7,5% |
+
+Zero nowych zapytań DB. Transport uwzględnia mobilność pasywną i aktywną;
+identyfikatory cech są liczone raz przed pętlą obu ról. Zmiany poniżej progu 20%.
+
+## Historyczny baseline — 2026-08-01
+
 **Data:** 2026-08-01
 **Commit:** `Rozwoj` (working tree po synchronizacji SZOP)
 **Roster:** 10 (10 oddziałów; mierzone `python scripts/profile_quote.py 10`)

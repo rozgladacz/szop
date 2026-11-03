@@ -131,7 +131,7 @@
                   {% set aura_defaults = entry.aura_items | selectattr('default_count') | list %}
                   <div class="d-flex flex-wrap gap-1 mt-2">
                     {% for ability in passive_defaults %}
-                    <span class="badge text-bg-secondary" title="{{ ability.description }}">{{ ability.label }}</span>
+                    <span class="badge text-bg-secondary" title="{{ ability.description }}">{{ ability.display_label or ability.label }}</span>
                     {% endfor %}
                     {% for ability in active_defaults %}
                     <span class="badge text-bg-info text-dark" title="{{ ability.description }}">{{ ability.label }}</span>
@@ -397,15 +397,20 @@
             <input type="hidden" name="custom_name" data-roster-editor-custom-name />
             <div class="mb-3" data-models-hide>
               <label class="form-label" for="roster-editor-count">Modele</label>
-              <input
-                class="form-control"
-                id="roster-editor-count"
-                name="count"
-                type="number"
-                min="1"
-                required
-                data-roster-editor-count
-              />
+              <div class="input-group model-count-control" data-model-count-control>
+                <button type="button" class="btn btn-outline-secondary" data-model-count-step="-1" aria-label="Zmniejsz liczbę modeli" aria-controls="roster-editor-count">−</button>
+                <input
+                  class="form-control"
+                  id="roster-editor-count"
+                  name="count"
+                  type="number"
+                  inputmode="numeric"
+                  min="1"
+                  required
+                  data-roster-editor-count
+                />
+                <button type="button" class="btn btn-outline-secondary" data-model-count-step="1" aria-label="Zwiększ liczbę modeli" aria-controls="roster-editor-count">+</button>
+              </div>
             </div>
             <div class="flex-grow-1 d-flex flex-column gap-3">
               <div class="mb-0" data-roster-section data-models-hide>

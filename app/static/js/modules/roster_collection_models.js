@@ -227,6 +227,17 @@
       return abil ? `${wsum} • ${abil}` : wsum;
     }
 
+    function quantityControlHtml(kind, id, qty) {
+      const label = kind === 'models' ? 'modeli' : 'proxy';
+      const inputId = `${kind}-qty-${id}`;
+      return `<div class="input-group model-count-control" data-model-count-control data-model-count-event="input">
+        <button type="button" class="btn btn-outline-secondary" data-model-count-step="-1" aria-label="Zmniejsz liczbę ${label}" aria-controls="${inputId}">−</button>
+        <input type="number" inputmode="numeric" class="form-control" id="${inputId}"
+               min="0" value="${qty}" data-${kind}-qty="${id}" aria-label="Liczba ${label}" />
+        <button type="button" class="btn btn-outline-secondary" data-model-count-step="1" aria-label="Zwiększ liczbę ${label}" aria-controls="${inputId}">+</button>
+      </div>`;
+    }
+
     function ownedRowsHtml() {
       const models = (data && data.models) || [];
       if (!models.length) {
@@ -266,8 +277,7 @@
               ${slotHtml}
             </div>
             <div class="d-flex align-items-center gap-1 flex-shrink-0">
-              <input type="number" class="form-control form-control-sm" style="width:4.5rem"
-                     min="0" value="${qty}" data-models-qty="${m.id}" aria-label="Liczba modeli" />
+              ${quantityControlHtml('models', m.id, qty)}
               <span class="text-muted small">/ ${avail}</span>
             </div>
           </div>`;
@@ -295,8 +305,7 @@
               <div class="text-muted small">${detail}</div>
             </div>
             <div class="d-flex align-items-center gap-1 flex-shrink-0">
-              <input type="number" class="form-control form-control-sm" style="width:4.5rem"
-                     min="0" value="${p.qty}" data-proxy-qty="${i}" aria-label="Liczba proxy" />
+              ${quantityControlHtml('proxy', i, p.qty)}
               <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" data-proxy-remove="${i}" title="Usuń">✕</button>
             </div>
           </div>`;
@@ -349,6 +358,25 @@
         if (container) container.innerHTML = '<span class="text-muted small">—</span>';
         return;
       }
+      const heroContext = activeItem && activeItem.getAttribute('data-is-hero') === 'true' ? {
+        rosterId,
+        rosterUnitId,
+        currentParentId: activeItem.getAttribute('data-parent-roster-unit-id') || '',
+        attachable: Array.from(root.querySelectorAll('[data-roster-item]'))
+          .filter((item) => item.getAttribute('data-is-hero') !== 'true')
+          .map((item) => ({
+            id: item.getAttribute('data-roster-unit-id'),
+            label: item.getAttribute('data-unit-custom-name') || item.getAttribute('data-unit-name'),
+          })),
+        beforeAttach: async () => {
+          if (saveTimer) {
+            window.clearTimeout(saveTimer);
+            saveTimer = null;
+          }
+          if (aggregate().count <= 0) return false;
+          return doSave();
+        },
+      } : null;
       rendering.renderPassiveEditor(
         container,
         (data && data.passive_items) || [],
@@ -356,6 +384,8 @@
         modelCount != null ? modelCount : aggregate().count,
         true,
         () => scheduleSave(),
+        undefined,
+        heroContext,
       );
     }
 
@@ -437,11 +467,11 @@
     }
 
     async function doSave() {
-      if (!rosterUnitId) return;
+      if (!rosterUnitId) return false;
       const agg = aggregate();
       if (agg.count <= 0) {
         setStatus('Wybierz co najmniej jeden model.');
-        return;
+        return false;
       }
       // Snapshot celu — przełączenie oddziału może zmienić activeItem/rosterUnitId
       // zanim ten (asynchroniczny) zapis się dokończy.
@@ -480,10 +510,12 @@
           savedSomething = true;
           if (rosterUnitId === targetUnitId) setStatus('Zapisano');
         }
+        return true;
       } catch (err) {
-        if (err && err.name === 'AbortError') return;
+        if (err && err.name === 'AbortError') return false;
         pendingChanges = true;
         setStatus('Błąd zapisu', true);
+        return false;
       }
     }
 
