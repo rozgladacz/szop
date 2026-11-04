@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import MetaData, create_engine, inspect, text
+from sqlalchemy import MetaData, create_engine, event, inspect, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
@@ -422,6 +422,94 @@ def test_migrate_v2_checks_preserves_preexisting_unrelated_fk_violations(monkeyp
         assert connection.exec_driver_sql(
             "SELECT activation_protocol_version FROM battles WHERE id = 1"
         ).scalar_one() == 2
+
+
+@pytest.mark.parametrize(
+    "failure_prefix",
+    (
+        'INSERT INTO "__c2c_battles_new"',
+        'DROP TABLE "battles"',
+        'INSERT INTO "__c2c_battle_invites_new"',
+        "CREATE INDEX ix_invite_battle",
+    ),
+)
+def test_protocol_check_migration_rolls_back_ddl_and_allows_retry(
+    monkeypatch, failure_prefix,
+):
+    engine = _memory_engine()
+    tables = ("battles", "battle_invites", "battle_events")
+    with engine.begin() as connection:
+        connection.exec_driver_sql("PRAGMA foreign_keys=ON")
+        for statement in (
+            "CREATE TABLE battles (id INTEGER PRIMARY KEY, "
+            "activation_protocol_version INTEGER NOT NULL "
+            "CHECK (activation_protocol_version IN (1, 2)))",
+            "CREATE TABLE battle_invites (id INTEGER PRIMARY KEY, "
+            "battle_id INTEGER REFERENCES battles(id), "
+            "activation_protocol_version INTEGER NOT NULL "
+            "CHECK (activation_protocol_version IN (1, 2)))",
+            "CREATE TABLE battle_events (id INTEGER PRIMARY KEY, "
+            "battle_id INTEGER REFERENCES battles(id))",
+            "CREATE INDEX ix_invite_battle ON battle_invites (battle_id)",
+            "CREATE TRIGGER tr_invite_update AFTER UPDATE ON battle_invites "
+            "BEGIN SELECT 1; END",
+            "INSERT INTO battles VALUES (1, 2)",
+            "INSERT INTO battle_invites VALUES (2, 1, 2)",
+            "INSERT INTO battle_events VALUES (3, 1)",
+        ):
+            connection.exec_driver_sql(statement)
+    monkeypatch.setattr(db, "engine", engine)
+
+    def snapshot():
+        with engine.connect() as connection:
+            return {
+                "schema": connection.exec_driver_sql(
+                    "SELECT type, name, tbl_name, sql FROM sqlite_master "
+                    "ORDER BY type, name"
+                ).fetchall(),
+                "rows": {
+                    table: connection.exec_driver_sql(
+                        f"SELECT * FROM {table} ORDER BY id"
+                    ).fetchall()
+                    for table in tables
+                },
+                "foreign_keys": connection.exec_driver_sql(
+                    "PRAGMA foreign_keys"
+                ).scalar_one(),
+                "violations": connection.exec_driver_sql(
+                    "PRAGMA foreign_key_check"
+                ).fetchall(),
+            }
+
+    before = snapshot()
+
+    def fail_statement(connection, cursor, statement, parameters, context, many):
+        if statement.startswith(failure_prefix):
+            raise RuntimeError("injected migration failure")
+
+    event.listen(engine, "before_cursor_execute", fail_statement)
+    try:
+        with pytest.raises(RuntimeError, match="injected migration failure"):
+            db._upgrade_activation_protocol_checks()
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_statement)
+
+    assert snapshot() == before
+    db._upgrade_activation_protocol_checks()
+    after = snapshot()
+    db._upgrade_activation_protocol_checks()
+    assert snapshot() == after
+    assert after["rows"] == before["rows"]
+    assert after["foreign_keys"] == 1
+    assert after["violations"] == []
+    assert set(inspect(engine).get_table_names()) == set(tables)
+    assert "ix_invite_battle" in {row[1] for row in after["schema"]}
+    assert "tr_invite_update" in {row[1] for row in after["schema"]}
+    with engine.begin() as connection:
+        for table in ("battles", "battle_invites"):
+            connection.exec_driver_sql(
+                f"UPDATE {table} SET activation_protocol_version = 3"
+            )
 
 
 def test_migrate_schema_adds_unit_base_geometry_columns(monkeypatch):

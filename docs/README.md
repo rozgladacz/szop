@@ -17,6 +17,11 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [PERFORMANCE.md](PERFORMANCE.md) | Baseline wydajności silnika kosztów, benchmarki |
 | [frontend_js_modules.md](frontend_js_modules.md) | Mapa modułów JS po Fazie III, call-site checklist |
 
+## Przeglądy
+
+- [C2 QA — 2026-11-04](c2-qa-2026-11-04.md) — simplify, code/security review,
+  regresja atomowości migracji i pełne testy pakietu C2.
+
 ## Podkatalogi
 
 | Katalog | Zawartość |

@@ -340,6 +340,8 @@ def _upgrade_activation_protocol_checks() -> None:
         connection.commit()
         try:
             with connection.begin():
+                # sqlite3 legacy mode does not begin a transaction for DDL.
+                connection.exec_driver_sql("BEGIN")
                 for name, sql in pending.items():
                     quoted_name = f'"{name}"'
                     temp_name = f'"__c2c_{name}_new"'
