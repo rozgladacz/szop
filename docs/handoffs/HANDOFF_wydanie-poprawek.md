@@ -8,7 +8,7 @@ Warstwy: bez nowych zmian kodu/modelu/payloadu/JS/CSS. Testy: pełny pytest prze
 
 - [x] Odświeżenie origin/tagów, sprawdzenie rozbieżności main/Rozwoj, pytest i przegląd diffu (370 passed).
 - [~] Commit wskazanych plików, scalenie na main bez przepisywania historii, push main.
-- [ ] Tag patch po v1.1.1 i Release workflow (testy, GHCR latest, GitHub Release); zweryfikować zakończenie.
+- [~] Tag v1.2.0 i Release workflow (testy, GHCR latest, GitHub Release); zweryfikować zakończenie.
 - [ ] Zapis wyniku i archiwizacja.
 
 Aktualizator korzysta z docker compose pull (latest); sam push main nie publikuje obrazu. RELEASE.md wymaga tagu SemVer. User autoryzował commit main i przygotowanie aktualizacji; nie uruchamiać aktualizacji serwera.
@@ -16,3 +16,5 @@ Aktualizator korzysta z docker compose pull (latest); sam push main nie publikuj
 Rozbieżność: origin/main ma 73 osobne commity (historyczne OPOS/Faza A), Rozwoj 25 (aktualny SZOP); różnica 213 plików. Merge-tree bez edycji wykazał konflikty quote.py, HANDOFF, docs i pycache. Zadano pytanie o promocję aktualnego drzewa SZOP vs zachowanie funkcji obu gałęzi. Wykonać commit poprawek na Rozwoj; przed zmianą main/publikacją czekać na odpowiedź dotyczącą zakresu.
 
 2026-11-03: User potwierdził, że OPOS jest w osobnym repo i tutaj nie musi być utrzymywany. Autoryzacja: najpierw Rozwoj, potem ostrożnie main i automatyczna aktualizacja. Commit 5950224 wypchnięty na Rozwoj. Zachować aktualne drzewo SZOP przez merge historii origin/main do Rozwoj ze strategią ours, potem fast-forward main. Nie przepisywać historii ani nie przywracać historycznych funkcji OPOS. Usunąć z indeksu 32 śledzone pliki cache Pythona, zachowując lokalne pliki. Wydanie v1.2.0 (od ostatniego main także kompatybilne nowe funkcje Kolekcji i Stanu Bitewnego).
+
+2026-11-04: Kontynuacja po przerwaniu. Rozwoj i lokalny main wskazują 3996723; origin/Rozwoj opublikowany, origin/main nadal fc00732. Porównanie drzewa merge 3996723 z 1a65074 puste: scalenie zachowało dokładnie aktualny SZOP. Bez force push, stara historia main pozostaje przodkiem. Uruchomiono ponownie pytest na main przed publikacją v1.2.0. Ostatni opublikowany Release v1.1.1, brak kolizji tagu v1.2.0.
