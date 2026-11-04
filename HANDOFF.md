@@ -11,7 +11,6 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
-| [HANDOFF_wydanie-poprawek](docs/handoffs/HANDOFF_wydanie-poprawek.md) | Commit main i publikacja obrazu dla aktualizatora | Git / release | In progress |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
@@ -48,6 +47,10 @@
 ## LOG SESJI
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Starsze wpisy w [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).)*
+
+### 2026-11-04 — wydanie-poprawek (archived)
+- Poprawki zapisano jako `5950224`, opublikowano najpierw na Rozwoj, potem na main przez fast-forward po scaleniu historii (`3996723`) zachowującym aktualny SZOP, zgodnie z potwierdzeniem usera o oddzieleniu OPOS. Bez force push; stary main pozostaje w historii. Usunięto z indeksu 32 pliki cache Pythona.
+- Wydanie **v1.2.0** na `3a4b138`: https://github.com/rozgladacz/szop/releases/tag/v1.2.0. Lokalnie 370/370, CI Tests + Build & Push + Create Release success: https://github.com/rozgladacz/szop/actions/runs/41796075798. GHCR `1.2.0` i `latest` dostępne publicznie (HTTP 200), wspólny digest `sha256:19facbfdc97eb9102ff6040b1deb18e3a2292daa0f890cd8b0a648425c13f356`. Gotowe do aktualizacji z panelu aplikacji; produkcji nie aktualizowano. Kolejny commit wyłącznie archiwizuje dokumentację.
 
 ### 2026-11-02 — nazwy-liczebnosc-mobile (archived)
 - Rozpiska przekazuje własne nazwy pasywnych z Armii przez wspólny parser `ability_registry.passive_custom_names`; lista, oba edytory i eksport pokazują „Nazwa [Reguła]”, zachowując kanoniczne etykiety wyceny. Dodano jawne −/+ dla liczebności klasycznej, kolekcji i proxy: delegacja `model_count_controls.js`, natywne ograniczenia i istniejący autosave, cele dotykowe 44×44 px.
