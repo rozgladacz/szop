@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Podgląd bitwy 2D — SZOP{% endblock %}
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', path='/css/battle_preview.css') }}" />
+{% endblock %}
+{% block content %}
+<section id="battle-preview" aria-labelledby="battle-preview-title">
+  <h1 id="battle-preview-title" class="h3">Podgląd bitwy 2D</h1>
+  <p class="text-muted">Tylko odczyt utrwalonego checkpointu. Odświeżanie ręczne — bez wykonywania akcji i symulacji.</p>
+  <form id="battle-preview-form" class="d-flex flex-wrap align-items-end gap-2 mb-3">
+    <div>
+      <label for="battle-preview-id" class="form-label">ID istniejącej bitwy</label>
+      <input id="battle-preview-id" name="battle_id" class="form-control" type="text" inputmode="numeric" pattern="[0-9]+" required aria-describedby="battle-preview-help" autocomplete="off" />
+    </div>
+    <button class="btn btn-primary" type="submit">Wczytaj / odśwież</button>
+    <button class="btn btn-outline-secondary" id="battle-preview-fit" type="button" disabled>Dopasuj widok</button>
+  </form>
+  <p id="battle-preview-help" class="small text-muted">Dostęp mają uczestnicy bitwy. Adres z parametrem battle_id pozwala wrócić do tego podglądu.</p>
+  <div id="battle-preview-message" class="alert alert-secondary" role="status" aria-live="polite">Podaj ID bitwy, aby wczytać checkpoint.</div>
+  <p id="battle-preview-summary" class="fw-semibold" hidden></p>
+  <div class="battle-preview-layout">
+    <div>
+      <div class="battle-preview-surface border rounded bg-light">
+        <canvas id="battle-preview-canvas" role="img" aria-label="Plansza bitwy; wybierz oddział z listy poniżej, aby odczytać szczegóły." aria-describedby="battle-preview-bounds battle-preview-legend"></canvas>
+      </div>
+      <p id="battle-preview-bounds" class="small text-muted mt-2">Granice widoku nie są granicami pola bitwy.</p>
+      <p id="battle-preview-legend" class="small"><span class="battle-side-0">● Strona 1</span> · <span class="battle-side-1">● Strona 2</span> · koła: oddziały · romby: cele (szary: bez kontroli) · szary obrys: teren. Wszystkie współrzędne i promienie w calach.</p>
+      <div id="battle-preview-features" class="small mb-3"></div>
+    </div>
+    <aside class="border rounded p-3" aria-labelledby="battle-preview-details-title">
+      <h2 id="battle-preview-details-title" class="h5">Wybrany oddział</h2>
+      <div id="battle-preview-details">Wybierz oddział na planszy lub z listy.</div>
+    </aside>
+  </div>
+  <div class="row mt-3">
+    <section class="col-md-6" aria-labelledby="battle-preview-front-title">
+      <h2 id="battle-preview-front-title" class="h5">Front</h2>
+      <ul id="battle-preview-front" class="list-unstyled battle-unit-list"></ul>
+    </section>
+    <section class="col-md-6" aria-labelledby="battle-preview-off-title">
+      <h2 id="battle-preview-off-title" class="h5">Poza Frontem / pokonane</h2>
+      <ul id="battle-preview-off" class="list-unstyled battle-unit-list"></ul>
+    </section>
+  </div>
+  <noscript><p class="alert alert-warning">Podgląd wymaga JavaScript.</p></noscript>
+</section>
+{% endblock %}
+{% block page_scripts %}
+<script src="{{ url_for('static', path='/js/modules/battle_canvas.js') }}"></script>
+{% endblock %}

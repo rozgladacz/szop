@@ -67,6 +67,19 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 
+@app.get("/battle-preview", response_class=HTMLResponse, include_in_schema=False)
+def battle_preview(
+    request: Request,
+    current_user: Optional[models.User] = Depends(get_current_user(optional=True)),
+):
+    """Read-only HTML shell; battle access remains in the checkpoint API."""
+    if not current_user:
+        return RedirectResponse(url="/auth/login", status_code=303)
+    return templates.TemplateResponse(
+        request, "battle_preview.html", {"user": current_user}
+    )
+
+
 @app.get("/", response_class=HTMLResponse)
 def index(
     request: Request,

@@ -1,0 +1,9 @@
+.battle-preview-layout { display: grid; grid-template-columns: minmax(0, 1fr) 19rem; gap: 1rem; }
+.battle-preview-surface { width: 100%; height: clamp(20rem, 55vh, 38rem); overflow: hidden; }
+#battle-preview-canvas { display: block; width: 100%; height: 100%; cursor: pointer; }
+.battle-side-0 { color: #0756a1; }
+.battle-side-1 { color: #a33b00; }
+.battle-unit-list button { width: 100%; text-align: left; margin-bottom: .35rem; }
+.battle-unit-list button[aria-pressed="true"] { outline: 2px solid #212529; outline-offset: 1px; }
+#battle-preview-details { overflow-wrap: anywhere; }
+@media (max-width: 850px) { .battle-preview-layout { grid-template-columns: minmax(0, 1fr); } }
