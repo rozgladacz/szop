@@ -13,7 +13,7 @@ import random as _random
 from dataclasses import dataclass
 
 from app.services.agents.deployment import DeploymentZone
-from app.services.engine.state import Objective, Position, TerrainCircle, TerrainLine
+from app.services.engine.state import Objective, Position, Terrain, TerrainCircle, TerrainLine
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,7 +22,7 @@ class BattleFixture:
 
     name: str
     rosters: tuple[dict, ...]
-    terrain: tuple[TerrainCircle | TerrainLine, ...]
+    terrain: tuple[Terrain, ...]
     objectives: tuple[Objective, ...]
 
 # ---------------------------------------------------------------------------

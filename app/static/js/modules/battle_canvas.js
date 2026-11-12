@@ -2,6 +2,7 @@
 (function (root) {
   'use strict';
   const COLORS = ['#0756a1', '#a33b00'];
+  const TERRAIN_LABELS = { circle: 'koło', line: 'odcinek', polygon: 'wielokąt' };
   const LOCATIONS = { front: 'Front', zaplecze: 'Zaplecze', wycofany: 'Wycofany', eliminowany: 'Eliminowany' };
   const PHASES = {
     BEFORE_ACTION: 'Przed akcją', ACTION_READY: 'Gotowość do akcji',
@@ -62,6 +63,12 @@
         const t = fields(value, 'TerrainCircle');
         return { kind: 'circle', center: position(t.center), radius: radius(t.radius_inches), features: strings(t.features) };
       }
+      if (value && value.$dataclass === 'TerrainPolygon') {
+        const t = fields(value, 'TerrainPolygon');
+        const vertices = tuple(t.vertices).map(position);
+        requireValue(vertices.length >= 3);
+        return { kind: 'polygon', vertices, features: strings(t.features) };
+      }
       const t = fields(value, 'TerrainLine');
       return { kind: 'line', start: position(t.start), end: position(t.end), features: strings(t.features) };
     });
@@ -94,7 +101,8 @@
     view.units.filter((u) => u.onBoard).forEach((u) => include(u.position, u.radius));
     view.terrain.forEach((t) => {
       if (t.kind === 'circle') include(t.center, t.radius);
-      else { include(t.start); include(t.end); }
+      else if (t.kind === 'line') { include(t.start); include(t.end); }
+      else t.vertices.forEach((vertex) => include(vertex));
     });
     view.objectives.forEach((o) => include(o.position));
     if (minX === Infinity) return { minX: 0, minY: 0, maxX: 48, maxY: 36, empty: true };
@@ -138,9 +146,18 @@
       if (t.kind === 'circle') {
         p = tx.point(t.center); circle(p, t.radius * tx.scale); ctx.fill(); ctx.stroke();
       } else {
-        p = tx.point(t.start); const q = tx.point(t.end);
-        ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(q.x, q.y); ctx.stroke();
-        p = { x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 };
+        const vertices = t.kind === 'line' ? [t.start, t.end] : t.vertices;
+        p = { x: 0, y: 0 };
+        ctx.beginPath();
+        vertices.forEach((vertex, index) => {
+          const q = tx.point(vertex);
+          if (index === 0) ctx.moveTo(q.x, q.y);
+          else ctx.lineTo(q.x, q.y);
+          p.x += q.x; p.y += q.y;
+        });
+        if (t.kind === 'polygon') { ctx.closePath(); ctx.fill(); }
+        ctx.stroke();
+        p.x /= vertices.length; p.y /= vertices.length;
       }
       ctx.fillStyle = '#30363b'; ctx.fillText(`T${i + 1}`, p.x, p.y - 10);
     });
@@ -272,7 +289,7 @@
           b.addEventListener('click', () => select(u.id));
         });
       }
-      view.terrain.forEach((t, i) => append(get('features'), 'p', `T${i + 1}: ${t.kind === 'circle' ? 'koło' : 'odcinek'} · ${t.features.join(', ') || 'bez cech'}`, 'mb-1'));
+      view.terrain.forEach((t, i) => append(get('features'), 'p', `T${i + 1}: ${TERRAIN_LABELS[t.kind]} · ${t.features.join(', ') || 'bez cech'}`, 'mb-1'));
       view.objectives.forEach((o) => append(get('features'), 'p', `Cel ${o.id}: ${o.controller === null ? 'bez kontroli' : `strona ${o.controller + 1}`}`, 'mb-1'));
     }
     const loader = createLoader(win.fetch.bind(win), update);

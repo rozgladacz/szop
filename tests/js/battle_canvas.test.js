@@ -19,10 +19,15 @@ for (const view of views) {
   assert.deepEqual(view.units[0].statuses, ['Aktywowany', 'Wyczerpany']);
   assert.equal(view.terrain[0].kind, 'circle');
   assert.equal(view.terrain[1].kind, 'line');
+  assert.deepEqual(view.terrain[2], {
+    kind: 'polygon', features: ['Blokujacy'],
+    vertices: [{ x: 18, y: 12 }, { x: 21, y: 12 }, { x: 21, y: 19 }, { x: 19, y: 17 }, { x: 18, y: 19 }]
+  });
   assert.equal(view.objectives[0].controller, 1);
   assert.equal(view.objectives[1].controller, null);
   const bounds = api.viewBounds(view);
   assert.ok(bounds.maxX < 30); // The off-Front unit at 999,999 must not affect fitting.
+  assert.ok(bounds.maxX > 21 && bounds.maxY > 19);
   assert.ok(bounds.minX < -6);
   const tx = api.transform(bounds, 600, 400), p = tx.point(view.units[0].position);
   assert.equal(api.pickUnit(view, tx, p.x, p.y).id, 1);
@@ -35,6 +40,8 @@ assert.throws(() => api.parseCheckpoint(fixtures[0], 8), /malformed/);
 assert.throws(() => api.parseCheckpoint({ ...fixtures[0], version: 4 }, 7), /unsupported/);
 const unknownTerrain = clone(fixtures[0]); unknownTerrain.state.fields.terrain.$tuple[0].$dataclass = 'Unknown';
 assert.throws(() => api.parseCheckpoint(unknownTerrain, 7), /malformed/);
+const shortPolygon = clone(fixtures[0]); shortPolygon.state.fields.terrain.$tuple[2].fields.vertices.$tuple.length = 2;
+assert.throws(() => api.parseCheckpoint(shortPolygon, 7), /malformed/);
 const empty = { ...views[0], units: [], terrain: [], objectives: [] };
 assert.equal(api.viewBounds(empty).empty, true);
 assert.equal(api.battleId('7'), 7);
@@ -51,6 +58,14 @@ assert.equal(arcs.length, 3); // One terrain circle + two live Front units.
 assert.equal(arcs[1][3], 2 * rendered.tx.scale);
 assert.ok(calls.some((c) => c[0] === 'fillText' && c[1] === 'Cel 1'));
 assert.ok(calls.some((c) => c[0] === 'lineTo'));
+const polygonPath = views[0].terrain[2].vertices.map((v, i) => {
+  const p = rendered.tx.point(v);
+  return [i === 0 ? 'moveTo' : 'lineTo', p.x, p.y];
+});
+const firstClose = calls.findIndex(([name]) => name === 'closePath');
+assert.deepEqual(calls.slice(firstClose - polygonPath.length, firstClose + 3), [
+  ...polygonPath, ['closePath'], ['fill'], ['stroke']
+]);
 api.draw(canvas, null, null, 1);
 assert.equal(canvas.width, 600);
 api.draw(canvas, empty, null, 2);
@@ -134,6 +149,7 @@ async function page() {
   assert.equal(buttons[0].attributes['aria-pressed'], 'true');
   assert.ok(elements['battle-preview-details'].children.some((el) => el.textContent.includes('<img src=x')));
   assert.ok(elements['battle-preview-features'].children.some((el) => el.textContent.includes('Trudny')));
+  assert.ok(elements['battle-preview-features'].children.some((el) => el.textContent.includes('wielokąt · Blokujacy')));
   const p = api.transform(api.viewBounds(views[0]), 600, 400).point(views[0].units[1].position);
   uiCanvas.events.click({ clientX: p.x, clientY: p.y });
   assert.equal(buttons[1].attributes['aria-pressed'], 'true');

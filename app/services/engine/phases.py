@@ -62,8 +62,7 @@ from app.services.engine.state import (
     Lokalizacja,
     Objective,
     Position,
-    TerrainCircle,
-    TerrainLine,
+    Terrain,
     UnitBlob,
     build_initial_state,
     effective_passives,
@@ -217,7 +216,7 @@ def _replace_two_blobs(
 
 def setup_phase(
     rosters: Iterable[dict],
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
     objectives: Iterable[Objective] = (),
     initiative_player: int = 0,
     ruleset_version: str = "v1",
@@ -328,8 +327,8 @@ def _apply_maneuver(
     Ta funkcja czysto aplikuje ruch — wywołania przez `activation_phase`
     bezpośrednio (testy jednostkowe) świadomie omijają walidację.
 
-    R5.g (faza-b-rules-resync 2026-06): po move, jeśli aktor jest wewnątrz
-    TerrainCircle z feature `Niebezpieczny` (pkt 4.c.v) → wykonaj test
+    MVP (pkt 4.c.v): test wyzwala pozycja końcowa aktora wewnątrz
+    terenu z cechą `Niebezpieczny`. Wykonaj test
     **per-unit**: rzut `models_alive * toughness_per_model` k6, każda 1 = rana.
     Drift uproszcza pre-drift per-model (każdy model rzucał toughness razy)
     do jednego wspólnego puli. Rany przechodzą przez standardową alokację
@@ -361,9 +360,7 @@ def _apply_maneuver(
 
     # R5.g pkt 4.c.v Niebezpieczny test (per-unit, post-drift 2026-06)
     in_dangerous = any(
-        isinstance(t, TerrainCircle)
-        and "Niebezpieczny" in t.features
-        and _blob_inside_terrain_circle(moved, t)
+        "Niebezpieczny" in t.features and t.contains_point(moved.position)
         for t in state.terrain
     )
     if in_dangerous and moved.models_alive > 0:
@@ -398,13 +395,6 @@ def _apply_maneuver(
             events.extend(killed_events)
 
     return _replace_blob(state, moved), tuple(events), seq
-
-
-def _blob_inside_terrain_circle(blob: UnitBlob, terrain: TerrainCircle) -> bool:
-    """Helper: True gdy centrum bloba jest w obrębie `terrain` (TerrainCircle).
-    R5.g — sprawdzanie czy oddział znajduje się w niebezpiecznym terenie
-    po Manewrze. Używamy distance(blob.position, terrain.center) ≤ radius."""
-    return _distance(blob.position, terrain.center) <= terrain.radius_inches
 
 
 def _apply_defend(

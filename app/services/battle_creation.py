@@ -17,7 +17,7 @@ from .agents.roster_adapter import AdaptResult, roster_to_engine_roster
 from .engine.dice import DeterministicDice
 from .engine.persistence import save_checkpoint, save_events
 from .engine.phases import deployment_round, setup_phase
-from .engine.state import Objective, TerrainCircle, TerrainLine
+from .engine.state import Objective, Terrain
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,7 +36,7 @@ def stage_battle_creation(
     p2_roster: models.Roster,
     rng_seed: int,
     initiative_player: int,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
     objectives: Iterable[Objective] = (),
     activation_protocol_version: int = ACTIVATION_PROTOCOL_VERSION_V1,
 ) -> StagedBattleCreation:

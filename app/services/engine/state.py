@@ -1,7 +1,7 @@
 """B3.0 — Battle state runtime substrate (ADR-0008 / 0010 / 0014).
 
 Pure functional core:
-- `Position`, `TerrainCircle`, `TerrainLine` — geometryczne podstawki.
+- `Position`, `Terrain` — pozycje i kształty terenu.
 - `UnitBlob` — oddział reprezentowany jako koło (Pareto MVP); 4 kategorie ran
   per ADR-0014.
 - `BattleState` — immutable snapshot stanu bitwy.
@@ -20,6 +20,13 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping
 
+from app.services.engine.geometry import (
+    Position as Position,
+    point_in_circle,
+    segment_intersects_circle,
+    segments_intersect,
+)
+from app.services.engine.terrain_complex import TerrainPolygon
 from app.services.rulesets.loader import load_b_mvp_exclusions, load_ruleset
 from app.services.rulesets.models import BMvpConfig
 
@@ -67,20 +74,18 @@ class UnsupportedAbilityError(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class Position:
-    """2D pozycja w calach. Origin = lewy-dolny róg pola bitwy."""
-
-    x: float
-    y: float
-
-
-@dataclass(frozen=True, slots=True)
 class TerrainCircle:
     """Element terenu jako koło. `features` per `SZOP_Rozjemca.md pkt 4.c`."""
 
     center: Position
     radius_inches: float
     features: tuple[str, ...]  # ∈ {Niedostepny, Blokujacy, Zaslaniajacy, Trudny, Niebezpieczny, Obronny}
+
+    def contains_point(self, point: Position) -> bool:
+        return point_in_circle(point, self.center, self.radius_inches)
+
+    def intersects_segment(self, start: Position, end: Position) -> bool:
+        return segment_intersects_circle(start, end, self.center, self.radius_inches)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +95,16 @@ class TerrainLine:
     start: Position
     end: Position
     features: tuple[str, ...]
+
+    def contains_point(self, point: Position) -> bool:
+        """A line has no interior for terrain effects (pkt 4.a)."""
+        return False
+
+    def intersects_segment(self, start: Position, end: Position) -> bool:
+        return segments_intersect(start, end, self.start, self.end)
+
+
+Terrain = TerrainCircle | TerrainLine | TerrainPolygon
 
 
 @dataclass(frozen=True, slots=True)
@@ -536,7 +551,7 @@ class BattleState:
     active_player: int  # 0 lub 1
     activations_remaining: tuple[int, int]  # per player
     blobs: tuple[UnitBlob, ...]
-    terrain: tuple[TerrainCircle | TerrainLine, ...]
+    terrain: tuple[Terrain, ...]
     objectives: tuple[Objective, ...] = ()  # 5 celów per pkt 5.a
     pending_effects: tuple[str, ...] = ()  # placeholder dla B3.5
     pending_interrupts: tuple[str, ...] = ()  # placeholder dla B3.5
@@ -588,7 +603,7 @@ def compute_radius_inches(
 
 def build_initial_state(
     rosters: Iterable[Mapping[str, Any]],
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
     ruleset_version: str = "v1",
 ) -> BattleState:
     """Buduje `BattleState` z 2 rosterów; raise dla wykluczeń (ADR-0008).

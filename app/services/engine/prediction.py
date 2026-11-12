@@ -45,8 +45,7 @@ from app.services.engine.combat import (
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
     Position,
-    TerrainCircle,
-    TerrainLine,
+    Terrain,
     UnitBlob,
 )
 
@@ -157,7 +156,7 @@ def expected_damage(
     attacker: UnitBlob,
     defender: UnitBlob,
     weapon: WeaponProfile,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
 ) -> DamageDistribution:
     """Analityczna estymacja ran zadawanych przez Ostrzał (pkt 17 + 19).
 
@@ -241,7 +240,7 @@ def would_see(
     attacker_position: Position,
     attacker_radius: float,
     target: UnitBlob,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
 ) -> LoSState:
     """Hipotetyczny `check_los` dla `attacker_position` (bez modyfikacji state).
 

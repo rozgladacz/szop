@@ -24,18 +24,21 @@ Public API:
 
 Konwencje:
 - Wszystkie funkcje **pure** — bez state, bez side-effects.
-- `Position` z `app.services.engine.state` (typed). Dla circle-edge variantów
-  akceptujemy bare `(x, y)` żeby uniknąć cyclical import w niskoletnich call
-  sites — nie potrzebne w MVP, na razie `Position`-only.
+- `Position` żyje w tym module, a `app.services.engine.state` nadal je eksportuje.
 """
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
-if TYPE_CHECKING:
-    from app.services.engine.state import Position
+
+@dataclass(frozen=True, slots=True)
+class Position:
+    """2D pozycja w calach, od lewego dolnego rogu pola bitwy."""
+
+    x: float
+    y: float
 
 
 # ---------------------------------------------------------------------------
@@ -107,11 +110,24 @@ def segment_intersects_circle(
     # Clamp do [0, 1] żeby zostać na odcinku (nie nieskończonej linii)
     t = max(0.0, min(1.0, t))
 
-    # Import lokalny: `Position` używany jako return type tylko tutaj.
-    from app.services.engine.state import Position
-
     closest = Position(p1.x + t * dx, p1.y + t * dy)
     return distance(closest, center) <= radius
+
+
+def _orientation(a: Position, b: Position, point: Position) -> float:
+    return (b.x - a.x) * (point.y - a.y) - (b.y - a.y) * (point.x - a.x)
+
+
+def _in_segment_bounds(point: Position, start: Position, end: Position) -> bool:
+    return (
+        min(start.x, end.x) <= point.x <= max(start.x, end.x)
+        and min(start.y, end.y) <= point.y <= max(start.y, end.y)
+    )
+
+
+def point_on_segment(point: Position, start: Position, end: Position) -> bool:
+    """Whether a point lies on the closed segment, including its endpoints."""
+    return _in_segment_bounds(point, start, end) and _orientation(start, end, point) == 0
 
 
 def segments_intersect(
@@ -123,14 +139,10 @@ def segments_intersect(
     cases (jeden punkt leży na drugim odcinku).
     """
 
-    def ccw(a: "Position", b: "Position", c: "Position") -> float:
-        """Cross product: dodatni gdy a→b→c jest CCW."""
-        return (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
-
-    d1 = ccw(p3, p4, p1)
-    d2 = ccw(p3, p4, p2)
-    d3 = ccw(p1, p2, p3)
-    d4 = ccw(p1, p2, p4)
+    d1 = _orientation(p3, p4, p1)
+    d2 = _orientation(p3, p4, p2)
+    d3 = _orientation(p1, p2, p3)
+    d4 = _orientation(p1, p2, p4)
 
     # Strict crossing: orientations różne dla obu par
     if ((d1 > 0 and d2 < 0) or (d1 < 0 and d2 > 0)) and (
@@ -138,23 +150,12 @@ def segments_intersect(
     ):
         return True
 
-    # Colinear cases — point lies on the other segment
-    def on_segment(a: "Position", b: "Position", c: "Position") -> bool:
-        return (
-            min(a.x, b.x) <= c.x <= max(a.x, b.x)
-            and min(a.y, b.y) <= c.y <= max(a.y, b.y)
-        )
-
-    if d1 == 0 and on_segment(p3, p4, p1):
-        return True
-    if d2 == 0 and on_segment(p3, p4, p2):
-        return True
-    if d3 == 0 and on_segment(p1, p2, p3):
-        return True
-    if d4 == 0 and on_segment(p1, p2, p4):
-        return True
-
-    return False
+    return (
+        (d1 == 0 and _in_segment_bounds(p1, p3, p4))
+        or (d2 == 0 and _in_segment_bounds(p2, p3, p4))
+        or (d3 == 0 and _in_segment_bounds(p3, p1, p2))
+        or (d4 == 0 and _in_segment_bounds(p4, p1, p2))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -175,10 +176,12 @@ LoS query.
 
 
 __all__ = [
+    "Position",
     "distance",
     "point_in_circle",
     "circle_edge_distance",
     "segment_intersects_circle",
+    "point_on_segment",
     "segments_intersect",
     "UNIT_CIRCLE_16",
 ]

@@ -27,13 +27,9 @@ from app.services.engine.events import BattleEvent
 from app.services.engine.state import (
     BattleState,
     Objective,
-    TerrainCircle,
-    TerrainLine,
+    Terrain as Terrain,
 )
 from szop_client.types import SimulationSummary
-
-#: Teren akceptowany przy tworzeniu bitwy.
-Terrain = TerrainCircle | TerrainLine
 
 #: Callback aktywacji wieloakcyjnej (pkt 11.b.iv, ADR-0051): dla danego stanu,
 #: id oddziału i już-wykonanych akcji zwraca następną akcję lub `None` (koniec).

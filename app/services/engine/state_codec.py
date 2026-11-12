@@ -40,6 +40,7 @@ from app.services.engine.state import (
     WeaponProfile,
 )
 from app.services.engine.status import StatusFlag
+from app.services.engine.terrain_complex import TerrainPolygon
 
 STATE_CHECKPOINT_SCHEMA = "szop.battle_state"
 STATE_CHECKPOINT_VERSION = ACTIVATION_PROTOCOL_VERSION_V1
@@ -104,6 +105,7 @@ _COMMON_DATACLASS_FIELDS = {
     Position: ("x", "y"),
     TerrainCircle: ("center", "radius_inches", "features"),
     TerrainLine: ("start", "end", "features"),
+    TerrainPolygon: ("vertices", "features"),
     Objective: ("id", "position", "controller"),
     WeaponProfile: (
         "slug",

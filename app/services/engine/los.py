@@ -32,19 +32,8 @@ import math
 from enum import Enum
 from typing import Iterable
 
-from app.services.engine.geometry import (
-    UNIT_CIRCLE_16,
-    distance,
-    point_in_circle,
-    segment_intersects_circle,
-    segments_intersect,
-)
-from app.services.engine.state import (
-    Position,
-    TerrainCircle,
-    TerrainLine,
-    UnitBlob,
-)
+from app.services.engine.geometry import UNIT_CIRCLE_16, distance
+from app.services.engine.state import Position, Terrain, UnitBlob
 
 
 class LoSState(Enum):
@@ -67,18 +56,14 @@ FEATURE_ZASLANIAJACY = "Zaslaniajacy"
 # ---------------------------------------------------------------------------
 
 
-def _blob_inside_terrain(
-    blob: UnitBlob, terrain: TerrainCircle | TerrainLine
-) -> bool:
+def _blob_inside_terrain(blob: UnitBlob, terrain: Terrain) -> bool:
     """Czy blob (centrum) jest "wewnątrz" terenu.
 
     Per `SZOP_Rozjemca.md pkt 4.a`: oddział wewnątrz gdy większość modeli w
     większości znajduje się w obrębie. W Pareto MVP (oddział = koło): proxy
     przez centrum blob. Dla `TerrainLine` zwraca False (line nie ma "wnętrza").
     """
-    if isinstance(terrain, TerrainCircle):
-        return point_in_circle(blob.position, terrain.center, terrain.radius_inches)
-    return False
+    return terrain.contains_point(blob.position)
 
 
 # ---------------------------------------------------------------------------
@@ -89,7 +74,7 @@ def _blob_inside_terrain(
 def check_los(
     attacker: UnitBlob,
     target: UnitBlob,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
     n_samples: int = DEFAULT_N_SAMPLES,
 ) -> LoSState:
     """Sprawdza LoS atakującego do celu (pkt 6 + ADR-0043).
@@ -108,7 +93,7 @@ def check_los(
         return LoSState.WIDZI  # same position; engine higher-level zwykle wyklucza
 
     # Filtruj teren który blokuje LoS dla tej pary (z Zasłaniający exception)
-    blocking: list[TerrainCircle | TerrainLine] = []
+    blocking: list[Terrain] = []
     for t in terrain:
         features = set(t.features)
         if FEATURE_BLOKUJACY in features:
@@ -119,6 +104,8 @@ def check_los(
             if _blob_inside_terrain(attacker, t) or _blob_inside_terrain(target, t):
                 continue  # ten teren nie blokuje dla tej pary
             blocking.append(t)
+    if not blocking:
+        return LoSState.WIDZI
 
     # Wyznacz attacker edge point (na obwodzie ku celowi).
     # Per pkt 6.a: atakujący wybiera model — w MVP używamy reprezentatywnego edge point.
@@ -155,19 +142,10 @@ def check_los(
     # Sprawdź każdy target point przeciw blokującemu terenowi
     visible_count = 0
     for tp in target_points:
-        blocked = False
         for t in blocking:
-            if isinstance(t, TerrainCircle):
-                if segment_intersects_circle(
-                    attacker_edge, tp, t.center, t.radius_inches
-                ):
-                    blocked = True
-                    break
-            elif isinstance(t, TerrainLine):
-                if segments_intersect(attacker_edge, tp, t.start, t.end):
-                    blocked = True
-                    break
-        if not blocked:
+            if t.intersects_segment(attacker_edge, tp):
+                break
+        else:
             visible_count += 1
 
     # Klasyfikacja per pkt 6.a.i + 6.a.ii

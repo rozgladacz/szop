@@ -806,10 +806,10 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] Adapter eventów: `BlobModified` → `ModelModified`
 - [ ] ADR-0040: Migration blob → per-model
 
-### E2. Geometria terenu (3 tyg)
-- [ ] `TerrainPolygon` w `app/services/engine/terrain_complex.py`
-- [ ] Ray-casting w `los.py` dla poligonów
-- [ ] ADR-0041: Terrain shapes beyond circle/line
+### E2. Geometria terenu — DONE 2026-11-12
+- [x] `TerrainPolygon` w `app/services/engine/terrain_complex.py`: prosty obrys wypukły lub wklęsły, także w fixturach YAML.
+- [x] Linia wzroku dla poligonów, zapis i odczyt checkpointów v1–v3 oraz rysowanie w podglądzie 2D.
+- [x] [ADR-0041: Wielokąty terenu](adr/0041-terrain-polygons.md). Pełny `pytest -q`: 3739 testów zaliczonych. Smoke w Edge: uwierzytelniony odczyt checkpointu i rysowanie poligonu.
 
 ### E3. Złożone zdolności (iteracyjnie)
 - [ ] Lista priorytetowa z `build/geometry_classification.md`
@@ -890,7 +890,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0033 | Owner-scoped score_list przez publiczne API | ✓ |
 | 0034 | Owner-scoped granica wyszukiwania kandydatów exploitu | ✓ |
 | 0040 | Migration blob → per-model | — |
-| 0041 | Terrain shapes beyond circle/line | — |
+| 0041 | [Wielokąty terenu](adr/0041-terrain-polygons.md) | Accepted |
 | 0042 | Facing: wprowadzane z Zwrot | — |
 | 0043 | LoS 3-stanowy (sampling N=16) | ✓ |
 | 0044 | Prediction module (damage PMF + visibility) | ✓ |

@@ -32,6 +32,7 @@ from app.services.engine.state import (
 )
 from app.services.engine.state_codec import battle_state_to_json
 from app.services.engine.status import StatusFlag
+from app.services.engine.terrain_complex import TerrainPolygon
 from tests.node_runtime import resolve_node_binary
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,7 +54,12 @@ def preview_state() -> BattleState:
                replace(unit, id=5, models_alive=0),
                replace(unit, id=6, location=Lokalizacja.ELIMINOWANY, models_alive=0)),
         terrain=(TerrainCircle(Position(3, 3), 3, ("Trudny",)),
-                 TerrainLine(Position(0, 12), Position(16, 12), ("Obronny",))),
+                 TerrainLine(Position(0, 12), Position(16, 12), ("Obronny",)),
+                 TerrainPolygon(
+                     (Position(18, 12), Position(21, 12), Position(21, 19),
+                      Position(19, 17), Position(18, 19)),
+                     ("Blokujacy",),
+                 )),
         objectives=(Objective(1, Position(7, 7), 1), Objective(2, Position(12, 5))),
         score=(1, 2),
     )

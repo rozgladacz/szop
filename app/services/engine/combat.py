@@ -48,14 +48,13 @@ from app.services.engine.events import (
     ShotResolved,
     StatusAdded,
 )
-from app.services.engine.geometry import circle_edge_distance, distance, point_in_circle
+from app.services.engine.geometry import circle_edge_distance, distance
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
     BattleState,
     Lokalizacja,
     Position,
-    TerrainCircle,
-    TerrainLine,
+    Terrain,
     UNARMED_WEAPON,
     UnitBlob,
     WeaponProfile,
@@ -190,32 +189,26 @@ class _RangedVolleyResult:
 # ---------------------------------------------------------------------------
 
 
-def _blob_inside_circle(blob: UnitBlob, terrain: TerrainCircle) -> bool:
-    """Centrum bloba ≤ radius od centrum koła."""
-    return point_in_circle(blob.position, terrain.center, terrain.radius_inches)
-
-
 def compute_cover(
     attacker: UnitBlob,
     defender: UnitBlob,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
 ) -> bool:
     """True gdy defender ma osłonę (pkt 19).
 
     Pkt 19: "Jeżeli większość modeli atakowanego oddziału ma osłonę". W Pareto
     MVP (oddział = blob) sprawdzamy:
     - LoS state OSLONA z `check_los`, **lub**
-    - defender wewnątrz `TerrainCircle` z cechą `Obronny` (pkt 4.c.vi).
+    - centrum defendera wewnątrz terenu z cechą `Obronny` (pkt 4.a, 4.c.vi).
     """
     terrain_list = list(terrain)
     los_state = check_los(attacker, defender, terrain_list)
     if los_state == LoSState.OSLONA:
         return True
-    for t in terrain_list:
-        if isinstance(t, TerrainCircle) and FEATURE_OBRONNY in t.features:
-            if _blob_inside_circle(defender, t):
-                return True
-    return False
+    return any(
+        FEATURE_OBRONNY in t.features and t.contains_point(defender.position)
+        for t in terrain_list
+    )
 
 
 def compute_attack_modifiers(
@@ -382,7 +375,7 @@ def _resolve_ranged_profile_pools(
     weapon: WeaponProfile,
     weapon_count: int,
     dice: DeterministicDice,
-    terrain: Iterable[TerrainCircle | TerrainLine],
+    terrain: Iterable[Terrain],
     *,
     source_correct: bool,
 ) -> _RangedProfilePools:
@@ -491,7 +484,7 @@ def _resolve_ranged_volley(
     declarations: tuple[_RangedProfileDeclaration, ...],
     dice: DeterministicDice,
     sequence: int,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
     *,
     source_correct: bool = False,
 ) -> _RangedVolleyResult:
@@ -584,7 +577,7 @@ def resolve_ranged_attack(
     weapon: WeaponProfile,
     dice: DeterministicDice,
     sequence: int,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
 ) -> CombatResult:
     """Resolve the legacy one-profile ranged Attack through the volley SSOT."""
 
@@ -615,7 +608,7 @@ def resolve_melee_attack(
     weapon: WeaponProfile,
     dice: DeterministicDice,
     sequence: int,
-    terrain: Iterable[TerrainCircle | TerrainLine] = (),
+    terrain: Iterable[Terrain] = (),
 ) -> CombatResult:
     """Resolves pojedynczy atak wręcz (pkt 17 + 20.c bilans).
 

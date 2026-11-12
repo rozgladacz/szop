@@ -58,9 +58,11 @@ from app.services.agents import (  # noqa: E402
 from app.services.engine.state import (  # noqa: E402
     Objective,
     Position,
+    Terrain,
     TerrainCircle,
     TerrainLine,
 )
+from app.services.engine.terrain_complex import TerrainPolygon  # noqa: E402
 
 #: Domyślna fixtura gdy `--fixture` nie podane.
 DEFAULT_FIXTURE = _repo_root / "tests" / "fixtures" / "battles" / "demo_skirmish.yaml"
@@ -76,8 +78,8 @@ DEFAULT_FIXTURE = _repo_root / "tests" / "fixtures" / "battles" / "demo_skirmish
 
 # BattleFixture lives in app.services.agents.maps; balance_simulate re-exports it below.
 
-def _parse_terrain(raw: Sequence[dict]) -> tuple[TerrainCircle | TerrainLine, ...]:
-    out: list[TerrainCircle | TerrainLine] = []
+def _parse_terrain(raw: Sequence[dict]) -> tuple[Terrain, ...]:
+    out: list[Terrain] = []
     for t in raw or ():
         shape = str(t.get("shape", "circle")).lower()
         features = tuple(t.get("features", ()))
@@ -100,8 +102,10 @@ def _parse_terrain(raw: Sequence[dict]) -> tuple[TerrainCircle | TerrainLine, ..
                     features=features,
                 )
             )
+        elif shape == "polygon":
+            out.append(TerrainPolygon(tuple(Position(x, y) for x, y in t["vertices"]), features))
         else:
-            raise ValueError(f"Nieznany kształt terenu: {shape!r} (oczekiwano circle/line)")
+            raise ValueError(f"Nieznany kształt terenu: {shape!r} (oczekiwano circle/line/polygon)")
     return tuple(out)
 
 

@@ -46,8 +46,7 @@ from app.services.engine.state import (
     BattleState,
     Lokalizacja,
     Objective,
-    TerrainCircle,
-    TerrainLine,
+    Terrain,
 )
 
 #: Bezpiecznik anty-zapętlenie — maks. aktywacji na całą grę. Realna gra to
@@ -292,7 +291,7 @@ def simulate_from_rosters(
     players: Sequence[Player],
     *,
     seed: int = 0,
-    terrain: Sequence[TerrainCircle | TerrainLine] = (),
+    terrain: Sequence[Terrain] = (),
     objectives: Sequence[Objective] = (),
     initiative_player: int = 0,
     deployment: Sequence = (),
