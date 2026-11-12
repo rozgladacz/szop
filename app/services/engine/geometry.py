@@ -96,22 +96,25 @@ def segment_intersects_circle(
     if point_in_circle(p2, center, radius):
         return True
 
-    dx = p2.x - p1.x
-    dy = p2.y - p1.y
-    seg_len_sq = dx * dx + dy * dy
+    return point_segment_distance(center, p1, p2) <= radius
 
-    if seg_len_sq == 0:
-        # Degenerate: p1 == p2 — już sprawdzone wyżej jako endpoints.
-        return False
 
-    # Parametr `t` na linii p1→p2, gdzie najbliższy punkt do center:
-    # t = ((center - p1) · (p2 - p1)) / |p2 - p1|²
-    t = ((center.x - p1.x) * dx + (center.y - p1.y) * dy) / seg_len_sq
-    # Clamp do [0, 1] żeby zostać na odcinku (nie nieskończonej linii)
-    t = max(0.0, min(1.0, t))
+def point_segment_distance(point: Position, start: Position, end: Position) -> float:
+    """Shortest Euclidean distance to a segment, including its endpoints."""
+    dx = end.x - start.x
+    dy = end.y - start.y
+    length_sq = dx * dx + dy * dy
+    if length_sq == 0:
+        return distance(point, start)
 
-    closest = Position(p1.x + t * dx, p1.y + t * dy)
-    return distance(closest, center) <= radius
+    projection = ((point.x - start.x) * dx + (point.y - start.y) * dy) / length_sq
+    if projection <= 0:
+        return distance(point, start)
+    if projection >= 1:
+        return distance(point, end)
+    return math.hypot(
+        start.x + projection * dx - point.x, start.y + projection * dy - point.y
+    )
 
 
 def _orientation(a: Position, b: Position, point: Position) -> float:
@@ -158,6 +161,18 @@ def segments_intersect(
     )
 
 
+def segment_segment_distance(a: Position, b: Position, c: Position, d: Position) -> float:
+    """Shortest distance between two closed 2D segments."""
+    if segments_intersect(a, b, c, d):
+        return 0.0
+    return min(
+        point_segment_distance(a, c, d),
+        point_segment_distance(b, c, d),
+        point_segment_distance(c, a, b),
+        point_segment_distance(d, a, b),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Precomputed unit circle samples (perf — 16-point LoS sampling per ADR-0043)
 # ---------------------------------------------------------------------------
@@ -180,7 +195,9 @@ __all__ = [
     "distance",
     "point_in_circle",
     "circle_edge_distance",
+    "point_segment_distance",
     "segment_intersects_circle",
+    "segment_segment_distance",
     "point_on_segment",
     "segments_intersect",
     "UNIT_CIRCLE_16",

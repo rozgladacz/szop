@@ -770,9 +770,8 @@ def effective_move_inches(blob: UnitBlob, ruleset_version: str = "v1") -> float:
     `wolny` −2″. Czytane z `effective_passives(blob)` → honoruje czasowe
     override'y Rozkaz/Klątwa/Oznaczenie (pkt 11.b.i/12). Clamp ≥ 0.
 
-    **POZA zakresem (E4, roadmap „Ruch nie egzekwuje Trudny/Niedostępny"):**
-    pkt 4.c.iv Trudny (½ ruchu przez teren) — budżet NIE zależy od terenu na
-    trasie (brak parametru `terrain`); pkt 4.c.i Niedostępny — brak path-blocking.
+    To budżet wejściowy planera Manewru. Planer stosuje pkt 4.c.i i 4.c.iv
+    do konkretnej trasy (ADR-0057).
     """
     config = load_ruleset(ruleset_version).tables.b_mvp
     if config is None:

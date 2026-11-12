@@ -39,8 +39,8 @@ from app.services.engine.actions import (
     SpecialAction,
 )
 from app.services.engine.geometry import circle_edge_distance, distance
-from app.services.engine.movement import maneuver_destination_is_clear
 from app.services.engine.los import LoSState, check_los
+from app.services.engine.pathfinding import ManeuverPlanner
 from app.services.engine.state import (
     BattleState,
     Lokalizacja,
@@ -116,23 +116,6 @@ def _nearest(origin: Position, candidates: list[Position]) -> Position | None:
     return min(candidates, key=lambda p: distance(origin, p))
 
 
-def _move_toward(origin: Position, dest: Position, max_dist: float) -> Position:
-    """Pozycja po ruchu z `origin` ku `dest`, clamp do `max_dist` (pkt 15.a)."""
-    d = distance(origin, dest)
-    if d <= max_dist or d == 0.0:
-        return dest
-    ratio = max_dist / d
-    return Position(
-        origin.x + (dest.x - origin.x) * ratio,
-        origin.y + (dest.y - origin.y) * ratio,
-    )
-
-
-def _can_maneuver_to(state: BattleState, unit: UnitBlob, target: Position) -> bool:
-    """Shared agent-side guard matching resolver Maneuver clearance."""
-    return maneuver_destination_is_clear(state, unit, target)
-
-
 def _maneuver_targets(
     state: BattleState,
     unit: UnitBlob,
@@ -142,23 +125,25 @@ def _maneuver_targets(
 ) -> list[Position]:
     """Kandydaci na pozycję docelową Manewru (dyskretyzacja, ADR-0031 H1).
 
-    {stój, ku najbliższemu wrogowi, ku najbliższemu celowi} — clamp do `move`.
+    Stój albo idź ku najbliższemu wrogowi lub celowi po legalnej trasie.
     Deduplikacja po zaokrągleniu do 0.01″ (unikamy duplikatów gdy "stój" pokrywa
     się z już-osiągniętym celem).
     """
-    targets: list[Position] = [unit.position]  # stój
+    planner = ManeuverPlanner(state, unit, move)
+    targets: list[Position] = []
+    if planner.can_reach(unit.position):
+        targets.append(unit.position)
     nearest_enemy = _nearest(unit.position, [e.position for e in enemies])
-    if nearest_enemy is not None:
-        targets.append(_move_toward(unit.position, nearest_enemy, move))
     nearest_obj = _nearest(unit.position, [o.position for o in objectives])
-    if nearest_obj is not None:
-        targets.append(_move_toward(unit.position, nearest_obj, move))
+    for goal in (nearest_enemy, nearest_obj):
+        if goal is not None and (target := planner.advance_toward(goal)) is not None:
+            targets.append(target)
 
     seen: set[tuple[float, float]] = set()
     deduped: list[Position] = []
     for p in targets:
         key = (round(p.x, 2), round(p.y, 2))
-        if key not in seen and _can_maneuver_to(state, unit, p):
+        if key not in seen:
             seen.add(key)
             deduped.append(p)
     return deduped
@@ -233,9 +218,8 @@ def legal_actions(state: BattleState, perspective: int) -> list[Action]:
 
     Zwraca pustą listę gdy gracz nie ma aktywowalnych oddziałów (sygnał dla
     `choose_action` → None). Nie waliduje pełnej legalności (limit akcji,
-    blokada Ostrzału w zwarciu) — to robi resolver. Filtruje tylko końcowy
-    odstęp Manewru (ADR-0052), żeby kandydaci botów byli spójni z publicznym
-    resolverem.
+    blokada Ostrzału w zwarciu) — to robi resolver. Kandydaci Manewru
+    korzystają z tego samego planera tras co resolver (ADR-0057).
     """
     enemies = enemy_units(state, perspective)
     actions: list[Action] = []

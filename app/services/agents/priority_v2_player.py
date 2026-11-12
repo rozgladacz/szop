@@ -36,9 +36,7 @@ from __future__ import annotations
 from app.services.agents.base import (
     Player,
     _can_charge,
-    _can_maneuver_to,
     _can_shoot,
-    _move_toward,
     enemy_units,
     own_active_units,
 )
@@ -58,6 +56,7 @@ from app.services.engine.actions import (
     SpecialAction,
 )
 from app.services.engine.geometry import distance
+from app.services.engine.pathfinding import ManeuverPlanner
 from app.services.engine.phases import _check_objective_control
 from app.services.engine.prediction import expected_damage
 from app.services.engine.state import (
@@ -216,8 +215,8 @@ class PriorityV2Player(GridDeploymentMixin, Player):
         # 8. Ruch do najbliższego wroga.
         if enemies:
             target = min(enemies, key=lambda e: (distance(unit.position, e.position), e.id))
-            dest = _move_toward(unit.position, target.position, move)
-            if dest != unit.position and _can_maneuver_to(state, unit, dest):
+            dest = ManeuverPlanner(state, unit, move).advance_toward(target.position)
+            if dest is not None:
                 return ManeuverAction(unit_id=unit.id, target_position=dest)
 
         # Bezpiecznik (poza specem): brak wrogów i niezajętych celów → Obrona.
@@ -242,7 +241,7 @@ class PriorityV2Player(GridDeploymentMixin, Player):
         if not threats:
             return None
         target = min(threats, key=lambda e: (distance(unit.position, e.position), e.id))
-        dest = _move_toward(unit.position, target.position, move)
-        if dest == unit.position or not _can_maneuver_to(state, unit, dest):
+        dest = ManeuverPlanner(state, unit, move).advance_toward(target.position)
+        if dest is None:
             return None
         return ManeuverAction(unit_id=unit.id, target_position=dest)

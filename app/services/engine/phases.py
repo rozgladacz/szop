@@ -321,9 +321,8 @@ def _apply_maneuver(
     dice: DeterministicDice,
     sequence: int,
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
-    """Pkt 14.a Manewr — emit MoveExecuted, update position. Walidacja
-    dist ≤ budżet ruchu (pkt 15.a + Szybki/Wolny) egzekwowana w
-    `resolver._validate_action` (brama walidacji publicznego API silnika).
+    """Pkt 14.a Manewr — emit MoveExecuted, update position.
+    Trasę przed wykonaniem sprawdza `resolver` (ADR-0057).
     Ta funkcja czysto aplikuje ruch — wywołania przez `activation_phase`
     bezpośrednio (testy jednostkowe) świadomie omijają walidację.
 

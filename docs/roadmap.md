@@ -816,24 +816,13 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [ ] Zdolność `Zwrot` wprowadza `UnitBlob.facing_deg: float = 0.0`
 - [ ] Każda zdolność = osobny PR + test + ADR
 
-### E4. Ruch — kolizje i pathfinding (po E2, tydzień 28+)
+### E4. Ruch — kolizje i pathfinding Manewru — DONE 2026-11-12
 
-> MVP: ruch deklarowany, brak kolizji jednostka–jednostka (B0 decyzja #5). Oddziały mogą na siebie wchodzić. Poniższe implementują pełny model ruchu po stabilizacji silnika.
->
-> **Slice 2026-06-25 DONE (ADR-0052):** końcowa pozycja `ManeuverAction` musi być dalej niż 1″ od innych żywych oddziałów na Froncie (Pareto MVP: gap obwód-obwód między kołami oddziałów). Boty filtrują Manewry tym samym helperem. Pełny pathfinding i ruch po trasie przez `Niedostępny`/`Trudny` nadal otwarte.
-
-**Kolizje jednostka–jednostka:**
-- [x] Walidacja końcowej pozycji `ManeuverAction` w `resolver._validate_action` przez `movement.maneuver_destination_blocker`: gap obwód-obwód do innego żywego oddziału na Froncie musi być `> 1″` (pkt 15.b.iii).
-- [x] `base.legal_actions` / `legal_followup_actions` oraz boty Priority/V2/V3 filtrują `ManeuverAction`, których `target_position` narusza końcowy odstęp.
-- [x] Testy regresyjne: overlap / dokładnie 1″ po Manewrze niedozwolone; pokonani i Zaplecze nie blokują; boty nie zwracają nielegalnego Manewru; B7 goldeny odświeżone.
-- [ ] Pełny ruch przez modele jako teren `Niedostępny` (pkt 2.d/4.c.i) po trasie — wymaga pathfindingu.
-
-**Pathfinding:**
-- [ ] `app/services/engine/pathfinding.py` — `find_reachable_positions(state, blob, move_inches) → list[Position]` (siatka hex lub ciągła)
-- [ ] Obsługa terenu `Trudny` (½ ruchu, pkt 4.c.iv) — ważona siatka
-- [ ] Obsługa terenu `Niedostępny` (pkt 4.c.i) — blokada węzłów
-- [ ] Boty (Greedy/Priority/V2/V3) zastępują heurestyczne `_move_toward` wywołaniem `find_reachable_positions`
-- [ ] ADR: model pathfindingu (grid rozdzielczość vs graph nawigacji)
+- [x] `find_reachable_positions` w `app/services/engine/pathfinding.py` używa lokalnej siatki heksagonalnej o kroku 1″. Walidator sprawdza prostą trasę oraz objazd z dokładnym połączeniem do celu poza siatką.
+- [x] Silnik sprawdza obrys poruszającego się oddziału na całej trasie. Żywe oddziały na Froncie i teren Niedostępny stanowią przeszkody (pkt 2.d i 4.c.i). Możliwy jest styk kół oddziałów (pkt 15.c). [Źródło reguł](../app/static/docs/SZOP_Rozjemca.md)
+- [x] Przejście przez Trudny zmniejsza budżet całej trasy o połowę (pkt 4.c.iv). Planer dopuszcza dłuższy objazd mieszczący się w pełnym budżecie, jeśli omija ten teren. [Źródło reguł](../app/static/docs/SZOP_Rozjemca.md)
+- [x] Boty Greedy i rodzina Priority korzystają z tego samego planera co walidator Manewru. Zdarzenia nadal zapisują punkt początkowy i końcowy, a odtwarzanie bitew stosuje zapisane wyniki.
+- [x] [ADR-0057: Trasy Manewru i kolizje](adr/0057-maneuver-pathfinding.md) opisuje zakres i ograniczenia siatki. Pełny `pytest -q`: 3763 testy zaliczone. Próby API v1–v3 obejmują odrzucenie ruchu przez przeszkodę bez zapisu i odtworzenie legalnego objazdu.
 
 ---
 
@@ -901,11 +890,12 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0049 | Czasowy ability-override + przerwania Rozkaz/Klątwa/Oznaczenie (BEFORE_ACTION) | ✓ |
 | 0050 | Persystencja event-store: Battle + BattleEvent + persistence.py (B2 slice) | ✓ |
 | 0051 | Aktywacja wieloakcyjna (pkt 11.b.iv): orkiestrator `apply_activation` + `continue_activation` | ✓ |
-| 0052 | Końcowy odstęp Manewru od innych oddziałów | ✓ |
+| 0052 | Końcowy odstęp Manewru od innych oddziałów | Zastąpiony przez ADR-0057 |
 | 0053 | Wersjonowane checkpointy BattleState + RNG | ✓ |
 | 0054 | Atomowe pojedyncze akcje bitwy przez HTTP | ✓ |
 | 0055 | Trwały lifecycle zaproszenia do bitwy | ✓ |
 | 0056 | Trwały protokół aktywacji i okien przerwań (B4.4a design) | ✓ |
+| 0057 | [Trasy Manewru i kolizje](adr/0057-maneuver-pathfinding.md) | Accepted |
 
 ---
 

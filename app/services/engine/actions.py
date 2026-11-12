@@ -39,8 +39,7 @@ class DeploymentAction:
 class ManeuverAction:
     """Pkt 14.a Manewr — oddział wykonuje Ruch (pkt 15) do `target_position`.
 
-    W MVP: pojedynczy punkt końcowy (gracz deklaruje, brak pathfindingu — ADR-0008).
-    Engine waliduje legalność (dist ≤ move_inches, brak kolizji terenu).
+    Gracz deklaruje punkt końcowy. Resolver szuka legalnej trasy (ADR-0057).
     """
 
     unit_id: int

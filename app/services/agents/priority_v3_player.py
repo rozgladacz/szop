@@ -29,9 +29,7 @@ from dataclasses import dataclass
 from app.services.agents.base import (
     Player,
     _can_charge,
-    _can_maneuver_to,
     _can_shoot,
-    _move_toward,
     enemy_units,
     own_active_units,
 )
@@ -56,6 +54,7 @@ from app.services.engine.actions import (
     SpecialAction,
 )
 from app.services.engine.geometry import distance
+from app.services.engine.pathfinding import ManeuverPlanner
 from app.services.engine.phases import OBJECTIVE_CONTROL_RANGE
 from app.services.engine.prediction import expected_damage
 from app.services.engine.state import (
@@ -241,8 +240,8 @@ def _a_move_to_enemy(c: _Ctx) -> Action:
     if not c.enemies:
         return _a_defend(c)
     target = min(c.enemies, key=lambda e: (distance(c.unit.position, e.position), e.id))
-    dest = _move_toward(c.unit.position, target.position, c.move)
-    if dest == c.unit.position or not _can_maneuver_to(c.state, c.unit, dest):
+    dest = ManeuverPlanner(c.state, c.unit, c.move).advance_toward(target.position)
+    if dest is None:
         return _a_defend(c)
     return ManeuverAction(unit_id=c.unit.id, target_position=dest)
 

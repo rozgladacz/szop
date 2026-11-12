@@ -1,18 +1,6 @@
-"""faza-b-move-validation — walidacja dystansu Manewru (pkt 15.a + zdolność 33).
-
-Domyka lukę kontraktu: `actions.py` (`ManeuverAction` docstring) + `phases.py`
-(`_apply_maneuver` docstring) deklarowały „engine waliduje dist ≤ move_inches",
-ale `resolver._validate_action` tej walidacji nie miał. Pokrywa:
-- budżet bazowy 6″ (pkt 15.a) — legalny / graniczny / nielegalny dystans,
-- modyfikatory zdolności 33 Szybki (+2″) / Wolny (−2″),
-- czasowe override'y (`ability_overrides`) — Rozkaz/Klątwa nadające Szybki,
-- `effective_move_inches` jednostkowo,
-- Trudny teren (pkt 4.c.iv) NIE egzekwowany (świadomie → E4).
-"""
+"""Maneuver budgets and route validation through the resolver (ADR-0057)."""
 
 from __future__ import annotations
-
-from dataclasses import replace
 
 import pytest
 
@@ -86,13 +74,6 @@ def test_effective_move_honors_ability_override_grant():
     assert effective_move_inches(blob) == 8.0
 
 
-def test_effective_move_ignores_terrain_trudny_e4_deferral():
-    # pkt 4.c.iv Trudny (½ ruchu) świadomie nieegzekwowany — budżet nie zależy
-    # od terenu na trasie (E4, roadmap). Dokumentacyjny pin.
-    blob = _blob()
-    assert effective_move_inches(blob) == 6.0
-
-
 # ---------------------------------------------------------------------------
 # Walidacja przez resolver.apply
 # ---------------------------------------------------------------------------
@@ -146,19 +127,20 @@ def test_override_grant_szybki_allows_seven():
     assert any(isinstance(e, MoveExecuted) for e in _maneuver(Position(7.0, 0.0), blob).events)
 
 
-def test_trudny_terrain_on_path_does_not_reduce_budget():
-    # pkt 4.c.iv NIE egzekwowany (E4): ruch 6″ przez Trudny teren wciąż legalny.
-    trudny = TerrainCircle(center=Position(3.0, 0.0), radius_inches=2.0, features=("Trudny",))
+def test_trudny_terrain_on_path_halves_budget_even_with_clear_endpoint():
+    # Start and finish are outside the terrain. Crossing it still halves the
+    # budget for the entire move (pkt 4.c.iv), with no slack for a detour here.
+    trudny = TerrainCircle(center=Position(3.0, 0.0), radius_inches=0.5, features=("Trudny",))
     blob = _blob()
-    result = apply(
-        _state(blob, terrain=(trudny,)),
-        ManeuverAction(unit_id=blob.id, target_position=Position(6.0, 0.0)),
-        DeterministicDice(42),
-    )
-    assert any(isinstance(e, MoveExecuted) for e in result.events)
+    with pytest.raises(IllegalActionError, match="no legal maneuver route"):
+        apply(
+            _state(blob, terrain=(trudny,)),
+            ManeuverAction(unit_id=blob.id, target_position=Position(6.0, 0.0)),
+            DeterministicDice(42),
+        )
 
 
-def test_maneuver_too_close_to_other_unit_raises():
+def test_maneuver_ending_in_another_unit_raises():
     actor = _blob()
     blocker = _blob(id=2, owner_player=1, position=Position(6.0, 0.0))
     state = BattleState(
@@ -168,18 +150,18 @@ def test_maneuver_too_close_to_other_unit_raises():
         blobs=(actor, blocker),
         terrain=(),
     )
-    # target center at x=3.0 gives edge gap 1.0" to blocker: not "dalej niz 1".
-    with pytest.raises(IllegalActionError, match="too close"):
+    with pytest.raises(IllegalActionError, match="no legal maneuver route"):
         apply(
             state,
-            ManeuverAction(unit_id=1, target_position=Position(3.0, 0.0)),
+            ManeuverAction(unit_id=1, target_position=Position(4.1, 0.0)),
             DeterministicDice(42),
         )
 
 
-def test_maneuver_more_than_one_inch_from_other_unit_accepted():
+@pytest.mark.parametrize("x", [3.0, 3.5, 4.0])
+def test_maneuver_can_finish_close_to_or_touching_another_unit(x):
     actor = _blob()
-    blocker = _blob(id=2, owner_player=1, position=Position(6.2, 0.0))
+    blocker = _blob(id=2, owner_player=1, position=Position(6.0, 0.0))
     state = BattleState(
         round=1,
         active_player=0,
@@ -189,7 +171,7 @@ def test_maneuver_more_than_one_inch_from_other_unit_accepted():
     )
     result = apply(
         state,
-        ManeuverAction(unit_id=1, target_position=Position(3.0, 0.0)),
+        ManeuverAction(unit_id=1, target_position=Position(x, 0.0)),
         DeterministicDice(42),
     )
     assert any(isinstance(e, MoveExecuted) for e in result.events)

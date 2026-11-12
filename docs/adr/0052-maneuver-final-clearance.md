@@ -1,7 +1,12 @@
 # ADR-0052 — Końcowy odstęp Manewru od innych oddziałów
 
-**Status:** Accepted (2026-06-25)
+**Status:** Zastąpiony 2026-11-12 przez [ADR-0057](0057-maneuver-pathfinding.md).
 **Kontekst wątku:** `faza-b-engine-mvp` / E4 slice.
+
+> Decyzja historyczna z 2026-06-25. Aktualny pkt 15.c
+> [SZOP_Rozjemca.md](../../app/static/docs/SZOP_Rozjemca.md) znosi odstęp 1″
+> między różnymi oddziałami. Historyczny pkt 15.b.iii nie występuje w
+> aktualnym źródle.
 
 ## Kontekst
 
