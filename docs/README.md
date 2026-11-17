@@ -16,6 +16,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [app-js-guide.md](app-js-guide.md) | Struktura `app.js`, łańcuch DOMContentLoaded, closure scope |
 | [PERFORMANCE.md](PERFORMANCE.md) | Baseline wydajności silnika kosztów, benchmarki |
 | [frontend_js_modules.md](frontend_js_modules.md) | Mapa modułów JS po Fazie III, call-site checklist |
+| [oznaczenie-mechaniki-plan.md](oznaczenie-mechaniki-plan.md) | Podział mechanik Oznaczenia i zakres pierwszego etapu C2d1 (Furia v3) |
 
 ## Przeglądy
 

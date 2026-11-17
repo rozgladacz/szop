@@ -517,7 +517,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   inventory, declaration/pass/close nie wykonują rzutów, resolve używa
   prywatnego klonu RNG, a każdy restart head zachowuje complete-tail replay
   equality. V1/v2 pozostają niezmienione, a persistence/publiczny wire nadal
-  akceptują wyłącznie v1/v2.
+  akceptują v3 po jawnym opt-in C2c; v1/v2 zachowują zgodność.
 
   Priority/passy reużywają dwugraczową kolejkę od snapshotu inicjatywy.
   Oznaczenie może nadać tylko X z `oznaczenie_tak: true` innemu żywemu/frontowemu
@@ -532,7 +532,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   same-owner/two-owner, complete-tail replay, prywatny RNG resolve, atomowy
   rollback/race/no-oracle/auth i pułapy 5/6/7 SELECT są normatywne w ADR.
 
-  Nie dochodzi nowa trasa ani scope: przyszły v3 użyje istniejących
+  Nie dochodzi nowa trasa ani scope: v3 używa istniejących
   `POST /actions` do declaration i `operation=resolve_attack` oraz
   `POST /interrupts` ze strict `scope=attack`; klient rozpozna pending scope ze
   state v3 i dostanie tylko jedną nową metodę resolve. Intent nie istnieje w
@@ -540,12 +540,20 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
   C2a0 nadal wynosi dokładnie `{"rozkaz", "klatwa", "straznik"}`;
   `oznaczenie` nadal jest odrzucane bez zapisu.
 
-  Dalsze slice'y pozostają OPEN i każdy wymaga osobnego commitu/DoD:
-  **C2b** immutable `oznaczenie_tak`, strict private handler i attack effect
-  view bez I/O/allowlisty; **C2c** durable service, opt-in/DB
-  constraint v3, FastAPI, publiczna allowlista i
-  `HttpClient.resolve_activation_attack` z same-owner/two-bearer, auth/audit,
-  stale/race/rollback/no-oracle i exact 5/6/7 SELECT gates.
+  Status slice'ów C2 (każdy ma osobny commit/DoD):
+
+  - [x] **B4.4d.C2a2** — siedem eventów, reducery i pure
+    declare/pass/close/resolve z restart/RNG parity; DONE 2026-08-07.
+  - [x] **B4.4d.C2b** — immutable `oznaczenie_tak`, strict private handler i
+    attack effect view bez I/O/allowlisty; DONE 2026-10-18.
+  - [x] **B4.4d.C2c** — durable service, opt-in/DB constraint v3, FastAPI,
+    strict attack scope i `HttpClient.resolve_activation_attack` z
+    same-owner/two-bearer, auth/audit, stale/race/rollback/no-oracle i exact
+    5/6/7 SELECT gates; DONE 2026-10-19. Publiczne Oznaczenie pozostaje
+    fail-closed (`unsupported_interrupt`) do osobnego etapu mechanik X.
+  - [ ] **B4.4d.C2d1** — prywatna Furia w pending attack v3, bez publikacji
+    Oznaczenia; [zakres, DoD i testy](oznaczenie-mechaniki-plan.md).
+    Etap zdefiniowany ręcznie 2026-11-10; implementacja i automatyzacja nieuruchomione.
   **C2/Oznaczenie implementacja pozostaje OPEN; niepuste recovery,
   LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
   `POST /battles/{id}/replay` **DONE
