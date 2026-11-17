@@ -1,10 +1,24 @@
 # Roadmap
 
-> Kierunki długofalowe. Bieżące zadania per wątek: `docs/handoffs/HANDOFF_*.md`. Stan zarchiwizowany: LOG SESJI w `HANDOFF.md`.
+> Kierunki długofalowe i kolejka etapów poniżej. Historyczne decyzje są w `docs/handoffs/` i `HANDOFF.md`.
 >
 > Pełny plan architektoniczny 12–24 mies.: [docs/plans/architektura-dlugofala.md](plans/architektura-dlugofala.md)
+>
+> Etykieta `[automation-ready]` jawnie dopuszcza otwarty etap do automatycznego
+> uruchomienia przez koordynatora. Brak etykiety oznacza wymagany wybór ręczny.
 
 ---
+
+## Kolejka po C2d1 — propozycja 2026-11-17
+
+Jeden przebieg wykonuje jeden etap. [Zakresy, zależności, testy i warunki
+przekazania na kolejny komputer](kolejka-po-c2d1.md) są punktem startowym.
+
+- [ ] **B4.4d.C2d2** — zgodność nazw Podwójnego w prywatnym melee v3.
+- [ ] **D5.1** — wspólny walidator miejsca rozstawienia po E2/E4.
+- [ ] **D5.2** — boty wybierają wolne miejsca, po D5.1.
+- [ ] **D5.3** — opcjonalna strategia rozstawienia pod cele, po D5.2.
+- [ ] **B4.4d.C2d3-spec** — specyfikacja Ostrożnego i rozstrzygnięcie zakresu źródeł.
 
 ## Plan długofalowy — 5 strumieni (12–24 mies.)
 
