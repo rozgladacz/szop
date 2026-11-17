@@ -1,8 +1,7 @@
 # Oznaczenie — plan etapów mechanik X
 
-Status: kierunek wybrany ręcznie 2026-11-10. Ten dokument definiuje kolejny
-etap; nie stanowi implementacji ani wznowienia automatyzacji. Brak etykiety
-`[automation-ready]` jest celowy.
+Status: kierunek wybrany ręcznie 2026-11-10. Plan i wynik etapu C2d1 są
+punktem odniesienia dla następnych mechanik. Każda wymaga osobnego wyboru.
 
 ## Punkt wyjścia
 
@@ -109,6 +108,27 @@ testów, jeśli zostanie wydzielony):
 .\.venv\Scripts\python.exe -X utf8 -m pytest -q
 git diff --check
 ```
+
+### Wynik C2d1 (2026-11-17)
+
+Silnik rozlicza Furię w głównym ataku zamkniętej Szarży v3. Efekt wrodzony
+i nadany przez Oznaczenie liczy się raz. Wykonana Kontra odbiera kwalifikację
+do Furii. Furia i Podwójny dodają własne trafienie z tej samej naturalnej 6,
+a wszystkie trafienia idą do zwykłej obrony i alokacji ran. Podstawę stanowią
+[poz. 7, 10, 49 i 66 Zdolności](../app/static/docs/SZOP_Zdolnosci.md) oraz
+[pkt 14.d i 17 Rozjemcy](../app/static/docs/SZOP_Rozjemca.md).
+
+Regresje w `tests/test_engine_activation_protocol.py` pokrywają rozliczenie
+trafień, odtworzenie pełnego ciągu zdarzeń, restart, izolację następnego ataku
+i ponowienie po błędzie alokacji. Próba HTTP na SQLite w pamięci z seedem 19
+dała jedno trafienie bez Furii i dwa z Furią, zgodny zapis RNG i zgodny replay.
+Publiczny `oznaczenie` dla `furia` zwrócił `unsupported_interrupt` bez zapisu.
+Pełny lokalny `pytest -q`: 3777 zaliczonych testów. Zestaw celowany C2d1:
+665 zaliczonych testów. Próba combat i protokołu po korekcie opisu: 210.
+
+Do odrębnej decyzji pozostaje zgodność nazw Podwójnego w walce wręcz.
+`combat.py` rozpoznaje tam `podwojny`, a katalog YAML używa `rozrywajacy`.
+Próba współdziałania z Furią używa istniejącego identyfikatora `podwojny`.
 
 ## Późniejsza publikacja
 

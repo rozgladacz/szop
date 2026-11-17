@@ -551,9 +551,9 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
     same-owner/two-bearer, auth/audit, stale/race/rollback/no-oracle i exact
     5/6/7 SELECT gates; DONE 2026-10-19. Publiczne Oznaczenie pozostaje
     fail-closed (`unsupported_interrupt`) do osobnego etapu mechanik X.
-  - [ ] **B4.4d.C2d1** — prywatna Furia w pending attack v3, bez publikacji
-    Oznaczenia; [zakres, DoD i testy](oznaczenie-mechaniki-plan.md).
-    Etap zdefiniowany ręcznie 2026-11-10; implementacja i automatyzacja nieuruchomione.
+  - [x] **B4.4d.C2d1** — prywatna Furia w Szarży v3; DONE 2026-11-17.
+    Publiczna allowlista Oznaczenia pozostaje pusta. Pełny lokalny `pytest -q`:
+    3777 zaliczonych testów. [Zakres, weryfikacja i dalsze decyzje](oznaczenie-mechaniki-plan.md#wynik-c2d1-2026-11-17).
   **C2/Oznaczenie implementacja pozostaje OPEN; niepuste recovery,
   LocalClient/Protocol, MCP i UI pozostają osobnymi slice'ami.**
   `POST /battles/{id}/replay` **DONE

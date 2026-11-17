@@ -2,7 +2,8 @@
 
 Funkcje publiczne:
 - `resolve_ranged_attack(state, attacker, defender, weapon, dice, sequence, terrain)`
-- `resolve_melee_attack(state, attacker, defender, weapon, dice, sequence, *, is_charger, is_counter_attack)`
+- `resolve_melee_attack` rozlicza pojedynczy atak wręcz.
+- `resolve_charge_attack` rozlicza Związanie, kontratak i główny atak Szarży.
 
 Każdy atak realizuje 3-fazową semantykę pkt 17:
 - **Faza 1 — Declare + modifiers.** Sprawdzamy LoS (ranged), Osłonę pkt 19,
@@ -20,16 +21,15 @@ Każdy atak realizuje 3-fazową semantykę pkt 17:
     może odrzucić rany aby pokonać"); obrońca alokujący standardową preferuje
     zwykłe modele.
 
-Reactive window (pkt 14.d.iv — kontratak w Szarży) zaplanowany w `resolve_charge_attack`
-(future, B3.4 extension). MVP `resolve_melee_attack` jest pojedynczym atakiem (bez
-Szarży/kontrataku) z `damage_balance` accounting per pkt 20.c.
+`resolve_charge_attack` koordynuje oba ataki wręcz z pkt 14.d.iii–iv.
+`resolve_melee_attack` aktualizuje bilans ran używany przy Przegrupowaniu (pkt 20.a).
 
 Weapon abilities w MVP scope:
 - **AP(X)** (id 55) — modyfikator obrony `-X` (effective higher threshold)
 - **Brutalny** (id 57) — `natural_6_auto_success=False` w testach obrony
 - **Precyzyjny** (id 68) — wszystkie rany → pula atakującego
 
-Pozostałe weapon abilities (Furia, Impet, Podwójny, Przebijająca, Zabójczy,
+Pozostałe weapon abilities (Impet, Przebijająca, Zabójczy,
 Dezintegracja, Niezawodny, Niebezpośredni, etc.) → B3.5 `effects.py` lub
 przyszłe iteracje. `RollResult.rolls` zachowuje natural values dla inspekcji.
 """
@@ -39,7 +39,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Iterable
 
-from app.services.engine.dice import DeterministicDice
+from app.services.engine.dice import DeterministicDice, RollResult
 from app.services.engine.events import (
     BattleEvent,
     MeleeResolved,
@@ -51,13 +51,17 @@ from app.services.engine.events import (
 from app.services.engine.geometry import circle_edge_distance, distance
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
+    ActivationPhase,
+    AttackState,
     BattleState,
+    ChargeAttackIntent,
     Lokalizacja,
     Position,
     Terrain,
     UNARMED_WEAPON,
     UnitBlob,
     WeaponProfile,
+    effective_attack_passives,
     effective_passives,
 )
 from app.services.engine.status import (
@@ -81,29 +85,22 @@ def effective_attack_quality(weapon: WeaponProfile, attacker: UnitBlob) -> int:
     return attacker.quality
 
 
-def _apply_podwojny_extra_hits(
-    hit_result,
+def _count_hits(
+    hit_result: RollResult,
     weapon: WeaponProfile,
     *,
     canonical_aliases: bool = False,
+    furia: bool = False,
 ) -> int:
-    """Podwojny (id 66): "6 na trafienie dają dodatkowe normalne trafienie".
-
-    Post-process inspekcja `hit_result.rolls`: za każdą naturalną 6 dorzucamy
-    +1 trafienie (poza zwykłym sukcesem z auto-6). Zwraca total hits po
-    augmentation.
-    """
-    hits = hit_result.successes
-    if (
+    """Count normal hits and bonuses from Podwójny (66) and Furia (7)."""
+    podwojny = (
         ABILITY_PODWOJNY in weapon.weapon_abilities
-        or (
-            canonical_aliases
-            and ABILITY_ROZRYWAJACY in weapon.weapon_abilities
-        )
-    ):
-        extra = sum(1 for r in hit_result.rolls if r == 6)
-        hits += extra
-    return hits
+        or (canonical_aliases and ABILITY_ROZRYWAJACY in weapon.weapon_abilities)
+    )
+    bonuses = podwojny + furia
+    if bonuses:
+        return hit_result.successes + bonuses * hit_result.rolls.count(6)
+    return hit_result.successes
 
 
 def _aggregate_passive_attack(attacker: UnitBlob, **ctx_kwargs: object) -> int:
@@ -426,7 +423,7 @@ def _resolve_ranged_profile_pools(
         threshold=attack_quality,
         modifier=attack_modifier,
     )
-    hits = _apply_podwojny_extra_hits(
+    hits = _count_hits(
         hit_result,
         weapon,
         canonical_aliases=source_correct,
@@ -609,12 +606,13 @@ def resolve_melee_attack(
     dice: DeterministicDice,
     sequence: int,
     terrain: Iterable[Terrain] = (),
+    *,
+    charging_attack: AttackState | None = None,
 ) -> CombatResult:
-    """Resolves pojedynczy atak wręcz (pkt 17 + 20.c bilans).
+    """Rozlicza pojedynczy atak wręcz (pkt 17).
 
-    Brak Szarży / kontrataku — to integracja w przyszłym `resolve_charge_attack`
-    (B3.4 extension). MVP traktuje jako pojedynczy atak wręcz; `damage_balance`
-    update per pkt 20.c (Przegrupowanie sprawdzi w `phases.py` B3.6).
+    `resolve_charge_attack` przekazuje `charging_attack` tylko dla głównego
+    ataku kwalifikującego się do Furii (poz. 7 i 10).
 
     Algorithm:
     1. Faza 1: brak LoS (wręcz), brak Osłony pkt 19 standard (osłona dotyczy
@@ -646,7 +644,10 @@ def resolve_melee_attack(
         threshold=attack_quality,
         modifier=attack_modifier,
     )
-    hits = _apply_podwojny_extra_hits(hit_result, weapon)
+    furia = charging_attack is not None and ABILITY_FURIA in effective_attack_passives(
+        attacker, charging_attack
+    )
+    hits = _count_hits(hit_result, weapon, furia=furia)
 
     wounds_pending = 0
     wounds_pending_precise = 0
@@ -737,6 +738,31 @@ def resolve_melee_attack(
 # Passive ability sluggi dotyczące reactive kontrataku (Szarża pkt 14.d.iv)
 ABILITY_BASTION = "bastion"  # nie zostajesz Wyczerpany po kontrataku (id 1)
 ABILITY_KONTRA = "kontra"  # kontratak przed atakami szarżującego (id 10)
+ABILITY_FURIA = "furia"  # dodatkowe trafienia szarżującego (id 7)
+
+
+def _matching_closed_charge(
+    state: BattleState,
+    charger: UnitBlob,
+    defender: UnitBlob,
+    weapon: WeaponProfile,
+    counter_attack_declared: bool,
+) -> AttackState | None:
+    activation = state.activation
+    if activation is None or activation.phase is not ActivationPhase.ATTACK_RESOLUTION_READY:
+        return None
+    attack = activation.attack
+    if attack is None or not isinstance(attack.intent, ChargeAttackIntent):
+        return None
+    intent = attack.intent
+    if (
+        intent.attacker_unit_id == charger.id
+        and intent.target_unit_id == defender.id
+        and intent.weapon_slug == weapon.slug
+        and intent.counter_attack_declared == counter_attack_declared
+    ):
+        return attack
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -778,11 +804,9 @@ def resolve_charge_attack(
        Pominięty jeśli charger został pokonany w kontrataku.
     4. **Pkt 14.d.vi** — Szarża można wykonać raz w aktywacji (enforce w `phases.py`).
 
-    Kontra (id 10) modyfikuje timing kontrataku (sygnalizowane przez Kontra w
-    `defender.passives`); semantyka MVP: kontratak nadal "przed atakami" — to
-    zgodne z default sequence (pkt 14.d.iv mówi "przerwać żeby kontratak").
-    Wpływ na zdolności Furia/Impet (wyłącza "szarżującego") — implementacja
-    odłożona do momentu gdy Furia/Impet są w combat scope.
+    W prywatnej Szarży v3 faktycznie wykonany kontratak z Kontrą (poz. 10)
+    odbiera szarżującemu Furię dla głównego ataku. Kolejność MVP jest wspólna
+    z pozostałymi wywołaniami.
 
     Args:
         state, charger, defender, weapon, dice, sequence: jak w resolve_melee_attack
@@ -887,8 +911,14 @@ def resolve_charge_attack(
 
     # Faza 3: Główny atak szarżującego pkt 14.d.iii — pominięty jeśli charger pokonany
     if new_charger.models_alive > 0 and new_defender.models_alive > 0:
+        charging_attack = _matching_closed_charge(
+            state, charger, defender, weapon, counter_attack_declared
+        )
+        if charging_attack is not None and can_counter and ABILITY_KONTRA in effective_passives(defender):
+            charging_attack = None
         charge_result = resolve_melee_attack(
-            state, new_charger, new_defender, weapon, dice, next_seq
+            state, new_charger, new_defender, weapon, dice, next_seq,
+            charging_attack=charging_attack,
         )
         events.extend(charge_result.events)
         next_seq += len(charge_result.events)

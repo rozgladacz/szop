@@ -55,7 +55,9 @@ from app.services.engine.events import (
     InterruptWindowClosed,
     InterruptWindowOpened,
     MeleeBalanceReset,
+    MeleeResolved,
     MoveExecuted,
+    ShotResolved,
     StatusAdded,
     StatusRemoved,
     event_to_json,
@@ -3408,6 +3410,202 @@ def test_v3_oznaczenie_reaches_combat_only_for_declared_attacker(monkeypatch) ->
     assert seen == [11]
     melee_attackers = [e.attacker_id for e in charge_resolved.events if type(e).__name__ == 'MeleeResolved']
     assert melee_attackers == [21, 11]
+
+
+# B4.4d.C2d1 — Furia outcomes, using real deterministic dice and v3 transitions.
+_FURIA_SWORD = replace(SWORD, attacks=1)
+_FURIA_RIFLE = replace(RIFLE, attacks=1)
+
+
+def _furia_battle(*, native=False, podwojny=False, defender_passives=(), exhausted=False, fragile=False):
+    state = _marked_idle_state()
+    actor, defender, source = state.blobs
+    weapon = replace(_FURIA_SWORD, weapon_abilities=("podwojny",)) if podwojny else _FURIA_SWORD
+    actor = replace(
+        actor, models_alive=1, toughness_per_model=1 if fragile else 8,
+        passives=("furia",) if native else (), melee_weapons=(weapon,),
+        ranged_weapons=(_FURIA_RIFLE,),
+    )
+    defender = replace(
+        defender, models_alive=1, toughness_per_model=8,
+        melee_weapons=(_FURIA_SWORD,), passives=defender_passives,
+        status_flags=(STATUS_WYCZERPANY,) if exhausted else (),
+    )
+    return replace(
+        state, blobs=(actor, defender, source),
+        initial_toughness_snapshot=((11, actor.toughness_per_model), (21, 8), (12, 3)),
+    )
+
+
+def _close_furia_attack(declared, dice, *, marked):
+    tail = []
+    head = declared
+    if marked:
+        head = _mark_attack(
+            head.state, dice, sequence=head.next_sequence, payload={"ability": "furia"},
+        )
+        tail.extend(head.events)
+    for _ in range(2):
+        head = _pass_attack(
+            head.state, caller_player=head.state.activation.attack.window.priority_player,
+            sequence=head.next_sequence,
+        )
+        tail.extend(head.events)
+    return head, tail
+
+
+@pytest.mark.parametrize(
+    ("native", "marked", "podwojny", "seed", "expected_hits", "expected_wounds"),
+    [
+        (False, False, False, 225, 1, 1),
+        (True, False, False, 225, 2, 2),
+        (False, True, False, 225, 2, 2),
+        (True, True, False, 225, 2, 2),
+        (True, True, True, 225, 3, 2),
+        (True, True, True, 58, 1, 1),
+    ],
+)
+def test_v3_furia_counts_natural_sixes_before_defense(
+    native, marked, podwojny, seed, expected_hits, expected_wounds, monkeypatch,
+):
+    initial = _furia_battle(native=native, podwojny=podwojny)
+    weapon, = initial.blobs[0].melee_weapons
+    _, started, first, ready, declared = _marked_declared(
+        state=initial, action=ChargeAction(11, 21, weapon, counter_attack_declared=False),
+    )
+    dice = DeterministicDice(seed)
+    before = dice.to_checkpoint()
+    closed, close_tail = _close_furia_attack(declared, dice, marked=marked)
+    prefix = (*started.events, *first.events, *ready.events, *declared.events, *close_tail)
+    assert apply_events(initial, prefix) == closed.state
+
+    calls = []
+    original_roll = DeterministicDice.roll_d6
+
+    def record_roll(self, count=1):
+        result = original_roll(self, count)
+        calls.append(result)
+        return result
+
+    with monkeypatch.context() as trace:
+        trace.setattr(DeterministicDice, "roll_d6", record_roll)
+        result = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+
+    hit, = (event for event in result.events if isinstance(event, MeleeResolved))
+    assert (hit.attacker_id, hit.defender_id, hit.weapon_slug) == (11, 21, weapon.slug)
+    assert calls[0] == ((6,) if seed == 225 else (5,))
+    assert len(calls[1]) == hit.hits == expected_hits
+    assert hit.wounds_dealt + hit.wounds_precise == expected_wounds
+    assert result.state.blobs[1].wounds_received == expected_wounds
+    assert apply_events(initial, (*prefix, *result.events)) == result.state
+    assert result.state.activation.attack is None
+    assert result.state.blobs[0].passives == initial.blobs[0].passives
+    assert dice.to_checkpoint() == before
+    restarted = _resolve_attack(
+        _restart_v3(closed.state), DeterministicDice.from_checkpoint(before),
+        sequence=closed.next_sequence,
+    )
+    _assert_transition_equal(result, restarted)
+    assert result.dice.roll_d6(6) == restarted.dice.roll_d6(6)
+
+
+@pytest.mark.parametrize(
+    ("passives", "counter", "exhausted", "fragile", "seed", "melee_hits"),
+    [
+        (("furia",), True, False, False, 376, [(21, 1), (11, 2)]),
+        (("furia", "kontra"), True, False, False, 376, [(21, 1), (11, 1)]),
+        (("kontra",), False, False, False, 376, [(11, 2)]),
+        (("kontra",), True, True, False, 376, [(11, 2)]),
+        (("furia",), True, False, True, 282, [(21, 1)]),
+    ],
+)
+def test_v3_furia_respects_charge_and_counterattack_roles(
+    passives, counter, exhausted, fragile, seed, melee_hits,
+):
+    initial = _furia_battle(defender_passives=passives, exhausted=exhausted, fragile=fragile)
+    _, _, _, _, declared = _marked_declared(
+        state=initial, action=ChargeAction(11, 21, _FURIA_SWORD, counter_attack_declared=counter),
+    )
+    dice = DeterministicDice(seed)
+    closed, _ = _close_furia_attack(declared, dice, marked=True)
+    result = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+    assert [(e.attacker_id, e.hits) for e in result.events if isinstance(e, MeleeResolved)] == melee_hits
+    if fragile:
+        assert result.state.blobs[0].models_alive == 0
+
+
+def test_v3_furia_mark_is_inert_for_shoot_and_cleared_before_next_charge():
+    initial = _furia_battle()
+    _, _, _, _, declared = _marked_declared(state=initial, action=ShootAction(11, 21, _FURIA_RIFLE))
+    dice = DeterministicDice(376)  # Natural 6 for the shot and again for the charge.
+    closed, _ = _close_furia_attack(declared, dice, marked=True)
+    shot = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+    assert next(e for e in shot.events if isinstance(e, ShotResolved)).hits == 1
+    second_ready = _ready_for_second_action(shot)
+    charge = _commit_v3(
+        second_ready.state, ChargeAction(11, 21, _FURIA_SWORD, counter_attack_declared=False),
+        shot.dice, sequence=second_ready.next_sequence,
+    )
+    assert charge.state.activation.attack.ability_overrides == ()
+    closed, _ = _close_furia_attack(charge, shot.dice, marked=False)
+    result = _resolve_attack(closed.state, shot.dice, sequence=closed.next_sequence)
+    assert next(e for e in result.events if isinstance(e, MeleeResolved)).hits == 1
+
+
+def test_v3_furia_failure_during_allocation_preserves_head_and_retry_rng(monkeypatch):
+    from app.services.engine import combat
+
+    initial = _furia_battle()
+    _, _, _, _, declared = _marked_declared(
+        state=initial, action=ChargeAction(11, 21, _FURIA_SWORD, counter_attack_declared=False),
+    )
+    dice = DeterministicDice(225)
+    closed, _ = _close_furia_attack(declared, dice, marked=True)
+    original = _restart_v3(closed.state)
+    before = dice.to_checkpoint()
+    expected = _resolve_attack(original, DeterministicDice.from_checkpoint(before), sequence=closed.next_sequence)
+
+    allocations = []
+
+    def fail_after_defense(_defender, wounds, **kwargs):
+        allocations.append(wounds)
+        raise RuntimeError("allocation failure after rolling defense against Furia")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(combat, "_allocate_wounds_to_defender", fail_after_defense)
+        _assert_rejected(
+            closed.state, ActivationProtocolErrorReason.ILLEGAL_ACTION,
+            lambda: _resolve_attack(closed.state, dice, sequence=closed.next_sequence),
+        )
+    assert allocations == [2]
+    assert closed.state == original
+    assert dice.to_checkpoint() == before
+    retried = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+    _assert_transition_equal(retried, expected)
+
+
+def test_furia_native_is_inert_in_v1_and_v2_charge():
+    from app.services.engine.resolver import apply
+
+    native = _furia_battle(native=True)
+    plain = _furia_battle()
+    action = ChargeAction(11, 21, _FURIA_SWORD, counter_attack_declared=False)
+    for state in (native, plain):
+        v1_dice = DeterministicDice(225)
+        v1 = apply(replace(state, initiative_player=None), action, v1_dice)
+        ready = _ready_for_action(state=state)
+        v2 = _commit(ready.state, action, DeterministicDice(225), sequence=ready.next_sequence)
+        fingerprints = (
+            next(e for e in v1.events if isinstance(e, MeleeResolved)).hits,
+            v1_dice.to_checkpoint(),
+            next(e for e in v2.events if isinstance(e, MeleeResolved)).hits,
+            v2.dice.to_checkpoint(),
+        )
+        assert fingerprints[0] == fingerprints[2] == 1
+        if state is native:
+            expected_fingerprints = fingerprints
+        else:
+            assert fingerprints == expected_fingerprints
 
 
 @pytest.mark.parametrize('payload', [
