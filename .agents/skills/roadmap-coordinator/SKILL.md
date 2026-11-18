@@ -5,13 +5,92 @@ description: Koordynuj autonomiczną realizację roadmapy projektu szop_a z bie�
 
 # Roadmap coordinator
 
-Koordynuj jeden aktywny etap naraz. Pełny protokół HANDOFF pozostaje wstrzymany.
+To jest jedyne źródło procedury automatycznego koordynatora. Prompt heartbeat i
+`AGENTS.md` mogą wyłącznie wskazywać ten skill, bez kopiowania jego reguł.
+
+Koordynuj jeden aktywny etap naraz. Nie wykonuj implementacji w wątku
+koordynacyjnym i nie reaktywuj pełnego protokołu HANDOFF.
 
 ## Bramka czasu
 
 Najpierw ustal lokalny czas `Europe/Warsaw`. Od poniedziałku do piątku w
 przedziale `13:00:00 <= czas < 19:00:00` zakończ bez odczytywania roadmapy,
 uruchamiania zadań i publikowania statusu.
+
+## Trwały stan — zawsze używaj helpera
+
+Stan jest atomowo zapisywany w ignorowanym pliku
+`.codex/runtime/roadmap-coordinator-state.json`. Nigdy nie edytuj go ręcznie.
+Uruchamiaj helper przez Python repozytorium z `-X utf8`:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\coordinator_state.py show
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\coordinator_state.py ready-stages
+```
+
+Jeśli `.venv` nie istnieje, użyj skonfigurowanego Pythona workspace. Błąd
+odczytu lub zapisu stanu jest fail-closed: nie uruchamiaj workera.
+
+Po inspekcji zapisz dokładnie jedną obserwację:
+
+```powershell
+# nic nie pracuje i brak blokady
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\coordinator_state.py observe --status ready
+
+# worker aktywny lub zakolejkowany
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\coordinator_state.py observe --status running --stage-key "B4.4d.C2a2" --thread-id "<thread-id>"
+
+# blokada
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\coordinator_state.py observe --status blocked --blocker-kind "approval_required" --blocker-key "thread:<thread-id>" --blocker-version "<stable-revision>" --blocker-summary "Worker oczekuje na zatwierdzenie narzędzia."
+```
+
+Fingerprint to SHA-256 kanonicznych pól `kind`, `key` i `version`; `summary`
+jest tylko stabilnym opisem raportowym. Używaj stabilnych wartości, nie czasu
+heartbeat:
+
+- approval/pytanie: `key=thread:<id>`, `version=updatedAt` lub digest pytania;
+- limit: `key=weekly_limit`, `version=<reason>:<resets_at>`;
+- brak etapu: `key=roadmap`, `version=no_automation_ready_stage`;
+- błąd: stabilny kod komponentu i istotna rewizja wejścia.
+
+Zmiana sensu pytania, przyczyny, źródłowego `updatedAt` lub czasu resetu ma
+zmienić fingerprint. Kosmetyczne przeformułowanie nie powinno go zmieniać.
+
+### Tabela stanów
+
+| Stan + obserwacja | Nowy stan | Powiadom | Działanie |
+|---|---|---:|---|
+| `READY` + worker | `RUNNING` | nie | zapisz etap i wątek |
+| `RUNNING` + brak workera/blokady | `READY` | nie | wyczyść etap |
+| dowolny aktywny + nowa/zmieniona blokada | `BLOCKED` | tak | ustaw fingerprint, `first_seen_at`, `last_notified_at`, `unchanged_runs=0` |
+| `BLOCKED` + ta sama blokada poniżej progu | `BLOCKED` | nie | zwiększ `unchanged_runs` |
+| trzecia identyczna obserwacja lub wiek `>=90 min` | `PAUSE_PENDING` | nie | spróbuj wstrzymać heartbeat |
+| pauza automatyzacji potwierdzona | `PAUSED` | tak, raz | uruchom `confirm-pause` |
+| `PAUSE_PENDING` + nieudana pauza | `PAUSE_PENDING` | nie | ponów pauzę w następnym przebiegu |
+| `PAUSE_PENDING` + blokada znikła przed pauzą | `READY`/`RUNNING` | nie | anuluj oczekującą pauzę |
+| `PAUSED` + heartbeat/ręczna kontrola | `PAUSED` | nie | czekaj na jawne wznowienie |
+| `PAUSED` + jawne wznowienie użytkownika | `READY` | raport ręczny | wyczyść blokadę i włącz heartbeat |
+
+Pierwsza obserwacja ma `unchanged_runs=0`; trzecia identyczna ma wartość `2`.
+Zmiana fingerprintu rozpoczyna nowy cykl i powiadamia. Usunięcie blokady
+przechodzi do `RUNNING` albo `READY` bez osobnego powiadomienia.
+
+### Efekty helpera
+
+- `notify=true`: użyj `NOTIFY` wyłącznie dla pierwszej/zmienionej blokady albo
+  po potwierdzonej pauzie.
+- `pause_automation=true`: przez narzędzie automatyzacji ustaw
+  `roadmapa-koordynacja-poza-szczytem-pn-pt` na `PAUSED`, zachowując pozostałe
+  pola, i zweryfikuj zapis. Dopiero po sukcesie uruchom:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\coordinator_state.py confirm-pause
+```
+
+Potwierdzenie przechodzi do `PAUSED`, aktualizuje `last_notified_at` i zwraca
+jedyny komunikat o automatycznym wstrzymaniu. Gdy zmiana konfiguracji nie
+powiedzie się, zostaw `PAUSE_PENDING`; następny heartbeat ponowi próbę bez
+powiadomienia.
 
 ## Bramka tygodniowego limitu
 
@@ -35,16 +114,17 @@ czyli 7 dni. Pole `remaining_percent` oznacza `100 - used_percent`.
 - Jeśli repozytorium nie ma `.venv`, użyj skonfigurowanego Pythona workspace z
   obowiązkową flagą `-X utf8`.
 
-Powiadom raz przy wejściu w blokadę limitu lub przy braku wiarygodnego pomiaru,
-podając przyczynę i — jeśli jest dostępny — czas resetu. Nie duplikuj statusu,
-dopóki przyczyna się nie zmieni.
+Każdy wynik `allow_start=false` zapisz jako blokadę w maszynie stanów. To ona
+decyduje o pierwszym powiadomieniu, deduplikacji i automatycznej pauzie.
 
 ## 1. Sprawdź stan
 
-1. Użyj narzędzi wątków Codex i sprawdź wszystkie relewantne zadania projektu:
+1. Odczytaj trwały stan, potem użyj narzędzi wątków Codex i sprawdź wszystkie
+   relewantne zadania projektu:
    aktywne, zakolejkowane, oczekujące, świeżo zakończone i zarchiwizowane.
-2. Jeśli zadanie pracuje albo czeka na zatwierdzenie narzędzia, nie uruchamiaj
-   kolejnego. Publikuj status tylko przy zmianie stanu.
+2. Jeśli zadanie pracuje, zapisz `running` i nie uruchamiaj kolejnego. Jeśli
+   czeka na zatwierdzenie narzędzia, zapisz `blocked`; nie traktuj oczekiwania
+   jako zwykłego aktywnego stanu.
 3. Jeśli zadanie zakończyło się pytaniem, sklasyfikuj decyzję przed eskalacją.
 
 ## 2. Rozstrzygaj pytania autonomicznie
@@ -87,8 +167,7 @@ Zatrzymaj pracę i powiadom użytkownika tylko przy:
 - dwóch istotnie różnych rozwiązaniach z różnymi skutkami produktowymi.
 
 Zadaj jedno konkretne pytanie z rekomendacją. Nie uruchamiaj innego etapu.
-Nie powtarzaj powiadomienia, dopóki treść pytania lub `updatedAt` zadania się nie
-zmieni.
+Fingerprint musi uwzględniać treść pytania albo stabilne `updatedAt` zadania.
 
 ## 3. Odzyskaj zadanie, które nie daje się wznowić
 
@@ -103,23 +182,30 @@ Jeśli ukończonego lub zarchiwizowanego zadania nie można kontynuować:
    bezpieczny etap integracyjny; przy niejednoznacznym właścicielu zmian zatrzymaj
    się.
 
-## 4. Wybierz następny etap
+## 4. Wybierz następny etap tylko z allowlisty roadmapy
 
 Wybieraj dopiero, gdy nic nie pracuje i nie ma czerwonego pytania.
 
-1. Odczytaj `AGENTS.md`, wynik ostatniego etapu, `docs/roadmap.md` i tylko
-   potrzebne dokumenty.
-2. Wybierz najmniejszy logiczny slice prowadzący do roadmapy. Preferuj jeden
-   spójny kontrakt i jeden commit. Rozdziel szeroki etap na kolejno:
-   model/codec, eventy/reducery, transition/service, transport/API, klient/UI.
-3. Zdefiniuj cel, zakres, ograniczenia, Layer Checklist, performance gate,
+1. Odczytaj `AGENTS.md`, wynik ostatniego etapu i `docs/roadmap.md`, a następnie
+   uruchom helper `ready-stages`.
+2. Kandydatem może być wyłącznie otwarty punkt `- [ ]`, który na tej samej
+   pozycji ma dokładną etykietę `[automation-ready]`. Nie wyprowadzaj gotowości
+   z kolejności, ADR, dawnych wątków, zwykłego `[ ]` ani ogólnego backlogu.
+3. Jeśli helper zwraca zero kandydatów, zapisz blokadę
+   `no_automation_ready_stage`. Jeśli zwraca więcej niż jeden kandydat i ich
+   kolejność nie jest jednoznaczna, zapisz czerwone pytanie; nie wybieraj losowo.
+4. Zweryfikuj zależności jedynego kandydata. Koordynator nie dodaje sam etykiet
+   `[automation-ready]` i nie rozszerza zakresu etapu.
+5. Zdefiniuj cel, zakres, ograniczenia, Layer Checklist, performance gate,
    Definition of Done oraz konkretne testy i artefakty.
-4. Zastosuj bramkę tygodniowego limitu. Jeśli pozwala, utwórz jedno osobne
+6. Zastosuj bramkę tygodniowego limitu. Jeśli pozwala, utwórz jedno osobne
    zadanie w tym samym projekcie. Prompt ma wymagać:
    zachowania cudzych zmian, encoding gate, procedur z `AGENTS.md`, pełnej
    weryfikacji, call-site audit, osobnego commitu i zatrzymania po etapie.
-5. W promptach workerów używaj klasyfikacji zielone/żółte/czerwone. Nie nakazuj
+7. W promptach workerów używaj klasyfikacji zielone/żółte/czerwone. Nie nakazuj
    pytać użytkownika przy każdej niejednoznaczności.
+8. Po udanym utworzeniu zadania zapisz `running` z ID etapu i wątku. Błąd
+   utworzenia zapisz jako blokadę; nie twórz drugiego workera w tym przebiegu.
 
 ## 5. Raportuj oszczędnie
 
@@ -127,9 +213,28 @@ Powiadom tylko o:
 
 - uruchomieniu lub zastąpieniu zadania;
 - nowym czerwonym pytaniu;
-- błędzie uniemożliwiającym wznowienie lub utworzenie zadania;
-- wejściu w blokadę tygodniowego limitu lub braku wiarygodnego pomiaru;
+- pierwszej lub zmienionej blokadzie wskazanej przez helper;
+- potwierdzonym automatycznym wstrzymaniu po progu;
 - zakończeniu całej roadmapy albo braku kolejnego bezpiecznego etapu.
 
-Przy niezmienionym stanie zwróć cichy status. Nigdy nie twórz dwóch zadań dla
-tego samego etapu i nie reaktywuj pełnego HANDOFF.
+Przy `notify=false` zwróć `DONT_NOTIFY`. Nigdy nie twórz dwóch zadań dla tego
+samego etapu i nie reaktywuj pełnego HANDOFF.
+
+## 6. Ręczne wznowienie po blokadzie
+
+Wykonuj tylko na jawne polecenie użytkownika:
+
+1. Potwierdź, że przyczyna blokady została rozwiązana albo świadomie
+   zaakceptowana i że żaden worker nie realizuje etapu.
+2. Uruchom:
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 .agents\skills\roadmap-coordinator\scripts\coordinator_state.py resume
+```
+
+3. Przez narzędzie automatyzacji ustaw istniejący heartbeat na `ACTIVE`, nie
+   zmieniając promptu, harmonogramu ani targetu.
+4. Jeśli aktywacja nie powiedzie się, stan `READY` jest bezpieczny i polecenie
+   `resume` jest idempotentne; ponów wyłącznie aktywację automatyzacji.
+5. Poinformuj użytkownika raz o ręcznym wznowieniu. Nie uruchamiaj etapu w tym
+   samym ręcznym przebiegu; zrobi to kolejny heartbeat.

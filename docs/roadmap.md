@@ -13,14 +13,15 @@
 
 Jeden przebieg wykonuje jeden etap. [Zakresy, zależności, testy i warunki
 przekazania na kolejny komputer](kolejka-po-c2d1.md) są punktem startowym.
-Użytkownik zaakceptował punkty 1, 2, 3 i 5. Kolejność realizacji to
-C2d2 → D5.1 → D5.2 → C2d3-spec. Punkt D5.3 czeka na osobną akceptację
-rozszerzonego zakresu. Akceptacja kolejki nie zmienia stanu heartbeat.
+Użytkownik zaakceptował punkty 1, 2, 3 i 5 oraz poprawkę kontroli celu do 2″.
+Kolejność realizacji to B3.objectives-2in → C2d2 → D5.1 → D5.2 → C2d3-spec.
+D5.3a i D5.3b są odłożone. Użytkownik zlecił wznowienie istniejącego heartbeat.
 
+- [ ] **B3.objectives-2in** [automation-ready] — zaakceptowana poprawka zasięgu kontroli celu z 3″ do 2″, z regresjami silnika i botów.
 - [ ] **B4.4d.C2d2** [automation-ready] — zaakceptowany, zgodność nazw Podwójnego w prywatnym melee v3.
 - [ ] **D5.1** [automation-ready] — zaakceptowany, wspólny walidator miejsca rozstawienia po E2/E4.
 - [ ] **D5.2** [automation-ready] — zaakceptowany, boty wybierają wolne miejsca, po D5.1.
-- [ ] **D5.3** — do akceptacji, strategia pod cele oraz porównanie z gridem, po D5.2.
+- [ ] **D5.3** — odłożone D5.3a i D5.3b, strategia pod cele oraz porównanie z gridem.
 - [ ] **B4.4d.C2d3-spec** [automation-ready] — zaakceptowany audyt, specyfikacja Ostrożnego i rozstrzygnięcie zakresu źródeł.
 
 ## Plan długofalowy — 5 strumieni (12–24 mies.)

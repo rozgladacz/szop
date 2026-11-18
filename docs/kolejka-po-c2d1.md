@@ -4,19 +4,23 @@ Plan przygotowany 2026-11-17 na `Faza_A`, po `13abcd2`. C2d1 zakończyło
 się wynikiem 3777 zaliczonych testów.
 
 Aktualizacja 2026-11-18 zapisuje akceptację użytkownika dla etapów 1, 2, 3
-i 5. Kolejność realizacji to C2d2 → D5.1 → D5.2 → C2d3-spec. Każdy przebieg
-zamyka jeden etap i zapisuje wynik przed wyborem następnego. Punkt 4 został
-rozszerzony do oceny i czeka na osobną akceptację. Zaakceptowane pozycje
+i 5 oraz dodatkowej poprawki kontroli celu do 2″. Kolejność realizacji to
+B3.objectives-2in → C2d2 → D5.1 → D5.2 → C2d3-spec. Każdy przebieg
+zamyka jeden etap i zapisuje wynik przed wyborem następnego. D5.3a i D5.3b
+są odłożone decyzją użytkownika. Zaakceptowane pozycje
 otrzymują w roadmapie etykietę `[automation-ready]` na podstawie tego wyboru
-użytkownika, z obowiązkiem sprawdzenia zależności. Status heartbeat jest
-wstrzymany, a wznowienie harmonogramu wymaga jawnego polecenia użytkownika.
+użytkownika, z obowiązkiem sprawdzenia zależności. Użytkownik zlecił
+wznowienie istniejącego heartbeat w tym czacie, z jego dotychczasowym
+harmonogramem i ustawieniami powiadomień. Harmonogram podlega bramce
+czasu z kanonicznego skilla koordynatora, w dni robocze poza 13–19.
 
 | Numer | Etap | Status od 2026-11-18 |
 |---|---|---|
+| 0 | B3.objectives-2in | Zaakceptowana poprawka, pierwsza w kolejce |
 | 1 | B4.4d.C2d2 | Zaakceptowany do realizacji |
 | 2 | D5.1 | Zaakceptowany, po zamknięciu 1 w tej kolejce |
 | 3 | D5.2 | Zaakceptowany, po zamknięciu 2 |
-| 4 | D5.3 | Rozszerzona propozycja do oceny |
+| 4 | D5.3a i D5.3b | Odłożone decyzją użytkownika |
 | 5 | B4.4d.C2d3-spec | Zaakceptowany audyt, po zamknięciu 3 w tej kolejce |
 
 ## Wspólne warunki pracy
@@ -51,6 +55,44 @@ git ls-remote --heads origin Faza_A
 Na innym komputerze utworzyć własne środowisko z `requirements-dev.txt`
 i zainstalować klienta zgodnie z `docs/testing.md`. W razie niedostępności
 Store Pythona wybrać działający interpreter zamiast kopiować `.venv`.
+
+## 0. B3.objectives-2in — kontrola celu w zasięgu 2″
+
+**Akceptacja** Użytkownik zlecił dodanie poprawki 2026-11-18.
+
+**Cel** Doprowadzić regułę kontroli celu w silniku i korzystających z niej
+botach do zgodności z [pkt 5.d Rozjemcy](../app/static/docs/SZOP_Rozjemca.md).
+Odległość od krawędzi podstawki do znacznika wynosi najwyżej 2″. Odczyt
+kodu z 2026-11-18 wykazał `OBJECTIVE_CONTROL_RANGE = 3.0` w `phases.py`.
+
+**Zależność** Baza po C2d1 i E2/E4. Poprawka poprzedza pozostałe etapy
+tej kolejki, aby używały spójnej reguły kontroli celu.
+
+**Zakres** Zmienić źródłową stałą i odszukać wszystkich jej konsumentów
+oraz niezależne porównania dotyczące kontroli celu. Zachować wspólny
+helper `_check_objective_control` i geometrię obwód–znacznik. Uaktualnić
+bezpośrednio nieaktualne komentarze, testy i opis architektury. Nie zmieniać
+innych zasięgów przez globalną zamianę liczby 3. Historia eventów nadal
+odtwarza zapisany wynik, a ponowna symulacja nowych akcji stosuje 2″.
+
+**Warstwy i wydajność** Engine phases, konsumenci botów i oceny polityki,
+testy oraz dokumentacja. Nowe pola DB, codec i API, JS i CSS poza zakresem.
+Zero dodatkowych zapytań SQL i dodatkowych rzutów RNG. Koszt kontroli
+celów zachowuje dotychczasową złożoność.
+
+**Warunek zakończenia** Testy pozycji nieco bliżej niż 2″, dokładnie 2″
+i nieco dalej niż 2″ od krawędzi oddziału, z różnymi promieniami jednostek.
+Sprawdzić kontrolę przy jednostkach jednej i obu stron, zachowanie kontroli
+po odejściu oraz przejęcie przez przeciwnika według pkt 5.e. Zapisać dowód
+zgodności botów z helperem silnika. Każdą zmianę goldenów B7 uzasadnić
+pierwszym zmienionym rozliczeniem celu lub zależną decyzją bota, a następnie
+potwierdzić determinizm i replay.
+
+**Weryfikacja celowana** `tests/test_engine_phases.py`,
+`tests/test_engine_replay_invariant.py`, `tests/test_engine_regression.py`,
+testy agentów używających zasięgu kontroli oraz `tests/test_balance_simulate.py`.
+Pełny `pytest -q`, audyt wywołań, simplify i review. Wynik i commit
+zapisać tutaj i potwierdzić na `origin/Faza_A`.
 
 ## 1. B4.4d.C2d2 — nazwa Podwójnego w prywatnym melee v3
 
@@ -153,7 +195,7 @@ przed i po zmianie. Wyjaśnić każdą konieczną zmianę goldenów.
 
 ## 4. D5.3 — opcjonalne rozstawianie pod cele
 
-**Status** Rozszerzona propozycja z 2026-11-18, oczekująca na akceptację.
+**Status** D5.3a i D5.3b odłożone przez użytkownika 2026-11-18.
 Podział poniżej pozwala ocenić osobno strategię i jej skuteczność.
 
 **Zależność** Zamknięte D5.2. Strategia korzysta z tego samego walidatora,
@@ -237,6 +279,8 @@ Raport D5.3 musi nazwać tę rozbieżność. Odległości i przydziały można
 porównywać niezależnie od niej. Wyniki pełnych gier opisują bieżący silnik.
 Ewentualna zmiana zasad kontroli celu wymaga osobnego zakresu i regresji,
 ponieważ zmieni również wynik pomiaru strategii.
+Poprawka została zaakceptowana jako `B3.objectives-2in`, na początku kolejki.
+Przed ewentualnym powrotem do D5.3 sprawdzić jej zapisany wynik.
 
 **Warunek zakończenia D5.3b** Powtarzalny raport porównawczy z komendami,
 hashami kodu, parametrami i wynikami obu strategii. Opisać zaobserwowane
