@@ -9,16 +9,19 @@
 
 ---
 
-## Kolejka po C2d1 — propozycja 2026-11-17
+## Kolejka po C2d1 — akceptacje 2026-11-18
 
 Jeden przebieg wykonuje jeden etap. [Zakresy, zależności, testy i warunki
 przekazania na kolejny komputer](kolejka-po-c2d1.md) są punktem startowym.
+Użytkownik zaakceptował punkty 1, 2, 3 i 5. Kolejność realizacji to
+C2d2 → D5.1 → D5.2 → C2d3-spec. Punkt D5.3 czeka na osobną akceptację
+rozszerzonego zakresu. Akceptacja kolejki nie zmienia stanu heartbeat.
 
-- [ ] **B4.4d.C2d2** — zgodność nazw Podwójnego w prywatnym melee v3.
-- [ ] **D5.1** — wspólny walidator miejsca rozstawienia po E2/E4.
-- [ ] **D5.2** — boty wybierają wolne miejsca, po D5.1.
-- [ ] **D5.3** — opcjonalna strategia rozstawienia pod cele, po D5.2.
-- [ ] **B4.4d.C2d3-spec** — specyfikacja Ostrożnego i rozstrzygnięcie zakresu źródeł.
+- [ ] **B4.4d.C2d2** [automation-ready] — zaakceptowany, zgodność nazw Podwójnego w prywatnym melee v3.
+- [ ] **D5.1** [automation-ready] — zaakceptowany, wspólny walidator miejsca rozstawienia po E2/E4.
+- [ ] **D5.2** [automation-ready] — zaakceptowany, boty wybierają wolne miejsca, po D5.1.
+- [ ] **D5.3** — do akceptacji, strategia pod cele oraz porównanie z gridem, po D5.2.
+- [ ] **B4.4d.C2d3-spec** [automation-ready] — zaakceptowany audyt, specyfikacja Ostrożnego i rozstrzygnięcie zakresu źródeł.
 
 ## Plan długofalowy — 5 strumieni (12–24 mies.)
 

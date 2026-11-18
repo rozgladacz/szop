@@ -1,9 +1,23 @@
 # Kolejne przebiegi po C2d1
 
 Plan przygotowany 2026-11-17 na `Faza_A`, po `13abcd2`. C2d1 zakończyło
-się wynikiem 3777 zaliczonych testów. Poniższa kolejność jest propozycją
-pięciu osobnych przebiegów. Ten dokument określa zadania do wyboru i nie
-wznawia heartbeat. W roadmapie etapy czekają na ręczne uruchomienie.
+się wynikiem 3777 zaliczonych testów.
+
+Aktualizacja 2026-11-18 zapisuje akceptację użytkownika dla etapów 1, 2, 3
+i 5. Kolejność realizacji to C2d2 → D5.1 → D5.2 → C2d3-spec. Każdy przebieg
+zamyka jeden etap i zapisuje wynik przed wyborem następnego. Punkt 4 został
+rozszerzony do oceny i czeka na osobną akceptację. Zaakceptowane pozycje
+otrzymują w roadmapie etykietę `[automation-ready]` na podstawie tego wyboru
+użytkownika, z obowiązkiem sprawdzenia zależności. Status heartbeat jest
+wstrzymany, a wznowienie harmonogramu wymaga jawnego polecenia użytkownika.
+
+| Numer | Etap | Status od 2026-11-18 |
+|---|---|---|
+| 1 | B4.4d.C2d2 | Zaakceptowany do realizacji |
+| 2 | D5.1 | Zaakceptowany, po zamknięciu 1 w tej kolejce |
+| 3 | D5.2 | Zaakceptowany, po zamknięciu 2 |
+| 4 | D5.3 | Rozszerzona propozycja do oceny |
+| 5 | B4.4d.C2d3-spec | Zaakceptowany audyt, po zamknięciu 3 w tej kolejce |
 
 ## Wspólne warunki pracy
 
@@ -139,31 +153,111 @@ przed i po zmianie. Wyjaśnić każdą konieczną zmianę goldenów.
 
 ## 4. D5.3 — opcjonalne rozstawianie pod cele
 
-**Zależność** Zamknięte D5.2.
+**Status** Rozszerzona propozycja z 2026-11-18, oczekująca na akceptację.
+Podział poniżej pozwala ocenić osobno strategię i jej skuteczność.
 
-**Cel** Dodać prostą strategię wyboru spośród legalnych kandydatów D5.1,
-która ogranicza dystans własnych oddziałów do celów. To heurystyka bota,
-której skuteczność trzeba zmierzyć.
+**Zależność** Zamknięte D5.2. Strategia korzysta z tego samego walidatora,
+zbioru kandydatów i informacji o już rozstawionych jednostkach.
 
-**Zakres** Jawny wybór strategii w warstwie Python runnera. Obecny grid
-pozostaje domyślny. Preferować przydzielenie różnych oddziałów do różnych
-celów, z odległością obwód oddziału–znacznik jako miarą oraz stabilnym
-rozstrzyganiem remisów. Dla nadmiarowych oddziałów stosować tę samą miarę.
-Strategia ocenia wyłącznie zwalidowanych kandydatów, bez dodatkowego RNG.
-Nie dodawać nowego bota do publicznego katalogu HTTP w tym etapie.
+**Cel** Porównać dwa sposoby ustawiania armii. Grid daje równomierne
+pozycje, a nowa strategia ma ułatwić podejście do różnych celów, zamiast
+skupiać całą armię przy jednym najbliższym znaczniku. Wynik porównania
+ma pokazać koszt i korzyści, zanim strategia stanie się kandydatem domyślnym.
+
+### D5.3a — strategia i jawny wybór
+
+Przez parametr Python runnera wybrać dotychczasowy grid albo strategię
+celów. To ustawienie rozstawienia jest niezależne od polityki walki
+wybranego bota. Domyślny wybór pozostaje gridem.
+
+Wspólna, ograniczona pula legalnych kandydatów z D5.2 pozwala porównać
+strategie bez mieszania wpływu innego próbkowania. Dla każdego oddziału
+ocenić odległość obwodu koła oddziału od znacznika. W pierwszej kolejności
+przydzielać różne cele, a następnie zmniejszać odległość dojścia. To
+heurystyka wyboru pozycji, której wynik nie oznacza jeszcze zajęcia celu.
+
+Proponowane rozstrzyganie decyzji jest deterministyczne, z ustaloną
+kolejnością oddziałów i remisów po identyfikatorze celu i współrzędnych
+kandydata. Następny oddział widzi pozycje poprzednich. Gdy nie ma celów,
+strategia używa bezpiecznej metody D5.2. Gdy cele są już przydzielone,
+nadmiarowe oddziały wzmacniają cel o najmniejszej dotychczasowej obsadzie,
+a przy remisie wybierają mniejszy dystans. To propozycja polityki bota,
+którą można zmienić przed zatwierdzeniem etapu.
+
+Przykłady do sprawdzenia
+
+- Dwa oddziały i dwa cele powinny uzyskać dwa różne przydziały, gdy
+  istnieją legalne pozycje dla obu. Pojedynczy bliski cel nie przyciąga obu
+  oddziałów tylko z powodu mniejszej sumy dystansów.
+- Więcej oddziałów niż celów daje wsparcie przydzielonych celów.
+- Mniej oddziałów niż celów daje tylko tyle przydziałów, ile jest oddziałów.
+- Zablokowany kandydat odpada przez D5.1 przed porównaniem odległości.
+- Brak legalnego miejsca daje ten sam jawny wynik błędu co D5.2.
+
+Pierwsza wersja mierzy odległość geometryczną. Preferencja terenu
+Obronnego, unikanie ostrzału, szukanie trasy z każdego kandydata i ocena
+kilku tur są możliwymi rozszerzeniami po pomiarach. Osobne dodawanie ich
+umożliwi ustalenie, która zmiana poprawiła wynik.
+
+**Warunek zakończenia D5.3a** Działający wybór strategii w Pythonie,
+legalność wszystkich pozycji, testy powyższych przykładów, deterministyczne
+wyniki i regresje dotychczasowego domyślnego rozstawienia.
+
+### D5.3b — porównanie rozstawień i pełnych bitew
+
+Zamrozić zbiór map, seedów i par armii przed pomiarem. Użyć istniejących
+fixtur oraz map Standard_A, Lustrzana_A i Symetryczna_A, z odnotowaniem
+seedów generatorów. Dla każdej pary uruchomić grid i nową strategię
+z identyczną armią, polityką walki, mapą i seedem bitwy. Zamienić strony
+i inicjatywę, żeby pozycja gracza nie przesądzała wyniku.
+
+Porównanie obejmuje zarówno różne strategie po dwóch stronach, jak
+i kontrolne gry lustrzane z tą samą strategią. Pozwala to oddzielić wpływ
+rozstawienia od różnicy botów. Graczy konstruować przez istniejący
+`make_player`, a klasyfikację botów pobierać z rejestru.
+
+| Miara | Co ma wyjaśnić |
+|---|---|
+| Legalne rozstawienia i błędy znalezienia miejsca | Czy strategia nadaje się do użycia na badanych mapach |
+| Liczba różnych przydzielonych celów | Czy armia rozdziela zadania |
+| Dystans do przydzielonego celu i najgorszy dystans | Czy lepsza suma nie ukrywa oddziału pozostawionego daleko od celu |
+| Wynik końcowy oraz wygrane i remisy | Czy zmiana pomaga w badanym modelu silnika |
+| Czas samego rozstawienia i całej gry | Jaki jest koszt strategii |
+| Powtarzalność pozycji i dziennika zdarzeń | Czy ten sam wariant można ponownie odtworzyć |
+
+Wyniki zapisać jako dane z parametrami uruchomienia i krótkie podsumowanie
+wersjonowane w dokumentacji. Wygrana na wybranym zestawie nie dowodzi
+ogólnej przewagi. Gorszy wynik lub brak różnicy również kończy eksperyment.
+Wariant o niekorzystnym koszcie pozostaje dostępny do eksperymentów.
+
+**Uwaga o wierności silnika** Odczyt z 2026-11-18 wykazał, że
+`phases.OBJECTIVE_CONTROL_RANGE` wynosi 3.0, podczas gdy
+[pkt 5.d Rozjemcy](../app/static/docs/SZOP_Rozjemca.md) wskazuje promień 2″.
+Raport D5.3 musi nazwać tę rozbieżność. Odległości i przydziały można
+porównywać niezależnie od niej. Wyniki pełnych gier opisują bieżący silnik.
+Ewentualna zmiana zasad kontroli celu wymaga osobnego zakresu i regresji,
+ponieważ zmieni również wynik pomiaru strategii.
+
+**Warunek zakończenia D5.3b** Powtarzalny raport porównawczy z komendami,
+hashami kodu, parametrami i wynikami obu strategii. Opisać zaobserwowane
+korzyści, porażki oraz rekomendację dalszego użycia.
 
 **Warstwy i wydajność** Agent deployment, parametr runnera, testy i wynik
-porównania w dokumentacji. Bez zmian DB, checkpointów, JS i CSS. Zero SQL,
-ograniczony zbiór kandydatów i bez przeszukiwania wszystkich permutacji.
+porównania w dokumentacji. Przygotowanie parametrów eksperymentu może
+rozszerzyć istniejący skrypt symulacji o wybór rozstawienia. Publiczna
+allowlista botów HTTP, DB, checkpointy, JS i CSS pozostają poza tym zakresem.
+Zero SQL dla wyboru pozycji, ograniczony zbiór kandydatów i bez badania
+wszystkich permutacji. Raportować liczbę ocenionych kandydatów oraz czas,
+zamiast zakładać dopuszczalny koszt bez pomiaru.
 
-**Warunek zakończenia** Legalność i determinizm przy różnej liczbie
-oddziałów i celów, bez celów oraz przy przeszkodach. Porównać z gridem na
-tych samych mapach i seedach, raportując miarę odległości i koszt obliczeń.
-Słabszy wynik rozgrywek jest wynikiem eksperymentu, a nie powodem do
-dobierania seedów pod tezę. Dotychczasowy tryb domyślny zachowuje regresje.
+**Warunek zakończenia całości** Zamknięte D5.3a i D5.3b, osobne commity
+z ich wynikami na `origin/Faza_A`. Decyzja o zastąpieniu domyślnego gridu
+wynika z wyników i jest odrębna od dodania eksperymentalnego wariantu.
 
 **Weryfikacja celowana** `tests/test_agents_deployment.py`,
-`tests/test_balance_simulate.py` i `tests/test_engine_regression.py`.
+`tests/test_agents_match.py`, `tests/test_balance_simulate.py`,
+`tests/test_agents_factory.py` i `tests/test_engine_regression.py`.
+Pełny `pytest -q` i audyt wywołań po każdym podetapie zmieniającym kod.
 
 ## 5. B4.4d.C2d3-spec — kontrakt Ostrożnego
 
