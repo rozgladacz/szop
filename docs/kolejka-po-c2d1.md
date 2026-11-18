@@ -19,7 +19,7 @@ czasu z kanonicznego skilla koordynatora, w dni robocze poza 13–19.
 | 0 | B3.objectives-2in | Zakończony 2026-11-18; wynik poniżej |
 | 1 | B4.4d.C2d2 | Zakończony 2026-11-18; wynik poniżej |
 | 2 | D5.1 | Zakończony 2026-11-18; wynik poniżej |
-| 3 | D5.2 | Zaakceptowany, po zamknięciu 2 |
+| 3 | D5.2 | Zakończony 2026-11-18; wynik poniżej |
 | 4 | D5.3a i D5.3b | Odłożone decyzją użytkownika |
 | 5 | B4.4d.C2d3-spec | Zaakceptowany audyt, po zamknięciu 3 w tej kolejce |
 
@@ -370,6 +370,117 @@ zostawia częściowego zapisu. Stare wywołania bez wyboru rozstawienia działaj
 `tests/test_agents_factory.py`, `tests/test_balance_simulate.py` i
 `tests/test_engine_regression.py`. Pomiar pełnej symulacji z rozstawieniem
 przed i po zmianie. Wyjaśnić każdą konieczną zmianę goldenów.
+
+**Wynik 2026-11-18 — zamknięty D5.2** Bazą jest `0c752e6` po D5.1.
+Runner `_build_deployment_from_players` zachowuje kolejność `state.blobs`,
+pomija pokonanych i jednostki poza Frontem i po każdej legalnej decyzji
+buduje nowy roboczy stan. Callback widzi aktualne pozycje poprzedników.
+Jawny zbiór `occupied` zawiera wyłącznie już wybrane żywe jednostki obu
+stron. Pozycje oczekujących w pełnym stanie nadal są placeholderami.
+Każdy wynik, także od własnego `Player`, przechodzi niezależną walidację D5.1
+przed dodaniem akcji. Cała lista jest zwracana dopiero po sukcesie; błąd
+nie mutuje wejściowego stanu i nie dociera do `deployment_round`.
+Reguły odczytano z pkt 13.a, 2.d, 4.c.i, 15.c i 24/26
+[Rozjemcy](../app/static/docs/SZOP_Rozjemca.md).
+
+**Kontrakt roboczego obrazu** Prywatny context manager `_deployment_selection`
+wiąże tuple zajętych jednostek z dokładnym obiektem roboczego stanu poprzez
+`ContextVar`. Grid i Random odczytują go tylko w tym callbacku; `finally`
+przywraca poprzedni kontekst także po błędzie i zagnieżdżeniu. Zapobiega to
+zmianie sygnatury `Player.choose_deployment(state, unit_id, zone)` oraz
+rozszerzeniu trwałego `BattleState`, checkpointu czy API. Inny obiekt stanu
+nie dziedziczy zajętości. Bezpośredni pojedynczy wybór poza runnerem oznacza
+`occupied=()`, a nie wszystkie jednostki na Froncie. Orkiestracja wielu
+wyborów musi ustawić jawny kontekst; nie wolno zgadywać zajętości z pozycji.
+Własny callback może nadal zwrócić bieżącą pozycję; runner sprawdza ją tak
+samo jak wynik bota. Nie wycofuje prywatnych efektów ubocznych dowolnego
+callbacku ani zużytych losowań bota, lecz nie zapisuje częściowego deploymentu.
+
+**Strategie i granice** Grid najpierw próbuje dotychczasowego slotu, potem
+leniwie przegląda siatkę maksymalnie `33 × 33 = 1089` punktów całej dozwolonej
+strefy środków, dla promienia aktualnej jednostki. Random używa tego samego
+własnego seeded RNG co dotychczas; wykonuje maksymalnie 64 próby, następnie
+ten sam deterministyczny fallback. Sampler `random_position_in_zone` i
+`grid_positions` pozostają prymitywami generowania, nie pełną walidacją.
+Strategie i runner zawsze delegują geometrię do SSOT D5.1. Wyczerpanie
+maksymalnie 1090/1153 kandydatów daje `IllegalActionError` opisujący wyłącznie
+ograniczony przeszukany zbiór. Siatka może ominąć bardzo mały wolny fragment;
+nie jest dowodem braku miejsca w ciągłej geometrii i nie wykonuje backtrackingu
+wcześniejszych wyborów. Nie dodano strategii celów D5.3.
+
+**Audyt wywołań** Jedyny produkcyjny caller `_build_deployment_from_players`
+to gałąź `simulate_from_rosters(deployment_zones=...)`. Tryb `None` i jawne
+`DeploymentAction` zachowują dotychczasową ścieżkę. `GridDeploymentMixin`
+deleguje do poprawionego helpera dla Greedy, Priority/V2/V3, Minimax,
+ClaudeV1/V2 i dziedziczącego ClaudeV3. `RandomPlayer` deleguje do nowego
+`random_deployment_position`; `random_position_in_zone` ma tego jednego
+produkcyjnego callera, a kontrakt samplerów jest bez zmian. Bazowy `Player`
+zachowuje implementację i podpis callbacku. Kosztów/klasyfikacji nie zmieniono;
+zero dodatkowych SQL, nowych pól, codec, HTTP, JS, CSS i zmian engine RNG.
+Zapisane eventy i replay nie są reinterpretowane. Goldeny B7 bez zmian.
+
+**Pomiar wydajności** Windows, Python 3.13 z `.venv`, pełna
+`simulate_from_rosters` z `deployment_zones`, 8 jednostek (4+4), Priority/Random,
+seed kości 19, seed Random 1000022, inicjatywa 0, domyślne prostokątne strefy
+72×12 przy y=0 i 36. Jedna rozgrzewka + mediana 3 pełnych gier z nowymi
+instancjami graczy, ładowanie fixtur poza pomiarem. Dwa pierwsze pomiary
+przed zmianą wykonano na oryginalnym checkoutcie, porównanie Standard_A
+na bazowych modułach odczytanych z `git show 0c752e6:<path>` wyłącznie do pamięci.
+
+| Mapa/fixtura | Przed | Po | Zdarzenia przed/po |
+|---|---:|---:|---:|
+| `demo_skirmish.yaml` | 61.25 ms | 49.01 ms | 195/195 |
+| `objective_clash.yaml` | 39.54 ms | 33.33 ms | 203/203 |
+| `Standard_A` | 64.70 ms | 88.26 ms | 201/202 |
+
+Czasy pełnej gry obejmują szum środowiska i różne legalne trajektorie, nie są
+obietnicą przyspieszenia. Na Standard_A pierwszy zmieniony wybór to oddział 4:
+slot `(69.814903, 9.814903)` przecina Niedostępny odcinek
+`(69, 9)–(66, 9)`, więc nowy wybór to
+`(8.525391, 2.185097)`. Zmienia to późniejsze decyzje i koszt bitwy. Sam wybór
+wszystkich pozycji trwa medianowo 0.569 ms (100 pomiarów po rozgrzewce).
+Pełna gra z identycznymi nowymi legalnymi pozycjami podanymi jawnie i tym samym
+przyszłym RNG bota: 96.14 ms/202 zdarzenia. Narzut walidacji nie tłumaczy
+różnicy całych bitew. Wąska strefa 12×2 z wklęsłym poligonem i 6 jednostkami
+różnych promieni: Grid 1.19 ms, Random 0.65 ms; całkowite wyczerpanie
+zablokowanej strefy: 7.48/7.03 ms (mediana 5 prób). To uzasadnia skończone
+limity bez pętli zależnej od znalezienia miejsca.
+
+**Weryfikacja wyniku** Celowane sześć plików: **195 passed**. Pełny
+`pytest --tb=short -q` po simplify i rozszerzeniu testów: **3926 passed,
+4 warnings** zależności (221.08 s), +20 przypadków względem bazy 3906.
+Pierwszy pełny przebieg przed ostatnimi czterema regresjami: 3922 passed.
+W obu pełnych przebiegach brak błędów.
+Nowe regresje obejmują wszystkie rodziny botów, poligon, wąską wspólną strefę,
+różne promienie, obie strony, placeholdery/rezerwy/pokonanych, aktualizację
+roboczego stanu i jawny occupied. Sprawdzone błędy custom callbacku (overlap,
+NaN, poza strefą i teren), brak częściowego zapisu, limit prób, fallback,
+reset kontekstu po błędzie i zagnieżdżeniu, deterministyczny wybór oraz równość
+całej gry auto/explicit deployment i pełnego replay.
+Audyt call sites i przeglądy simplify/review objęły reuse D5.1, leniwy fallback,
+reset kontekstu, zgodność podpisu callbacku, odrzucanie custom wyborów i replay.
+Simplify usunął nieużywany import oraz powtórne tworzenie tej samej jednostki;
+po tych zmianach ponowiono pytest. Brak zmian auth, user input → DB i UI,
+więc security review oraz UI smoke nie dotyczą zakresu. Opcjonalny lint
+zmienionych plików nie uruchomił się: w `.venv` brak modułu `ruff`.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_agents_deployment.py tests/test_agents_factory.py tests/test_agents_match.py tests/test_balance_simulate.py tests/test_engine_regression.py tests/test_engine_replay_invariant.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest --tb=short -q
+git diff --check
+```
+
+**Przeniesienie** Kod, testy i dokumentacja mają osobny commit na `Faza_A`
+z potwierdzeniem na `origin/Faza_A`. Produkcyjna ignorowana `data/szop.db`
+pozostaje nietknięta, SHA256
+`AB6D92E654BB6A3D050A4FAC88A7533DA89539E4CB351E38E526EF086C5BE8E6`.
+Baza i lokalne sekrety/konfiguracja wymagają osobnego backupu, a środowisko
+odtworzenia z `requirements-dev.txt`. Cudze ustawienia, HANDOFF i historyczny
+hunk B6.2 nie należą do etapu.
+
+**Podstawa kolejnego przebiegu** Następny zaakceptowany etap to wyłącznie
+`B4.4d.C2d3-spec`, audyt/specyfikacja Ostrożnego; nie został tu uruchomiony.
+D5.3a i D5.3b nadal są odłożone. Brak nowych decyzji użytkownika.
 
 ## 4. D5.3 — opcjonalne rozstawianie pod cele
 

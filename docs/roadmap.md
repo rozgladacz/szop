@@ -20,7 +20,7 @@ D5.3a i D5.3b są odłożone. Użytkownik zlecił wznowienie istniejącego heart
 - [x] **B3.objectives-2in** — **DONE 2026-11-18**: kontrola celu ≤2″ od obwodu oddziału, regresje silnika/botów i replay; celowane **226 passed**, pełne **3828 passed**. Uzasadnienie goldenów w [ADR-0058](adr/0058-objective-control-two-inches.md), wynik w [kolejce](kolejka-po-c2d1.md#0-b3objectives-2in--kontrola-celu-w-zasięgu-2).
 - [x] **B4.4d.C2d2** — **DONE 2026-11-18**: oba aliasy Podwójnego w głównym ataku i kontrataku zamkniętej Szarży v3, niezależnie od Furii/Kontry; celowane **370 passed**, pełne **3848 passed**. Wynik, replay/RNG, ograniczenia i obserwacja testowa w [kolejce](kolejka-po-c2d1.md#1-b44dc2d2--nazwa-podwójnego-w-prywatnym-melee-v3).
 - [x] **D5.1** — **DONE 2026-11-18**: czysty walidator miejsca rozstawienia i wspólna statyczna geometria E4; jawne zajęte pozycje, strefa i Niedostępny wszystkich kształtów. Celowane **227 passed**, pełne **3906 passed**. Wynik i granica integracji D5.2 w [kolejce](kolejka-po-c2d1.md#2-d51--wspólna-walidacja-miejsca-rozstawienia).
-- [ ] **D5.2** [automation-ready] — zaakceptowany, boty wybierają wolne miejsca, po D5.1.
+- [x] **D5.2** — **DONE 2026-11-18**: Grid/Random i runner używają walidatora D5.1, sekwencyjnego roboczego stanu i jawnych zajętych pozycji; ograniczony fallback i błędy bez częściowego zapisu. Celowane **195 passed**, pełne **3926 passed**. Kontrakt, pomiary, replay i backup w [kolejce](kolejka-po-c2d1.md#3-d52--boty-wybierają-wolne-miejsca).
 - [ ] **D5.3** — odłożone D5.3a i D5.3b, strategia pod cele oraz porównanie z gridem.
 - [ ] **B4.4d.C2d3-spec** [automation-ready] — zaakceptowany audyt, specyfikacja Ostrożnego i rozstrzygnięcie zakresu źródeł.
 

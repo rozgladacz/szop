@@ -11,13 +11,12 @@ import random
 
 from app.services.agents.base import (
     Player,
-    blob_by_id,
     legal_actions,
     legal_followup_actions,
 )
 from app.services.agents.deployment import (
     DeploymentZone,
-    random_position_in_zone,
+    random_deployment_position,
 )
 from app.services.engine.actions import Action
 from app.services.engine.state import BattleState, Position
@@ -53,5 +52,4 @@ class RandomPlayer(Player):
         self, state: BattleState, unit_id: int, zone: DeploymentZone
     ) -> Position:
         """D5 — losowa legalna pozycja w strefie (deterministyczna per seed)."""
-        blob = blob_by_id(state, unit_id)
-        return random_position_in_zone(self._rng, zone, blob.radius_inches)
+        return random_deployment_position(self._rng, state, unit_id, zone)

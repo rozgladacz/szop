@@ -305,7 +305,9 @@ class Player(ABC):
         wybrać pozycję strategicznie (np. `random_player` losuje w strefie,
         `deployment.grid_positions` daje równomierny grid).
 
-        Zwrócona pozycja jest walidowana przez runner (`zone.contains_circle`,
-        pkt 13.a MVP) → `IllegalActionError` jeśli koło wykracza poza strefę.
+        Runner przekazuje roboczy stan z już wybranymi pozycjami, a zwrócone
+        miejsce sprawdza walidatorem D5.1 (pkt 13.a). Pozycje oczekujących
+        jednostek są placeholderami, nie zajętymi miejscami. Wbudowane strategie
+        otrzymują jawny zbiór zajętych miejsc przez prywatny kontekst callbacku.
         """
         return blob_by_id(state, unit_id).position

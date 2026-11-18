@@ -11,20 +11,52 @@ objectives/deployment przekazywanych do `simulate_from_rosters`.
 
 **Legalność D5.1 (pkt 13.a):** całe koło oddziału mieści się w strefie,
 poza Niedostępnym (pkt 4.c.i) i innymi oddziałami (pkt 2.d). Styk oddziałów
-jest dozwolony (pkt 15.c). Czysty walidator reużywa geometrię E4, ale jego
-włączenie do runnera i strategii botów jest osobnym etapem D5.2.
+jest dozwolony (pkt 15.c). Runner i strategie reużywają walidator D5.1;
+oczekujące pozycje z rosteru nie są zajętymi miejscami.
 """
 
 from __future__ import annotations
 
 import math
 import random
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
+from itertools import chain
 
 from app.services.engine.movement import can_place_unit
 from app.services.engine.pathfinding import is_finite_position
+from app.services.engine.resolver import IllegalActionError
 from app.services.engine.state import BattleState, Lokalizacja, Position, Terrain, UnitBlob
+
+
+# Private callback context, never part of BattleState/checkpoints. Binding it to
+# the exact working state prevents unrelated/nested selections from using it.
+_SELECTION: ContextVar[tuple[BattleState, tuple[UnitBlob, ...]] | None] = ContextVar(
+    "deployment_selection", default=None,
+)
+DEPLOYMENT_GRID_AXIS_POINTS = 33  # at most 1089 fallback positions
+DEPLOYMENT_RANDOM_ATTEMPTS = 64
+
+
+@contextmanager
+def _deployment_selection(
+    state: BattleState, occupied: Iterable[UnitBlob],
+) -> Iterator[None]:
+    """Supply explicit occupied positions during an unchanged Player callback."""
+    token = _SELECTION.set((state, tuple(occupied)))
+    try:
+        yield
+    finally:
+        _SELECTION.reset(token)
+
+
+def _deployment_occupied(state: BattleState) -> tuple[UnitBlob, ...]:
+    # Direct calls outside the runner represent no prior placements, not all
+    # FRONT placeholders in state. Multi-unit orchestration must bind occupancy.
+    selection = _SELECTION.get()
+    return selection[1] if selection is not None and selection[0] is state else ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,7 +198,8 @@ def grid_deployment_position(
     Strategia dla botów deterministycznych: wszystkie własne oddziały na Froncie
     (sort po `id`) dostają sloty z `grid_positions`. Grid liczony dla największego
     promienia własnych oddziałów (`max radius`) → każde (mniejsze) koło też mieści
-    się w strefie. Slot per oddział = jego indeks w posortowanej liście.
+    się w strefie, jeśli pozwala na to jej rozmiar. Slot per oddział = jego indeks.
+    Nielegalny slot zastępuje pierwszy legalny punkt ograniczonej siatki próbek.
     """
     unit = next(b for b in state.blobs if b.id == unit_id)
     own = sorted(
@@ -182,7 +215,48 @@ def grid_deployment_position(
     max_radius = max(b.radius_inches for b in own)
     positions = grid_positions(zone, len(own), max_radius)
     idx = next(i for i, b in enumerate(own) if b.id == unit_id)
-    return positions[idx]
+    return _first_legal_position(
+        state, unit, zone,
+        chain((positions[idx],), _fallback_positions(zone, unit.radius_inches)),
+    )
+
+
+def _fallback_positions(zone: DeploymentZone, radius: float) -> Iterator[Position]:
+    """Bounded row-major sampling; exhaustion is not proof of no free space."""
+    x_lo, y_lo, x_hi, y_hi = _usable_bounds(zone, radius)
+    for y in _linspace(y_lo, y_hi, DEPLOYMENT_GRID_AXIS_POINTS):
+        for x in _linspace(x_lo, x_hi, DEPLOYMENT_GRID_AXIS_POINTS):
+            yield Position(x, y)
+
+
+def _first_legal_position(
+    state: BattleState, unit: UnitBlob, zone: DeploymentZone,
+    candidates: Iterable[Position],
+) -> Position:
+    occupied = _deployment_occupied(state)
+    for position in candidates:
+        if is_deployment_position_legal(
+            unit, position, zone, occupied=occupied, terrain=state.terrain,
+        ):
+            return position
+    raise IllegalActionError(
+        f"Rozstawienie oddziału {unit.id}: brak legalnego kandydata "
+        "w ograniczonym przeszukanym zbiorze (pkt 13.a)"
+    )
+
+
+def random_deployment_position(
+    rng: random.Random, state: BattleState, unit_id: int, zone: DeploymentZone,
+) -> Position:
+    """Try bounded seeded samples, then the same deterministic fallback as Grid."""
+    unit = next(b for b in state.blobs if b.id == unit_id)
+
+    def candidates():
+        for _ in range(DEPLOYMENT_RANDOM_ATTEMPTS):
+            yield random_position_in_zone(rng, zone, unit.radius_inches)
+        yield from _fallback_positions(zone, unit.radius_inches)
+
+    return _first_legal_position(state, unit, zone, candidates())
 
 
 class GridDeploymentMixin:

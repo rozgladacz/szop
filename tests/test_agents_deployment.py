@@ -444,3 +444,214 @@ def test_simulate_deterministic_bots_with_zones_completes():
     )
     assert result.final_state.is_game_over
     assert result.winner in (0, 1, None)
+
+
+# D5.2: bounded strategies and sequential explicit occupancy
+
+
+def _crowded_deployment_state():
+    units = tuple(
+        _placement_unit(id=i + 1, owner_player=i % 2,
+                        radius_inches=(0.35, 0.5, 0.65)[i % 3],
+                        position=Position(1, 1))
+        for i in range(6)
+    )
+    # Concave polygon blocks the preferred lower-left grid slot, with a free notch.
+    terrain = (TerrainPolygon((
+        Position(0, 0), Position(3, 0), Position(3, 0.8),
+        Position(0.8, 0.8), Position(0.8, 2), Position(0, 2),
+    ), ("Niedostepny",)),)
+    return BattleState(0, 0, (3, 3), units, terrain, ())
+
+
+def _assert_legal_deployment(state, actions, zones):
+    occupied = []
+    units = {b.id: b for b in state.blobs}
+    for action in actions:
+        unit = units[action.unit_id]
+        assert is_deployment_position_legal(
+            unit, action.position, zones[unit.owner_player],
+            occupied=occupied, terrain=state.terrain,
+        )
+        occupied.append(replace(unit, position=action.position))
+    return occupied
+
+
+@pytest.mark.parametrize("factory", [GreedyPlayer, PriorityPlayer, PriorityV2Player, PriorityV3Player, RandomPlayer])
+def test_bots_deploy_legal_mixed_radii_with_polygon_and_shared_narrow_zone(factory):
+    state = _crowded_deployment_state()
+    zones = (DeploymentZone(0, 0, 12, 2),) * 2
+    actions = _build_deployment_from_players(state, [factory(), factory()], zones)
+    _assert_legal_deployment(state, actions, zones)
+    assert len(actions) == 6
+    assert actions == _build_deployment_from_players(state, [factory(), factory()], zones)
+    assert all(b.position == Position(1, 1) for b in state.blobs)
+
+
+def test_runner_callbacks_see_previously_chosen_positions_and_preserve_input():
+    from app.services.agents.deployment import _deployment_occupied
+
+    seen = []
+
+    class ObservingPlayer(_PassivePlayer):
+        def choose_deployment(self, state, unit_id, zone):
+            occupied = _deployment_occupied(state)
+            seen.append((state, tuple(occupied)))
+            assert len(occupied) == len(seen) - 1
+            for other in occupied:
+                assert next(b for b in state.blobs if b.id == other.id) == other
+            return Position(2 + (unit_id - 1) * 3, 3)
+
+    state = replace(_crowded_deployment_state(), terrain=())
+    zones = (DeploymentZone(0, 0, 22, 6),) * 2
+    actions = _build_deployment_from_players(state, [ObservingPlayer(), ObservingPlayer()], zones)
+    _assert_legal_deployment(state, actions, zones)
+    assert [action.unit_id for action in actions] == [b.id for b in state.blobs]
+    assert all(b.position == Position(1, 1) for b in state.blobs)
+    assert _deployment_occupied(seen[-1][0]) == ()  # context reset after callback
+
+
+@pytest.mark.parametrize("bad_position", [Position(2, 2), Position(float("nan"), 2), Position(-1, 2)])
+def test_runner_rejects_later_bad_choice_without_partial_input_mutation(bad_position):
+    from app.services.agents.deployment import _deployment_occupied
+
+    seen = []
+
+    class BadSecondPlayer(_PassivePlayer):
+        def choose_deployment(self, state, unit_id, zone):
+            seen.append(state)
+            return Position(2, 2) if len(seen) == 1 else bad_position
+
+    state = replace(_crowded_deployment_state(), terrain=())
+    before = state
+    zones = (DeploymentZone(0, 0, 20, 6),) * 2
+    player = BadSecondPlayer()
+    with pytest.raises(IllegalActionError):
+        _build_deployment_from_players(state, [player, player], zones)
+    assert len(seen) == 2
+    assert state == before and all(b.position == Position(1, 1) for b in state.blobs)
+    assert _deployment_occupied(seen[-1]) == ()
+
+
+def test_runner_rejects_custom_choice_inside_terrain_before_deployment(monkeypatch):
+    import app.services.agents.match as match
+
+    class TerrainPlayer(_PassivePlayer):
+        def choose_deployment(self, state, unit_id, zone):
+            return Position(6, 6)
+
+    def forbidden_commit(*args, **kwargs):
+        pytest.fail("invalid choices must not reach deployment_round")
+
+    monkeypatch.setattr(match, "deployment_round", forbidden_commit)
+    with pytest.raises(IllegalActionError):
+        simulate_from_rosters(
+            _rosters(), [TerrainPlayer(), TerrainPlayer()], deployment_zones=ZONES,
+            terrain=(TerrainCircle(Position(6, 6), 1, ("Niedostepny",)),),
+        )
+
+
+def test_waiting_placeholders_reserves_and_dead_do_not_block_grid():
+    state = _crowded_deployment_state()
+    state = replace(state, terrain=(), blobs=tuple(
+        replace(b, position=Position(6, 1), location=Lokalizacja.ZAPLECZE) if b.id == 2 else
+        replace(b, position=Position(6, 1), models_alive=0) if b.id == 3 else b
+        for b in state.blobs
+    ))
+    zones = (DeploymentZone(0, 0, 12, 2),) * 2
+    actions = _build_deployment_from_players(state, [PriorityPlayer(), PriorityPlayer()], zones)
+    assert [a.unit_id for a in actions] == [1, 4, 5, 6]
+    _assert_legal_deployment(state, actions, zones)
+
+
+def test_random_bounded_attempts_then_deterministic_fallback():
+    from app.services.agents.deployment import DEPLOYMENT_RANDOM_ATTEMPTS, random_deployment_position
+
+    class BlockedRng:
+        def __init__(self):
+            self.calls = 0
+
+        def uniform(self, lo, hi):
+            self.calls += 1
+            return 5.0  # every random sample is inside the obstacle
+
+    unit = _placement_unit()
+    state = BattleState(0, 0, (1, 0), (unit,),
+                        (TerrainCircle(Position(5, 5), 1, ("Niedostepny",)),), ())
+    rng = BlockedRng()
+    position = random_deployment_position(rng, state, unit.id, DeploymentZone(0, 0, 10, 10))
+    assert rng.calls == 2 * DEPLOYMENT_RANDOM_ATTEMPTS
+    assert is_deployment_position_legal(unit, position, DeploymentZone(0, 0, 10, 10),
+                                        occupied=(), terrain=state.terrain)
+
+
+@pytest.mark.parametrize("factory", [PriorityPlayer, RandomPlayer])
+def test_bounded_search_reports_only_sampled_exhaustion(factory, monkeypatch):
+    import app.services.agents.deployment as deployment
+
+    unit = _placement_unit()
+    state = BattleState(0, 0, (1, 0), (unit,),
+                        (TerrainCircle(Position(5, 5), 100, ("Niedostepny",)),), ())
+    calls = []
+    validate = deployment.is_deployment_position_legal
+
+    def count(*args, **kwargs):
+        calls.append(1)
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(deployment, "is_deployment_position_legal", count)
+    with pytest.raises(IllegalActionError, match="ograniczonym przeszukanym zbiorze"):
+        factory().choose_deployment(state, unit.id, DeploymentZone(0, 0, 10, 10))
+    expected = deployment.DEPLOYMENT_GRID_AXIS_POINTS ** 2 + (
+        deployment.DEPLOYMENT_RANDOM_ATTEMPTS if factory is RandomPlayer else 1
+    )
+    assert len(calls) == expected
+
+
+def test_private_occupancy_context_resets_after_callback_exception_and_nested_scope():
+    from app.services.agents.deployment import _deployment_occupied, _deployment_selection
+
+    state = _crowded_deployment_state()
+    foreign_state = replace(state)
+    with _deployment_selection(state, state.blobs[:1]):
+        assert _deployment_occupied(state) == state.blobs[:1]
+        assert _deployment_occupied(foreign_state) == ()
+        with pytest.raises(RuntimeError):
+            with _deployment_selection(state, state.blobs[:2]):
+                assert _deployment_occupied(state) == state.blobs[:2]
+                raise RuntimeError("callback failed")
+        assert _deployment_occupied(state) == state.blobs[:1]
+    assert _deployment_occupied(state) == ()
+
+
+def test_auto_deployment_matches_explicit_actions_and_complete_match_replay():
+    from app.services.engine.phases import deployment_round
+    from app.services.engine.state import apply_events
+
+    state = _state()
+    explicit_players = [RandomPlayer(7), RandomPlayer(19)]
+    actions = _build_deployment_from_players(state, explicit_players, ZONES)
+    explicit = simulate_from_rosters(
+        _rosters(), explicit_players, seed=18, objectives=_objectives(), deployment=actions,
+    )
+    automatic = simulate_from_rosters(
+        _rosters(), [RandomPlayer(7), RandomPlayer(19)], seed=18,
+        objectives=_objectives(), deployment_zones=ZONES,
+    )
+    # The same players' deployment draws leave identical future decision RNG;
+    # engine seed/outcomes and the old explicit-deployment path are unchanged.
+    assert automatic == explicit
+    deployed, _ = deployment_round(state, actions)
+    assert apply_events(deployed, automatic.events) == automatic.final_state
+
+
+@pytest.mark.parametrize("kind", ["minimax", "claude_v1", "claude_v2", "claude_v3"])
+def test_other_factory_grid_bots_use_shared_placement_validator(kind):
+    from app.services.agents.factory import make_player
+
+    state = _crowded_deployment_state()
+    zones = (DeploymentZone(0, 0, 12, 2),) * 2
+    players = [make_player(kind, 2), make_player(kind, 8)]
+    actions = _build_deployment_from_players(state, players, zones)
+    assert len(actions) == 6
+    _assert_legal_deployment(state, actions, zones)
