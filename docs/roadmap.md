@@ -22,7 +22,7 @@ D5.3a i D5.3b są odłożone. Użytkownik zlecił wznowienie istniejącego heart
 - [x] **D5.1** — **DONE 2026-11-18**: czysty walidator miejsca rozstawienia i wspólna statyczna geometria E4; jawne zajęte pozycje, strefa i Niedostępny wszystkich kształtów. Celowane **227 passed**, pełne **3906 passed**. Wynik i granica integracji D5.2 w [kolejce](kolejka-po-c2d1.md#2-d51--wspólna-walidacja-miejsca-rozstawienia).
 - [x] **D5.2** — **DONE 2026-11-18**: Grid/Random i runner używają walidatora D5.1, sekwencyjnego roboczego stanu i jawnych zajętych pozycji; ograniczony fallback i błędy bez częściowego zapisu. Celowane **195 passed**, pełne **3926 passed**. Kontrakt, pomiary, replay i backup w [kolejce](kolejka-po-c2d1.md#3-d52--boty-wybierają-wolne-miejsca).
 - [ ] **D5.3** — odłożone D5.3a i D5.3b, strategia pod cele oraz porównanie z gridem.
-- [ ] **B4.4d.C2d3-spec** [automation-ready] — zaakceptowany audyt, specyfikacja Ostrożnego i rozstrzygnięcie zakresu źródeł.
+- [x] **B4.4d.C2d3-spec** — **DONE 2026-11-18 (audyt)**: [specyfikacja Ostrożnego](ostrozny-spec.md), mapa combat/prediction, granice i DoD. Źródła 4/4 CLEAN; implementacja czeka na decyzję: tylko ataki dystansowe (rekomendacja) czy wszystkie testy trafienia. Bez zmian kodu i nowego etapu automation-ready.
 
 ## Plan długofalowy — 5 strumieni (12–24 mies.)
 

@@ -21,7 +21,7 @@ czasu z kanonicznego skilla koordynatora, w dni robocze poza 13–19.
 | 2 | D5.1 | Zakończony 2026-11-18; wynik poniżej |
 | 3 | D5.2 | Zakończony 2026-11-18; wynik poniżej |
 | 4 | D5.3a i D5.3b | Odłożone decyzją użytkownika |
-| 5 | B4.4d.C2d3-spec | Zaakceptowany audyt, po zamknięciu 3 w tej kolejce |
+| 5 | B4.4d.C2d3-spec | Audyt zakończony; przyszła implementacja wymaga decyzji o zakresie |
 
 ## Wspólne warunki pracy
 
@@ -621,6 +621,40 @@ pytaniem kończy audyt, ale implementacja pozostaje zablokowana do decyzji.
 punktu lub pozycji. Sprawdzić wszystkie wymienione funkcje i ścieżki, linki
 dokumentacji i `git diff --check`. Pełny pytest wymagany, jeśli audyt
 spowoduje jakąkolwiek zmianę kodu.
+
+**Wynik 2026-11-18 — zamknięty audyt C2d3-spec** Na bazie `3954634`
+powstała [specyfikacja Ostrożnego](ostrozny-spec.md). Obejmuje źródła,
+mapę wszystkich wejść combat i pięciu bezpośrednich konsumentów prediction,
+role, granicę 12″ z różnymi promieniami, dodatkowego bliskiego wroga,
+lokalizacje, attack lifetime, cache/payload, koszty O(N) bez SQL, macierz
+testów oraz pliki i DoD przyszłej implementacji. Nic nie zaimplementowano;
+publiczne `_READY_ATTACK_X` pozostaje puste.
+
+**Decyzja do następnego wyboru** Czy Ostrożny z poz. 23 ma dawać bonus
+wyłącznie w atakach dystansowych, czy we wszystkich testach trafienia,
+także wręcz? Rekomendacja: **wyłącznie dystansowe**, zgodnie ze szczegółowym
+warunkiem „oddziału strzelającego”. Ogólny opis DOCX/MD/YAML nie ogranicza
+rodzaju ataku. Szczegóły dowodów i skutków obu wariantów są w specyfikacji.
+Pytanie kończy zatwierdzony audyt, ale nie upoważnia do implementacji.
+
+**Weryfikacja audytu** `rules_sources_check.py`: **4/4 CLEAN, exit 0**.
+Odczyt DOCX oraz bieżące ekstraktory DOCX/MD w pamięci potwierdziły ogólny
+opis; pola `efekty` MD nie są rozstrzygane przez zgodność ekstraktora.
+Sprawdzono symbole/call sites i linki dokumentacji, `git diff --check`,
+simplify/review specyfikacji. Zmiany wyłącznie w Markdown; zgodnie z warunkiem
+tego etapu nie ponawiano pytest bez zmiany kodu. Wynik bazy D5.2
+**3926 passed, 4 warnings** nie jest nowym uruchomieniem testów audytu.
+UI smoke/security review nie dotyczą zakresu dokumentacji.
+
+**Przeniesienie i granice** Osobny commit dokumentacji na `Faza_A` ma zostać
+potwierdzony na `origin/Faza_A`. Baza nietknięta: SHA256
+`AB6D92E654BB6A3D050A4FAC88A7533DA89539E4CB351E38E526EF086C5BE8E6`.
+Baza i lokalne sekrety/konfiguracja wymagają osobnego backupu; pytanie,
+kontrakt, wynik i wszystkie cztery źródła SZOP są śledzone w Git
+(zweryfikowano `git ls-files`). Zastane lokalne pliki
+i historyczny hunk B6.2 nie należą do etapu. D5.3a/b pozostają odłożone,
+a przyszła implementacja Ostrożnego i publikacja Oznaczenia wymagają
+osobnego zatwierdzonego zakresu. Nie dodano nowych etykiet gotowości.
 
 ## Dalszy wybór po tej kolejce
 
