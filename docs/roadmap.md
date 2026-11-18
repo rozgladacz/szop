@@ -17,7 +17,7 @@ Użytkownik zaakceptował punkty 1, 2, 3 i 5 oraz poprawkę kontroli celu do 2�
 Kolejność realizacji to B3.objectives-2in → C2d2 → D5.1 → D5.2 → C2d3-spec.
 D5.3a i D5.3b są odłożone. Użytkownik zlecił wznowienie istniejącego heartbeat.
 
-- [ ] **B3.objectives-2in** [automation-ready] — zaakceptowana poprawka zasięgu kontroli celu z 3″ do 2″, z regresjami silnika i botów.
+- [x] **B3.objectives-2in** — **DONE 2026-11-18**: kontrola celu ≤2″ od obwodu oddziału, regresje silnika/botów i replay; celowane **226 passed**, pełne **3828 passed**. Uzasadnienie goldenów w [ADR-0058](adr/0058-objective-control-two-inches.md), wynik w [kolejce](kolejka-po-c2d1.md#0-b3objectives-2in--kontrola-celu-w-zasięgu-2).
 - [ ] **B4.4d.C2d2** [automation-ready] — zaakceptowany, zgodność nazw Podwójnego w prywatnym melee v3.
 - [ ] **D5.1** [automation-ready] — zaakceptowany, wspólny walidator miejsca rozstawienia po E2/E4.
 - [ ] **D5.2** [automation-ready] — zaakceptowany, boty wybierają wolne miejsca, po D5.1.
@@ -922,6 +922,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0055 | Trwały lifecycle zaproszenia do bitwy | ✓ |
 | 0056 | Trwały protokół aktywacji i okien przerwań (B4.4a design) | ✓ |
 | 0057 | [Trasy Manewru i kolizje](adr/0057-maneuver-pathfinding.md) | Accepted |
+| 0058 | [Kontrola celu w promieniu 2″](adr/0058-objective-control-two-inches.md) | Accepted |
 
 ---
 

@@ -728,6 +728,84 @@ def test_round_end_no_game_over_round_3():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.parametrize("radius", [0.5, 1.0, 3.0])
+@pytest.mark.parametrize("owner", [0, 1])
+@pytest.mark.parametrize("gap,claimed", [(1.999, True), (2.0, True), (2.001, False)])
+def test_objective_control_two_inch_edge_boundary(radius, owner, gap, claimed):
+    """Pkt 5.d: granica dotyczy obwodu, niezależnie od promienia i gracza."""
+    blob = UnitBlob(
+        id=1, owner_player=owner, position=Position(radius + gap, 0),
+        radius_inches=radius, models_alive=1, toughness_per_model=3,
+    )
+    state = BattleState(
+        round=1, active_player=0, activations_remaining=(1, 1),
+        blobs=(blob,), terrain=(), objectives=(Objective(1, Position(0, 0)),),
+    )
+    after, events = round_end_phase(state)
+    assert OBJECTIVE_CONTROL_RANGE == 2.0
+    assert after.objectives[0].controller == (owner if claimed else None)
+    assert after.score == ((1, 0) if claimed and owner == 0 else
+                           (0, 1) if claimed else (0, 0))
+    replayed = apply_events(state, events)
+    assert replayed.objectives == after.objectives
+    assert replayed.score == after.score
+
+
+@pytest.mark.parametrize("previous", [None, 0, 1])
+@pytest.mark.parametrize("enemy_gap", [1.999, 2.0, 2.001])
+def test_objective_contest_at_two_inch_boundary(previous, enemy_gap):
+    """Pkt 5.d–e: wróg za granicą nie kontestuje, spór zachowuje kontrolera."""
+    own = UnitBlob(1, 0, Position(3, 0), 1.0, 1, 3)
+    enemy = UnitBlob(2, 1, Position(-(2.5 + enemy_gap), 0), 2.5, 1, 3)
+    state = BattleState(
+        round=1, active_player=0, activations_remaining=(1, 1),
+        blobs=(own, enemy), terrain=(),
+        objectives=(Objective(1, Position(0, 0), controller=previous),),
+    )
+    after, _ = round_end_phase(state)
+    assert after.objectives[0].controller == (previous if enemy_gap <= 2 else 0)
+
+
+@pytest.mark.parametrize("location,alive,expected", [
+    (Lokalizacja.FRONT, 1, 0),
+    (Lokalizacja.ZAPLECZE, 1, 0),
+    (Lokalizacja.WYCOFANY, 0, None),
+    (Lokalizacja.ELIMINOWANY, 0, None),
+])
+def test_objective_control_preserves_existing_location_contract(location, alive, expected):
+    """Zachowuje istniejący filtr models_alive; nie dodaje reguł lokalizacji."""
+    blob = UnitBlob(1, 0, Position(3, 0), 1.0, alive, 3, location=location)
+    state = BattleState(
+        round=1, active_player=0, activations_remaining=(1, 1),
+        blobs=(blob,), terrain=(), objectives=(Objective(1, Position(0, 0)),),
+    )
+    after, _ = round_end_phase(state)
+    assert after.objectives[0].controller == expected
+
+
+def test_objective_two_inch_claim_vacate_and_recapture():
+    """Pkt 5.e–f: kontrola trwa po odejściu; przeciwnik odbija na końcu rundy."""
+    from dataclasses import replace
+
+    own = UnitBlob(1, 0, Position(3, 0), 1.0, 1, 3)
+    enemy = UnitBlob(2, 1, Position(20, 0), 2.0, 1, 3)
+    state = BattleState(
+        round=1, active_player=0, activations_remaining=(1, 1),
+        blobs=(own, enemy), terrain=(), objectives=(Objective(1, Position(0, 0)),),
+    )
+    claimed, _ = round_end_phase(state)
+    assert claimed.objectives[0].controller == 0
+    vacated = replace(claimed, blobs=(replace(own, position=Position(20, 0)), enemy))
+    persisted, _ = round_end_phase(vacated)
+    assert persisted.objectives[0].controller == 0
+    approached = replace(persisted, blobs=(vacated.blobs[0], replace(enemy, position=Position(4, 0))))
+    assert approached.objectives[0].controller == 0
+    recaptured, events = round_end_phase(approached)
+    assert recaptured.objectives[0].controller == 1
+    assert recaptured.score == (0, 1)
+    assert apply_events(approached, events).objectives == recaptured.objectives
+
+
 def test_objective_unclaimed_when_no_units_nearby():
     obj = Objective(id=1, position=Position(50, 50))
     rosters = [make_roster(0, [make_unit(1, x=0, y=0)]), make_roster(1, [make_unit(2, x=10, y=0)])]
@@ -739,7 +817,7 @@ def test_objective_unclaimed_when_no_units_nearby():
 
 
 def test_objective_claimed_by_only_player_nearby():
-    """Pkt 5.d — gdy tylko 1 gracz w 3″ od celu, ten gracz kontroluje."""
+    """Pkt 5.d — gdy tylko 1 gracz w 2″ od celu, ten gracz kontroluje."""
     obj = Objective(id=1, position=Position(0, 0))
     rosters = [
         make_roster(0, [make_unit(1, x=0, y=0, models=1)]),  # przy celu
@@ -754,7 +832,7 @@ def test_objective_claimed_by_only_player_nearby():
 
 
 def test_objective_disputed_keeps_previous_controller():
-    """Pkt 5.d — gdy obaj gracze w 3″, cel pozostaje zajęty (poprzedni kontroler)."""
+    """Pkt 5.d–e — gdy obaj gracze w 2″, cel pozostaje zajęty (poprzedni kontroler)."""
     obj = Objective(id=1, position=Position(0, 0), controller=0)
     rosters = [
         make_roster(0, [make_unit(1, x=0, y=0, models=1)]),  # przy celu
@@ -769,8 +847,8 @@ def test_objective_disputed_keeps_previous_controller():
 
 
 def test_objective_persists_when_vacated():
-    """Pkt 5.d — cel kontrolowany POZOSTAJE zajęty, gdy wszyscy go opuszczą
-    (nikt w 3″). To NIE jest błędne naliczanie — `_check_objective_control`
+    """Pkt 5.e — cel kontrolowany POZOSTAJE zajęty, gdy wszyscy go opuszczą
+    (nikt w 2″). To NIE jest błędne naliczanie — `_check_objective_control`
     zachowuje poprzedniego kontrolera gdy `len(players_in_range) != 1`."""
     obj = Objective(id=1, position=Position(0, 0), controller=0)
     rosters = [
@@ -784,7 +862,7 @@ def test_objective_persists_when_vacated():
 
 
 def test_objective_recaptured_only_by_opponent():
-    """Pkt 5.d — kontrolę przejmuje cel TYLKO przeciwnik będąc jedynym w 3″.
+    """Pkt 5.e — kontrolę przejmuje cel TYLKO przeciwnik będąc jedynym w 2″.
     Potwierdza: to przeciwnik odbija (len==1 → przeciwnik), nie system."""
     obj = Objective(id=1, position=Position(0, 0), controller=0)
     rosters = [

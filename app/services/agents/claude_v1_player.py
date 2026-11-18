@@ -9,9 +9,9 @@ udokumentowane słabości depth-1, BEZ hardkodowania jakiejkolwiek zdolności:
    (AP/Brutalny/Precyzyjny/Niezawodny/Podwójny…) i pasywkę obrony/ataku (Cierpliwy/Tarcza…).
    Żaden slug nie jest zaszyty → nowe jednostki/zdolności działają automatycznie.
 2. **Gradient celów (anty-miopia, pkt 5.f)** — `GreedyPlayer` „widzi" kontrolę celu tylko
-   w 3″ (pkt 5.d), więc ignoruje dalekie cele. ClaudeV1 dodaje przyciąganie obejmujące
+   w 2″ (pkt 5.d), więc ignoruje dalekie cele. ClaudeV1 dodaje przyciąganie obejmujące
    całą planszę `MARCH·S/(S+gap)` ku każdemu celowi, którego NIE kontroluje → oddziały
-   maszerują i kontestują (cele wygrywają grę, pkt 5.f).
+   maszerują i kontestują (cele wygrywają grę, pkt 5.g).
 3. **Dobijanie / eliminacja** — `p_full_kill·ELIM` premiuje wymiecenie całego oddziału
    (usuwa aktywację wroga + kontestera celu). Ogień skupia się na rannych zamiast muskać
    świeże (błąd, na którym poległ v2).
@@ -69,7 +69,7 @@ _BIG_GAP: float = 1_000.0
 def _objective_value(state: BattleState, perspective: int) -> float:
     """Wartość celów: kontrola (±`OBJECTIVE_WEIGHT`, pkt 5.d) + gradient marszu.
 
-    Reużywa SSOT `phases._check_objective_control` (3″, Przyszpilony nie kontroluje
+    Reużywa SSOT `phases._check_objective_control` (2″, Przyszpilony nie kontroluje
     pkt 22.b.ii). Dla każdego celu, którego gracz NIE kontroluje, dolicza
     przyciąganie `MARCH·S/(S+gap)` najbliższego własnego oddziału (gap obwód–cel) —
     ku własnym brakującym i wrogim celom. To gradient obejmujący planszę: oddział

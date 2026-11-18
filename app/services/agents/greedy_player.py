@@ -156,7 +156,7 @@ class GreedyPlayer(GridDeploymentMixin, Player):
         terrain = state.terrain if isinstance(action, ShootAction) else ()
         dist = expected_damage(attacker, defender, action.weapon, terrain)
         # Człon HP (fine-grained, sub-kill) + zmiana wartości celów gdy atak
-        # praktycznie wymiata defendera z 3″ celu (pkt 5.d). Bez double-count:
+        # praktycznie wymiata defendera z 2″ celu (pkt 5.d). Bez double-count:
         # obrażenia = HP, objective_balance = tylko cele.
         #
         # Zaokrąglenie przez ceil (nie round) — unikamy rzutowania do 0 gdy

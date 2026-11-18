@@ -84,8 +84,8 @@ def test_prefers_taking_objective_over_weak_attack():
     obj = Objective(id=1, position=Position(5, 0), controller=None)
     action = GreedyPlayer().choose_action(_state((own, enemy), (obj,)), perspective=0)
     assert isinstance(action, ManeuverAction)
-    # Ruch ląduje w 3″ od celu (zajmuje go, pkt 5.d).
-    assert distance(action.target_position, obj.position) <= 3.0
+    # Ruch ląduje w 2″ od celu (zajmuje go, pkt 5.d).
+    assert distance(action.target_position, obj.position) - own.radius_inches <= 2.0
 
 
 def test_continue_activation_takes_beneficial_followup():

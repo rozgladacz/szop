@@ -4,10 +4,10 @@ Skalarna ocena `BattleState` z perspektywy gracza: wyższa = lepsza. Składowe:
 
 1. **Bilans wytrzymałości** (HP) — Σ `models_alive * toughness_per_model` własne
    minus wroga. Toughness pool ≈ "Stan bitewny" (pkt 17.d–18); proxy siły bojowej.
-2. **Cele** (pkt 5) — kontrola celów wygrywa grę (pkt 5.f: więcej zajętych celów
+2. **Cele** (pkt 5) — kontrola celów wygrywa grę (pkt 5.g: więcej zajętych celów
    = wygrana). Zajęty cel: `+OBJECTIVE_WEIGHT`; zajęty przez wroga: `−OBJECTIVE_WEIGHT`.
    Niezajęty cel: mały bonus za bliskość najbliższego własnego oddziału (zachęta
-   do marszu na cele zanim runda 4 je rozstrzygnie, pkt 5.e/8.c.ii).
+   do marszu na cele zanim runda 4 je rozstrzygnie, pkt 5.f/8.c.ii).
 
 Wagi dobrane tak, by jeden cel (~strategiczny) przeważał kilka punktów ran
 (taktyczny) — cele rozstrzygają grę. Czysta funkcja: zero RNG, zero I/O.
@@ -20,7 +20,7 @@ from app.services.engine.phases import _check_objective_control
 from app.services.engine.state import BattleState, Objective, UnitBlob
 
 #: Waga zajętego celu w punktach oceny. Dobrana > typowego bilansu HP jednej
-#: wymiany ognia (kilka ran) — pkt 5.f czyni cele rozstrzygającymi.
+#: wymiany ognia (kilka ran) — pkt 5.g czyni cele rozstrzygającymi.
 OBJECTIVE_WEIGHT: float = 25.0
 
 #: Maks. bonus za bliskość do niezajętego celu (gdy oddział praktycznie na celu).
@@ -39,7 +39,7 @@ def _proximity_bonus(
     """Bonus za bliskość najbliższego własnego oddziału do niezajętego celu.
 
     `PROXIMITY_WEIGHT / (1 + gap)` gdzie `gap` = dystans środek-cel minus promień
-    oddziału (≈ odległość obwodu od celu, pkt 5.d mierzy 3″ od celu). Brak
+    oddziału (≈ odległość obwodu od celu, pkt 5.d mierzy 2″ od celu). Brak
     własnych oddziałów → 0.
     """
     if not own_units:
@@ -105,7 +105,7 @@ def objective_balance_with_control(state: BattleState, perspective: int) -> floa
     rozważanej akcji, zanim `round_end_phase` to potwierdzi (pkt 8.c.ii). Bez tego
     ruch na niezajęty cel widać tylko jako proximity (≤`PROXIMITY_WEIGHT`), nie
     jako kontrolę (`OBJECTIVE_WEIGHT`). Reużywa `phases._check_objective_control`
-    (SSOT pkt 5.d — 3″, Przyszpilony nie kontroluje pkt 22.b.ii).
+    (SSOT pkt 5.d — 2″, Przyszpilony nie kontroluje pkt 22.b.ii).
     """
     controlled, _events, _seq = _check_objective_control(state)
     return _objective_balance(controlled, perspective)

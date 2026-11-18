@@ -571,6 +571,15 @@ Pakiet implementuje symulator bitwy 1v1 oparty o `SZOP_Rozjemca.md` (reguły) + 
 | `phases.py` | ~1030 | `setup_phase`, `deployment_round` oraz split aktywacji: `_begin_activation` raz, `_apply_single_action` = akcja + Przegrupowanie, `_finalize_activation` = Odzyskiwanie ran placeholder + Aktywowany + clear override'ów ([`SZOP_Rozjemca.md` pkt 11.b.i–vi](../app/static/docs/SZOP_Rozjemca.md)). **B3.9.c**: `ActivationContext` frozen dataclass + `_build_activation_context` (delta `wounds_received_this_activation` per blob + `melee_combatants` frozenset). **B3.9.d**: emit Status* + MeleeBalanceReset. **B3.9.e**: `_apply_special` deleguje do `effects.get_active_ability`. |
 | `resolver.py` | ~360 | **PUBLIC API**: `apply(state, action, dice) → ResolverResult` zamyka legacy jednoakcyjną aktywację; `apply_activation(..., continuation)` wykonuje do dwóch akcji, ale `actions_taken` jest tylko procesowe. `should_end_round` / `is_battle_over`. Trwałe przerwanie między krokami wymaga event-sourced activation/window z ADR-0056; obecny resolver nie jest restart-safe seam dla osobnego interrupt requestu. |
 
+Kontrola celu: `phases._check_objective_control` jest SSOT; odległość obwodu
+bloba do znacznika (środek minus promień) wynosi ≤`OBJECTIVE_CONTROL_RANGE`
+= 2″ ([Rozjemca pkt 5.d](../app/static/docs/SZOP_Rozjemca.md)). Kontrola trwa
+do odbicia (pkt 5.e), przeliczenie następuje na końcu rundy (pkt 5.f).
+Policy/Greedy, Priority/V2, Minimax i Claude reużywają helpera; bliskość celu
+w PriorityV3 korzysta z tej samej stałej. Historyczne eventy odtwarzają
+zapisany wynik bez ponownej oceny geometrii. Zakres korekty i dowód goldenów:
+[ADR-0058](adr/0058-objective-control-two-inches.md).
+
 ### Event-sourced data flow
 
 ```

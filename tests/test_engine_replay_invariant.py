@@ -425,8 +425,29 @@ def test_replay_round_end_removes_aktywowany():
 # ---------------------------------------------------------------------------
 
 
+def test_historical_objective_events_replay_without_rechecking_two_inch_range():
+    """Historyczne rozliczenie z 3″ pozostaje zapisanym wynikiem, nie nową akcją."""
+    from app.services.engine.events import ObjectiveControlChanged, RoundEnded, event_to_json, json_to_event
+    from app.services.engine.phases import _check_objective_control
+    from app.services.engine.state import Objective
+
+    initial = _setup_and_deploy()
+    own = next(b for b in initial.blobs if b.owner_player == 0)
+    initial = replace(
+        initial, blobs=(own,),
+        objectives=(Objective(1, Position(own.position.x + own.radius_inches + 2.5, own.position.y)),),
+    )
+    fresh, _, _ = _check_objective_control(initial)
+    assert fresh.objectives[0].controller is None
+    saved = [ObjectiveControlChanged(100, 1, None, 0), RoundEnded(101, 1, (1, 0))]
+    decoded = [json_to_event(event_to_json(e)) for e in saved]
+    replayed = apply_events(initial, decoded)
+    assert replayed.objectives[0].controller == 0
+    assert replayed.score == (1, 0)
+
+
 def test_replay_objective_control_change():
-    """CR-fix A: `round_end_phase` z objective w 3″ od oddziału player 0
+    """CR-fix A: `round_end_phase` z objective w 2″ od oddziału player 0
     emituje `ObjectiveControlChanged` — replay rekonstruuje `objectives[i].controller`."""
     from app.services.engine.state import Objective
     from app.services.engine.phases import round_end_phase

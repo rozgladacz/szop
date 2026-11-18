@@ -16,7 +16,7 @@ czasu z kanonicznego skilla koordynatora, w dni robocze poza 13–19.
 
 | Numer | Etap | Status od 2026-11-18 |
 |---|---|---|
-| 0 | B3.objectives-2in | Zaakceptowana poprawka, pierwsza w kolejce |
+| 0 | B3.objectives-2in | Zakończony 2026-11-18; wynik poniżej |
 | 1 | B4.4d.C2d2 | Zaakceptowany do realizacji |
 | 2 | D5.1 | Zaakceptowany, po zamknięciu 1 w tej kolejce |
 | 3 | D5.2 | Zaakceptowany, po zamknięciu 2 |
@@ -93,6 +93,58 @@ potwierdzić determinizm i replay.
 testy agentów używających zasięgu kontroli oraz `tests/test_balance_simulate.py`.
 Pełny `pytest -q`, audyt wywołań, simplify i review. Wynik i commit
 zapisać tutaj i potwierdzić na `origin/Faza_A`.
+
+**Wynik 2026-11-18 — zamknięty** Bazą był `64e9e81`. Jedyna zmiana
+wykonywalnej reguły to `OBJECTIVE_CONTROL_RANGE = 2.0` w `phases.py`.
+Pomiar nadal odejmuje promień bloba od dystansu środek–znacznik. Zachowano
+trwałość kontroli, odbicie, moment rozliczenia, schemy i replay historycznych
+eventów. Zaktualizowano bezpośrednie komentarze silnika, ocen botów i testów.
+Uzasadnienie dwóch zmienionych logów B7 i nowego przypadku remisu:
+[ADR-0058](adr/0058-objective-control-two-inches.md).
+
+**Weryfikacja wyniku** Celowana suita **226 passed**, pełny
+`pytest --tb=short -q` **3828 passed, 4 warnings** zależności (ReportLab /
+openpyxl), wobec bazowych 3777. Dodano 51 przypadków: granice
+1.999/2/2.001″ dla trzech promieni i obu stron, kontestację, obecny kontrakt
+rezerwy/pokonanych, odejście i odbicie, zgodność konsumentów agentów,
+historyczny replay z 2.5″, zachowanie remisu oraz replay kontroli/wyniku
+wszystkich siedmiu goldenów. Powtarzalność pełnych bitew pozostaje zielona.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_engine_phases.py tests/test_engine_replay_invariant.py tests/test_engine_regression.py tests/test_agents_policy.py tests/test_agents_greedy.py tests/test_agents_priority.py tests/test_agents_priority_v2.py tests/test_agents_priority_v3.py tests/test_agents_claude_v1.py tests/test_agents_minimax.py tests/test_balance_simulate.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest --tb=short -q
+```
+
+**Audyt wywołań i DoD** `round_end_phase`, policy_eval (a przez nie Greedy),
+Priority, PriorityV2/V3, Minimax i ClaudeV1/V2/V3 korzystają z jednego helpera
+lub jego konsumentów. Jedyny dodatkowy predykat geometrycznej bliskości
+PriorityV3 importuje tę samą stałą; nie jest osobnym rozliczeniem kontroli.
+Audyt nie znalazł dalszych niezależnych progów kontroli. Pozostałe wartości
+3 w mapach, rozstawieniu i wadze akcji nie dotyczą kontroli, pozostały
+bez zmian. Simplify i review objęły reuse, granicę obwodu, źródła, event
+sourcing i przyczynę driftu goldenów. Simplify poprawił dawną asercję Greedy
+na jawną odległość obwodu i odnośniki do pkt 5; po nim powtórzono testy.
+Security review oraz smoke JS nie dotyczą zakresu: bez auth, wejścia do DB,
+zmian JS/CSS/API. Zero dodatkowych SQL i RNG, koszt nadal cele × oddziały.
+
+**Ograniczenia i przeniesienie** Zachowano dotychczasowy filtr
+`models_alive` i Przyszpilony. Helper nie filtruje `location`; żywa rezerwa
+na wskazanych współrzędnych zachowuje dotychczasowy kontrakt. Reguły
+lokalizacji i aproksymacja oddziału kołem nie są rozszerzane tym etapem.
+Zastane zmiany HANDOFF, lokalnych ustawień i historyczny wpis B6.2 pozostają
+poza commitem. Kod, golden i dokumentacja etapu trafiają do osobnego commitu
+na `Faza_A`, którego obecność na `origin/Faza_A` potwierdza zamknięcie przebiegu.
+
+Bieżąca ignorowana `data/szop.db` pozostała nietknięta: SHA256
+`AB6D92E654BB6A3D050A4FAC88A7533DA89539E4CB351E38E526EF086C5BE8E6`.
+Przed zmianą komputera wymaga osobnego backupu, podobnie jak lokalne sekrety
+i konfiguracja spoza Git; środowisko `.venv` należy odtworzyć z zależności.
+Te dane nie są zastępowane commitem etapu.
+
+**Podstawa kolejnego przebiegu** Następny zaakceptowany etap to
+`B4.4d.C2d2`, opisany niżej, na bazie zamkniętego C2d1 z `13abcd2`
+oraz niniejszej poprawki. Nie został uruchomiony w tym przebiegu.
+Brak nowych decyzji wymagających użytkownika; D5.3a/b pozostają odłożone.
 
 ## 1. B4.4d.C2d2 — nazwa Podwójnego w prywatnym melee v3
 

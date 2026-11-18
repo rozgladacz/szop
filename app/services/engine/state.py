@@ -212,8 +212,8 @@ class Objective:
     """Cel misji (pkt 5).
 
     `controller` ∈ {None, 0, 1}: None = niezajęty; 0/1 = owner_player kontrolujący.
-    Per pkt 5.d: zajęty gdy w 3″ od celu tylko oddziały tego gracza. Pozostaje
-    zajęty między rundami (pkt 5.d ostatnie zdanie).
+    Per pkt 5.d–e: zajęty gdy w 2″ od celu tylko oddziały tego gracza. Pozostaje
+    zajęty między rundami (pkt 5.e).
     """
 
     id: int

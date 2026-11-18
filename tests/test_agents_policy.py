@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from app.services.agents.policy_eval import (
     OBJECTIVE_WEIGHT,
     PROXIMITY_WEIGHT,
@@ -97,10 +99,10 @@ def test_objective_outweighs_single_wound_swing():
 
 
 def test_control_recompute_flips_uncontrolled_objective():
-    # Własny oddział w 3″ niezajętego celu → kontrola gracza 0 (+OBJECTIVE_WEIGHT).
+    # Własny oddział w 2″ niezajętego celu → kontrola gracza 0 (+OBJECTIVE_WEIGHT).
     # evaluate_state (bez przeliczenia) widzi tylko proximity; with_control widzi pełną kontrolę.
     obj = Objective(id=1, position=Position(0, 0), controller=None)
-    own = _blob(1, 0, 0, 0)  # na celu (edge_dist = -1 ≤ 3)
+    own = _blob(1, 0, 0, 0)  # na celu (edge_dist = -1 ≤ 2)
     state = _state((own,), (obj,))
     assert objective_balance_with_control(state, 0) == OBJECTIVE_WEIGHT
     # Stała funkcja evaluate_state (controller=None) daje tylko proximity < OBJECTIVE_WEIGHT.
@@ -108,7 +110,7 @@ def test_control_recompute_flips_uncontrolled_objective():
 
 
 def test_control_recompute_contested_stays_uncontrolled():
-    # Oba oddziały w 3″ → nikt nie kontroluje (pkt 5.d: tylko jeden gracz w zasięgu).
+    # Oba oddziały w 2″ → nikt nie kontroluje (pkt 5.d: tylko jeden gracz w zasięgu).
     obj = Objective(id=1, position=Position(0, 0), controller=None)
     own = _blob(1, 0, 0, 0)
     enemy = _blob(2, 1, 0, 0)
@@ -132,3 +134,38 @@ def test_control_recompute_enemy_on_objective_penalizes():
     enemy = _blob(2, 1, 0, 0)
     state = _state((enemy,), (obj,))
     assert objective_balance_with_control(state, 0) == -OBJECTIVE_WEIGHT
+
+
+@pytest.mark.parametrize("radius", [0.5, 1.0, 3.0])
+@pytest.mark.parametrize("gap", [1.999, 2.0, 2.001])
+def test_agent_objective_consumers_share_engine_two_inch_boundary(radius, gap):
+    """Pkt 5.d: oceny i decyzje botów używają tej samej granicy co silnik."""
+    from types import SimpleNamespace
+
+    from app.services.agents.claude_v1_player import (
+        OBJECTIVE_WEIGHT as CLAUDE_OBJECTIVE_WEIGHT,
+        _objective_value,
+    )
+    from app.services.agents.minimax_player import MinimaxPlayer
+    from app.services.agents.priority_player import _objectives_not_controlled
+    from app.services.agents.priority_v2_player import _split_objectives_by_control
+    from app.services.agents.priority_v3_player import _c_near_not_mine_objective
+    from app.services.engine.phases import _check_objective_control
+
+    obj = Objective(1, Position(0, 0))
+    own = _blob(1, 0, radius + gap, 0, radius_inches=radius)
+    state = _state((own,), (obj,))
+    controlled, _, _ = _check_objective_control(state)
+    in_range = gap <= 2.0
+    assert controlled.objectives[0].controller == (0 if in_range else None)
+    expected_value = OBJECTIVE_WEIGHT if in_range else PROXIMITY_WEIGHT / (1 + gap)
+    assert objective_balance_with_control(state, 0) == pytest.approx(expected_value)
+    assert bool(_objectives_not_controlled(state, 0)) is not in_range
+    mine, not_mine = _split_objectives_by_control(state, 0)
+    assert bool(mine) is in_range
+    assert bool(not_mine) is not in_range
+    assert _c_near_not_mine_objective(SimpleNamespace(unit=own, not_mine=[obj])) is in_range
+    assert MinimaxPlayer()._evaluate(state, 0) == evaluate_state(controlled, 0)
+    assert (_objective_value(state, 0) == CLAUDE_OBJECTIVE_WEIGHT) is in_range
+    # Hipotetyczna wycena nie zmienia trwałej kontroli przed końcem rundy (pkt 5.f).
+    assert state.objectives[0].controller is None

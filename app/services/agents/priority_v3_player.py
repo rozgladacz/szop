@@ -189,7 +189,7 @@ def _c_can_charge(c: _Ctx) -> bool:
 
 
 def _c_near_not_mine_objective(c: _Ctx) -> bool:
-    """W 3″ (kontrola, pkt 5.d) od celu nie naszej strony."""
+    """W 2″ (kontrola, pkt 5.d) od celu nie naszej strony."""
     return any(
         distance(c.unit.position, o.position) - c.unit.radius_inches <= OBJECTIVE_CONTROL_RANGE
         for o in c.not_mine

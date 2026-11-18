@@ -92,13 +92,19 @@ def _run(fixture_file: str, kinds: tuple[str, str], seed: int, initiative: int):
 # --- GOLDEN ------------------------------------------------------------------
 # Pola: id, fixtura, (P0_kind, P1_kind), seed, initiative,
 #       winner, rounds, score (P0, P1), n_events, digest sha256.
-# Wyniki odświeżone 2026-11-12 po ADR-0057 (legalne trasy Manewru w E4).
+# Wyniki odświeżone 2026-11-18 po ADR-0058 (kontrola celu w 2″, pkt 5.d).
 GOLDEN_CASES = [
     (
         "demo_priority_mirror",
         "demo_skirmish.yaml", ("priority", "priority"), 0, 0,
-        None, 4, (2, 2), 247,
-        "28cd884197f7cf59f750ea7304ac9d4d3bfb613c8040f2ab6b2766b69d9e5f12",
+        1, 4, (2, 3), 245,
+        "5f0f8cf7f9bad06bf462b29ac1533272099c50249724a605748e91b02b074c4a",
+    ),
+    (
+        "demo_priority_mirror_draw",
+        "demo_skirmish.yaml", ("priority", "priority"), 11, 0,
+        None, 4, (2, 2), 250,
+        "4dac4a1a9c15fbec5be6d22f1391c90be95095f97dc8acb9366515812529136e",
     ),
     (
         "demo_greedy_vs_random",
@@ -109,8 +115,8 @@ GOLDEN_CASES = [
     (
         "clash_priority_vs_greedy",
         "objective_clash.yaml", ("priority", "greedy"), 0, 0,
-        0, 4, (3, 0), 217,
-        "c5eb91ce3be22f9c72bb736dc513f939b336b287d00be62d13f291e23f817817",
+        0, 4, (2, 1), 214,
+        "e751d25b7993e6194305b8e1012963416c7307e3e8a7c8dffae74897d8ee29ad",
     ),
     (
         "clash_random_mirror",
@@ -172,6 +178,25 @@ def test_golden_battle_is_reproducible(case_id, fixture_file, kinds, seed, initi
     assert r1.rounds_played == r2.rounds_played
     assert tuple(r1.final_state.score) == tuple(r2.final_state.score)
     assert _event_digest(r1.events) == _event_digest(r2.events)
+
+
+@pytest.mark.parametrize("case", GOLDEN_CASES, ids=_IDS)
+def test_golden_objective_results_replay_without_recalculation(case):
+    """Pkt 5.d–g: zapisane rozliczenia odtwarzają kontrolę/wynik pełnej bitwy."""
+    from app.services.engine.phases import deployment_round, setup_phase
+    from app.services.engine.state import apply_events
+
+    _, fixture_file, kinds, seed, initiative = case[:5]
+    result = _run(fixture_file, kinds, seed, initiative)
+    fx = bs.load_battle_fixture(_FIXTURES / fixture_file)
+    initial = setup_phase(fx.rosters, terrain=fx.terrain, objectives=fx.objectives,
+                          initiative_player=initiative)
+    initial, _ = deployment_round(initial, [])
+    replayed = apply_events(initial, result.events)
+    assert replayed.objectives == result.final_state.objectives
+    assert replayed.score == result.final_state.score
+    assert replayed.round == result.final_state.round
+    assert replayed.is_game_over == result.final_state.is_game_over
 
 
 def test_golden_cases_cover_all_fixtures():

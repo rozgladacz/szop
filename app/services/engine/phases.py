@@ -77,8 +77,8 @@ from app.services.engine.status import (
     remove_status as _remove_status,
 )
 
-MAX_ROUND = 4  # pkt 5.f: gra kończy się po 4 rundach
-OBJECTIVE_CONTROL_RANGE = 3.0  # pkt 5.d: 3″ od celu
+MAX_ROUND = 4  # pkt 5.g: gra kończy się po 4 rundach
+OBJECTIVE_CONTROL_RANGE = 2.0  # pkt 5.d: obwód oddziału–znacznik ≤ 2″
 
 
 # ---------------------------------------------------------------------------
@@ -904,7 +904,7 @@ def _check_objective_control(
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Pkt 5.d sprawdzanie kontroli celów (pkt 8.c.ii).
 
-    Pkt 5.d: cel zostaje zajęty gdy w 3″ od niego znajdują się **tylko** oddziały
+    Pkt 5.d–e: cel zostaje zajęty gdy w 2″ od niego znajdują się **tylko** oddziały
     danego gracza (i co najmniej jeden). Pozostaje zajęty między rundami, dopóki
     nie zostanie zajęty przez przeciwnika.
 
@@ -926,15 +926,15 @@ def _check_objective_control(
                 continue
             if STATUS_PRZYSZPILONY in blob.status_flags:
                 continue  # pkt 22.b.ii: Przyszpilony nie kontroluje celów
-            # 3″ od celu — używamy centrum bloba minus radius (proxy: edge w 3″)
+            # Pkt 5.d: obwód–znacznik ≤ 2″ (centrum bloba minus radius).
             edge_dist = _distance(blob.position, obj.position) - blob.radius_inches
             if edge_dist <= OBJECTIVE_CONTROL_RANGE:
                 players_in_range.add(blob.owner_player)
-        # Pkt 5.d: zajęty gdy tylko jeden gracz w 3″ + co najmniej 1 oddział
+        # Pkt 5.e: zajęty gdy tylko jeden gracz w zasięgu + co najmniej 1 oddział
         if len(players_in_range) == 1:
             new_controller = next(iter(players_in_range))
         else:
-            # Pkt 5.d: pozostaje zajęty między rundami dopóki nie zostanie zajęty przez przeciwnika
+            # Pkt 5.e: pozostaje zajęty dopóki nie zostanie zajęty przez przeciwnika
             new_controller = obj.controller
         new_objectives.append(replace(obj, controller=new_controller))
         if new_controller != obj.controller:
@@ -997,7 +997,7 @@ def round_end_phase(
     state, obj_events, seq = _check_objective_control(state, sequence=seq)
     events.extend(obj_events)
 
-    # Pkt 5.f: gra kończy się po 4 rundach
+    # Pkt 5.g: gra kończy się po 4 rundach
     is_over = state.round >= MAX_ROUND
 
     events.append(
