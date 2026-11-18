@@ -608,11 +608,14 @@ def resolve_melee_attack(
     terrain: Iterable[Terrain] = (),
     *,
     charging_attack: AttackState | None = None,
+    canonical_aliases: bool = False,
 ) -> CombatResult:
     """Rozlicza pojedynczy atak wręcz (pkt 17).
 
     `resolve_charge_attack` przekazuje `charging_attack` tylko dla głównego
     ataku kwalifikującego się do Furii (poz. 7 i 10).
+    `canonical_aliases` obejmuje także kontratak zamkniętej Szarży v3;
+    nie zależy od kwalifikacji do Furii (Podwójny, poz. 66).
 
     Algorithm:
     1. Faza 1: brak LoS (wręcz), brak Osłony pkt 19 standard (osłona dotyczy
@@ -647,7 +650,9 @@ def resolve_melee_attack(
     furia = charging_attack is not None and ABILITY_FURIA in effective_attack_passives(
         attacker, charging_attack
     )
-    hits = _count_hits(hit_result, weapon, furia=furia)
+    hits = _count_hits(
+        hit_result, weapon, canonical_aliases=canonical_aliases, furia=furia,
+    )
 
     wounds_pending = 0
     wounds_pending_precise = 0
@@ -818,6 +823,9 @@ def resolve_charge_attack(
     """
     events: list[BattleEvent] = []
     next_seq = sequence
+    closed_attack = _matching_closed_charge(
+        state, charger, defender, weapon, counter_attack_declared
+    )
 
     # Faza 1: Związanie (pkt 14.d.ii) — emit MoveExecuted
     # MVP: binding ruch do 1″ od obwodu defendera w prostej linii.
@@ -882,7 +890,8 @@ def resolve_charge_attack(
             else UNARMED_WEAPON
         )
         counter_result = resolve_melee_attack(
-            state, new_defender, new_charger, defender_weapon, dice, next_seq
+            state, new_defender, new_charger, defender_weapon, dice, next_seq,
+            canonical_aliases=closed_attack is not None,
         )
         events.extend(counter_result.events)
         next_seq += len(counter_result.events)
@@ -911,14 +920,13 @@ def resolve_charge_attack(
 
     # Faza 3: Główny atak szarżującego pkt 14.d.iii — pominięty jeśli charger pokonany
     if new_charger.models_alive > 0 and new_defender.models_alive > 0:
-        charging_attack = _matching_closed_charge(
-            state, charger, defender, weapon, counter_attack_declared
-        )
+        charging_attack = closed_attack
         if charging_attack is not None and can_counter and ABILITY_KONTRA in effective_passives(defender):
             charging_attack = None
         charge_result = resolve_melee_attack(
             state, new_charger, new_defender, weapon, dice, next_seq,
             charging_attack=charging_attack,
+            canonical_aliases=closed_attack is not None,
         )
         events.extend(charge_result.events)
         next_seq += len(charge_result.events)

@@ -17,7 +17,7 @@ czasu z kanonicznego skilla koordynatora, w dni robocze poza 13–19.
 | Numer | Etap | Status od 2026-11-18 |
 |---|---|---|
 | 0 | B3.objectives-2in | Zakończony 2026-11-18; wynik poniżej |
-| 1 | B4.4d.C2d2 | Zaakceptowany do realizacji |
+| 1 | B4.4d.C2d2 | Zakończony 2026-11-18; wynik poniżej |
 | 2 | D5.1 | Zaakceptowany, po zamknięciu 1 w tej kolejce |
 | 3 | D5.2 | Zaakceptowany, po zamknięciu 2 |
 | 4 | D5.3a i D5.3b | Odłożone decyzją użytkownika |
@@ -174,6 +174,61 @@ Dokument `oznaczenie-mechaniki-plan.md` odnotowuje rozwiązanie rozbieżności.
 **Weryfikacja celowana** `tests/test_engine_combat.py`,
 `tests/test_engine_activation_protocol.py`, `tests/test_engine_weapons_inventory.py`,
 `tests/test_engine_regression.py` i `tests/test_battle_activation_transport.py`.
+
+**Wynik 2026-11-18 — zamknięty** Bazą jest `f57b26b` po poprawce kontroli celu.
+Jedyną zmienioną warstwą produkcyjną jest `combat.py`: istniejący matcher
+zamkniętej Szarży jest wywoływany raz, a znaleziony kontekst włącza aliasy
+w `_count_hits` dla głównego ataku i kontrataku. Dwie nazwy to jeden bonus.
+Kontra może wyłączyć Furię, ale nie aliasy własnej broni. Otwarte okno oraz
+niepasująca broń lub deklaracja nie włączają nowej ścieżki. Nie rozszerzono
+dotychczasowego zachowania v1/v2 ani ranged; publiczne `_READY_ATTACK_X`
+pozostaje puste. Podstawa reguł: poz. 66, 7 i 10 Zdolności, pkt 14.d i 17
+Rozjemcy; szczegóły w [planie mechanik](oznaczenie-mechaniki-plan.md).
+
+**Weryfikacja wyniku** Celowany zestaw pięciu wskazanych plików:
+**370 passed, 1 warning**. Pełny `pytest --tb=short -q`:
+**3848 passed, 4 warnings** zależności (183.68 s), +20 przypadków względem
+bazy 3828. Nowe testy porównują zdarzenia i RNG trzech kombinacji nazw,
+Furię natywną/nadaną/obie/brak, naturalne 6/brak 6, kontratak i Kontrę,
+restart, pełny replay i 12 przyszłych rzutów oraz granice dopasowania v3.
+Regresje v1/v2 i ranged v1/v2/v3 zachowują historyczne rozróżnienie nazw.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_engine_combat.py tests/test_engine_activation_protocol.py tests/test_engine_weapons_inventory.py tests/test_engine_regression.py tests/test_battle_activation_transport.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest --tb=short -q
+git diff --check
+```
+
+**Obserwacja testowa** Pierwszy pełny przebieg miał 3847 zaliczonych testów
+i pojedynczy błąd `test_public_two_owner_straznik_uses_two_bearers_and_closed_errors`
+(422 `illegal_interrupt` zamiast 200). Test tworzy bitwę z losowym seedem
+serwera. Przeszedł pojedynczo, ponownie w zestawie celowanym i w pełnej suicie;
+próby z bazowym `combat.py` wczytanym wyłącznie do pamięci dla seedów 0–19
+również przeszły. Nie ustalono przyczyny pierwszego błędu; nie zmieniono
+niezwiązanej ścieżki Strażnika ani nie zamaskowano problemu zmianą asercji.
+
+**Audyt i granice** `phases._apply_charge` nadal jako jedyny produkcyjny
+caller deleguje do `resolve_charge_attack`; parametry akcji są bez zmian.
+Oba wywołania `resolve_melee_attack` dostają wspólną kwalifikację aliasów,
+a bezpośrednie wywołania nadal mają domyślne `False`. `_count_hits` pozostaje
+SSOT; jego konsument ranged i source-correct Strażnik są niezmienieni.
+Simplify/review objęły gate closed-v3, rolę obu atakujących, niezależność
+od Furii, naliczanie bonusu raz i replay. Bez auth, wejścia do DB i zmian
+JS: security review i UI smoke nie dotyczą zakresu. Zero nowych SQL,
+zmian modelu/codec/API; brak powtarzania testów trafienia. Więcej testów
+obrony jest wyłącznie konsekwencją dodatkowych trafień.
+
+**Przeniesienie** Kod, testy i dokumentacja C2d2 mają osobny commit na
+`Faza_A`, potwierdzany na `origin/Faza_A`. Zastane lokalne ustawienia,
+HANDOFF i historyczny hunk B6.2 nie należą do etapu. Produkcyjna ignorowana
+`data/szop.db` jest nietknięta (SHA256
+`AB6D92E654BB6A3D050A4FAC88A7533DA89539E4CB351E38E526EF086C5BE8E6`).
+Przed przejściem na inny komputer wykonać osobny backup bazy i lokalnych
+sekretów/konfiguracji; odtworzyć środowisko z `requirements-dev.txt`.
+
+**Podstawa kolejnego przebiegu** Następny zaakceptowany etap to D5.1,
+opisany niżej. Nie został uruchomiony w ramach C2d2. Brak nowych decyzji
+wymagających użytkownika; D5.3a i D5.3b pozostają odłożone.
 
 ## 2. D5.1 — wspólna walidacja miejsca rozstawienia
 

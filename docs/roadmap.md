@@ -18,7 +18,7 @@ Kolejność realizacji to B3.objectives-2in → C2d2 → D5.1 → D5.2 → C2d3-
 D5.3a i D5.3b są odłożone. Użytkownik zlecił wznowienie istniejącego heartbeat.
 
 - [x] **B3.objectives-2in** — **DONE 2026-11-18**: kontrola celu ≤2″ od obwodu oddziału, regresje silnika/botów i replay; celowane **226 passed**, pełne **3828 passed**. Uzasadnienie goldenów w [ADR-0058](adr/0058-objective-control-two-inches.md), wynik w [kolejce](kolejka-po-c2d1.md#0-b3objectives-2in--kontrola-celu-w-zasięgu-2).
-- [ ] **B4.4d.C2d2** [automation-ready] — zaakceptowany, zgodność nazw Podwójnego w prywatnym melee v3.
+- [x] **B4.4d.C2d2** — **DONE 2026-11-18**: oba aliasy Podwójnego w głównym ataku i kontrataku zamkniętej Szarży v3, niezależnie od Furii/Kontry; celowane **370 passed**, pełne **3848 passed**. Wynik, replay/RNG, ograniczenia i obserwacja testowa w [kolejce](kolejka-po-c2d1.md#1-b44dc2d2--nazwa-podwójnego-w-prywatnym-melee-v3).
 - [ ] **D5.1** [automation-ready] — zaakceptowany, wspólny walidator miejsca rozstawienia po E2/E4.
 - [ ] **D5.2** [automation-ready] — zaakceptowany, boty wybierają wolne miejsca, po D5.1.
 - [ ] **D5.3** — odłożone D5.3a i D5.3b, strategia pod cele oraz porównanie z gridem.

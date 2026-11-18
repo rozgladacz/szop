@@ -1,6 +1,6 @@
 # Oznaczenie — plan etapów mechanik X
 
-Status: kierunek wybrany ręcznie 2026-11-10. Plan i wynik etapu C2d1 są
+Status: kierunek wybrany ręcznie 2026-11-10. Plan i wyniki C2d1/C2d2 są
 punktem odniesienia dla następnych mechanik. Każda wymaga osobnego wyboru.
 
 ## Punkt wyjścia
@@ -126,9 +126,37 @@ Publiczny `oznaczenie` dla `furia` zwrócił `unsupported_interrupt` bez zapisu.
 Pełny lokalny `pytest -q`: 3777 zaliczonych testów. Zestaw celowany C2d1:
 665 zaliczonych testów. Próba combat i protokołu po korekcie opisu: 210.
 
-Do odrębnej decyzji pozostaje zgodność nazw Podwójnego w walce wręcz.
-`combat.py` rozpoznaje tam `podwojny`, a katalog YAML używa `rozrywajacy`.
-Próba współdziałania z Furią używa istniejącego identyfikatora `podwojny`.
+Na zamknięciu C2d1 pozostała rozbieżność nazw Podwójnego w walce wręcz:
+`combat.py` rozpoznawał `podwojny`, a katalog YAML używał `rozrywajacy`.
+Próba współdziałania z Furią używała istniejącego identyfikatora `podwojny`.
+Rozbieżność w prywatnym melee v3 zamyka zaakceptowane C2d2 poniżej.
+
+## B4.4d.C2d2 — wynik zgodności nazw Podwójnego (2026-11-18)
+
+Podstawa reguł: [poz. 66, 7 i 10 Zdolności](../app/static/docs/SZOP_Zdolnosci.md)
+oraz [pkt 14.d i 17 Rozjemcy](../app/static/docs/SZOP_Rozjemca.md), odczytane
+w tej sesji. Podwójny daje jedno dodatkowe normalne trafienie za naturalną 6;
+Furia dodaje własne trafienie tylko kwalifikującemu się szarżującemu.
+
+`resolve_charge_attack` wyznacza raz pasujący zamknięty `AttackState` v3
+przez istniejący `_matching_closed_charge`. Obecność tego kontekstu włącza
+`canonical_aliases` w obu wywołaniach melee, niezależnie od kwalifikacji do
+Furii. Istniejący SSOT `_count_hits` traktuje `podwojny` i `rozrywajacy`
+jako jedną zdolność, także gdy obie nazwy są obecne naraz. Wykonana Kontra
+może wyłączyć Furię głównego ataku, zachowując Podwójny obu własnych broni.
+
+Regresje porównują całe eventy i RNG trzech wariantów aliasów, naturalną 6
+i brak 6, Furię natywną/nadaną/obie, kontratak i Kontrę. Każdy wariant v3
+ma pełny replay od stanu początkowego, restart zamkniętego checkpointu,
+niezmieniony wejściowy RNG i zgodnych 12 przyszłych rzutów. Osobne granice
+sprawdzają otwarte okno, inną broń i inną deklarację kontrataku.
+
+Historyczne v1/v2 oraz ranged v1/v2/v3 zachowują wcześniejszą interpretację
+nazw i RNG; ich ujednolicenie wymaga osobnego zakresu. Source-correct ranged
+Strażnika nadal korzysta z istniejącego `_count_hits` bez zmian. Nie zmieniono
+modelu, codec, API, DB, UI ani pustego publicznego `_READY_ATTACK_X`.
+Komendy, wyniki testów i warunki przeniesienia są w
+[kolejce etapów](kolejka-po-c2d1.md#1-b44dc2d2--nazwa-podwójnego-w-prywatnym-melee-v3).
 
 ## Późniejsza publikacja
 

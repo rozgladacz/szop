@@ -3608,6 +3608,162 @@ def test_furia_native_is_inert_in_v1_and_v2_charge():
             assert fingerprints == expected_fingerprints
 
 
+# B4.4d.C2d2 — canonical Podwójny aliases only in closed v3 melee.
+_PODWOJNY_ALIASES = (
+    ("podwojny",), ("rozrywajacy",), ("podwojny", "rozrywajacy"),
+)
+
+
+def _podwojny_battle(aliases, *, native=False, counter=False, kontra=False):
+    state = _furia_battle(native=native, defender_passives=("furia", "kontra") if kontra else ("furia",))
+    actor, defender, source = state.blobs
+    actor = replace(actor, melee_weapons=(replace(_FURIA_SWORD, weapon_abilities=aliases),))
+    if counter:
+        defender = replace(defender, melee_weapons=actor.melee_weapons)
+    return replace(state, blobs=(actor, defender, source))
+
+
+def _resolve_podwojny_v3(initial, *, seed, marked=False, counter=False):
+    weapon, = initial.blobs[0].melee_weapons
+    _, started, first, ready, declared = _marked_declared(
+        state=initial, action=ChargeAction(11, 21, weapon, counter_attack_declared=counter),
+    )
+    dice = DeterministicDice(seed)
+    before = dice.to_checkpoint()
+    closed, close_tail = _close_furia_attack(declared, dice, marked=marked)
+    prefix = (*started.events, *first.events, *ready.events, *declared.events, *close_tail)
+    assert apply_events(initial, prefix) == closed.state
+    result = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+    assert dice.to_checkpoint() == before
+    assert apply_events(initial, (*prefix, *result.events)) == result.state
+    restarted = _resolve_attack(
+        _restart_v3(closed.state), DeterministicDice.from_checkpoint(before),
+        sequence=closed.next_sequence,
+    )
+    _assert_transition_equal(result, restarted)
+    future = result.dice.roll_d6(12)
+    assert future == restarted.dice.roll_d6(12)
+    return result, future
+
+
+@pytest.mark.parametrize("native,marked", [(False, False), (True, False), (False, True), (True, True)])
+@pytest.mark.parametrize("seed,natural_six", [(225, True), (58, False)])
+def test_v3_podwojny_aliases_share_outcome_rng_and_replay(native, marked, seed, natural_six):
+    """Poz. 66 i 7: Podwójny raz, Furia osobno, tylko naturalne 6."""
+    fingerprints = []
+    for aliases in _PODWOJNY_ALIASES:
+        result, future = _resolve_podwojny_v3(
+            _podwojny_battle(aliases, native=native), seed=seed, marked=marked,
+        )
+        event, = (e for e in result.events if isinstance(e, MeleeResolved))
+        expected_hits = 2 + int(native or marked) if natural_six else 1
+        assert event.hits == expected_hits
+        fingerprints.append((result.events, result.next_sequence, result.dice.to_checkpoint(), future))
+    assert fingerprints[0] == fingerprints[1] == fingerprints[2]
+
+
+@pytest.mark.parametrize("kontra", [False, True])
+def test_v3_podwojny_aliases_cover_counter_and_main_after_kontra(kontra):
+    """Poz. 66/10: Kontra odbiera Furię, nie zdolność własnej broni."""
+    fingerprints = []
+    for aliases in _PODWOJNY_ALIASES:
+        initial = _podwojny_battle(aliases, native=True, counter=True, kontra=kontra)
+        result, future = _resolve_podwojny_v3(initial, seed=225, marked=True, counter=True)
+        # Seed 225: counter 6, two defense dice, then the charger's 6.
+        # Defender's native Furia and the attack mark never add to the counter.
+        assert [(e.attacker_id, e.hits) for e in result.events if isinstance(e, MeleeResolved)] == [
+            (21, 2), (11, 2 if kontra else 3),
+        ]
+        fingerprints.append((result.events, result.next_sequence, result.dice.to_checkpoint(), future))
+    assert fingerprints[0] == fingerprints[1] == fingerprints[2]
+
+
+@pytest.mark.parametrize("mismatch", ["open_window", "weapon", "counter_declaration"])
+def test_podwojny_canonical_alias_requires_matching_closed_charge(mismatch):
+    from app.services.engine.combat import resolve_charge_attack
+
+    initial = _podwojny_battle(("rozrywajacy",))
+    actor, defender, source = initial.blobs
+    defender = replace(defender, status_flags=(STATUS_WYCZERPANY,))
+    initial = replace(initial, blobs=(actor, defender, source))
+    weapon, = actor.melee_weapons
+    _, _, _, _, declared = _marked_declared(
+        state=initial, action=ChargeAction(11, 21, weapon, counter_attack_declared=False),
+    )
+    dice = DeterministicDice(225)
+    closed, _ = _close_furia_attack(declared, dice, marked=False)
+    state = declared.state if mismatch == "open_window" else closed.state
+    selected_weapon = replace(weapon, slug="other") if mismatch == "weapon" else weapon
+    result = resolve_charge_attack(
+        state, state.blobs[0], state.blobs[1], selected_weapon, dice, sequence=closed.next_sequence,
+        counter_attack_declared=mismatch == "counter_declaration",
+    )
+    event, = (e for e in result.events if isinstance(e, MeleeResolved))
+    assert event.hits == 1
+    expected_dice = DeterministicDice(225)
+    expected_dice.roll_d6(2)  # One hit test and one defense test, no alias bonus.
+    assert dice.to_checkpoint() == expected_dice.to_checkpoint()
+
+
+@pytest.mark.parametrize("version", [1, 2])
+@pytest.mark.parametrize("counter", [False, True])
+def test_podwojny_aliases_preserve_legacy_melee_and_rng(version, counter):
+    from app.services.engine.resolver import apply
+
+    fingerprints = {}
+    for aliases in ((), *_PODWOJNY_ALIASES):
+        initial = _podwojny_battle(aliases, native=True, counter=counter, kontra=True)
+        weapon, = initial.blobs[0].melee_weapons
+        action = ChargeAction(11, 21, weapon, counter_attack_declared=counter)
+        dice = DeterministicDice(225)
+        if version == 1:
+            result = apply(replace(initial, initiative_player=None), action, dice)
+            final_dice = dice
+        else:
+            ready = _ready_for_action(state=initial)
+            result = _commit(ready.state, action, dice, sequence=ready.next_sequence)
+            final_dice = result.dice
+        legacy_bonus = "podwojny" in aliases
+        expected = [(21, 2 if legacy_bonus else 1), (11, 2 if legacy_bonus else 0)] if counter else [
+            (11, 2 if legacy_bonus else 1),
+        ]
+        assert [(e.attacker_id, e.hits) for e in result.events if isinstance(e, MeleeResolved)] == expected
+        fingerprints[aliases] = (result.events, final_dice.to_checkpoint(), final_dice.roll_d6(12))
+    assert fingerprints[()] == fingerprints[("rozrywajacy",)]
+    assert fingerprints[("podwojny",)] == fingerprints[("podwojny", "rozrywajacy")]
+
+
+@pytest.mark.parametrize("version", [1, 2, 3])
+def test_podwojny_aliases_leave_ranged_outcome_and_rng_unchanged(version):
+    from app.services.engine.resolver import apply
+
+    fingerprints = {}
+    for aliases in ((), *_PODWOJNY_ALIASES):
+        initial = _furia_battle(native=True)
+        actor, defender, source = initial.blobs
+        weapon = replace(_FURIA_RIFLE, weapon_abilities=aliases)
+        initial = replace(initial, blobs=(replace(actor, ranged_weapons=(weapon,)), defender, source))
+        action = ShootAction(11, 21, weapon)
+        dice = DeterministicDice(225)
+        if version == 1:
+            result = apply(replace(initial, initiative_player=None), action, dice)
+            final_dice = dice
+        elif version == 2:
+            ready = _ready_for_action(state=initial)
+            result = _commit(ready.state, action, dice, sequence=ready.next_sequence)
+            final_dice = result.dice
+        else:
+            _, _, _, _, declared = _marked_declared(state=initial, action=action)
+            closed, _ = _close_furia_attack(declared, dice, marked=True)
+            result = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+            final_dice = result.dice
+        shot, = (e for e in result.events if isinstance(e, ShotResolved))
+        assert shot.hits == (2 if "podwojny" in aliases else 1)
+        fingerprints[aliases] = (result.events, final_dice.to_checkpoint(), final_dice.roll_d6(12))
+    assert fingerprints[()] == fingerprints[("rozrywajacy",)]
+    assert fingerprints[("podwojny",)] == fingerprints[("podwojny", "rozrywajacy")]
+
+
 @pytest.mark.parametrize('payload', [
     {}, {'ability': ''}, {'ability': True}, {'ability': 1},
     {'ability': 'tarcza'}, {'ability': 'delikatny'},
