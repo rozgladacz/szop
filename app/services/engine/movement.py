@@ -1,6 +1,8 @@
-"""Swept circle tests for Maneuver routes (ADR-0057)."""
+"""Shared static placement and swept circle tests (ADR-0057, D5.1)."""
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 from app.services.engine.geometry import distance, point_segment_distance, segment_segment_distance
 from app.services.engine.state import (
@@ -48,6 +50,49 @@ def _sweeps_terrain(start: Position, end: Position, radius: float, terrain: Terr
     return terrain.contains_point(start) or any(
         segment_segment_distance(start, end, a, b) <= radius for a, b in terrain.edges
     )
+
+
+def _position_is_clear(
+    position: Position,
+    radius: float,
+    units: Iterable[tuple[Position, float]],
+    terrain: Iterable[tuple[Terrain, Bounds, bool]],
+) -> bool:
+    """Static clearance, without the Maneuver exception for leaving overlaps."""
+    if any(distance(position, center) < clearance - MOVE_EPSILON for center, clearance in units):
+        return False
+    bounds = _segment_bounds(position, position, radius)
+    return not any(
+        impassable and _bounds_intersect(bounds, terrain_bounds)
+        and _sweeps_terrain(position, position, radius, item)
+        for item, terrain_bounds, impassable in terrain
+    )
+
+
+def can_place_unit(
+    unit: UnitBlob,
+    position: Position,
+    *,
+    occupied: Iterable[UnitBlob],
+    terrain: Iterable[Terrain],
+) -> bool:
+    """Clear footprint among explicitly occupied units and impassable terrain.
+
+    Inputs have valid finite geometry. Callers choose occupancy; waiting units
+    must not be included merely because their placeholders are on the Front.
+    Dead/off-board units and the actor itself do not obstruct placement.
+    """
+    units = (
+        (other.position, unit.radius_inches + other.radius_inches)
+        for other in occupied
+        if other.id != unit.id and other.models_alive > 0
+        and other.location is Lokalizacja.FRONT
+    )
+    obstacles = (
+        (item, _terrain_bounds(item), True)
+        for item in terrain if _IMPASSABLE in item.features
+    )
+    return _position_is_clear(position, unit.radius_inches, units, obstacles)
 
 
 class ManeuverSpace:
@@ -102,4 +147,4 @@ class ManeuverSpace:
         return difficult
 
     def can_stop(self, position: Position) -> bool:
-        return self.segment(position, position) is not None
+        return _position_is_clear(position, self._radius, self._units, self._terrain)

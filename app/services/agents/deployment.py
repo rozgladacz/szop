@@ -1,28 +1,30 @@
 """D5 — strefa rozstawienia + proste strategie pozycjonowania botów.
 
-Strumień D5 (roadmap `docs/roadmap.md#strumień-d`). Dziś `simulate_from_rosters`
-woła `deployment_round` z pustą listą — oddziały startują na pozycjach z roster.
-D5 daje botom (`Player.choose_deployment`) wpływ na pozycje startowe.
+Strumień D5 (roadmap `docs/roadmap.md#strumień-d`). `deployment_zones` pozwala
+botom (`Player.choose_deployment`) wybrać pozycje startowe; bez tej opcji
+oddziały startują na pozycjach z roster.
 
 `DeploymentZone` modeluje **strefę rozstawienia** (`SZOP_Rozjemca.md pkt 24`:
 prostokąt wzdłuż dłuższej krawędzi, domyślnie 12″ od środka — pkt 24.a). Trzymana
 jako parametr runnera (NIE pole `BattleState`) — spójnie z wzorcem terrain/
-objectives/deployment przekazywanych do `simulate_from_rosters`. Zero zmian w
-rdzeniu silnika (`engine/*`), warstwa-liść agentów.
+objectives/deployment przekazywanych do `simulate_from_rosters`.
 
-**Legalność (pkt 13.a, uproszczenie MVP):** całe koło oddziału (`position ± radius`)
-mieści się w prostokącie strefy. Świadomie pominięte na tym etapie: cecha
-Niedostępny (pkt 4.c.i) oraz reguła >1″ od modeli innych oddziałów (pkt 13.a) —
-należą do E4 (kolizje jednostka–jednostka, roadmap).
+**Legalność D5.1 (pkt 13.a):** całe koło oddziału mieści się w strefie,
+poza Niedostępnym (pkt 4.c.i) i innymi oddziałami (pkt 2.d). Styk oddziałów
+jest dozwolony (pkt 15.c). Czysty walidator reużywa geometrię E4, ale jego
+włączenie do runnera i strategii botów jest osobnym etapem D5.2.
 """
 
 from __future__ import annotations
 
 import math
 import random
+from collections.abc import Iterable
 from dataclasses import dataclass
 
-from app.services.engine.state import BattleState, Lokalizacja, Position
+from app.services.engine.movement import can_place_unit
+from app.services.engine.pathfinding import is_finite_position
+from app.services.engine.state import BattleState, Lokalizacja, Position, Terrain, UnitBlob
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +53,52 @@ class DeploymentZone:
             and position.y - radius >= self.y_min - eps
             and position.y + radius <= self.y_max + eps
         )
+
+
+def is_deployment_position_legal(
+    unit: UnitBlob,
+    position: Position,
+    zone: DeploymentZone | None,
+    *,
+    occupied: Iterable[UnitBlob],
+    terrain: Iterable[Terrain],
+) -> bool:
+    """Validate one proposed placement without changing state (pkt 13.a).
+
+    `occupied` contains only units already placed, from either player. Waiting
+    placeholders must be excluded by the caller. Dead/off-board units and self
+    are ignored, as in Maneuver. No zone is inferred when `zone` is None.
+    """
+    def finite(value: float) -> bool:
+        try:
+            return type(value) in (int, float) and math.isfinite(value)
+        except OverflowError:
+            return False
+
+    if (
+        zone is None or unit.models_alive <= 0 or unit.location is not Lokalizacja.FRONT
+        or not is_finite_position(position)
+        or not finite(unit.radius_inches) or unit.radius_inches <= 0
+    ):
+        return False
+    if (
+        not all(finite(value) for value in (zone.x_min, zone.y_min, zone.x_max, zone.y_max))
+        or zone.x_min > zone.x_max or zone.y_min > zone.y_max
+        or not zone.contains_circle(position, unit.radius_inches)
+    ):
+        return False
+    blockers = tuple(
+        other for other in occupied
+        if other.id != unit.id and other.models_alive > 0
+        and other.location is Lokalizacja.FRONT
+    )
+    if any(
+        not is_finite_position(other.position)
+        or not finite(other.radius_inches) or other.radius_inches <= 0
+        for other in blockers
+    ):
+        return False
+    return can_place_unit(unit, position, occupied=blockers, terrain=terrain)
 
 
 def _usable_bounds(

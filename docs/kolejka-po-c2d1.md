@@ -18,7 +18,7 @@ czasu z kanonicznego skilla koordynatora, w dni robocze poza 13–19.
 |---|---|---|
 | 0 | B3.objectives-2in | Zakończony 2026-11-18; wynik poniżej |
 | 1 | B4.4d.C2d2 | Zakończony 2026-11-18; wynik poniżej |
-| 2 | D5.1 | Zaakceptowany, po zamknięciu 1 w tej kolejce |
+| 2 | D5.1 | Zakończony 2026-11-18; wynik poniżej |
 | 3 | D5.2 | Zaakceptowany, po zamknięciu 2 |
 | 4 | D5.3a i D5.3b | Odłożone decyzją użytkownika |
 | 5 | B4.4d.C2d3-spec | Zaakceptowany audyt, po zamknięciu 3 w tej kolejce |
@@ -268,6 +268,77 @@ Stare zapisane bitwy i dotychczasowy tryb bez `deployment_zones` są czytelne.
 `tests/test_engine_phases.py`, `tests/test_agents_match.py`,
 `tests/test_engine_replay_invariant.py` oraz
 `tests/test_engine_regression.py`. Dodać rzeczowe regresje walidatora.
+
+**Wynik 2026-11-18 — zamknięty D5.1** Bazą jest `fdd66d8` po C2d2.
+`is_deployment_position_legal(unit, position, zone, *, occupied, terrain)`
+w `agents/deployment.py` jest czystym predykatem. Brak jawnej strefy,
+nieprawidłowe lub nieskończone współrzędne/promienie/granice strefy,
+pokonany aktor i aktor poza Frontem dają `False`. Całe koło musi mieścić
+się w strefie; zachowano dotychczasową tolerancję strefy `1e-9`.
+Podstawa: odczytane pkt 13.a, 2.d, 4.c.i, 15.c i 24
+[Rozjemcy](../app/static/docs/SZOP_Rozjemca.md).
+
+**Wspólna geometria** `movement.can_place_unit` i `ManeuverSpace.can_stop`
+korzystają z jednego `_position_is_clear`. Reużywa on dokładny test koła
+wobec kół, odcinków i wielokątów oraz odrzucanie rozłącznych obwiedni E4.
+Wklęsłości wielokątów pozostają wolne. Styk oddziałów jest dozwolony,
+a ich penetracja większa niż istniejący `MOVE_EPSILON = 1e-6` jest odrzucana.
+Styk z brzegiem Niedostępnego jest blokowany jak w E4. Trudny i Blokujący
+bez Niedostępnego nie zabraniają rozstawienia. Wymagany jest istniejący
+poprawny kontrakt geometrii terenu; etap nie dodaje parsera ani naprawy terenu.
+
+**Zajęte miejsca** Caller przekazuje `occupied` z aktualnymi pozycjami tylko
+już rozstawionych jednostek obu stron. Oczekujące jednostki z pozycjami
+zastępczymi nie mogą zostać dodane automatycznie z `state.blobs`. Sam aktor,
+pokonani i jednostki poza Frontem są pomijani. Niepoprawna geometria
+istotnej przeszkody daje `False`. Wejściowe obiekty pozostają niezmienione.
+Predykat nie zapisuje wybranej pozycji ani nie sprawdza całej kolejki naraz.
+
+**Audyt wywołań i granice** `ManeuverPlanner.can_reach` oraz
+`reachable_positions` nadal używają `ManeuverSpace.can_stop`. Test punktu
+końcowego ma tę samą geometrię i wynik co wcześniejsze `segment(p, p)`;
+oddzielna ścieżka `segment` zachowuje wyjątek wyjścia ze starego nakładania
+podczas ruchu. Walidator rozstawienia tego wyjątku nie używa. Jedyny nowy
+caller `can_place_unit` to walidator. Nie zmieniono `DeploymentZone.contains_circle`
+ani jej callerów: runnera, Grid i Random. Integracja i sekwencyjne aktualizacje
+zajętych miejsc wymagają D5.2. Nie zmieniono eventów, codec, starych zapisanych
+bitew, API, DB, RNG, JS ani CSS. Zero SQL; koszt jednej walidacji jest liniowy
+od liczby zajętych oddziałów i elementów terenu (oraz krawędzi badanego wielokąta).
+
+**Weryfikacja wyniku** Dodano 58 przypadków: cztery brzegi strefy i trzy
+promienie, wszystkie kształty terenu i wklęsłość, styk/przenikanie, obie strony,
+rezerwy/pokonani/self, jawna kolejność zajmowania miejsc, generatory,
+NaN/Inf/nienumeryczne dane i niepoprawne promienie/strefy oraz brak mutacji.
+Regresja odróżnia dopuszczony odcinek ucieczki ze starej kolizji od
+niedopuszczonego punktu końcowego i rozstawienia. Zestaw celowany:
+**227 passed**. Pełny `pytest --tb=short -q`: **3906 passed, 4 warnings**
+zależności (212.93 s), bez błędów. Goldeny siedmiu pełnych bitew i replay
+pozostają bez zmian. Dodatkowy audyt 3600 pozycji przy seeded generatorze
+potwierdził równość nowego `can_stop(p)` i starego `segment(p, p) is not None`.
+Po testach wykonano przeglądy simplify i review diffu: reuse SSOT,
+rozdzielenie statycznej kolizji od escape, fail-closed danych, brak cyklu
+engine → agents i brak aktywnego wpięcia w strategie. Nie wymagały zmian kodu.
+Nie zmieniono auth ani wejścia użytkownika do DB, więc security review
+nie dotyczy zakresu; UI smoke także nie jest wymagany przy braku zmian JS.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_agents_deployment.py tests/test_engine_phases.py tests/test_agents_match.py tests/test_engine_replay_invariant.py tests/test_engine_regression.py tests/test_engine_pathfinding.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest --tb=short -q
+git diff --check
+```
+
+**Przeniesienie** D5.1 ma osobny commit na `Faza_A`, potwierdzany na
+`origin/Faza_A`. Produkcyjna ignorowana `data/szop.db` pozostaje nietknięta,
+SHA256 `AB6D92E654BB6A3D050A4FAC88A7533DA89539E4CB351E38E526EF086C5BE8E6`.
+Przed zmianą komputera wykonać osobny backup bazy i lokalnych sekretów/
+konfiguracji, a środowisko odtworzyć z `requirements-dev.txt`. Zastane lokalne
+ustawienia, HANDOFF i historyczny hunk B6.2 nie należą do etapu.
+
+**Podstawa kolejnego przebiegu** D5.2 może użyć nowego predykatu dla każdego
+kandydata i przed zatwierdzeniem wszystkich pozycji, przekazując jawny zbiór
+już wybranych jednostek. Strategie i runner obecnie nadal sprawdzają samą
+strefę, więc nie należy deklarować kompletnej walidacji automatycznego
+rozstawiania przed D5.2. Brak nowych decyzji użytkownika; D5.3a/b odłożone.
 
 ## 3. D5.2 — boty wybierają wolne miejsca
 
