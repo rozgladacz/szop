@@ -1,6 +1,6 @@
 # Ostrożny — audyt C2d3-spec i kontrakt przyszłej implementacji
 
-Status: **audyt zakończony 2026-11-18; implementacja wymaga decyzji o zakresie**.
+Status: **audyt zakończony 2026-11-18; zakres rozstrzygnięty przez użytkownika 2026-11-19: tylko dystansowe; implementacja wymaga osobnej akceptacji**.
 Baza: `3954634` na `Faza_A`, po C2d1/C2d2 i D5.2. Ten dokument nie
 zatwierdza implementacji ani publikacji Oznaczenia. D5.3a/b pozostają odłożone.
 
@@ -26,18 +26,15 @@ PDF sprawdzono sumą kontrolną, bez niezależnej interpretacji jego treści.
 Nie uruchamiano aktualizacji hashy ani zapisu ekstraktów. Zgodność hashy
 potwierdza wersję plików, nie usuwa niejednoznaczności wewnątrz tekstu.
 
-**Pytanie do użytkownika:** czy Ostrożny (poz. 23) ma dawać bonus wyłącznie
-podczas ataków dystansowych, czy podczas każdego testu trafienia, także wręcz?
-**Rekomendacja: wyłącznie dystansowe**, zgodnie z najbardziej szczegółowym
-warunkiem „oddziału strzelającego”. Wariant wszystkich ataków odpowiada
-ogólnemu opisowi DOCX/MD/YAML. Żaden odczytany fragment nie ustanawia reguły
-pierwszeństwa, która pozwalałaby usunąć tę różnicę bez decyzji autora.
+**Decyzja użytkownika 2026-11-19:** Ostrożny działa wyłącznie w atakach
+dystansowych. Bonus +1 wymaga braku wroga w 12″ od atakującego oddziału
+(poz. 23). Użytkownik wskazał, że podczas walki wręcz bliski przeciwnik
+i tak wyklucza spełnienie tego warunku. Wcześniejsze pytanie jest zamknięte.
+Decyzja rozstrzyga interpretację źródeł bez zmiany ich plików; nie oznacza
+jeszcze zlecenia implementacji ani wznowienia heartbeat.
 
-W zwykłej walce wręcz bliski cel sam wyłączałby bonus również w wariancie
-wszystkich ataków (poz. 23, pkt 14.d/16). Nie należy jednak traktować tej
-obserwacji jako definicji zakresu: ma znaczenie dla przyszłych zdolności,
-odległych wywołań czystego combat i precyzji kontraktu. Poniższy projekt
-obsługuje oba warianty; wybór nie został wdrożony.
+Poniżej obowiązuje wariant dystansowy. Wzmianki o szerszym wariancie
+pozostają porównaniem z audytu, nie alternatywnym zakresem do realizacji.
 
 ## Kontrakt warunku — propozycja techniczna
 
@@ -63,7 +60,7 @@ pkt 2.e. Proponowane odwzorowanie modelu na obecny blob jest następujące:
    granicę reguły; przykłady testować na osi, z dokładnie reprezentowalnymi
    wartościami. Skończone poprawne pozycje i dodatnie promienie są warunkiem
    wejścia silnika, a nie zadaniem nowego parsera tego efektu.
-5. Wariant rekomendowany: dodatkowy gate rodzaju ataku `ranged`; wariant
+5. Wybrany wariant dystansowy: dodatkowy gate rodzaju ataku `ranged`; wariant
    wszystkich ataków usuwa tylko ten gate, zachowując skan i role. Brak
    pełnego kontekstu nie jest dowodem braku wrogów i nie może dawać +1.
 6. Ocena w momencie testu trafienia, na aktualnym obrazie planszy. W volley
@@ -117,7 +114,7 @@ zmiany publicznego payloadu na podstawie tego starego komentarza.
 
 ## Granice przyszłego etapu implementacyjnego
 
-Proponowany pierwszy zakres po decyzji: **prywatne zamknięte ataki v3**,
+Proponowany pierwszy zakres do osobnej akceptacji: **prywatne zamknięte ataki v3**,
 natywna zdolność oraz Oznaczenie; jawny kontekst prediction do ich estymacji.
 V1/v2, ranged bez pasującego closed-v3, bezpośrednie wywołania bez opt-in
 i publiczny Strażnik zachowują dotychczasowe eventy/wynik/RNG. To granica
@@ -167,7 +164,7 @@ przy okazji. Testy: `test_engine_effects.py`, `test_engine_combat.py`,
 `test_engine_regression.py`, `test_battle_activations.py`,
 `test_battle_activation_transport.py` oraz regresje pięciu rodzin scoringu.
 
-Przyszły DoD: decyzja zakresu zapisana i źródło doprecyzowane przez autora;
+Przyszły DoD: decyzja użytkownika z 2026-11-19 zachowana;
 Layer Checklist/SSOT/performance gate; testy celowane i pełny `pytest -q`;
 call-site audit; simplify/review; security review tylko przy rzeczywistym
 rozszerzeniu auth/input→DB; ponowne testy po poprawkach; osobny commit

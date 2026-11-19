@@ -630,12 +630,13 @@ lokalizacje, attack lifetime, cache/payload, koszty O(N) bez SQL, macierz
 testów oraz pliki i DoD przyszłej implementacji. Nic nie zaimplementowano;
 publiczne `_READY_ATTACK_X` pozostaje puste.
 
-**Decyzja do następnego wyboru** Czy Ostrożny z poz. 23 ma dawać bonus
-wyłącznie w atakach dystansowych, czy we wszystkich testach trafienia,
-także wręcz? Rekomendacja: **wyłącznie dystansowe**, zgodnie ze szczegółowym
-warunkiem „oddziału strzelającego”. Ogólny opis DOCX/MD/YAML nie ogranicza
-rodzaju ataku. Szczegóły dowodów i skutków obu wariantów są w specyfikacji.
-Pytanie kończy zatwierdzony audyt, ale nie upoważnia do implementacji.
+**Decyzja 2026-11-19 — rozstrzygnięta** Użytkownik wybrał **wyłącznie
+ataki dystansowe**. Wskazał też, że w walce wręcz bliski przeciwnik wyklucza
+warunek braku wroga w 12″ od oddziału (poz. 23). Pytanie audytu jest zamknięte;
+przyszła implementacja nadal wymaga osobnego zatwierdzonego zakresu.
+Heartbeat pozostaje wstrzymany do jawnego wznowienia. Zmieniono wyłącznie
+dokumentację decyzji; przegląd simplify/review i `git diff --check`, bez
+ponawiania pytest dla Markdown. Wynik zostaje w osobnym commicie na Faza_A.
 
 **Weryfikacja audytu** `rules_sources_check.py`: **4/4 CLEAN, exit 0**.
 Odczyt DOCX oraz bieżące ekstraktory DOCX/MD w pamięci potwierdziły ogólny

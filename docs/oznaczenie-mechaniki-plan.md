@@ -23,7 +23,7 @@ Katalog kandydatów wynika z tagów `oznaczenie_tak` w aktualnie odczytanym
 | X / źródło | Decyzja planistyczna |
 |---|---|
 | Furia, poz. 7 | Pierwszy, ograniczony etap C2d1 opisany niżej. |
-| Ostrożny, poz. 23 | C2d3-spec zakończone: [audyt i kontrakt](ostrozny-spec.md); implementacja czeka na decyzję dystansowe/wszystkie ataki. |
+| Ostrożny, poz. 23 | C2d3-spec zakończone: [audyt i kontrakt](ostrozny-spec.md); decyzja użytkownika 2026-11-19: tylko dystansowe; implementacja do osobnej akceptacji. |
 | Planowanie, poz. 25 | Osobno od istniejącego `przygotowanie`; zachować wcześniejsze odroczenie kosztów i publicznego katalogu. |
 | Mistrzostwo(X), poz. 13 | Osobny projekt parametru X; nie rozszerzać milcząco obecnego payloadu Oznaczenia. |
 | Bastion, poz. 1 | Najpierw zweryfikować właściwą rolę i czas działania; istniejący warunek w kontrataku nie dowodzi gotowości attack scope. |
