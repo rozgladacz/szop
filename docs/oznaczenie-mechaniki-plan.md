@@ -27,7 +27,7 @@ Katalog kandydatów wynika z tagów `oznaczenie_tak` w aktualnie odczytanym
 | Planowanie, poz. 25 | C2d5-spec zakończone: [audyt statusu i lifecycle](planowanie-spec.md); kandydat do osobnego prywatnego hooka v3. Brak produkcyjnej implementacji; historyczne `przygotowanie` i koszty bez zmian. Wskazano istniejący drift mutex Mobilizacji. |
 | Mistrzostwo(X), poz. 13 | Osobny projekt parametru X; nie rozszerzać milcząco obecnego payloadu Oznaczenia. |
 | Bastion, poz. 1 | C2d4-spec zakończone: [audyt ról i czasu](bastion-spec.md); wykluczony z publikacji obecnego main-attacker-only Oznaczenia. Natywny efekt dotyczy kontratakującego, Rozkaz ma kierunek „−”; bez zmiany kodu/tagów. |
-| Niestrudzony, poz. 14 | Najpierw audyt momentu wyboru akcji względem czasu życia attack scope; nie przenosić efektu na następną akcję bez podstawy. |
+| Niestrudzony, poz. 14 | C2d6-spec zakończone: [audyt wyboru akcji](niestrudzony-spec.md); wykluczony z obecnego attack-only Oznaczenia. Istniejąca luka native/Rozkazu w walidacji powtórzeń oraz drift opisu YAML; bez zmiany kodu/tagów. |
 | Dywersant, poz. 6 | Pozostaje odroczony; wcześniejsza decyzja MVP nie jest uchylana ogólnym wyborem kierunku Oznaczenia. |
 
 To kolejka do osobnego doprecyzowania, nie zestaw zadań uruchamianych naraz.

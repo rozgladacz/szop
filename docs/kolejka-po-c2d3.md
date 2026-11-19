@@ -17,7 +17,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 | 1 | B4.4d.C2d3 | DONE 2026-11-19; prywatny Ostrożny v3, 3987 testów |
 | 2 | B4.4d.C2d4-spec | DONE 2026-11-19; Bastion wykluczony z obecnego scope |
 | 3 | B4.4d.C2d5-spec | DONE 2026-11-19; specyfikacja Planowania i drift statusu |
-| 4 | B4.4d.C2d6-spec | Audyt Niestrudzonego |
+| 4 | B4.4d.C2d6-spec | DONE 2026-11-20; wykluczenie attack-only, luka walidacji powtórzeń |
 | 5 | D5.3a | Strategia rozstawienia pod cele i jawny wybór |
 | 6 | D5.3b | Powtarzalne porównanie z gridem |
 | 7 | B4.4d.C2-publication-spec | Przygotowanie ograniczonej publikacji Oznaczenia |
@@ -230,6 +230,30 @@ bez DB/API/UI. Osobny commit na Faza_A potwierdzany na origin/Faza_A;
 backup bazy i sekretów/konfiguracji jak we wspólnym DoD. SHA256 bazy zgodny,
 cudze zmiany i historyczny hunk B6.2 zachowane. Następny zaakceptowany etap:
 **C2d6-spec — audyt Niestrudzonego**, nieuruchomiony tutaj. Brak nowych pytań.
+
+### Wynik C2d6-spec — 2026-11-20
+
+Na bazie `7a132f5` powstał [audyt Niestrudzonego](niestrudzony-spec.md).
+Niestrudzony znosi ograniczenia powtórzenia Ostrzału/Szarży, nie limit 2
+akcji (poz. 14 Zdolności, pkt 11.b.iv/14.c.v/14.d.vi Rozjemcy). Obecny
+grant Oznaczenia istnieje po legalnej deklaracji i znika przy AttackResolved;
+nie zalegalizuje kolejnej deklaracji ani nie może trwać do następnej akcji.
+Wynik: wykluczenie z publikacji obecnego attack-only scope, bez zmiany tagów.
+
+Wspólna walidacja `can_append_activation_action_type` nie czyta pasywek,
+więc odrzuca powtórzenia również przy native/Rozkaz Niestrudzonym. To
+istniejąca luka kodu do osobnego zakresu. DOCX/MD mówią o aktywacji, wtórny
+opis YAML o rundzie; odsyłacz MD 11.b.iii jest nieaktualny wobec 11.b.iv.
+Zapisano oba drifty, bez zmiany źródeł/kodu. Nie ma nowego pytania o reguły.
+
+Weryfikacja: źródła **4/4 CLEAN**, bezpośredni odczyt DOCX/MD/YAML,
+25 symboli AST w 9 plikach, call sites, 6 nowych celów linków,
+simplify/review oraz diff check.
+Wyłącznie Markdown; pytest nie ponawiano, **3987 passed** jest historycznym
+wynikiem C2d3. Zero SQL/RNG, baza nietknięta i SHA256 zgodny. Osobny commit
+Faza_A potwierdzany na origin/Faza_A; backup bazy/sekretów/konfiguracji jak
+we wspólnym DoD. Cudze zmiany oraz hunk B6.2 pozostają poza commitem.
+Następny zaakceptowany etap: **D5.3a**, nieuruchomiony w tym audycie.
 
 ## 5–6. D5.3a/b — strategia rozstawienia i pomiary
 
