@@ -1,6 +1,6 @@
 # Ostrożny — audyt C2d3-spec i kontrakt przyszłej implementacji
 
-Status: **audyt zakończony 2026-11-18; zakres rozstrzygnięty przez użytkownika 2026-11-19: tylko dystansowe; implementacja zaakceptowana 2026-11-19 jako C2d3**.
+Status: **audyt zakończony 2026-11-18; zakres rozstrzygnięty przez użytkownika 2026-11-19: tylko dystansowe; implementacja C2d3 zakończona 2026-11-19, pełne 3987 passed**.
 Baza: `3954634` na `Faza_A`, po C2d1/C2d2 i D5.2. Akceptację implementacji i kolejność
 zapisuje [bieżąca kolejka](kolejka-po-c2d3.md). Publikacja Oznaczenia pozostaje
 osobnym zakresem; D5.3a/b także zaakceptowano 2026-11-19.
@@ -77,7 +77,10 @@ Cel w `(20,0)` sam jest daleko, lecz drugi wróg w `(10,0)` wyłącza bonus.
 Zmiana tego drugiego na sojusznika albo jednostkę poza Frontem nie wyłącza go.
 Promienie 0.5″/3″ przy odległości środków 15.5″ również dają granicę 12″.
 
-## Odczytana mapa kodu i przyszłe punkty zmian
+## Mapa bazowego kodu z audytu i punkty zmian
+
+Tabela opisuje bazę audytu `3954634`. Bieżący wynik implementacji C2d3
+i testy są w [kolejce](kolejka-po-c2d3.md#1-b44dc2d3--implementacja-ostrożnego).
 
 | Ścieżka/symbol | Stan na bazie audytu | Wymaganie przyszłego etapu |
 |---|---|---|

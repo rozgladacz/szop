@@ -44,6 +44,7 @@ from app.services.engine.combat import (
 )
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
+    BattleState,
     Position,
     Terrain,
     UnitBlob,
@@ -157,6 +158,8 @@ def expected_damage(
     defender: UnitBlob,
     weapon: WeaponProfile,
     terrain: Iterable[Terrain] = (),
+    *,
+    state: BattleState | None = None,
 ) -> DamageDistribution:
     """Analityczna estymacja ran zadawanych przez Ostrzał (pkt 17 + 19).
 
@@ -173,6 +176,8 @@ def expected_damage(
         attacker, defender: bloby.
         weapon: profil broni atakującego.
         terrain: dla Osłony pkt 19 (LoS check, Obronny).
+        state: optional full closed-v3 ranged context for Ostrozny; legacy
+            calls without it retain their historical estimate.
 
     Returns:
         `DamageDistribution(pmf, mean, models_at_risk, toughness_per_model)`.
@@ -198,7 +203,13 @@ def expected_damage(
     )
 
     # Passive modifiers — consistency z combat.py
-    attack_modifier += aggregate_attack_modifier(EffectContext(blob=attacker, weapon=weapon))
+    from app.services.engine.combat import _matching_closed_shoot
+
+    attack = _matching_closed_shoot(state, attacker, defender, weapon) if state is not None else None
+    attack_modifier += aggregate_attack_modifier(EffectContext(
+        blob=attacker, weapon=weapon, state=state if attack is not None else None,
+        attack_state=attack, is_ranged_attack=attack is not None,
+    ))
     defense_modifier += aggregate_defense_modifier(EffectContext(blob=defender, weapon=weapon))
 
     is_brutalny = ABILITY_BRUTALNY in weapon.weapon_abilities

@@ -57,6 +57,7 @@ from app.services.engine.state import (
     ChargeAttackIntent,
     Lokalizacja,
     Position,
+    ShootAttackIntent,
     Terrain,
     UNARMED_WEAPON,
     UnitBlob,
@@ -365,6 +366,37 @@ def _allocate_wounds_to_defender(
 # ---------------------------------------------------------------------------
 
 
+def _matching_closed_shoot(
+    state: BattleState, attacker: UnitBlob, defender: UnitBlob, weapon: WeaponProfile,
+) -> AttackState | None:
+    """Opt-in for Ostrozny only; canonical validation remains the protocol SSOT."""
+    activation = state.activation
+    if activation is None or activation.phase is not ActivationPhase.ATTACK_RESOLUTION_READY:
+        return None
+    attack = activation.attack
+    if (
+        attack is None or type(attack.intent) is not ShootAttackIntent
+        or attack.window is not None
+        or "ostrozny" not in effective_attack_passives(attacker, attack)
+        or attack.intent.attacker_unit_id != attacker.id
+        or attack.intent.target_unit_id != defender.id
+        or attack.intent.weapon_slug != weapon.slug
+        or not any(blob == attacker for blob in state.blobs)
+        or not any(blob == defender for blob in state.blobs)
+    ):
+        return None
+    # Lazy import avoids protocol -> phases -> combat -> protocol at import time.
+    from app.services.engine.activation_protocol import (
+        ActivationProtocolError, _canonical_action_from_attack, _same_weapon_profile,
+    )
+
+    try:
+        action = _canonical_action_from_attack(state, activation, attack)
+    except ActivationProtocolError:
+        return None
+    return attack if _same_weapon_profile(action.weapon, weapon) else None
+
+
 def _resolve_ranged_profile_pools(
     state: BattleState,
     attacker: UnitBlob,
@@ -378,6 +410,10 @@ def _resolve_ranged_profile_pools(
 ) -> _RangedProfilePools:
     """Resolve all dice for one profile without allocating any wounds."""
 
+    # The public source-correct Straznik path keeps its existing refusal.
+    ostrozny_attack = None if source_correct else _matching_closed_shoot(
+        state, attacker, defender, weapon,
+    )
     terrain_list = list(terrain)
     defender_passives = effective_passives(defender)
     has_cover = compute_cover(attacker, defender, terrain_list) or (
@@ -394,9 +430,10 @@ def _resolve_ranged_profile_pools(
     )
     attack_modifier += _aggregate_passive_attack(
         attacker,
-        state=state if source_correct else None,
+        state=state if source_correct or ostrozny_attack is not None else None,
         weapon=weapon,
         attack_state=state.activation.attack if state.activation is not None else None,
+        is_ranged_attack=ostrozny_attack is not None,
     )
     defense_modifier += _aggregate_passive_defense(
         defender,

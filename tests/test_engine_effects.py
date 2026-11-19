@@ -206,3 +206,59 @@ def test_no_weapon_modifiers_yet_in_mvp():
     """MVP nie ma weapon modifiers (Niezawodny/Dobrze strzela/Mistrzostwo → B3.5+)."""
     # Registry istnieje ale jest pusty
     assert isinstance(_WEAPON_MODIFIERS, dict)
+
+
+# C2d3: poz. 23, full-board ranged context and edge-distance boundary.
+@pytest.mark.parametrize("radii", [(0.5, 1.0), (1.0, 2.0), (3.0, 0.5)])
+@pytest.mark.parametrize("gap,bonus", [(11.999, 0), (12.0, 0), (12.001, 1)])
+def test_ostrozny_scans_enemy_edge_boundary(radii, gap, bonus):
+    from dataclasses import replace
+    from app.services.engine.state import BattleState
+
+    actor = replace(make_blob(passives=("ostrozny",)), radius_inches=radii[0])
+    enemy = replace(make_blob(2), owner_player=1, radius_inches=radii[1],
+                    position=Position(sum(radii) + gap, 0))
+    state = BattleState(1, 0, (1, 1), (actor, enemy), ())
+    assert aggregate_attack_modifier(EffectContext(
+        actor, state=state, is_ranged_attack=True,
+    )) == bonus
+
+
+@pytest.mark.parametrize("owner,alive,location,flags,bonus", [
+    (1, 1, "front", (), 0),
+    (1, 1, "front", ("Wyczerpany", "Przyszpilony"), 0),
+    (0, 1, "front", (), 1),
+    (1, 0, "front", (), 1),
+    (1, 1, "zaplecze", (), 1),
+    (1, 0, "wycofany", (), 1),
+    (1, 0, "eliminowany", (), 1),
+])
+def test_ostrozny_enemy_population_not_just_selected_target(owner, alive, location, flags, bonus):
+    from dataclasses import replace
+    from app.services.engine.state import BattleState, Lokalizacja, TerrainCircle
+
+    actor = make_blob(passives=("ostrozny",))
+    target = replace(make_blob(2), owner_player=1, position=Position(30, 0))
+    other = replace(make_blob(3), owner_player=owner, models_alive=alive,
+                    location=Lokalizacja(location), status_flags=flags)
+    wall = TerrainCircle(Position(4, 0), 1, ("Blokujacy",))
+    state = BattleState(1, 0, (1, 1), (actor, target, other), (wall,))
+    assert aggregate_attack_modifier(EffectContext(
+        actor, state=state, is_ranged_attack=True,
+    )) == bonus
+
+
+@pytest.mark.parametrize("ranged,full_state,granted,expected", [
+    (True, True, True, 1), (False, True, True, 0),
+    (True, False, True, 0), (True, True, False, 0),
+])
+def test_ostrozny_explicit_context_and_deduplicated_rozkaz(ranged, full_state, granted, expected):
+    from dataclasses import replace
+    from app.services.engine.state import BattleState
+
+    actor = replace(make_blob(passives=("ostrozny",)),
+                    ability_overrides=(("ostrozny", granted),))
+    state = BattleState(1, 0, (1, 1), (actor,), ())
+    assert aggregate_attack_modifier(EffectContext(
+        actor, state=state if full_state else None, is_ranged_attack=ranged,
+    )) == expected

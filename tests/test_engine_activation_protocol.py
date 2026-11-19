@@ -3883,3 +3883,215 @@ def test_v3_oznaczenie_handler_failure_preserves_head_and_rng(monkeypatch) -> No
         _mark_attack(declared.state, dice, sequence=declared.next_sequence)
     assert malformed.value.reason is ActivationProtocolErrorReason.ILLEGAL_INTERRUPT
     assert dice.to_checkpoint() == before
+
+
+# C2d3: actual Ostrozny outcomes in closed ranged v3, not public publication.
+def _ostrozny_battle(*, native=False, gap=17.0):
+    state = _furia_battle()
+    actor, target, source = state.blobs
+    actor = replace(actor, passives=("ostrozny",) if native else (), quality=4,
+                    radius_inches=1.0)
+    target = replace(target, position=Position(3.0 + gap, 0), radius_inches=2.0)
+    source = replace(source, position=Position(target.position.x, 5))
+    return replace(state, blobs=(actor, target, source))
+
+
+def _close_ostrozny(initial, *, marked=False):
+    weapon = initial.blobs[0].ranged_weapons[0]
+    _, started, first, ready, declared = _marked_declared(
+        state=initial, action=ShootAction(11, 21, weapon),
+    )
+    prefix = [*started.events, *first.events, *ready.events, *declared.events]
+    head = declared
+    if marked:
+        head = _mark_attack(head.state, DeterministicDice(7), sequence=head.next_sequence,
+                            payload={"ability": "ostrozny"})
+        prefix.extend(head.events)
+    for _ in range(2):
+        head = _pass_attack(head.state,
+                            caller_player=head.state.activation.attack.window.priority_player,
+                            sequence=head.next_sequence)
+        prefix.extend(head.events)
+    return head, prefix, declared
+
+
+@pytest.mark.parametrize("native,marked", [(True, False), (False, True), (True, True), (False, False)])
+@pytest.mark.parametrize("gap,near", [(11.999, True), (12.0, True), (12.001, False)])
+def test_v3_ostrozny_real_hits_restart_replay_and_future_rng(native, marked, gap, near):
+    initial = _ostrozny_battle(native=native, gap=gap)
+    closed, prefix, _ = _close_ostrozny(initial, marked=marked)
+    assert apply_events(initial, prefix) == closed.state
+    dice = DeterministicDice(7)  # first natural 3: succeeds only with +1 at quality4
+    before = dice.to_checkpoint()
+    result = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+    shot, = (e for e in result.events if isinstance(e, ShotResolved))
+    assert shot.hits == int((native or marked) and not near)
+    assert apply_events(initial, (*prefix, *result.events)) == result.state
+    assert result.state.activation.attack is None
+    assert effective_passives(result.state.blobs[0]) == effective_passives(initial.blobs[0])
+    assert dice.to_checkpoint() == before
+    restarted = _resolve_attack(_restart_v3(closed.state),
+                                DeterministicDice.from_checkpoint(before), sequence=closed.next_sequence)
+    _assert_transition_equal(result, restarted)
+    assert result.dice.roll_d6(12) == restarted.dice.roll_d6(12)
+    # Resolved scope cannot grant a bonus to the next direct ranged call.
+    from app.services.engine.combat import resolve_ranged_attack
+    actor, target, _ = result.state.blobs
+    after = resolve_ranged_attack(result.state, actor, target, actor.ranged_weapons[0],
+                                  DeterministicDice(7), result.next_sequence)
+    assert next(e for e in after.events if isinstance(e, ShotResolved)).hits == 0
+
+
+@pytest.mark.parametrize("change", ["open", "actor", "target", "profile", "inventory", "other_state", "no_state"])
+def test_ostrozny_closed_shoot_matcher_rejects_wrong_context(change):
+    from app.services.engine.combat import _matching_closed_shoot, resolve_ranged_attack
+    from app.services.engine.prediction import expected_damage
+
+    initial = _ostrozny_battle(native=True)
+    closed, _, declared = _close_ostrozny(initial)
+    state = declared.state if change == "open" else closed.state
+    actor, target, source = state.blobs
+    weapon = actor.ranged_weapons[0]
+    if change == "actor":
+        actor = replace(actor, id=99)
+    elif change == "target":
+        target = replace(target, id=99)
+    elif change == "profile":
+        weapon = replace(weapon, attacks=2)
+    elif change == "inventory":
+        actor = replace(actor, ranged_weapons=())
+        state = replace(state, blobs=(actor, target, source))
+    elif change == "other_state":
+        state = replace(state, blobs=(replace(actor, position=Position(0, 5)), target, source))
+    elif change == "no_state":
+        state = replace(state, activation=None)
+    assert _matching_closed_shoot(state, actor, target, weapon) is None
+    actual = resolve_ranged_attack(state, actor, target, weapon, DeterministicDice(7), 1)
+    plain = resolve_ranged_attack(replace(state, activation=None), actor, target, weapon,
+                                  DeterministicDice(7), 1)
+    assert actual == plain
+    assert expected_damage(actor, target, weapon, state=state) == expected_damage(actor, target, weapon)
+
+
+@pytest.mark.parametrize("nearby", [False, True])
+def test_ostrozny_prediction_matches_closed_v3_monte_carlo(nearby):
+    from app.services.engine.combat import resolve_ranged_attack
+    from app.services.engine.prediction import expected_damage
+    import math
+
+    initial = _ostrozny_battle(native=True)
+    if nearby:
+        actor, target, source = initial.blobs
+        enemy = replace(target, id=99, position=Position(0, 8))
+        initial = replace(initial, blobs=(actor, target, source, enemy))
+    closed, _, _ = _close_ostrozny(initial)
+    actor, target = closed.state.blobs[:2]
+    weapon = actor.ranged_weapons[0]
+    predicted = expected_damage(actor, target, weapon, state=closed.state)
+    legacy = expected_damage(actor, target, weapon)
+    assert (predicted.mean > legacy.mean) is (not nearby)
+    values = []
+    for seed in range(1000):
+        outcome = resolve_ranged_attack(closed.state, actor, target, weapon, DeterministicDice(seed), 1)
+        shot = next(e for e in outcome.events if isinstance(e, ShotResolved))
+        values.append(shot.wounds_dealt + shot.wounds_precise)
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    assert abs(mean - predicted.mean) <= 3 * math.sqrt(variance / len(values))
+
+
+def test_ostrozny_failed_resolve_does_not_mutate_input_and_retries(monkeypatch):
+    from app.services.engine import combat
+
+    initial = _ostrozny_battle()
+    closed, _, _ = _close_ostrozny(initial, marked=True)
+    dice = DeterministicDice(7)
+    before = dice.to_checkpoint()
+    expected = _resolve_attack(closed.state, DeterministicDice(7), sequence=closed.next_sequence)
+    original = _restart_v3(closed.state)
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("allocation failure after Ostrozny hit")
+
+    with monkeypatch.context() as failure:
+        failure.setattr(combat, "_allocate_wounds_to_defender", fail)
+        _assert_rejected(closed.state, ActivationProtocolErrorReason.ILLEGAL_ACTION,
+                         lambda: _resolve_attack(closed.state, dice, sequence=closed.next_sequence))
+    assert closed.state == original
+    assert dice.to_checkpoint() == before
+    _assert_transition_equal(_resolve_attack(closed.state, dice, sequence=closed.next_sequence), expected)
+
+
+@pytest.mark.parametrize("seed", [2, 7, 225])
+def test_ostrozny_native_preserves_legacy_ranged_and_melee_rng(seed):
+    from app.services.engine.combat import resolve_ranged_attack, resolve_melee_attack
+
+    initial = _ostrozny_battle(native=True)
+    actor, target, _ = initial.blobs
+    for resolver, weapon in [(resolve_ranged_attack, actor.ranged_weapons[0]),
+                              (resolve_melee_attack, actor.melee_weapons[0])]:
+        a, b = DeterministicDice(seed), DeterministicDice(seed)
+        plain = replace(actor, passives=())
+        actual = resolver(initial, actor, target, weapon, a, 1)
+        expected = resolver(initial, plain, target, weapon, b, 1)
+        assert actual.events == expected.events
+        assert actual.new_defender == expected.new_defender
+        assert replace(actual.new_attacker, passives=()) == expected.new_attacker
+        assert a.to_checkpoint() == b.to_checkpoint()
+
+
+@pytest.mark.parametrize("quality", [2, 3, 4, 6])
+@pytest.mark.parametrize("seed,roll", [(2, 1), (7, 3), (225, 6)])
+def test_ostrozny_respects_clamp_and_natural_one_six(quality, seed, roll):
+    initial = _ostrozny_battle(native=True)
+    actor, target, source = initial.blobs
+    initial = replace(initial, blobs=(replace(actor, quality=quality), target, source))
+    closed, _, _ = _close_ostrozny(initial)
+    result = _resolve_attack(closed.state, DeterministicDice(seed), sequence=closed.next_sequence)
+    shot = next(e for e in result.events if isinstance(e, ShotResolved))
+    assert shot.hits == int(roll == 6 or (roll != 1 and roll >= max(2, quality - 1)))
+
+
+@pytest.mark.parametrize("second_profile,source_correct,expected", [
+    (False, False, [1, 1]), (True, False, [1, 0]), (False, True, [0, 0]),
+])
+def test_ostrozny_volley_qualifies_each_profile_before_allocation(
+    second_profile, source_correct, expected, monkeypatch,
+):
+    from app.services.engine import combat
+
+    closed, _, _ = _close_ostrozny(_ostrozny_battle(native=True))
+    actor, target = closed.state.blobs[:2]
+    weapon = actor.ranged_weapons[0]
+    other = replace(weapon, slug="other") if second_profile else weapon
+    modifiers = []
+    original = combat._aggregate_passive_attack
+
+    def record(*args, **kwargs):
+        modifier = original(*args, **kwargs)
+        modifiers.append(modifier)
+        assert closed.state.blobs[1] == target
+        return modifier
+
+    monkeypatch.setattr(combat, "_aggregate_passive_attack", record)
+    combat._resolve_ranged_volley(closed.state, actor, (
+        combat._RangedProfileDeclaration(target, weapon),
+        combat._RangedProfileDeclaration(target, other),
+    ), DeterministicDice(7), 1, source_correct=source_correct)
+    assert modifiers == expected
+
+
+def test_ostrozny_rejects_closed_charge_intent_and_v2_ready_context():
+    from app.services.engine.combat import _matching_closed_shoot
+    from app.services.engine.state import ChargeAttackIntent
+
+    closed, _, _ = _close_ostrozny(_ostrozny_battle(native=True))
+    actor, target = closed.state.blobs[:2]
+    attack = replace(closed.state.activation.attack,
+                     intent=ChargeAttackIntent(actor.id, target.id, actor.ranged_weapons[0].slug, False))
+    activation = replace(closed.state.activation, attack=attack)
+    assert _matching_closed_shoot(replace(closed.state, activation=activation),
+                                  actor, target, actor.ranged_weapons[0]) is None
+    ready = replace(activation, phase=ActivationPhase.ACTION_READY, attack=None)
+    assert _matching_closed_shoot(replace(closed.state, activation=ready),
+                                  actor, target, actor.ranged_weapons[0]) is None

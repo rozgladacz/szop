@@ -18,7 +18,7 @@ Oznaczenia, audyt botów, podłączenie istniejących agentów i podział Play v
 Jeden worker naraz; obowiązuje poniższa kolejność, każdy punkt zależy od
 zamknięcia poprzedniego. Wcześniejsze odłożenie D5.3 jest uchylone.
 
-- [ ] **B4.4d.C2d3** [automation-ready] — implementacja prywatnego Ostrożnego v3, tylko dystansowo, według rozstrzygniętej specyfikacji.
+- [x] **B4.4d.C2d3** — **DONE 2026-11-19**: prywatny Ostrożny w pasującym closed Shoot v3 i jawny prediction opt-in; tylko dystansowo, bez publikacji. Core **347 passed**, Strażnik/scoring **92 passed**, pełne **3987 passed**. [Wynik, pomiary i backup](kolejka-po-c2d3.md#1-b44dc2d3--implementacja-ostrożnego).
 - [ ] **B4.4d.C2d4-spec** [automation-ready] — audyt Bastionu: rola i czas działania, bez implementacji.
 - [ ] **B4.4d.C2d5-spec** [automation-ready] — audyt Planowania i stanu Przygotowany, bez implementacji.
 - [ ] **B4.4d.C2d6-spec** [automation-ready] — audyt Niestrudzonego wobec wyboru akcji i attack scope, bez implementacji.

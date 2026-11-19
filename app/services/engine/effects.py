@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any, Callable
 from app.services.engine.state import (
     AttackState,
     BattleState,
+    Lokalizacja,
     UnitBlob,
     WeaponProfile,
     effective_passives,
@@ -68,6 +69,7 @@ class EffectContext:
     od wrogów"). `weapon` (opcjonalny) = profil broni dla weapon-level modifiers.
     `is_charging` / `is_being_charged` = flagi szarży (Furia, Impet, Kontra).
     `attack_state` = immutable pending v3 scope for the declared attacker.
+    `is_ranged_attack` = explicit Ostrozny opt-in, qualified by combat/prediction.
     """
 
     blob: UnitBlob
@@ -76,6 +78,7 @@ class EffectContext:
     is_charging: bool = False
     is_being_charged: bool = False
     attack_state: AttackState | None = None
+    is_ranged_attack: bool = False
 
 
 # Hook function types
@@ -173,6 +176,27 @@ def apply_weapon_modifiers(weapon: WeaponProfile, blob: UnitBlob) -> WeaponProfi
 # ---------------------------------------------------------------------------
 # Concrete passive abilities (MVP — 3 representative)
 # ---------------------------------------------------------------------------
+
+
+@register_attack_modifier("ostrozny")
+def _ostrozny_attack(context: EffectContext) -> int:
+    """Poz. 23: ranged +1 only with full state and no enemy within 12 inches."""
+    if not context.is_ranged_attack or context.state is None:
+        return 0
+    from app.services.engine.geometry import circle_edge_distance
+
+    actor = context.blob
+    for enemy in context.state.blobs:
+        if (
+            enemy.owner_player != actor.owner_player
+            and enemy.models_alive > 0
+            and enemy.location is Lokalizacja.FRONT
+            and circle_edge_distance(
+                actor.position, actor.radius_inches, enemy.position, enemy.radius_inches,
+            ) <= 12.0
+        ):
+            return 0
+    return 1
 
 
 @register_defense_modifier("cierpliwy")

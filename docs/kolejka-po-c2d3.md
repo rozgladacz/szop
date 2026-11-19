@@ -14,7 +14,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 
 | Kolejność | ID | Wynik |
 |---|---|---|
-| 1 | B4.4d.C2d3 | Działający prywatny Ostrożny v3 |
+| 1 | B4.4d.C2d3 | DONE 2026-11-19; prywatny Ostrożny v3, 3987 testów |
 | 2 | B4.4d.C2d4-spec | Audyt Bastionu |
 | 3 | B4.4d.C2d5-spec | Audyt Planowania |
 | 4 | B4.4d.C2d6-spec | Audyt Niestrudzonego |
@@ -80,6 +80,79 @@ closed-v3 gate, restart/replay/future RNG i failed-resolve immutability.
 Prediction używa tego samego warunku. Testy wskazane w specyfikacji:
 engine effects/combat/activation/checkpoints/interrupts, prediction parity,
 regression i publiczny transport fail-closed; pełny pytest i wspólny DoD.
+
+### Wynik implementacji C2d3 — 2026-11-19
+
+Baza: `d6b742d`. Hook `_ostrozny_attack` w `effects.py` jest jedynym miejscem
+skanu wrogów i pomiaru `circle_edge_distance`; `EffectContext.is_ranged_attack`
+ma domyślne False. Combat kwalifikuje każdy profil przez `_matching_closed_shoot`:
+pasujący zamknięty Shoot intent, bieżące bloby, canonical inventory i strict
+profile equality. Matcher reużywa `_canonical_action_from_attack` oraz
+`_same_weapon_profile` z protokołu przez lokalny import, bez drugiej walidacji
+inline. Dopiero ten gate przekazuje pełny stan i włącza hook. Szeroki
+`source_correct` pozostaje niezmieniony i celowo nie włącza Ostrożnego.
+
+`prediction.expected_damage(..., *, state=None)` ma jawny opcjonalny kontekst.
+Gdy podano pełny pasujący zamknięty stan v3, stosuje ten sam matcher i hook.
+Bez kontekstu wynik historyczny zostaje zachowany. Nie dodano pól DB, eventu,
+checkpointu, wire/API, klienta, JS ani CSS; `_READY_ATTACK_X` pozostaje puste.
+
+**Audyt wywołań.** `_resolve_ranged_profile_pools` jest wołane wyłącznie przez
+volley SSOT. Jego callerzy to single-profile `resolve_ranged_attack` oraz
+publiczny Strażnik z `source_correct=True`; Strażnik zachowuje istniejącą
+odmowę Ostrożnego. `phases._apply_shoot` nadal deleguje bez zmiany parametrów.
+Matcher służy wyłącznie combat i opt-in prediction. `aggregate_attack_modifier`
+nie zmienia swojego algorytmu deduplikacji; domyślny False chroni dotychczasowe
+konteksty melee. Pięciu konsumentów `expected_damage` (Greedy, PriorityV2/V3,
+ClaudeV1/V3) nie przekazuje state i zachowuje historyczny scoring. Pozostałe
+rodziny dziedziczące te wyceny nie otrzymują automatycznego opt-in.
+
+**Weryfikacja.** Pierwszy wymagany zestaw dziewięciu plików przed końcowym
+simplify: 804 passed. Po simplify i dodatkowych regresjach: effects/combat/
+activation/prediction **347 passed** oraz Strażnik i pięć rodzin scoringu
+**92 passed**. Pełny `pytest --tb=short -q`: **3987 passed, 4 warnings** zależności
+(195.27 s), po końcowym simplify; +61 testów wobec bazy3926. Goldeny
+i historyczny replay pozostają bez zmian.
+Nowe 61 przypadków obejmują granice dla trzech par promieni, drugi bliski wróg,
+statusy/lokalizacje/sojuszników/pokonanych, native/granted/both i Rozkaz revoke,
+realne trafienia v3 na naturalnej 3 przy jakości 4, clamp/naturalne 1/6,
+niepasujące intent/profile/actor/target/inventory/state, v2 ready, per-profile
+volley, restart/pełny replay/12 przyszłych rzutów, failed resolve/retry oraz
+Monte Carlo prediction po 1000 seedów dla dwóch wariantów bliskości.
+
+**Wydajność.** Fixture `_furia_battle` z istniejących testów protokołu:
+3 bloby, aktor z `ostrozny`, cel `(20,0)`, sojuszniczy nosiciel `(20,2)`,
+jedna broń/atak; closed Shoot v3, seed 225. `timeit.repeat`, mediana siedmiu
+prób po 1000 wywołań. Bazowe moduły z `git show d6b742d:app/services/engine/...`
+wczytano wyłącznie do pamięci tego samego procesu, bez zmiany checkoutu.
+Combat: **37.618 → 64.265 µs**, prediction bez opt-in: **11.447 → 8.799 µs**,
+nowy prediction z opt-in: **26.639 µs**. To pomiar diagnostyczny podczas
+równoległego pytest, nie SLA ani dowód przyspieszenia starego prediction.
+Dodatkowy pomiar 32 blobów: combat 64.988 µs, opt-in prediction 41.433 µs.
+Koszt poprawności obejmuje ponowny canonical preflight (w tym walidację
+strzału), potem liniowy skan; brak zdolności/closed gate omija ten preflight.
+Zero SQL/I/O/nowych rzutów, bez cache. Sam predykat ma O(1) dodatkowej pamięci.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_engine_effects.py tests/test_engine_combat.py tests/test_engine_activation_protocol.py tests/test_prediction_vs_simulation.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_engine_straznik.py tests/test_agents_greedy.py tests/test_agents_priority_v2.py tests/test_agents_priority_v3.py tests/test_agents_claude_v1.py tests/test_agents_claude_v3.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest --tb=short -q
+git diff --check
+```
+
+Simplify/review objęły per-profile gate, reuse canonical validation, brak
+poszerzenia source_correct, role/lifetime, pełny obraz wrogów, RNG i backward
+compatibility. Gate został uproszczony do jednego miejsca w core, bez nowego
+parametru AttackState przenoszonego przez volley. Security review/UI smoke
+nie dotyczą zakresu bez auth/input→DB/JS. Ograniczenia: jest to prywatny
+zakres closed-v3; legacy, publiczny Strażnik i katalog publikacji pozostają
+przed osobnymi etapami. Bez zmiany danych produkcyjnych.
+
+**Przeniesienie.** Własny commit C2d3 na Faza_A musi być potwierdzony na
+origin/Faza_A; cudzy hunk B6.2 i historyczne pliki pozostają poza nim.
+Baza i lokalne sekrety/konfiguracja wymagają osobnego backupu, jak powyżej.
+Następny zaakceptowany etap to **B4.4d.C2d4-spec — audyt Bastionu**.
+Nie uruchomiono go w ramach C2d3. Brak nowych pytań o reguły.
 
 ## 2–4. Audyty Bastionu, Planowania i Niestrudzonego
 
