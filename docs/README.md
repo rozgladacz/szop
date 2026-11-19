@@ -17,6 +17,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [PERFORMANCE.md](PERFORMANCE.md) | Baseline wydajności silnika kosztów, benchmarki |
 | [frontend_js_modules.md](frontend_js_modules.md) | Mapa modułów JS po Fazie III, call-site checklist |
 | [oznaczenie-mechaniki-plan.md](oznaczenie-mechaniki-plan.md) | Podział mechanik Oznaczenia i zakres pierwszego etapu C2d1 (Furia v3) |
+| [planowanie-spec.md](planowanie-spec.md) | C2d5-spec: Planowanie, status Przygotowany, lifecycle i granice przyszłej implementacji |
 | [bastion-spec.md](bastion-spec.md) | C2d4-spec: role kontrataku, Rozkaz i wykluczenie Bastionu z obecnego zakresu Oznaczenia |
 | [ostrozny-spec.md](ostrozny-spec.md) | C2d3-spec: audyt źródeł Ostrożnego, decyzja tylko dystansowo, kontrakt i testy implementacji |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |

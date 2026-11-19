@@ -16,7 +16,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 |---|---|---|
 | 1 | B4.4d.C2d3 | DONE 2026-11-19; prywatny Ostrożny v3, 3987 testów |
 | 2 | B4.4d.C2d4-spec | DONE 2026-11-19; Bastion wykluczony z obecnego scope |
-| 3 | B4.4d.C2d5-spec | Audyt Planowania |
+| 3 | B4.4d.C2d5-spec | DONE 2026-11-19; specyfikacja Planowania i drift statusu |
 | 4 | B4.4d.C2d6-spec | Audyt Niestrudzonego |
 | 5 | D5.3a | Strategia rozstawienia pod cele i jawny wybór |
 | 6 | D5.3b | Powtarzalne porównanie z gridem |
@@ -205,6 +205,31 @@ backup bazy/sekretów/konfiguracji według wspólnych warunków. SHA256 bazy
 bez zmian. Cudze pliki i historyczny hunk B6.2 zachowane poza commitem.
 Brak nowego pytania do użytkownika. Następny zaakceptowany etap to
 **C2d5-spec — audyt Planowania**, nieuruchomiony w C2d4-spec.
+
+### Wynik C2d5-spec — 2026-11-19
+
+Na bazie `a09e55a` powstała [specyfikacja Planowania](planowanie-spec.md).
+Warunek dotyczy aktualnego Przygotowanego rzeczywistego atakującego
+(poz. 25 Zdolności, pkt 17/22.c Rozjemcy). Start aktywacji usuwa status,
+Mobilizacja może go nadać ponownie; natywny kontratak i mark szarżującego
+mają różne role. `planowanie`, historyczne `przygotowanie` i status nie są
+aliasami. Brak hooka; prywatny handler/tag i monkeypatch test nie dowodzą
+mechaniki. Zapisano gate Shoot/Charge v3, prediction, macierz przyszłych
+testów i pliki/DoD osobnej implementacji, bez publikacji `_READY_ATTACK_X`.
+
+Zidentyfikowano istniejącą różnicę `_apply_defend` wobec pkt 22.b.iii/22.c.iv:
+Mobilizacja przy wcześniej Przyszpilonym usuwa tylko Przyszpilony zamiast
+obu stanów. Nie zmieniono kodu; przed przyszłą implementacją określić jawny
+zakres regresji statusów. To nie jest konflikt źródeł ani nowe pytanie.
+
+Weryfikacja: źródła **4/4 CLEAN**, bezpośredni DOCX/MD/YAML, 29 symboli AST
+w 9 plikach, call sites, 4 nowe cele linków, simplify/review oraz
+`git diff --check`. Wyłącznie Markdown; pytest
+nie ponawiano, **3987 passed** jest historyczną bazą C2d3. Zero SQL/RNG,
+bez DB/API/UI. Osobny commit na Faza_A potwierdzany na origin/Faza_A;
+backup bazy i sekretów/konfiguracji jak we wspólnym DoD. SHA256 bazy zgodny,
+cudze zmiany i historyczny hunk B6.2 zachowane. Następny zaakceptowany etap:
+**C2d6-spec — audyt Niestrudzonego**, nieuruchomiony tutaj. Brak nowych pytań.
 
 ## 5–6. D5.3a/b — strategia rozstawienia i pomiary
 

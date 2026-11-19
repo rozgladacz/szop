@@ -24,7 +24,7 @@ Katalog kandydatów wynika z tagów `oznaczenie_tak` w aktualnie odczytanym
 |---|---|
 | Furia, poz. 7 | Pierwszy, ograniczony etap C2d1 opisany niżej. |
 | Ostrożny, poz. 23 | C2d3-spec zakończone: [audyt i kontrakt](ostrozny-spec.md); decyzja użytkownika 2026-11-19: tylko dystansowe; C2d3 zakończone (prywatny closed Shoot v3 + prediction opt-in), pełne 3987 passed; [wynik i ograniczenia](kolejka-po-c2d3.md). |
-| Planowanie, poz. 25 | Osobno od istniejącego `przygotowanie`; zachować wcześniejsze odroczenie kosztów i publicznego katalogu. |
+| Planowanie, poz. 25 | C2d5-spec zakończone: [audyt statusu i lifecycle](planowanie-spec.md); kandydat do osobnego prywatnego hooka v3. Brak produkcyjnej implementacji; historyczne `przygotowanie` i koszty bez zmian. Wskazano istniejący drift mutex Mobilizacji. |
 | Mistrzostwo(X), poz. 13 | Osobny projekt parametru X; nie rozszerzać milcząco obecnego payloadu Oznaczenia. |
 | Bastion, poz. 1 | C2d4-spec zakończone: [audyt ról i czasu](bastion-spec.md); wykluczony z publikacji obecnego main-attacker-only Oznaczenia. Natywny efekt dotyczy kontratakującego, Rozkaz ma kierunek „−”; bez zmiany kodu/tagów. |
 | Niestrudzony, poz. 14 | Najpierw audyt momentu wyboru akcji względem czasu życia attack scope; nie przenosić efektu na następną akcję bez podstawy. |

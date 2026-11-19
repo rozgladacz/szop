@@ -20,7 +20,7 @@ zamknięcia poprzedniego. Wcześniejsze odłożenie D5.3 jest uchylone.
 
 - [x] **B4.4d.C2d3** — **DONE 2026-11-19**: prywatny Ostrożny w pasującym closed Shoot v3 i jawny prediction opt-in; tylko dystansowo, bez publikacji. Core **347 passed**, Strażnik/scoring **92 passed**, pełne **3987 passed**. [Wynik, pomiary i backup](kolejka-po-c2d3.md#1-b44dc2d3--implementacja-ostrożnego).
 - [x] **B4.4d.C2d4-spec** — **DONE 2026-11-19 (audyt)**: [Bastion](bastion-spec.md) dotyczy kontratakującego; wykluczony z publikacji obecnego main-attacker-only Oznaczenia. Źródła **4/4 CLEAN**, bez zmian kodu/tagów; brak nowej decyzji użytkownika.
-- [ ] **B4.4d.C2d5-spec** [automation-ready] — audyt Planowania i stanu Przygotowany, bez implementacji.
+- [x] **B4.4d.C2d5-spec** — **DONE 2026-11-19 (audyt)**: [Planowanie](planowanie-spec.md), status Przygotowany i lifecycle, propozycja prywatnego hooka v3 oraz istniejący drift mutex Mobilizacji. Źródła **4/4 CLEAN**, bez zmiany kodu; brak nowych pytań.
 - [ ] **B4.4d.C2d6-spec** [automation-ready] — audyt Niestrudzonego wobec wyboru akcji i attack scope, bez implementacji.
 - [ ] **D5.3a** [automation-ready] — strategia rozstawienia pod cele i jawny wybór w Pythonie; grid domyślny.
 - [ ] **D5.3b** [automation-ready] — powtarzalne porównanie strategii z gridem, po D5.3a.
