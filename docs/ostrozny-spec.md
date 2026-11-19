@@ -1,10 +1,11 @@
 # Ostrożny — audyt C2d3-spec i kontrakt przyszłej implementacji
 
-Status: **audyt zakończony 2026-11-18; zakres rozstrzygnięty przez użytkownika 2026-11-19: tylko dystansowe; implementacja wymaga osobnej akceptacji**.
-Baza: `3954634` na `Faza_A`, po C2d1/C2d2 i D5.2. Ten dokument nie
-zatwierdza implementacji ani publikacji Oznaczenia. D5.3a/b pozostają odłożone.
+Status: **audyt zakończony 2026-11-18; zakres rozstrzygnięty przez użytkownika 2026-11-19: tylko dystansowe; implementacja zaakceptowana 2026-11-19 jako C2d3**.
+Baza: `3954634` na `Faza_A`, po C2d1/C2d2 i D5.2. Akceptację implementacji i kolejność
+zapisuje [bieżąca kolejka](kolejka-po-c2d3.md). Publikacja Oznaczenia pozostaje
+osobnym zakresem; D5.3a/b także zaakceptowano 2026-11-19.
 
-## Źródła i jedno pytanie
+## Źródła i rozstrzygnięta decyzja
 
 Odczytano w tej sesji [Zdolności, poz. 23 i 49](../app/static/docs/SZOP_Zdolnosci.md)
 oraz [Rozjemcę, pkt 1, 2.e, 6, 11–12, 14, 16–17, 23, 26–27](../app/static/docs/SZOP_Rozjemca.md).
@@ -30,8 +31,8 @@ potwierdza wersję plików, nie usuwa niejednoznaczności wewnątrz tekstu.
 dystansowych. Bonus +1 wymaga braku wroga w 12″ od atakującego oddziału
 (poz. 23). Użytkownik wskazał, że podczas walki wręcz bliski przeciwnik
 i tak wyklucza spełnienie tego warunku. Wcześniejsze pytanie jest zamknięte.
-Decyzja rozstrzyga interpretację źródeł bez zmiany ich plików; nie oznacza
-jeszcze zlecenia implementacji ani wznowienia heartbeat.
+Decyzja rozstrzyga interpretację źródeł bez zmiany ich plików. Późniejsze
+polecenie użytkownika z 2026-11-19 zatwierdza implementację i wznowienie cyklu.
 
 Poniżej obowiązuje wariant dystansowy. Wzmianki o szerszym wariancie
 pozostają porównaniem z audytu, nie alternatywnym zakresem do realizacji.
@@ -114,7 +115,7 @@ zmiany publicznego payloadu na podstawie tego starego komentarza.
 
 ## Granice przyszłego etapu implementacyjnego
 
-Proponowany pierwszy zakres do osobnej akceptacji: **prywatne zamknięte ataki v3**,
+Zaakceptowany pierwszy zakres C2d3: **prywatne zamknięte ataki v3**,
 natywna zdolność oraz Oznaczenie; jawny kontekst prediction do ich estymacji.
 V1/v2, ranged bez pasującego closed-v3, bezpośrednie wywołania bez opt-in
 i publiczny Strażnik zachowują dotychczasowe eventy/wynik/RNG. To granica
@@ -168,8 +169,8 @@ Przyszły DoD: decyzja użytkownika z 2026-11-19 zachowana;
 Layer Checklist/SSOT/performance gate; testy celowane i pełny `pytest -q`;
 call-site audit; simplify/review; security review tylko przy rzeczywistym
 rozszerzeniu auth/input→DB; ponowne testy po poprawkach; osobny commit
-na `Faza_A` potwierdzony na `origin/Faza_A`. Brak zgody na automatyczny start
-implementacji wynika z granicy zatwierdzonego etapu specyfikacji.
+na `Faza_A` potwierdzony na `origin/Faza_A`. Automatyczny wybór C2d3 jest
+dopuszczony akceptacją użytkownika z 2026-11-19 i etykietą w roadmapie.
 
 ## Weryfikacja tego audytu i przeniesienie
 

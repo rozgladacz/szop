@@ -1,5 +1,11 @@
 # Kolejne przebiegi po C2d1
 
+> Aktualizacja 2026-11-19: poprzednia kolejka jest zamknięta. Użytkownik
+> zaakceptował implementację Ostrożnego i wznowił cykl; D5.3a/b wracają do
+> realizacji. Bieżące zakresy i kolejność: [kolejka po C2d3](kolejka-po-c2d3.md).
+> Wcześniejsze wzmianki o odłożeniu/pauzie opisują stan historyczny.
+
+
 Plan przygotowany 2026-11-17 na `Faza_A`, po `13abcd2`. C2d1 zakończyło
 się wynikiem 3777 zaliczonych testów.
 
@@ -484,7 +490,8 @@ D5.3a i D5.3b nadal są odłożone. Brak nowych decyzji użytkownika.
 
 ## 4. D5.3 — opcjonalne rozstawianie pod cele
 
-**Status** D5.3a i D5.3b odłożone przez użytkownika 2026-11-18.
+**Status** Odłożone 2026-11-18, zaakceptowane do realizacji 2026-11-19.
+Aktualna kolejność i DoD w [nowej kolejce](kolejka-po-c2d3.md).
 Podział poniżej pozwala ocenić osobno strategię i jej skuteczność.
 
 **Zależność** Zamknięte D5.2. Strategia korzysta z tego samego walidatora,

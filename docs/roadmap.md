@@ -9,20 +9,41 @@
 
 ---
 
+## Aktywna kolejka — akceptacje 2026-11-19
+
+Użytkownik zaakceptował Ostrożnego (wyłącznie dystansowo), audyty Bastionu,
+Planowania i Niestrudzonego, obie części D5.3, przygotowanie publikacji
+Oznaczenia, audyt botów, podłączenie istniejących agentów i podział Play vs AI.
+[Zakresy, DoD, warstwy, weryfikacja i backup](kolejka-po-c2d3.md).
+Jeden worker naraz; obowiązuje poniższa kolejność, każdy punkt zależy od
+zamknięcia poprzedniego. Wcześniejsze odłożenie D5.3 jest uchylone.
+
+- [ ] **B4.4d.C2d3** [automation-ready] — implementacja prywatnego Ostrożnego v3, tylko dystansowo, według rozstrzygniętej specyfikacji.
+- [ ] **B4.4d.C2d4-spec** [automation-ready] — audyt Bastionu: rola i czas działania, bez implementacji.
+- [ ] **B4.4d.C2d5-spec** [automation-ready] — audyt Planowania i stanu Przygotowany, bez implementacji.
+- [ ] **B4.4d.C2d6-spec** [automation-ready] — audyt Niestrudzonego wobec wyboru akcji i attack scope, bez implementacji.
+- [ ] **D5.3a** [automation-ready] — strategia rozstawienia pod cele i jawny wybór w Pythonie; grid domyślny.
+- [ ] **D5.3b** [automation-ready] — powtarzalne porównanie strategii z gridem, po D5.3a.
+- [ ] **B4.4d.C2-publication-spec** [automation-ready] — przygotowanie ograniczonej publikacji Oznaczenia, katalog i security gates; bez samej publikacji.
+- [ ] **D6.1-audit** [automation-ready] — audyt istniejących botów i gotowości do publicznego lifecycle.
+- [ ] **D6.2-connect** [automation-ready] — podłączenie istniejących agentów przez klienta i propozycje akcji z zachowaniem zatwierdzania.
+- [ ] **D6.3-play-plan** [automation-ready] — podział Play vs AI na małe etapy na podstawie wyników audytu/integracji.
+
 ## Kolejka po C2d1 — akceptacje 2026-11-18
 
 Jeden przebieg wykonuje jeden etap. [Zakresy, zależności, testy i warunki
 przekazania na kolejny komputer](kolejka-po-c2d1.md) są punktem startowym.
 Użytkownik zaakceptował punkty 1, 2, 3 i 5 oraz poprawkę kontroli celu do 2″.
 Kolejność realizacji to B3.objectives-2in → C2d2 → D5.1 → D5.2 → C2d3-spec.
-D5.3a i D5.3b są odłożone. Użytkownik zlecił wznowienie istniejącego heartbeat.
+W tej historycznej kolejce D5.3a/b były odłożone; akceptacja z 2026-11-19
+powyżej przywraca je do realizacji. Cykl ma działać w istniejącym czacie.
 
 - [x] **B3.objectives-2in** — **DONE 2026-11-18**: kontrola celu ≤2″ od obwodu oddziału, regresje silnika/botów i replay; celowane **226 passed**, pełne **3828 passed**. Uzasadnienie goldenów w [ADR-0058](adr/0058-objective-control-two-inches.md), wynik w [kolejce](kolejka-po-c2d1.md#0-b3objectives-2in--kontrola-celu-w-zasięgu-2).
 - [x] **B4.4d.C2d2** — **DONE 2026-11-18**: oba aliasy Podwójnego w głównym ataku i kontrataku zamkniętej Szarży v3, niezależnie od Furii/Kontry; celowane **370 passed**, pełne **3848 passed**. Wynik, replay/RNG, ograniczenia i obserwacja testowa w [kolejce](kolejka-po-c2d1.md#1-b44dc2d2--nazwa-podwójnego-w-prywatnym-melee-v3).
 - [x] **D5.1** — **DONE 2026-11-18**: czysty walidator miejsca rozstawienia i wspólna statyczna geometria E4; jawne zajęte pozycje, strefa i Niedostępny wszystkich kształtów. Celowane **227 passed**, pełne **3906 passed**. Wynik i granica integracji D5.2 w [kolejce](kolejka-po-c2d1.md#2-d51--wspólna-walidacja-miejsca-rozstawienia).
 - [x] **D5.2** — **DONE 2026-11-18**: Grid/Random i runner używają walidatora D5.1, sekwencyjnego roboczego stanu i jawnych zajętych pozycji; ograniczony fallback i błędy bez częściowego zapisu. Celowane **195 passed**, pełne **3926 passed**. Kontrakt, pomiary, replay i backup w [kolejce](kolejka-po-c2d1.md#3-d52--boty-wybierają-wolne-miejsca).
-- [ ] **D5.3** — odłożone D5.3a i D5.3b, strategia pod cele oraz porównanie z gridem.
-- [x] **B4.4d.C2d3-spec** — **DONE 2026-11-18 (audyt)**: [specyfikacja Ostrożnego](ostrozny-spec.md), mapa combat/prediction, granice i DoD. Źródła 4/4 CLEAN; decyzja użytkownika 2026-11-19: tylko ataki dystansowe; implementacja wymaga osobnej akceptacji. Bez zmian kodu i nowego etapu automation-ready.
+- Dalsze D5.3a/b są osobnymi zaakceptowanymi etapami w aktywnej kolejce powyżej.
+- [x] **B4.4d.C2d3-spec** — **DONE 2026-11-18 (audyt)**: [specyfikacja Ostrożnego](ostrozny-spec.md), mapa combat/prediction, granice i DoD. Źródła 4/4 CLEAN; decyzja użytkownika 2026-11-19: tylko ataki dystansowe; implementacja zaakceptowana 2026-11-19 jako C2d3 w aktywnej kolejce. Sam audyt nie zmieniał kodu.
 
 ## Plan długofalowy — 5 strumieni (12–24 mies.)
 
