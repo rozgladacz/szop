@@ -15,7 +15,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 | Kolejność | ID | Wynik |
 |---|---|---|
 | 1 | B4.4d.C2d3 | DONE 2026-11-19; prywatny Ostrożny v3, 3987 testów |
-| 2 | B4.4d.C2d4-spec | Audyt Bastionu |
+| 2 | B4.4d.C2d4-spec | DONE 2026-11-19; Bastion wykluczony z obecnego scope |
 | 3 | B4.4d.C2d5-spec | Audyt Planowania |
 | 4 | B4.4d.C2d6-spec | Audyt Niestrudzonego |
 | 5 | D5.3a | Strategia rozstawienia pod cele i jawny wybór |
@@ -180,6 +180,31 @@ macierz testów, wykonalny ograniczony etap implementacyjny albo uzasadnione
 wykluczenie. Nierozstrzygalny konflikt źródeł daje jedno pytanie z
 rekomendacją; audyt można zamknąć z pytaniem, dalszy cykl blokuje koordynator.
 Weryfikacja: źródła/sync, symbole i linki, diff review; docs-only DoD wyżej.
+
+### Wynik C2d4-spec — 2026-11-19
+
+Na bazie `4bf700f` powstał [audyt Bastionu](bastion-spec.md). Właściwym
+podmiotem jest kontratakujący obrońca (poz. 1/10 Zdolności, pkt 14.d.iv/17
+Rozjemcy), a obecny attack override wiąże wyłącznie deklarowanego
+szarżującego. Bastion zostaje **wykluczony z katalogu publikacji obecnego
+main-attacker-only Oznaczenia**. Tag źródłowy pozostaje prawdziwy; wykluczenie
+dotyczy obecnego zakresu protokołu. Nie dodano implementacji ani nowego
+okna kontrataku. Rozkaz dla Bastionu ma kierunek „−”, więc source-correct
+payload odbiera zdolność, nie nadaje jej.
+
+Źródła: `rules_sources_check.py` **4/4 CLEAN**, odczyt DOCX/MD/YAML zgodny
+w zakresie Bastionu; PDF zweryfikowany hashem. Sprawdzono symbole i call
+sites, role/lifetimes, istniejące regresje native/counter oraz macierz
+przyszłych testów. Simplify/review, link check i `git diff --check`.
+Kod/testy niezmienione: bez ponownego pytest; **3987 passed** to historyczny
+wynik C2d3. Nie zmieniono DB/API/JS, RNG ani kosztów. Wskazano istniejące
+ograniczenie kolejności MVP counter/main, bez rozszerzania tego audytu.
+
+Osobny commit dokumentacji na `Faza_A` potwierdzany na `origin/Faza_A`;
+backup bazy/sekretów/konfiguracji według wspólnych warunków. SHA256 bazy
+bez zmian. Cudze pliki i historyczny hunk B6.2 zachowane poza commitem.
+Brak nowego pytania do użytkownika. Następny zaakceptowany etap to
+**C2d5-spec — audyt Planowania**, nieuruchomiony w C2d4-spec.
 
 ## 5–6. D5.3a/b — strategia rozstawienia i pomiary
 

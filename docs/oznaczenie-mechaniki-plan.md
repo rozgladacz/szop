@@ -26,7 +26,7 @@ Katalog kandydatów wynika z tagów `oznaczenie_tak` w aktualnie odczytanym
 | Ostrożny, poz. 23 | C2d3-spec zakończone: [audyt i kontrakt](ostrozny-spec.md); decyzja użytkownika 2026-11-19: tylko dystansowe; C2d3 zakończone (prywatny closed Shoot v3 + prediction opt-in), pełne 3987 passed; [wynik i ograniczenia](kolejka-po-c2d3.md). |
 | Planowanie, poz. 25 | Osobno od istniejącego `przygotowanie`; zachować wcześniejsze odroczenie kosztów i publicznego katalogu. |
 | Mistrzostwo(X), poz. 13 | Osobny projekt parametru X; nie rozszerzać milcząco obecnego payloadu Oznaczenia. |
-| Bastion, poz. 1 | Najpierw zweryfikować właściwą rolę i czas działania; istniejący warunek w kontrataku nie dowodzi gotowości attack scope. |
+| Bastion, poz. 1 | C2d4-spec zakończone: [audyt ról i czasu](bastion-spec.md); wykluczony z publikacji obecnego main-attacker-only Oznaczenia. Natywny efekt dotyczy kontratakującego, Rozkaz ma kierunek „−”; bez zmiany kodu/tagów. |
 | Niestrudzony, poz. 14 | Najpierw audyt momentu wyboru akcji względem czasu życia attack scope; nie przenosić efektu na następną akcję bez podstawy. |
 | Dywersant, poz. 6 | Pozostaje odroczony; wcześniejsza decyzja MVP nie jest uchylana ogólnym wyborem kierunku Oznaczenia. |
 
