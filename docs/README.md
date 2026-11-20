@@ -25,6 +25,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [D5.3b — eksperyment rozstawienia](experiments/d5_3b/README.md) | Zamrożony manifest, dane i porównanie grid/objectives |
 | [boty-audit.md](boty-audit.md) | D6.1: bot × protokół × scenariusz, reprodukcje luk legalności, koszt i prerekwizyty D6.2 |
 | [boty-connect.md](boty-connect.md) | D6.2: jednorazowy priority/v1 → pending proposal, osobna zgoda ownera, zakres i rekoncyliacja |
+| [play-vs-ai-plan.md](play-vs-ai-plan.md) | D6.3: małe etapy dojścia od podglądu i priority/v1 do gry w UI, consent/protokoły/setup/restart i testy |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |
 | [kolejka-po-c2d1.md](kolejka-po-c2d1.md) | Pięć kolejnych przebiegów z zależnościami, zakresem i kryteriami zakończenia |
 

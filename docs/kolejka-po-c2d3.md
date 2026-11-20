@@ -23,7 +23,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 | 7 | B4.4d.C2-publication-spec | DONE 2026-11-20; katalog gotowości i security gates, bez publikacji |
 | 8 | D6.1-audit | DONE 2026-11-20; audyt 9 rodzin, transport v1, luki legalności i prerekwizyty D6.2 |
 | 9 | D6.2-connect | DONE 2026-11-20; priority/v1 one-step → pending, osobna zgoda ownera, 4112 testów |
-| 10 | D6.3-play-plan | Podział Play vs AI na małe etapy |
+| 10 | D6.3-play-plan | DONE 2026-11-20; indeksowany plan P1–P16, bez implementacji i nowych markerów |
 
 Przed pierwszą edycją worker czyta `AGENTS.md`, potwierdza cel/DoD,
 Layer Checklist i SSOT oraz aktualny HEAD/cudze zmiany. Każdy rules claim
@@ -662,6 +662,44 @@ plan z kolejnością, zależnościami, plikami, Layer Checklist, kontraktami,
 SQL/time budgets i testami każdej części; konkretna decyzja produktowa tylko
 jeżeli naprawdę nie wynika z obecnej akceptacji. Sama implementacja UI
 wymaga wyboru z tego podziału; nie dodawać jej samodzielnie automation-ready.
+
+### Wynik D6.3 — 2026-11-20
+
+[Plan Play vs AI](play-vs-ai-plan.md) powstał na bazie commitu D6.2
+`23022eb9becbf883ec020a3f5ca669d3b7d499f1`. Zawiera opisowy przepływ UI,
+maszynę stanów próby, mapę rzeczywistych kontraktów/SSOT i propozycje
+P1–P16 z zależnościami, plikami, warstwami, SQL/time gates oraz testami.
+P12 i P14 wskazują oddzielne zamykane przebiegi backend/planner/UI.
+
+Rekomendowany pierwszy wybór: **P1 — fail-closed v2/v3 w legacy consent**.
+Pierwszy przyrost UI to P2–P5: trwała próba i jawny producent jednego
+kroku priority/v1 do pending, osobna zgoda ownera. Dalsze części obejmują
+naprawy wspólnej legalności, consent v2/v3, decyzję obrońcy o kontrataku,
+setup/rozstawienie, teren, restart i odtwarzanie. Automatyczne wykonywanie
+tur bota wymaga osobnej decyzji; wybór bota nie nadaje zgody ani uprawnień.
+Nowe kontrakty producenta, v3/kontrataku i round-0 wymagają późniejszego
+wyboru, nie są zatwierdzone przez samo planowanie. Publiczny katalog X
+pozostaje osobnym zakresem.
+
+Weryfikacja: odczyt źródła Rozjemcy pkt 4/5/8–14/22/24, rzeczywistych
+routerów/services/clienta, registry/factory, adaptera D6.2 i modułów UI;
+audyt symboli/call sites/linków/kotwic i zależności oraz `git diff --check`.
+`scripts/rules_sources_check.py`: **4/4 CLEAN**.
+Ręczne simplify/review/security-review rozdzieliły consent od execution,
+dedup create od idempotencji approve i stan bitwy od edycyjnego stanu
+rozpiski. Zero zmian kodu/testów/UX/auth/DB; pełnego pytest nie ponawiano
+dla czystego Markdown. Wynik **4112 passed / 4 warnings** jest bazą D6.2.
+
+Własny nowy commit D6.3 na Faza_A i potwierdzenie identycznego SHA przez
+`git ls-remote origin refs/heads/Faza_A` są częścią zamknięcia. Cudzy hunk
+B6.2 i historyczne HANDOFF pozostają poza commitem. SHA256 produkcyjnej
+bazy bez zmian; baza/sekrety/lokalna konfiguracja/scheduler wymagają
+osobnego backupu zgodnie z początkiem kolejki. Plan zawiera instrukcję
+kontynuacji na innym komputerze i rekoncyliacji niepewnych prób D6.2.
+
+**Zaakceptowana kolejka 2026-11-19 zakończona.** Nie oznacza to zakończenia
+całej roadmapy. Dalsza implementacja wymaga wyboru z planu; nie dodano
+nowych markerów gotowości ani nie uruchomiono kolejnego etapu.
 
 ## Weryfikacja przygotowania kolejki — 2026-11-19
 
