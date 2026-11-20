@@ -22,7 +22,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 | 6 | D5.3b | Powtarzalne porównanie z gridem |
 | 7 | B4.4d.C2-publication-spec | DONE 2026-11-20; katalog gotowości i security gates, bez publikacji |
 | 8 | D6.1-audit | DONE 2026-11-20; audyt 9 rodzin, transport v1, luki legalności i prerekwizyty D6.2 |
-| 9 | D6.2-connect | Adapter istniejących agentów do propozycji akcji |
+| 9 | D6.2-connect | DONE 2026-11-20; priority/v1 one-step → pending, osobna zgoda ownera, 4112 testów |
 | 10 | D6.3-play-plan | Podział Play vs AI na małe etapy |
 
 Przed pierwszą edycją worker czyta `AGENTS.md`, potwierdza cel/DoD,
@@ -577,6 +577,75 @@ bitwa, zły scope, wygasły token, stale sequence, timeout i powtórka nie
 powodują niejawnego zapisu ani wycieku. Testy agent proposals/token security,
 HTTP client, battle action proposals i wybranych botów + pełny pytest,
 security review, smoke przy JS. Udokumentować protokoły/zdolności/granice.
+
+### Wynik integracji D6.2 — 2026-11-20
+
+[Instrukcja, zakres i odtwarzanie](boty-connect.md) oraz
+[adapter/CLI](../szop_client/bot_proposals.py) są trwałym wynikiem etapu.
+Koordynator przyjął rekomendację D6.1: `priority`, nowa instancja z jawnym
+seedem, publiczny v1 i jeden krok niebojowy. Działające faktyczne decyzje
+to Manewr, Mobilizacja (`Defend`) i `discard_exhausted`; wybrany przez bota
+Shoot/Charge daje jawny brak propozycji bez zamiany akcji.
+
+Warstwy: nowy leaf klienta/CLI, testy i docs. Nie zmieniano silnika, schema,
+HTTP API, auth, JS/CSS ani katalogu X. Reużyto registry/factory, publiczny
+`get_battle_metadata` + atomowy `get_state_checkpoint` (state i sequence
+razem), codec akcji i ManeuverPlanner. Późniejszy race pozostaje chroniony
+CAS-em serwera. Wstępne gate'y wymagają zgodnego v1/headu/rundy/identity,
+active perspective, dopuszczonego aktora i profili bez zdolności/override;
+odrzucają pending context, Przyszpilony/nieznane statusy i niezweryfikowaną
+geometrię. Pierwszy tryb wymaga **jawnie pustego terrain**; brak obsługi terenu
+jest konserwatywnym zawężeniem, obejmującym Niebezpieczny.
+
+`BotProposalAttempt.run()` jest one-shot i chroniony lockiem. Zwraca ten sam
+wynik przy powtórce/concurrency w instancji. Nie ma retry, automatycznego
+approval ani bezpośredniego wykonania. Timeout/5xx/zerwanie/malformed po POST
+wymaga jawnej rekoncyliacji ownera. Endpoint nie daje idempotency key/reuse,
+więc dedup nie przechodzi przez nową instancję, CLI, restart lub komputer.
+Dokumentacja opisuje sprawdzenie istniejących propozycji przed nową próbą.
+Owner/scope pozostają serwerowym SSOT: tylko `battle:read` oraz
+`agent_proposals:create`, bez `battle:act` i bez nowych kont/uprawnień.
+
+**Weryfikacja:** 59 nowych przypadków w `test_bot_proposals.py`; rzeczywisty
+HttpClient → FastAPI → SQLite in-memory → pending, bez zmiany Battle/events/
+checkpoint/RNG do osobnego istniejącego HTTP approval przez sesję ownera.
+Approval daje executed i state/event/replay parity, a ponowny approval nie
+wykonuje akcji drugi raz. Negatywne obejmują kind/alias, v2/v3, mismatch,
+terminal/perspective/actor/status/abilities/hazard/geometry, faktyczny
+Shoot/Charge, foreign/missing/expiry/scope, prawdziwy CAS race, timeout
+przed/po zapisie, 5xx/malformed, redakcję sekretów i concurrent run.
+Zestaw proposals/token security/HTTP/priority/registry/factory/audit:
+**370 passed, 1 dependency warning**, 15,53 s. Pełny `pytest -q`:
+**4112 passed, 4 dependency warnings**, 226,10 s; po końcowym simplify
+ponowiony pełny gate: **4112 passed, 4 dependency warnings**, 221,67 s.
+Rzeczywisty moduł CLI przeszedł `--help` bez requestów. Komendy są
+w instrukcji D6.2. Ostrzeżenia pochodzą z reportlab/openpyxl.
+
+**Koszt:** każdy dodatni krok 2 GET + 1 POST, SELECT **4+5+6=15**,
+bot **0 SQL**; brak zapytań per kandydat. Standardowe auth audit/last_used
+mogą zapisywać wcześniej niż domena; asercje oddzielają te zapisy od bitwy.
+Próbka samej decyzji seed 19, dwie jednostki: Manewr 1,216 ms,
+discard_exhausted i Mobilizacja po 0,061 ms. To próbka, nie SLA.
+Hot path `/quote`/`/rosters/{id}` i indeksy są nietknięte.
+
+Slash niedostępne: wykonano ręczne simplify/review/security-review. Usunięto
+nieużywany import testowy; sprawdzono call sites (wyłącznie nowy CLI/testy,
+bez zmian podpisów istniejących klientów), SSOT, redakcję błędów, scope/
+no-oracle, osobną zgodę, brak prywatnego RNG i brak retry. Review domknął
+overflow promienia i typ statusu HTTP; poprawki przeszły ponowne testy.
+Ruff nie jest zainstalowany w `.venv`; ręczny AST check importów i przegląd
+diffu wykonano bez instalowania nowych zależności. JS nie zmieniano.
+
+**Przeniesienie i podkład D6.3:** kod/testy/docs w osobnym commicie Faza_A
+potwierdzonym na origin/Faza_A; środowisko odtworzyć z requirements i
+editable szop_client. Po zmianie komputera lub restarcie najpierw
+rekoncyliacja prób. Baza i lokalne sekrety/konfiguracja oraz scheduler/runtime
+wymagają osobnego backupu. Produkcyjna `data/szop.db` nietknięta, SHA256
+`AB6D92E654BB6A3D050A4FAC88A7533DA89539E4CB351E38E526EF086C5BE8E6`.
+Zachowano cudzy hunk B6.2 oraz historyczne HANDOFF poza commitem. D6.3
+powinno uwzględnić ograniczenia walki/walidatora, lifecycle consent v2/v3,
+teren, restart/deduplikację i UX. Nie wdrażano ich w D6.2 ani nie dodawano
+nowych markerów. Brak nowej decyzji użytkownika do tego zamknięcia.
 
 ## 10. D6.3-play-plan — podział Play vs AI
 

@@ -35,3 +35,9 @@ provides the HTTP transport.
 Building or publishing a wheel/sdist, bundling `app`, and uploading to a package
 index are outside this contract. A future publishable HTTP-only distribution
 needs a separate architecture decision about the shared codecs.
+
+The optional leaf `szop_client.bot_proposals` connects one existing `priority`
+decision to a pending public v1 proposal, with owner approval kept separate.
+It loads the existing local bot explicitly; top-level imports remain lazy.
+Usage, supported states/actions, one-shot instance deduplication and restart/
+timeout reconciliation are in [D6.2](../docs/boty-connect.md).

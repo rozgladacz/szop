@@ -7,6 +7,11 @@ Narzędzia CLI uruchamiane manualnie lub w CI. Nie są częścią runtime aplika
 - entry-point `main(argv=None) -> int` (testowalne bez subprocess),
 - exit code 0 = sukces, 1+ = błąd (semantyka per skrypt poniżej).
 
+Jednorazowy adapter bota D6.2 jest leaf CLI klienta, uruchamianym przez
+`python -X utf8 -m szop_client.bot_proposals`, a nie skryptem tego katalogu.
+[Instrukcja i granice rekoncyliacji](../docs/boty-connect.md) opisują token,
+seed, v1, obsługiwane akcje i osobne zatwierdzenie ownera.
+
 ## Komendy projektu (wrappery w `Makefile`)
 
 | Cel `make` | Skrypt | Co robi |
