@@ -160,6 +160,13 @@ Komendy, wyniki testów i warunki przeniesienia są w
 
 ## Późniejsza publikacja
 
+**C2-publication-spec zakończone 2026-11-20:** [katalog i security gates](oznaczenie-publication-spec.md).
+Publiczny katalog pozostaje pusty. Rzeczywiste mechaniki prywatne Furii i
+Ostrożnego są kandydatami, lecz wymagają pozytywnych przepływów publicznych
+oraz pełnej macierzy negatywnej przed osobno zatwierdzoną publikacją.
+Podwójny jest zależnością broni, a Bastion i Niestrudzony są wykluczone
+z obecnego attack-only zakresu. Audyt Planowania nie jest implementacją.
+
 Odblokowanie publicznego Oznaczenia jest osobnym etapem po potwierdzeniu
 gotowości wybranych X. Wymaga jawnego zakresu wspieranych wartości i testów
 auth/no-oracle, rollback/restart/RNG, jednego POST klienta oraz SQL gates.

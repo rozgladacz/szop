@@ -20,7 +20,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 | 4 | B4.4d.C2d6-spec | DONE 2026-11-20; wykluczenie attack-only, luka walidacji powtórzeń |
 | 5 | D5.3a | Strategia rozstawienia pod cele i jawny wybór |
 | 6 | D5.3b | Powtarzalne porównanie z gridem |
-| 7 | B4.4d.C2-publication-spec | Przygotowanie ograniczonej publikacji Oznaczenia |
+| 7 | B4.4d.C2-publication-spec | DONE 2026-11-20; katalog gotowości i security gates, bez publikacji |
 | 8 | D6.1-audit | Audyt istniejących botów i gotowości integracji |
 | 9 | D6.2-connect | Adapter istniejących agentów do propozycji akcji |
 | 10 | D6.3-play-plan | Podział Play vs AI na małe etapy |
@@ -442,6 +442,40 @@ endpointów lub danych produkcji. Zliczyć istniejące SQL i wskazać przyszłe
 budżety. DoD: jawny katalog bez domniemanej gotowości z samego audytu,
 konkretne pliki/kontrakty i negatywna macierz testów, review/security review,
 linki i diff check. Przygotowanie nie upoważnia do samej publikacji.
+
+### Wynik C2-publication-spec — 2026-11-20
+
+Na bazie `0ef2968` powstał indeksowany [plan ograniczonej publikacji](oznaczenie-publication-spec.md).
+Publiczny katalog nadal **pusty**; prywatna Furia jest propozycją pierwszego
+minimalnego katalogu, Ostrożny drugiego rozszerzenia. Podwójny to zależność
+broni, nie osobny pasywny X; Bastion i Niestrudzony są wykluczone z obecnego
+attack-only scope. Planowanie pozostaje audytem bez hooka. Mobilizacja oraz
+native/Rozkaz Niestrudzony mają własne przyszłe prerekwizyty, bez napraw w tym
+etapie. Tabela opiera się na źródłach i rzeczywistych call sites, nie tagach.
+
+Audyt obejmuje private core → durable service → HTTP → HttpClient → MCP → UI,
+owner/scope/no-oracle, role nosiciela/atakującego/celu, stale/CAS, rollback,
+restart/checkpoint/event tail i RNG. Rozdzielono transakcję domeny (router)
+od wcześniejszego commitu audytu autoryzacji bearera. Wskazano brakujące
+pozytywne przepływy i małe przyszłe etapy; **nie otrzymały automation-ready**.
+MCP nadal ma istniejące propozycje zatwierdzane przez użytkownika, bez nowego
+bezpośredniego write toola. Nie zmieniono `_READY_ATTACK_X`, API lub uprawnień.
+
+**Weryfikacja:** `rules_sources_check.py` **4/4 CLEAN**; pięć istniejących
+izolowanych testów SQL/fail-closed/retry-RNG **5 passed, 1 dependency warning**.
+Zmierzono istniejące pułapy 5 SELECT service / 6 session / 7 bearer; accepted-X
+ma je dopiero udowodnić. Test prywatnego durable seam nadaje Furię podczas
+Shoot, więc nie dowodzi jej efektu w Szarży. Dokładne testy i komendy są
+w specyfikacji. Odczyt źródeł/symboli, linki, diff check oraz ręczne odpowiedniki
+simplify/review/security review; docs-only, bez ponownego pełnego pytest.
+Historyczna baza po D5.3b: 4025 passed, nie wynik tego przebiegu.
+
+**Przeniesienie:** osobny nowy commit na Faza_A, potwierdzany na origin/Faza_A.
+Wszystkie artefakty etapu w Git. Baza nietknięta (SHA256 we wspólnym DoD);
+baza i lokalne sekrety/konfiguracja wymagają osobnego backupu. Zastane pliki
+i hunk B6.2 poza commitem. Brak nowego pytania o reguły/uprawnienia; sama
+publikacja pozostaje do osobnego zatwierdzenia. Następny zaakceptowany etap
+to **D6.1-audit**; ten worker go nie uruchamia.
 
 ## 8. D6.1-audit — audyt botów
 
