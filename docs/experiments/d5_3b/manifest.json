@@ -1,0 +1,81 @@
+{
+  "schema": "szop.deployment_experiment/v1",
+  "base_commit": "5588fedfc021129c6a0480c8dd4b7d4609c99d39",
+  "fixtures": [
+    {
+      "id": "standard_a",
+      "map": "standard_a",
+      "map_seed": 19
+    },
+    {
+      "id": "lustrzana_a",
+      "map": "lustrzana_a",
+      "map_seed": 19
+    },
+    {
+      "id": "symetryczna_a",
+      "map": "symetryczna_a",
+      "map_seed": 19
+    },
+    {
+      "id": "demo_skirmish",
+      "path": "tests/fixtures/battles/demo_skirmish.yaml"
+    },
+    {
+      "id": "objective_clash",
+      "path": "tests/fixtures/battles/objective_clash.yaml"
+    }
+  ],
+  "policies": [
+    "priority",
+    "priority3"
+  ],
+  "battle_seeds": [
+    11,
+    19,
+    42
+  ],
+  "swaps": [
+    false,
+    true
+  ],
+  "initiatives": [
+    0,
+    1
+  ],
+  "strategy_pairs": [
+    [
+      "grid",
+      "grid"
+    ],
+    [
+      "grid",
+      "objectives"
+    ],
+    [
+      "objectives",
+      "grid"
+    ],
+    [
+      "objectives",
+      "objectives"
+    ]
+  ],
+  "deployment_zones": [
+    [
+      0,
+      0,
+      72,
+      12
+    ],
+    [
+      0,
+      36,
+      72,
+      48
+    ]
+  ],
+  "repeats": 2,
+  "max_activations": 2000,
+  "ruleset_version": "v1"
+}

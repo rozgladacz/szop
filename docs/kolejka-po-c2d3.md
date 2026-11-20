@@ -369,6 +369,66 @@ DoD: komendy, parametry, hashe i dane wyniku dostępne w Git, nie tylko
 ignorowane reports; gorszy wynik również kończy etap. Nie przełączać
 milcząco domyślnej strategii. Kod skryptu wymaga pełnego pytest.
 
+**Wynik D5.3b 2026-11-20 — zamknięty** Baza `5588fed`.
+[Metodyka i rekomendacja](experiments/d5_3b/README.md),
+[zamrożony manifest](experiments/d5_3b/manifest.json),
+[surowe dane](experiments/d5_3b/results.json) i
+[tabele wyniku](experiments/d5_3b/results.md) są wersjonowane w Git.
+Leaf `scripts/deployment_experiment.py` reużywa runner, helper wyboru,
+walidator D5.1, factory/registry i replay; bez zmian kodu produkcji.
+
+480 przypadków, 960 wykonań: trzy generowane mapy (seed 19), dwa istniejące
+YAML, polityki priority/priority3 w parach tej samej polityki, seedy 11/19/42,
+obie zamiany armii i inicjatywy, wszystkie cztery pary grid/objectives,
+2 powtórzenia. Manifest zamrożono przed pomiarem. Wszystkie przypadki
+zakończyły pełną grę, bez błędów/cap; wszystkie powtórzenia zgodne poza
+czasem i wszystkie pełne replay równe live. Powtórki nie zwiększają
+liczby przypadków w statystykach. Hash manifestu, źródeł i bazowego commitu
+są w danych; ograniczenia CRLF/LF oraz odtworzenie opisano w metodyce.
+
+Mieszane 240 przypadków: **cele 174 wygrane (72,5%), grid 30 (12,5%),
+36 remisów (15%)**. Cele przegrały komórkę objective_clash/priority3:
+10 wygranych vs 12 gridu i 2 remisy. Najbliższy cel: średni dystans
+15,655→4,245 cala, najgorszy 25,755→12; średnie przestrzenne pokrycie
+2,2→2,4 różnych najbliższych celów/strona. Cele mają 4 jawne przydziały,
+ale nie są one tym samym co najbliższe cele ani formalna kontrola.
+Maksymalny dystans do przydzielonego celu 28,453 cala ilustruje koszt
+priorytetu różnych przydziałów nad dystansem.
+
+Średni deployment grid/grid **0,797ms**, cele/cele **183,750ms**;
+pełna gra z metrykami/setup odpowiednio **46,218ms** i **238,529ms**.
+Walidacje kandydatów: średnio4,8 / strona grid vs 4360 cele. To pomiar
+bez równoległego pytest, z jawną instrumentacją; nie SLA. Kontrole
+lustrzane wykazują efekt strony: grid/grid: 58 P0 / 8 P1 / 54 remisy,
+cele/cele: 42 P0 / 66 P1 / 12 remisów. Nie traktować 960 wykonań jako niezależnej
+próby ani wyniku jako dowodu ogólnej przewagi. **Zachować grid domyślny,
+cele jawnie eksperymentalne**; nie stroić kodu pod te dane.
+
+**Weryfikacja D5.3b** Nowe 17 testów bada manifest/parowanie, realną zamianę
+ownerów i seedów, wynik równy `simulate_from_rosters`, replay, cleanup
+instrumentacji, błędy rozstawienia/cap bez udawanego remisu, detekcję
+niedeterminizmu z pominięciem czasu i denominatory raportu. Celowane
+6 plików: **214 passed**. Pełny `pytest --tb=short -q`: **4025 passed,
+4 warnings** zależności, 217.63s; +17 wobec bazy 4008. Simplify/review,
+call-site audit, linki i diff check zakończone bez dalszych zmian kodu.
+Nowe funkcje są używane wyłącznie przez CLI/harness/testy; patche helperów
+istnieją tylko podczas sekwencyjnego pomiaru i są zawsze przywracane.
+Brak nowych SQL, DB, API, auth, JS, event/checkpoint schema, defaultów,
+wag i goldenów. Security review/UI smoke nie dotyczą tej warstwy.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/deployment_experiment.py --manifest docs/experiments/d5_3b/manifest.json --out docs/experiments/d5_3b/results.json --report docs/experiments/d5_3b/results.md
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_deployment_experiment.py tests/test_agents_deployment.py tests/test_agents_match.py tests/test_balance_simulate.py tests/test_agents_factory.py tests/test_engine_regression.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest --tb=short -q
+```
+
+**Przeniesienie D5.3b** Osobny nowy commit na Faza_A potwierdzany na
+origin/Faza_A. Artefakty są w Git, nie ignorowanych reports/build. Baza
+pozostała nietknięta, SHA256 jak we wspólnej sekcji; baza i lokalne
+sekrety/konfiguracja wymagają osobnego backupu. Cudze pliki/hunk B6.2 poza
+commitem. Następny zaakceptowany etap to **B4.4d.C2-publication-spec**;
+nie uruchomiono go w D5.3b. Brak nowych pytań/decyzji do realizacji audytu.
+
 ## 7. B4.4d.C2-publication-spec — przygotowanie publikacji
 
 Cel: przygotować ograniczony katalog X i konkretny plan publikacji

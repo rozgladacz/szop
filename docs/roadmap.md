@@ -23,7 +23,7 @@ zamknięcia poprzedniego. Wcześniejsze odłożenie D5.3 jest uchylone.
 - [x] **B4.4d.C2d5-spec** — **DONE 2026-11-19 (audyt)**: [Planowanie](planowanie-spec.md), status Przygotowany i lifecycle, propozycja prywatnego hooka v3 oraz istniejący drift mutex Mobilizacji. Źródła **4/4 CLEAN**, bez zmiany kodu; brak nowych pytań.
 - [x] **B4.4d.C2d6-spec** — **DONE 2026-11-20 (audyt)**: [Niestrudzony](niestrudzony-spec.md) wykluczony z obecnego attack-only Oznaczenia; istniejąca luka native/Rozkazu w legalności powtórzeń i drift katalogu YAML. Źródła **4/4 CLEAN**, bez zmiany kodu/tagów; brak nowych pytań.
 - [x] **D5.3a** — **DONE 2026-11-20**: jawne strategie rozstawienia per strona (`None`/grid/cele), wspólna pula i walidacja D5.1/D5.2, deterministyczne przydziały. Celowane **219 passed**, pełne **4008 passed**. [Kontrakt, pomiary i backup](kolejka-po-c2d3.md); domyślne rozstawienie bez zmian.
-- [ ] **D5.3b** [automation-ready] — powtarzalne porównanie strategii z gridem, po D5.3a.
+- [x] **D5.3b** — **DONE 2026-11-20**: [eksperyment grid/cele](experiments/d5_3b/README.md), 480 przypadków/960 wykonań, pełny replay i determinizm; 240 mieszanych: cele 174/grid 30/remis 36. Efekt strony i koszt opisane, grid nadal domyślny. Celowane **214 passed**, pełne **4025 passed**.
 - [ ] **B4.4d.C2-publication-spec** [automation-ready] — przygotowanie ograniczonej publikacji Oznaczenia, katalog i security gates; bez samej publikacji.
 - [ ] **D6.1-audit** [automation-ready] — audyt istniejących botów i gotowości do publicznego lifecycle.
 - [ ] **D6.2-connect** [automation-ready] — podłączenie istniejących agentów przez klienta i propozycje akcji z zachowaniem zatwierdzania.

@@ -664,3 +664,22 @@ Entry point dla Docker container — patrz `Dockerfile` + `DEPLOY.md`.
 7. **Output do `build/`** (gitignored) jeśli skrypt generuje pliki — chyba że
    kontrakt narzędzia jawnie definiuje tracked artefakt i drift gate, jak
    `generate_ruleset_schema.py`.
+
+## deployment_experiment.py — D5.3b
+
+Sekwencyjny eksperyment strategii rozstawienia nad istniejącym runnerem.
+Wymaga jawnego manifestu, wykonuje każde sparowane ustawienie co najmniej
+2 razy i porównuje deterministyczne pola, w tym pełny replay. Powtórzenia
+czasowe nie zwiększają liczby przypadków w statystykach. Statusy błędów
+rozstawienia/gry i activation cap są raportowane osobno, nie jako remis.
+Nie używa DB, nie zmienia botów ani domyślnego rozstawienia. Exit 1 oznacza
+niepowtarzalność; stabilne błędy symulacji mogą być wynikiem eksperymentu
+przy exit 0 i pozostają jawnie widoczne w danych.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/deployment_experiment.py --manifest docs/experiments/d5_3b/manifest.json --out docs/experiments/d5_3b/results.json --report docs/experiments/d5_3b/results.md
+```
+
+[Metodyka, ograniczenia i wersjonowany wynik](../docs/experiments/d5_3b/README.md).
+Obserwacyjne patche helperów są lokalne dla jednego procesu i zawsze
+przywracane; nie uruchamiać harnessu wielowątkowo w tym samym interpreterze.
