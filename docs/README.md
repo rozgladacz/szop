@@ -23,6 +23,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [bastion-spec.md](bastion-spec.md) | C2d4-spec: role kontrataku, Rozkaz i wykluczenie Bastionu z obecnego zakresu Oznaczenia |
 | [ostrozny-spec.md](ostrozny-spec.md) | C2d3-spec: audyt źródeł Ostrożnego, decyzja tylko dystansowo, kontrakt i testy implementacji |
 | [D5.3b — eksperyment rozstawienia](experiments/d5_3b/README.md) | Zamrożony manifest, dane i porównanie grid/objectives |
+| [boty-audit.md](boty-audit.md) | D6.1: bot × protokół × scenariusz, reprodukcje luk legalności, koszt i prerekwizyty D6.2 |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |
 | [kolejka-po-c2d1.md](kolejka-po-c2d1.md) | Pięć kolejnych przebiegów z zależnościami, zakresem i kryteriami zakończenia |
 

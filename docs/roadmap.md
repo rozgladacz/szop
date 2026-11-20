@@ -25,7 +25,7 @@ zamknięcia poprzedniego. Wcześniejsze odłożenie D5.3 jest uchylone.
 - [x] **D5.3a** — **DONE 2026-11-20**: jawne strategie rozstawienia per strona (`None`/grid/cele), wspólna pula i walidacja D5.1/D5.2, deterministyczne przydziały. Celowane **219 passed**, pełne **4008 passed**. [Kontrakt, pomiary i backup](kolejka-po-c2d3.md); domyślne rozstawienie bez zmian.
 - [x] **D5.3b** — **DONE 2026-11-20**: [eksperyment grid/cele](experiments/d5_3b/README.md), 480 przypadków/960 wykonań, pełny replay i determinizm; 240 mieszanych: cele 174/grid 30/remis 36. Efekt strony i koszt opisane, grid nadal domyślny. Celowane **214 passed**, pełne **4025 passed**.
 - [x] **B4.4d.C2-publication-spec** — **DONE 2026-11-20 (audyt)**: [katalog i security gates](oznaczenie-publication-spec.md); publiczny katalog pusty, propozycja Furia → Ostrożny wymaga osobnego zatwierdzenia i pozytywnych przepływów. Źródła **4/4 CLEAN**, izolowane regresje SQL/fail-closed/retry-RNG **5 passed**; bez publikacji/API/uprawnień.
-- [ ] **D6.1-audit** [automation-ready] — audyt istniejących botów i gotowości do publicznego lifecycle.
+- [x] **D6.1-audit** — DONE 2026-11-20: [audyt 9 rodzin](boty-audit.md), ograniczony v1, luki legalności i prerekwizyty D6.2; 4053 testy.
 - [ ] **D6.2-connect** [automation-ready] — podłączenie istniejących agentów przez klienta i propozycje akcji z zachowaniem zatwierdzania.
 - [ ] **D6.3-play-plan** [automation-ready] — podział Play vs AI na małe etapy na podstawie wyników audytu/integracji.
 

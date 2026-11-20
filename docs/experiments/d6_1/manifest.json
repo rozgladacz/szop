@@ -1,0 +1,7 @@
+{
+  "schema": "szop.bots_audit/v1",
+  "kinds": ["priority", "priority3", "claude_v3", "random", "greedy", "priority2", "claude_v1", "minimax", "claude_v2"],
+  "seeds": [11, 19],
+  "scenarios": ["ranged", "contact", "exhausted", "pinned", "polygon_detour", "wall_blocked", "objective_edge", "last_round", "game_over"],
+  "fixtures": ["tests/fixtures/battles/demo_skirmish.yaml", "tests/fixtures/battles/objective_clash.yaml"]
+}

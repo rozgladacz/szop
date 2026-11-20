@@ -1,0 +1,108 @@
+{
+  "source": "docs/experiments/d5_3b/results.json",
+  "source_sha256": "29b1ab90ba444482760de2ebdcd3ddbee68fe39aef946f2590f8c0eb3e428367",
+  "method": "Filter existing deterministic cases once, no reruns or inference of causality. Outcome keys P0/P1/draw.",
+  "mirror_by_initiative": [
+    {
+      "strategy": "grid",
+      "initiative": 0,
+      "cases": 60,
+      "outcomes": {
+        "P1": 2,
+        "draw": 24,
+        "P0": 34
+      }
+    },
+    {
+      "strategy": "grid",
+      "initiative": 1,
+      "cases": 60,
+      "outcomes": {
+        "draw": 30,
+        "P1": 6,
+        "P0": 24
+      }
+    },
+    {
+      "strategy": "objectives",
+      "initiative": 0,
+      "cases": 60,
+      "outcomes": {
+        "P1": 34,
+        "P0": 20,
+        "draw": 6
+      }
+    },
+    {
+      "strategy": "objectives",
+      "initiative": 1,
+      "cases": 60,
+      "outcomes": {
+        "P0": 22,
+        "P1": 32,
+        "draw": 6
+      }
+    }
+  ],
+  "mirror_by_army_swap": [
+    {
+      "strategy": "grid",
+      "swap": false,
+      "cases": 60,
+      "outcomes": {
+        "P1": 4,
+        "draw": 27,
+        "P0": 29
+      }
+    },
+    {
+      "strategy": "grid",
+      "swap": true,
+      "cases": 60,
+      "outcomes": {
+        "P1": 4,
+        "draw": 27,
+        "P0": 29
+      }
+    },
+    {
+      "strategy": "objectives",
+      "swap": false,
+      "cases": 60,
+      "outcomes": {
+        "P1": 33,
+        "P0": 21,
+        "draw": 6
+      }
+    },
+    {
+      "strategy": "objectives",
+      "swap": true,
+      "cases": 60,
+      "outcomes": {
+        "P1": 33,
+        "P0": 21,
+        "draw": 6
+      }
+    }
+  ],
+  "weak_objective_clash_priority3": [
+    {
+      "initiative": 0,
+      "cases": 12,
+      "outcomes": {
+        "objectives": 4,
+        "grid": 8
+      }
+    },
+    {
+      "initiative": 1,
+      "cases": 12,
+      "outcomes": {
+        "objectives": 6,
+        "draw": 2,
+        "grid": 4
+      }
+    }
+  ]
+}

@@ -683,3 +683,19 @@ przy exit 0 i pozostają jawnie widoczne w danych.
 [Metodyka, ograniczenia i wersjonowany wynik](../docs/experiments/d5_3b/README.md).
 Obserwacyjne patche helperów są lokalne dla jednego procesu i zawsze
 przywracane; nie uruchamiać harnessu wielowątkowo w tym samym interpreterze.
+
+## bots_audit.py — D6.1
+
+Ograniczony audyt wszystkich kindów registry/factory: decyzje ze stanu po
+publicznym round-trip, kontynuacje, deployment w strefach z poligonem,
+końcówki oraz dwie pełne fixture dla kindów fast. Każdy przypadek ma dwa
+świeże wykonania; porównanie pomija czasy. Błędy/terminalne decyzje pozostają
+w danych. Akceptacja przez resolver nie jest certyfikatem zgodności z
+regułami. Zero DB lub zewnętrznych usług; pełne fixture reużywają liść
+D5.3b, więc uruchamiać sekwencyjnie. Exit1 oznacza niepowtarzalność.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/bots_audit.py --manifest docs/experiments/d6_1/manifest.json --out docs/experiments/d6_1/results.json
+```
+
+[Raport, zakres próbek i prerekwizyty integracji](../docs/boty-audit.md).

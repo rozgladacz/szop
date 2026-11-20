@@ -1,0 +1,52 @@
+{
+  "isolation": "in-memory SQLite, FastAPI TestClient, no production DB",
+  "bot": "priority",
+  "decision_seed": 19,
+  "protocol": 1,
+  "action_type": "shoot",
+  "adapter_requests": [
+    {
+      "method": "GET",
+      "path": "/battles/1"
+    },
+    {
+      "method": "GET",
+      "path": "/battles/1/state"
+    },
+    {
+      "method": "POST",
+      "path": "/agent_proposals/battle-actions"
+    }
+  ],
+  "sql": {
+    "metadata": {
+      "SELECT": 4,
+      "INSERT": 1,
+      "UPDATE": 1
+    },
+    "state": {
+      "SELECT": 5,
+      "INSERT": 1,
+      "UPDATE": 1
+    },
+    "proposal": {
+      "SELECT": 6,
+      "INSERT": 3,
+      "UPDATE": 1
+    },
+    "owner_approval_service_excluding_user_lookup": {
+      "SELECT": 8,
+      "UPDATE": 3,
+      "INSERT": 6
+    },
+    "state_after_approval": {
+      "SELECT": 5,
+      "INSERT": 1,
+      "UPDATE": 1
+    }
+  },
+  "sequence_before": 2,
+  "proposal_status": "pending",
+  "approval_status": "executed",
+  "sequence_after": 6
+}

@@ -21,7 +21,7 @@ od zamknięcia poprzedniego oraz wskazanych niżej prerekwizytów. Markery
 | 5 | D5.3a | Strategia rozstawienia pod cele i jawny wybór |
 | 6 | D5.3b | Powtarzalne porównanie z gridem |
 | 7 | B4.4d.C2-publication-spec | DONE 2026-11-20; katalog gotowości i security gates, bez publikacji |
-| 8 | D6.1-audit | Audyt istniejących botów i gotowości integracji |
+| 8 | D6.1-audit | DONE 2026-11-20; audyt 9 rodzin, transport v1, luki legalności i prerekwizyty D6.2 |
 | 9 | D6.2-connect | Adapter istniejących agentów do propozycji akcji |
 | 10 | D6.3-play-plan | Podział Play vs AI na małe etapy |
 
@@ -498,6 +498,58 @@ bot × obsługiwany protokół × scenariusz, odtworzenia usterek i lista
 prerekwizytów D6.2. Testy registry/factory/base, botów, match/deployment,
 move_fidelity, regression, clients parity; pełny pytest przy zmianie kodu.
 Brak wymaganej zdolności ma być jawny, nie zastępowany nielegalną decyzją.
+
+### Wynik D6.1-audit — 2026-11-20
+
+Baza `4082bd9`, [raport i macierze](boty-audit.md),
+[manifest/wyniki](experiments/d6_1/manifest.json),
+[harness](../scripts/bots_audit.py). Wszystkie 9 rodzin przez registry/factory;
+alias `claude` osobno, bez dostawców zewnętrznych. **239 przypadków / 478
+wykonań**, wszystkie pary powtarzalne. 144/144 nieterminalne pierwsze akcje
+akceptowane przez obecny resolver, 101 drugich akcji, 144/144 replay;
+54/54 legalne deployment (default/grid/objectives, także wąska strefa i
+poligon), 9/9 zakończonych końcówek oraz 14/14 pełnych fixture fast.
+Drogie rodziny mają jawnie małą próbkę, bez pełnych 8-unit gier.
+
+Akceptacja resolvera **nie dowodzi zgodności z regułami**: reprodukcje
+Shoot przy bliskim wrogu, ataku Wyczerpanego i Manewru Przyszpilonego
+pozostają w harnessie/raporcie. Nie poprawiano produkcyjnego silnika ani
+polityk. Prediction Ostrożnego wymaga opt-in closed v3, którego boty nie
+przekazują; znane luki Mobilizacji/Niestrudzonego są oddzielone od jakości
+polityki. Ponowne grupowanie danych D5.3b i konkretne kontrprzykłady
+slotów ID/kolejności celów pokazują czynniki asymetrii, bez ogłoszenia
+uniwersalnej przyczyny wyników lub zmiany domyślnego deployment/tagów.
+
+**Gotowość D6.2:** `priority`, jawny seed, publiczny v1, bounded one-step,
+consent-gated proposal. Pierwszy ograniczony zakres bez walki:
+Manewr/Defend/discard_exhausted z jawnymi ograniczeniami stanów i profili
+w raporcie; nieobsługiwany kandydat daje brak propozycji, bez fallbacku.
+V2/v3 nie są obsługiwane przez żaden bot jako lifecycle. Propozycja v2
+jest dziś przyjmowana, lecz approval trafia w błąd checkpoint codec v1;
+test dowodzi rollbacku i pending. Adapter ma odrzucić tę wersję przed
+POST. Rozszerzenie walki potrzebuje wspólnej walidacji, a v2/v3 osobnego
+projektu consent lifecycle; nie obchodzić granicy direct-write/core.
+
+Izolowany rzeczywisty HttpClient/FastAPI/SQLite in-memory dowiódł publiczny
+odczyt → priority → pending → owner approval executed, sequence 2→6.
+Adapter: **2 GET + 1 POST, 15 SELECT (4+5+6), decyzja 0 SQL**; auth zapisuje
+audit/last_used, a bitwa pozostaje bez mutacji do approval. Approval service
+osobno 8 SELECT bez lookup ownera. Czasy pierwszych decyzji po 32 pomiary
+na kind: mean 0,293–4,706 ms; odstający pierwszy priority max 59,789 ms.
+Nie ekstrapolować kosztów na duże armie ani zmieniać historycznych ratio.
+
+**Weryfikacja:** 28 nowych przypadków testowych; audit+proposals 35 passed;
+celowane pakiety 1007 passed; pełny `pytest -q` **4053 passed, 4 dependency
+warnings, 218,59 s**. Encoding gate, call-site audit, ręczne odpowiedniki
+simplify/review/security review oraz diff check; bez zmian JS, API/auth,
+silnika i DB. Komendy/provenance/denominatory w raporcie.
+
+**Przeniesienie:** raport, manifest, dane, harness i regresje w osobnym
+commicie Faza_A, potwierdzanym na origin/Faza_A. SHA256 bazy bez zmian
+(wspólny DoD); baza i lokalne sekrety/konfiguracja wymagają osobnego backupu.
+Zastane pliki i historyczny hunk B6.2 poza commitem. Brak nowego czerwonego
+pytania; rekomendowane ograniczenie D6.2 jest decyzją techniczną dla
+koordynatora. Ten worker kończy po audycie i nie uruchamia D6.2.
 
 ## 9. D6.2-connect — podłączenie istniejących agentów
 
