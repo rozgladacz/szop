@@ -655,3 +655,196 @@ def test_other_factory_grid_bots_use_shared_placement_validator(kind):
     actions = _build_deployment_from_players(state, players, zones)
     assert len(actions) == 6
     _assert_legal_deployment(state, actions, zones)
+
+
+# D5.3a: explicit per-side strategies and objective assignment heuristic.
+
+
+def _objective_choices(state, zones, monkeypatch, strategies=("objectives", "objectives")):
+    import app.services.agents.match as match
+
+    selected = []
+    choose = match.objective_deployment_choice
+
+    def record(working, unit_id, zone, *, assignments):
+        position, target = choose(working, unit_id, zone, assignments=assignments)
+        unit = next(b for b in working.blobs if b.id == unit_id)
+        selected.append((unit.owner_player, target, dict(assignments)))
+        return position, target
+
+    monkeypatch.setattr(match, "objective_deployment_choice", record)
+    actions = match._build_deployment_from_players(
+        state, [_PassivePlayer(), _PassivePlayer()], zones,
+        deployment_strategies=strategies,
+    )
+    return actions, selected
+
+
+@pytest.mark.parametrize("count", [1, 2, 3, 5])
+def test_objectives_assign_distinct_then_least_populated_targets(count, monkeypatch):
+    units = tuple(_placement_unit(id=i + 1, position=Position(1, 1), radius_inches=0.3)
+                  for i in range(count))
+    targets = (Objective(11, Position(6, 6)), Objective(22, Position(40, 6)))
+    state = BattleState(0, 0, (count, 0), units, (), targets)
+    actions, selected = _objective_choices(state, (DeploymentZone(0, 0, 12, 12),) * 2, monkeypatch)
+    assert [target for _, target, _ in selected] == [11, 22, 11, 22, 11][:count]
+    _assert_legal_deployment(state, actions, (DeploymentZone(0, 0, 12, 12),) * 2)
+    assert all(b.position == Position(1, 1) for b in state.blobs)
+
+
+def test_objective_counts_are_per_side_and_reset_between_games(monkeypatch):
+    state = replace(_crowded_deployment_state(), terrain=(), objectives=(
+        Objective(1, Position(6, 1)), Objective(2, Position(30, 1)),
+    ))
+    zones = (DeploymentZone(0, 0, 12, 2),) * 2
+    first, selected = _objective_choices(state, zones, monkeypatch)
+    assert [target for _, target, _ in selected] == [1, 1, 2, 2, 1, 1]
+    assert selected[0][2] == selected[1][2] == {}
+    _assert_legal_deployment(state, first, zones)
+    second = _build_deployment_from_players(
+        state, [_PassivePlayer(), _PassivePlayer()], zones,
+        deployment_strategies=("objectives", "objectives"),
+    )
+    assert second == first
+
+
+def test_objective_candidates_reuse_legal_pool_and_deterministic_ties():
+    from app.services.agents.deployment import objective_deployment_choice
+
+    unit = _placement_unit()
+    # Equal geometry, shuffled IDs: tie goes to ID, then x/y, not input order.
+    targets = (Objective(22, Position(5, 5)), Objective(11, Position(5, 5)))
+    state = BattleState(0, 0, (1, 0), (unit,), (), targets)
+    zone = DeploymentZone(0, 0, 10, 10)
+    position, target = objective_deployment_choice(state, unit.id, zone, assignments={})
+    assert target == 11
+    assert (position, target) == objective_deployment_choice(
+        replace(state, objectives=tuple(reversed(targets))), unit.id, zone, assignments={},
+    )
+    assert is_deployment_position_legal(unit, position, zone, occupied=(), terrain=())
+
+
+def test_objectives_handle_polygon_and_narrow_zone_with_mixed_radii():
+    state = replace(_crowded_deployment_state(), objectives=(
+        Objective(1, Position(2, 1)), Objective(2, Position(11, 1)),
+    ))
+    zones = (DeploymentZone(0, 0, 12, 2),) * 2
+    actions = _build_deployment_from_players(
+        state, [RandomPlayer(1), RandomPlayer(2)], zones,
+        deployment_strategies=("objectives", "objectives"),
+    )
+    _assert_legal_deployment(state, actions, zones)
+    assert len(actions) == 6
+
+
+def test_objectives_without_targets_use_grid_and_ignore_waiting_offboard_dead():
+    state = replace(_crowded_deployment_state(), terrain=(), blobs=tuple(
+        replace(b, location=Lokalizacja.ZAPLECZE) if b.id == 2 else
+        replace(b, models_alive=0) if b.id == 3 else b
+        for b in _crowded_deployment_state().blobs
+    ))
+    zones = (DeploymentZone(0, 0, 12, 2),) * 2
+    players = [PriorityPlayer(), PriorityPlayer()]
+    default = _build_deployment_from_players(state, players, zones)
+    assert default == _build_deployment_from_players(
+        state, players, zones, deployment_strategies=("objectives", "objectives"),
+    )
+    assert [a.unit_id for a in default] == [1, 4, 5, 6]
+
+
+def test_objective_exhaustion_is_bounded_and_does_not_mutate_input(monkeypatch):
+    import app.services.agents.deployment as deployment
+
+    state = replace(_crowded_deployment_state(), objectives=(Objective(1, Position(5, 5)),),
+                    terrain=(TerrainCircle(Position(5, 5), 100, ("Niedostepny",)),))
+    checked = []
+    validate = deployment.is_deployment_position_legal
+
+    def count(*args, **kwargs):
+        checked.append(1)
+        return validate(*args, **kwargs)
+
+    monkeypatch.setattr(deployment, "is_deployment_position_legal", count)
+    with pytest.raises(IllegalActionError, match="ograniczonym przeszukanym zbiorze"):
+        _build_deployment_from_players(
+            state, [_PassivePlayer(), _PassivePlayer()], (DeploymentZone(0, 0, 10, 10),) * 2,
+            deployment_strategies=("objectives", "grid"),
+        )
+    assert len(checked) == 1 + deployment.DEPLOYMENT_GRID_AXIS_POINTS ** 2
+    assert all(b.position == Position(1, 1) for b in state.blobs)
+
+
+@pytest.mark.parametrize("strategies", ["objectives", (), ("grid",), ("grid",) * 3,
+                                         ("invalid", None), (None, 1), ([], None), True])
+def test_invalid_strategy_selection_fails_before_player_callback(strategies):
+    with pytest.raises(ValueError, match="deployment_strategies"):
+        _build_deployment_from_players(_state(), [], ZONES, deployment_strategies=strategies)
+
+
+def test_strategy_requires_zones_and_cannot_override_explicit_deployment():
+    from app.services.engine.actions import DeploymentAction
+
+    with pytest.raises(ValueError, match="requires deployment_zones"):
+        simulate_from_rosters(_rosters(), [], deployment_strategies=("grid", "grid"))
+    with pytest.raises(ValueError, match="nie oba naraz"):
+        simulate_from_rosters(_rosters(), [], deployment_zones=ZONES,
+                              deployment_strategies=("objectives", "grid"),
+                              deployment=[DeploymentAction(1, Position(6, 6))])
+
+
+def test_explicit_strategies_override_only_selected_callback_and_preserve_rng():
+    state = _state()
+    left, right = RandomPlayer(7), RandomPlayer(19)
+    right_before = right._rng.getstate()
+    actions = _build_deployment_from_players(
+        state, [left, right], ZONES, deployment_strategies=(None, "grid"),
+    )
+    reference = _build_deployment_from_players(state, [RandomPlayer(7), PriorityPlayer()], ZONES)
+    assert actions == reference
+    assert right._rng.getstate() == right_before
+
+
+def test_objective_opt_in_matches_explicit_and_complete_replay():
+    from app.services.engine.phases import deployment_round
+    from app.services.engine.state import apply_events
+
+    state = _state()
+    strategies = ("objectives", "grid")
+    actions = _build_deployment_from_players(
+        state, [RandomPlayer(7), RandomPlayer(19)], ZONES, deployment_strategies=strategies,
+    )
+    explicit = simulate_from_rosters(
+        _rosters(), [RandomPlayer(7), RandomPlayer(19)], seed=18,
+        objectives=_objectives(), deployment=actions,
+    )
+    automatic = simulate_from_rosters(
+        _rosters(), [RandomPlayer(7), RandomPlayer(19)], seed=18,
+        objectives=_objectives(), deployment_zones=ZONES, deployment_strategies=strategies,
+    )
+    assert automatic == explicit
+    assert automatic == simulate_from_rosters(
+        _rosters(), [RandomPlayer(7), RandomPlayer(19)], seed=18,
+        objectives=_objectives(), deployment_zones=ZONES, deployment_strategies=strategies,
+    )
+    deployed, _ = deployment_round(state, actions)
+    assert apply_events(deployed, automatic.events) == automatic.final_state
+
+
+def test_objective_later_exhaustion_never_commits_partial_deployment(monkeypatch):
+    import app.services.agents.match as match
+
+    rosters = _rosters()
+    rosters[0]["units"][1]["models"] = 100  # circle cannot fit in this zone
+    before = repr(rosters)
+
+    def no_commit(*args, **kwargs):
+        pytest.fail("partial objective deployment reached deployment_round")
+
+    monkeypatch.setattr(match, "deployment_round", no_commit)
+    with pytest.raises(IllegalActionError, match="ograniczonym przeszukanym zbiorze"):
+        simulate_from_rosters(
+            rosters, [_PassivePlayer(), _PassivePlayer()], objectives=_objectives(),
+            deployment_zones=(DeploymentZone(0, 0, 7, 7),) * 2,
+            deployment_strategies=("objectives", "objectives"),
+        )
+    assert repr(rosters) == before

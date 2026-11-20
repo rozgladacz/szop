@@ -19,12 +19,13 @@ from __future__ import annotations
 
 import math
 import random
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from itertools import chain
 
+from app.services.engine.geometry import distance
 from app.services.engine.movement import can_place_unit
 from app.services.engine.pathfinding import is_finite_position
 from app.services.engine.resolver import IllegalActionError
@@ -202,6 +203,13 @@ def grid_deployment_position(
     Nielegalny slot zastępuje pierwszy legalny punkt ograniczonej siatki próbek.
     """
     unit = next(b for b in state.blobs if b.id == unit_id)
+    return _first_legal_position(state, unit, zone, _grid_candidates(state, unit, zone))
+
+
+def _grid_candidates(
+    state: BattleState, unit: UnitBlob, zone: DeploymentZone,
+) -> Iterator[Position]:
+    """The same preferred slot and bounded fallback for Grid and objectives."""
     own = sorted(
         (
             b
@@ -214,11 +222,39 @@ def grid_deployment_position(
     )
     max_radius = max(b.radius_inches for b in own)
     positions = grid_positions(zone, len(own), max_radius)
-    idx = next(i for i, b in enumerate(own) if b.id == unit_id)
-    return _first_legal_position(
-        state, unit, zone,
-        chain((positions[idx],), _fallback_positions(zone, unit.radius_inches)),
+    idx = next(i for i, b in enumerate(own) if b.id == unit.id)
+    yield from chain((positions[idx],), _fallback_positions(zone, unit.radius_inches))
+
+
+def objective_deployment_choice(
+    state: BattleState, unit_id: int, zone: DeploymentZone,
+    *, assignments: Mapping[int, int],
+) -> tuple[Position, int | None]:
+    """Choose a legal position and a target, without changing assignment counts.
+
+    Counts belong to one player's current deployment, not objective control
+    (pkt 5.d-f). Prefer the least assigned target, then edge-to-marker distance,
+    target id and coordinates. No route or future battle outcome is predicted.
+    """
+    if not state.objectives:
+        return grid_deployment_position(state, unit_id, zone), None
+    unit = next(b for b in state.blobs if b.id == unit_id)
+    occupied = _deployment_occupied(state)
+    ranked = (
+        (assignments.get(target.id, 0),
+         max(0.0, distance(position, target.position) - unit.radius_inches),
+         target.id, position.x, position.y, position)
+        for position in _grid_candidates(state, unit, zone)
+        if is_deployment_position_legal(
+            unit, position, zone, occupied=occupied, terrain=state.terrain,
+        )
+        for target in state.objectives
     )
+    best = min(ranked, key=lambda candidate: candidate[:5], default=None)
+    if best is None:
+        # Reuse the same bounded-exhaustion error as Grid/Random.
+        return _first_legal_position(state, unit, zone, ()), None
+    return best[-1], best[2]
 
 
 def _fallback_positions(zone: DeploymentZone, radius: float) -> Iterator[Position]:

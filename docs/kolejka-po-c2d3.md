@@ -272,6 +272,93 @@ limit kandydatów bez permutacji; mierzyć liczbę ocen/czas. DoD: legalne i
 powtarzalne pozycje, oddzielne przydziały, niezmieniony default, testy
 agents_deployment/match/factory, balance_simulate, regression + pełny pytest.
 
+**Wynik D5.3a 2026-11-20** Baza: `da0bfbd`. Python runner ma opcjonalne
+`deployment_strategies=(choice_p0, choice_p1)`: każda pozycja to `None`
+(dotychczasowy callback gracza), `"grid"` albo `"objectives"`. Brak parametru
+pozostawia dotychczasowy grid botów deterministycznych i seeded Random.
+Jawny wybór jest niezależny od polityki walki, działa tylko z
+`deployment_zones` i nie łączy się z explicit `deployment`. Błędny typ,
+liczba stron lub nazwa daje `ValueError` przed callbackami. Przykład:
+
+```python
+result = simulate_from_rosters(
+    rosters, players, seed=19, terrain=terrain, objectives=objectives,
+    deployment_zones=zones, deployment_strategies=("objectives", "grid"),
+)
+```
+
+`objective_deployment_choice` zwraca `(position, target_id)` bez mutacji
+liczników. Runner utrzymuje osobne słowniki przydziałów dla obu stron,
+nowe dla każdego rozstawienia; zwiększa licznik dopiero po niezależnej
+walidacji wyboru. `None` zamiast celu oznacza fallback bez celów.
+Przydział nie oznacza kontroli celu z pkt 5.d–f
+[Rozjemcy](../app/static/docs/SZOP_Rozjemca.md).
+
+Grid i cele używają tego samego `_grid_candidates`: dotychczasowy
+preferowany slot, następnie siatka 33×33 z D5.2. Każdy punkt przechodzi
+D5.1 ze stanem i jawnym `occupied` D5.2 przed oceną. Ranking to
+`(liczba_przydziałów, max(0, odległość_środków - promień_oddziału),
+id_celu, x, y)`. Liczy się więc najpierw najmniej obsadzony cel, potem
+geometryczne dojście, identyfikator i współrzędne. Pomiar podstawka–znacznik
+jest przybliżeniem koła; strategia nie sprawdza tras ani wyniku bitwy.
+Nie zmieniono SSOT kontroli celów, walidacji miejsca, pól stanu, RNG ani
+publicznych API/allowlist/klienta/UI. Zero SQL.
+
+**Weryfikacja D5.3a** Dodano 21 przypadków: osobne przydziały i nadmiarowe
+wsparcie, obie strony i reset między grami, deterministyczne remisy,
+poligon/wąska strefa/różne promienie, brak celów, rezerwy/pokonani i
+placeholdery, bounded exhaustion, późny błąd bez częściowego zatwierdzenia,
+walidacja parametrów, wybrany callback i RNG Random bez dryftu,
+opt-in równe explicit oraz pełny deterministyczny replay.
+Końcowy zestaw celowany **219 passed, 1 warning**, deployment **124 passed**.
+Pełna suita: **4008 passed, 4 warnings** zależności (215.87 s), po końcowym simplify/review; +21 przypadków wobec 3987.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 -m pytest tests/test_agents_deployment.py tests/test_agents_match.py tests/test_agents_factory.py tests/test_balance_simulate.py tests/test_engine_regression.py tests/test_engine_replay_invariant.py tests/test_clients_parity.py -x --tb=short -q
+.\.venv\Scripts\python.exe -X utf8 -m pytest --tb=short -q
+git diff --check
+```
+
+**Pomiary D5.3a** Mapy z `build_map(name, 19)`, po 8 jednostek i 5 celów,
+`priority` po obu stronach, seedy decyzji 19/20, seed bitwy 19, strefy
+`DEFAULT_DEPLOYMENT_ZONES`. Mediana 5 prób: po 10 rozstawień, po 1 pełnej
+grze; budowanie graczy w mierzonej funkcji. Licznik opakowuje walidator
+kandydatów; końcowe 8 walidacji runnera jest dodatkowe.
+
+| Mapa | Default przed zmianą: rozstawienie / gra ms | Grid po zmianie: rozstawienie / gra ms | Cele: rozstawienie / gra ms | Kandydaci Grid / cele |
+|---|---:|---:|---:|---:|
+| Standard_A | 0.806 / 38.146 | 0.640 / 39.688 | 216.134 / 251.185 | 16 / 8720 |
+| Lustrzana_A | 0.532 / 31.213 | 0.654 / 30.607 | 199.824 / 230.588 | 8 / 8720 |
+| Symetryczna_A | 0.551 / 37.738 | 0.658 / 32.061 | 221.818 / 234.373 | 8 / 8720 |
+
+To diagnostyka, nie SLA ani dowód przewagi strategii. Cele skanują do
+1090 punktów na jednostkę i oceniają do `1090 × liczba_celów` par;
+pamięć nie przechowuje wszystkich par. Koszt opt-in jest istotnie wyższy
+niż early-exit Grid. Czas pełnych gier obejmuje też inne pozycje i decyzje;
+porównanie skuteczności pozostaje D5.3b. Brak backtrackingu, badania
+permutacji i gwarancji znalezienia małej wolnej szczeliny między próbkami.
+Domyślny wybór pozostaje bez zmian.
+
+**Audyt wywołań i przeglądy** `grid_deployment_position` nadal obsługuje
+GridDeploymentMixin i jawny runner; bez celów nowy helper do niego deleguje.
+`_grid_candidates` jest wspólny tylko dla gridu i celów, `_first_legal_position`
+nadal obsługuje grid/Random i identyczny błąd wyczerpania. Jedyny caller
+nowego wyboru to runner. Pięć skryptów (`balance_simulate`, `battle_replay`,
+`exploit_hunt`, `analyze_battle`, `analyze_agents`) i `roster_simulation`
+nie podają nowego argumentu: zachowują dotychczasową ścieżkę. Klienci i
+transport HTTP nie dostały nowego parametru. Simplify/review sprawdziły
+SSOT puli/walidacji, lokalny czas życia liczników, tie-breaks, callback
+context, brak efektów ubocznych i compat defaults. Security review/UI smoke
+nie dotyczą zakresu bez auth/input→DB/JS. Nie zmieniono goldenów.
+
+**Przeniesienie D5.3a** Wynik ma osobny nowy commit na `Faza_A`, potwierdzany
+na `origin/Faza_A`; zastany B6.2 i lokalne pliki poza commitem. Baza pozostaje
+nietknięta, SHA256 zgodny ze wspólną sekcją backupu; bazę, sekrety i lokalną
+konfigurację zachować osobno, środowisko odtworzyć z requirements.
+Następny zaakceptowany etap D5.3b może wybrać strategie osobno dla stron
+przez nowy parametr. Helper wyboru zwraca ID celu do pomiarów przydziałów;
+nie ma go w trwałym stanie/eventach. Nie uruchomiono D5.3b w tym etapie.
+
 **D5.3b:** po D5.3a zamrozić mapy/armie/seedy, sparować grid/cele przy tej
 samej polityce, zamienić strony/inicjatywę, dodać kontrole lustrzane.
 Pomiar: legalność i błędy, pokrycie/przydziały, dystanse, zwycięstwa/remisy,

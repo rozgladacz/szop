@@ -29,7 +29,9 @@ from app.services.agents.base import Player, own_active_units
 from app.services.agents.deployment import (
     DeploymentZone,
     _deployment_selection,
+    grid_deployment_position,
     is_deployment_position_legal,
+    objective_deployment_choice,
 )
 from app.services.engine.actions import Action, DeploymentAction
 from app.services.engine.dice import DeterministicDice
@@ -263,27 +265,53 @@ def _build_deployment_from_players(
     state: BattleState,
     players: Sequence[Player],
     deployment_zones: Sequence[DeploymentZone],
+    *,
+    deployment_strategies: Sequence[str | None] | None = None,
 ) -> list[DeploymentAction]:
     """D5 — pyta każdego gracza o pozycję startową jego oddziałów (pkt 13).
 
     Iteruje oddziały na Froncie w deterministycznej kolejności (jak w `state.blobs`),
     Callback widzi roboczy stan z już wybranymi pozycjami. Prywatny kontekst
     przekazuje strategiom jawne zajęte miejsca; pozostałe pozycje to placeholdery.
+    `deployment_strategies` wybiera niezależnie dla każdej strony callback
+    (None), grid lub cele. Liczniki przydziałów celów są lokalne dla tej listy.
     Każdy wybór przechodzi wspólny walidator D5.1 (pkt 13.a).
     Rezerwy Zaplecze (pkt 26) pomijane — rozstawiają się mid-game (poza MVP).
 
     Raises:
         IllegalActionError: nielegalne miejsce rozstawienia (pkt 13.a).
     """
+    if deployment_strategies is None:
+        strategies = (None, None)
+    elif (
+        not isinstance(deployment_strategies, Sequence)
+        or isinstance(deployment_strategies, (str, bytes))
+        or len(deployment_strategies) != 2
+        or any(choice is not None and choice not in ("grid", "objectives")
+               for choice in deployment_strategies)
+    ):
+        raise ValueError("deployment_strategies: expected two choices: None, 'grid', 'objectives'")
+    else:
+        strategies = tuple(deployment_strategies)
     actions: list[DeploymentAction] = []
     working = state
     occupied = []
+    assignments: tuple[dict[int, int], dict[int, int]] = ({}, {})
     for blob in state.blobs:
         if blob.models_alive <= 0 or blob.location != Lokalizacja.FRONT:
             continue
         zone = deployment_zones[blob.owner_player]
+        strategy = strategies[blob.owner_player]
+        target_id = None
         with _deployment_selection(working, occupied):
-            pos = players[blob.owner_player].choose_deployment(working, blob.id, zone)
+            if strategy == "objectives":
+                pos, target_id = objective_deployment_choice(
+                    working, blob.id, zone, assignments=assignments[blob.owner_player],
+                )
+            elif strategy == "grid":
+                pos = grid_deployment_position(working, blob.id, zone)
+            else:
+                pos = players[blob.owner_player].choose_deployment(working, blob.id, zone)
         if not is_deployment_position_legal(
             blob, pos, zone, occupied=occupied, terrain=state.terrain,
         ):
@@ -293,6 +321,9 @@ def _build_deployment_from_players(
                 f"koło r={blob.radius_inches}, strefa {zone}"
             )
         actions.append(DeploymentAction(unit_id=blob.id, position=pos))
+        if target_id is not None:
+            counts = assignments[blob.owner_player]
+            counts[target_id] = counts.get(target_id, 0) + 1
         placed = replace(blob, position=pos)
         occupied.append(placed)
         working = replace(working, blobs=tuple(
@@ -312,6 +343,7 @@ def simulate_from_rosters(
     initiative_player: int = 0,
     deployment: Sequence = (),
     deployment_zones: Sequence[DeploymentZone] | None = None,
+    deployment_strategies: Sequence[str | None] | None = None,
     ruleset_version: str = "v1",
     max_activations: int = DEFAULT_MAX_ACTIVATIONS,
     on_decision: OnDecision | None = None,
@@ -328,10 +360,18 @@ def simulate_from_rosters(
     (pozycje z roster). Wzajemnie wykluczające z `deployment` (jawny deployment
     + auto-deployment botów byłby dwuznaczny).
 
+    `deployment_strategies=(choice_p0, choice_p1)` wybiera dla każdej strony
+    None (dotychczasowy callback), "grid" lub "objectives". Domyślnie None:
+    grid botów deterministycznych i seeded Random zachowują dotychczasowy wynik.
+    Jawny wybór wymaga `deployment_zones`; nie zmienia polityki walki ani RNG
+    silnika. Heurystyka celów porównuje legalne próbki geometrycznie, bez tras.
+
     Raises:
-        ValueError: podano jednocześnie `deployment` i `deployment_zones`.
+        ValueError: konflikt deployment/zones lub nieprawidłowy wybór strategii.
         IllegalActionError: bot zwrócił nielegalne miejsce rozstawienia (pkt 13.a).
     """
+    if deployment_strategies is not None and deployment_zones is None:
+        raise ValueError("deployment_strategies requires deployment_zones")
     state = setup_phase(
         rosters,
         terrain=terrain,
@@ -345,7 +385,9 @@ def simulate_from_rosters(
                 "simulate_from_rosters: podaj albo `deployment` (jawne akcje), "
                 "albo `deployment_zones` (auto-deployment botów), nie oba naraz"
             )
-        deployment = _build_deployment_from_players(state, players, deployment_zones)
+        deployment = _build_deployment_from_players(
+            state, players, deployment_zones, deployment_strategies=deployment_strategies,
+        )
     state, _deploy_events = deployment_round(state, deployment)
     dice = DeterministicDice(seed=seed)
     return run_match(
