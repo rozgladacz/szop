@@ -9,7 +9,15 @@
 
 ---
 
-## Aktywna kolejka — akceptacje 2026-11-19
+## Aktywna kolejka — akceptacja 2026-11-22
+
+Użytkownik wybrał „trwała kampania testowa v1” i jawnie wznowił cykl.
+Marker poniżej pochodzi z tej akceptacji. Jeden worker, jeden zamykany etap;
+pozostałe propozycje Play vs AI i poprawki silnika wymagają osobnego wyboru.
+
+- [ ] **D7.1-campaign-v1** [automation-ready] — [trwała kampania testowa v1](trwala-kampania-v1.md): zapis każdego przypadku, zgodny resume, kontrola writerów/integralności, archiwum i pilot 32 przypadków na istniejącym harnessie D5.3b. Bez zmian silnika/API/UI i produkcyjnej DB.
+
+## Zakończona kolejka — akceptacje 2026-11-19
 
 Użytkownik zaakceptował Ostrożnego (wyłącznie dystansowo), audyty Bastionu,
 Planowania i Niestrudzonego, obie części D5.3, przygotowanie publikacji
