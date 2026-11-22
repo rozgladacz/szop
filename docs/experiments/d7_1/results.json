@@ -1,0 +1,422 @@
+{
+  "schema": "szop.campaign.pilot/v1",
+  "manifest_file_sha256": "793cdb325ec8f65cfd51fb957f184c8a6fb7efc49d0850bbf06fcb46f4b3ac59",
+  "manifest_digest": "5497f0d81cc3ce6b0cb762b7d125b7558457192aa0a8ccbb900e1989a5ffbac6",
+  "runtime_directory": "build/campaigns/d7_1/pilot-20261122T195451Z",
+  "provenance": {
+    "base_commit": "df60897edccd1648fa7102d0ccbbcfb3739866bb",
+    "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+    "environment": {
+      "platform": "Windows-11-10.0.26100-SP0",
+      "python": "3.13.14"
+    },
+    "identity": {
+      "dependencies": {
+        "PyYAML": "6.0.1",
+        "pydantic": "2.13.4",
+        "pydantic_core": "2.46.4"
+      },
+      "manifest_digest": "5497f0d81cc3ce6b0cb762b7d125b7558457192aa0a8ccbb900e1989a5ffbac6",
+      "python_family": [
+        3,
+        13
+      ],
+      "sources": {
+        "app/data/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "app/data/abilities.py": "46fa3a8d16e93ebb1284a8936300a0b331c19cb730ebc38c0f9e1da36bacbd8b",
+        "app/data/strategic_cards.py": "f2a6efe524233dc4f9a9ad909d877ace52103770546839e6b66da098cfdb6757",
+        "app/rulesets/v1/abilities.yaml": "b8f49e7b7464aa7acc16dccfe25ccd6002815e0a7063947e5281b0039243c34f",
+        "app/rulesets/v1/ability_costs.yaml": "63ec6faf554affdba195fd45c445051bcb9523c1b65bde41e30aa47242d1ebd7",
+        "app/rulesets/v1/b_mvp_exclusions.yaml": "46ba0d01636d4f80ec98312576c1e41b1602fb06432fb4d174efa74ead7c6efd",
+        "app/rulesets/v1/drift_allowlist.yaml": "b2a162d3661d5372bd91110c19621847384ce1989ceca5bfc8bae8e20f0ceb9f",
+        "app/rulesets/v1/source_hashes.yaml": "423f322ed028f34c1f85d98758693b67a458924e756240e7b138a3d0976852df",
+        "app/rulesets/v1/tables.yaml": "2bc5ccfa3f93f988863de4f8d0635f05c5e2c233ad1721c3e4974a80a46c3a26",
+        "app/services/agents/__init__.py": "648146360a848a625ed5d83ca093503a26e0b69ee8a4bddfd02c4866ae360437",
+        "app/services/agents/base.py": "335b8c73377d7f2b44347a96f6b6698177960ec1ff26a79fba62b91ccc00db57",
+        "app/services/agents/claude_v1_player.py": "e1d8b6c18a6fcc33b83e6c232ad70836e8d6b75dcdee1948522d2f4980b1fe3e",
+        "app/services/agents/claude_v2_player.py": "26eb9913aeeb713d8f58d9a89b37d97c8f88234219f4eab7f8364944c99461ec",
+        "app/services/agents/claude_v3_player.py": "3a0c844a3b99d31e6ef875dbb74b991ff29ab4b29ab1889e6f29ca032f39d988",
+        "app/services/agents/deployment.py": "7d71153603e32d62ce6fd15936344826551d0a05251d7d77a7cb48f95164b19f",
+        "app/services/agents/factory.py": "b3c203a52b8229a7807c43b27644fc63e326554f63e8b6f2ac6650fdb11570fa",
+        "app/services/agents/greedy_player.py": "9a2db86a61a2a1ca89d9c6c0a69afd6cb956cf85da89ce397011c55a4ea7353d",
+        "app/services/agents/maps.py": "9f9c3c8f049d46024079d950e70f9e8ad3af1639225daf73aac9737bc6abd353",
+        "app/services/agents/match.py": "a0e43c6ca6027c8f1d73c939231991c96cbacc41cf3df9da27bb1f86eb95c443",
+        "app/services/agents/minimax_player.py": "53eab4b3fb6bb2027cd3c28dd07832be0f1959852c3e0259d4e9f430ab71d343",
+        "app/services/agents/policy_eval.py": "ee18916c30df64d821ea56b3f77f59d83436faa84f1fd5badee282e9d913f7cd",
+        "app/services/agents/priority_player.py": "69d15fd1cf20725e339a5e7b5b4e538e55a298ad84bcf19f327565ad7160e98e",
+        "app/services/agents/priority_v2_player.py": "087a88c7828162e7ea355ac941f32e7d297fd2e74b3f8b08f943f0e9e0cba068",
+        "app/services/agents/priority_v3_player.py": "fe0b4cfbebfe84260b2105a30d80be05ce3026189c58816528b3fb43cca883c6",
+        "app/services/agents/random_player.py": "bbad71aae908cff9a14fb087b4639bab5c594258960c83d0fa449640c5db7cf2",
+        "app/services/agents/registry.py": "99a465f00f26524e58e4fd3cb11861c80094ffe939ca4e1ce8cba676385e143b",
+        "app/services/agents/roster_adapter.py": "5b3c2d5ab2e46d7558e2fbfeb4d8c3fcceb8ba53e1be8f86f15bd1fcecb50b8f",
+        "app/services/engine/__init__.py": "b0e571523cc666c3bc23899286e076ed5c441eba54edb71683947dbd1a1c2100",
+        "app/services/engine/action_codec.py": "485d24dd246be5fb8b880725a1f6947dee2ca1278fdc23da375b1b8eecd821ed",
+        "app/services/engine/actions.py": "673691c14ad929edb2039c37fd72b83a407dfc21867d84011d7ebf381d5a3c87",
+        "app/services/engine/activation_protocol.py": "77cde1ef22a5c01a7eb778e3e6a25186b24e23a4d980f5f7694a93edd8c70963",
+        "app/services/engine/combat.py": "c8d5dd18e49cfe450aef1feca617c7a55199f8b81c563b01a778c57e044406ff",
+        "app/services/engine/dice.py": "0aa00c1d90a9ad6b96f77d78791f0e51b0fb6b3d91c03219e9b589e2bf88a47c",
+        "app/services/engine/effects.py": "8c4a8b258a8027577b131492ad5760153491c9500f9bb006333d7b7e13c3d9f9",
+        "app/services/engine/events.py": "8a8499d0ccd89989f62d1ebf15679a5f36a49d391267862e28d442ba838581e0",
+        "app/services/engine/geometry.py": "21f587e36da4cd9e1ad16eb966c561f049896e7b1147a486c044664c9a46a30b",
+        "app/services/engine/interrupts.py": "5fc1dd2df37d066753c71cbeba827f02b9d3be22e06d0ef4b3621e9b7fc8b6db",
+        "app/services/engine/los.py": "f80a70b185df2807dbe5c45b8ba72e0853d3e19f4f5edd7eb5dfc5e3ad1f5f7b",
+        "app/services/engine/movement.py": "346e86291c4a6cb2b5ff8ed329c4975c8ad9815e78663a9658650fd1fa360f41",
+        "app/services/engine/pathfinding.py": "16fa6daa77e11a037200ae21da4992fd137bd0779538f2c82b2387512a3b9af1",
+        "app/services/engine/persistence.py": "926c694ee475469f3f200842bf8145bfffa7911172ef730843c32a1640c18907",
+        "app/services/engine/phases.py": "73b08205f830d0b2bad959f704cbf15d4e7899b33ed29984c1ef29b311dee1f5",
+        "app/services/engine/prediction.py": "9ccdc659d3833839b635ed2d5cf7681f0015e6d5540a50a354d21fa5d574faaf",
+        "app/services/engine/reducers.py": "3c5aacfa324e94877f64f2764b63c352a530506cfcf156ea57d6086facc100ba",
+        "app/services/engine/resolver.py": "08988010520758580d4991393c28a7fe2f83dad143c958b7221df4854e18fe16",
+        "app/services/engine/state.py": "b7513f18814e9007e15605dba1c9af43f09e92b43d7b6698b5358a180042c528",
+        "app/services/engine/state_codec.py": "8a5133266ff7e154a3836b3d13c05093925ab2645a0736b3733dfc84811a8a27",
+        "app/services/engine/status.py": "8a3c6cce49526187bb67654f0808b86384f2b81b9dfc602a108a045d1a13871e",
+        "app/services/engine/terrain_complex.py": "56d43f45f380abf6907bbf89ec77637f6d3922107762020dc750bba4ccd6a01a",
+        "app/services/rulesets/__init__.py": "03e8657287680a82968426fb2872f301f6a230a2117e18ea81b4fe6b1ca81005",
+        "app/services/rulesets/cost_functions.py": "008fd888c2ccc5e63dd512040f1c8bc8d119a3d78b786afb7f4fc78230ecff6a",
+        "app/services/rulesets/dispatcher.py": "32179c24bd0915017cf3fe17a2406790d2d94f860a7899efdf8bcf41ba010f15",
+        "app/services/rulesets/handlers.py": "776ca2a4fb1fc0c4a9e36fb5df5d5b11d1910d215e7459397a833b45e604801b",
+        "app/services/rulesets/loader.py": "370659593ea81d25877079b94009f9e07061a4272bab7bfe5b8b8bd0480c0b91",
+        "app/services/rulesets/models.py": "5fbb2a9bac9bb06437bed1e3d51ffdbbce3714fde358dbf3d30d277c81bdf789",
+        "app/services/rulesets/quote_yaml.py": "79d164791350f52c0f9c69848b55b84f6893e53f58c8de7f95bdec711b68f60d",
+        "scripts/balance_common.py": "20f135476c8f5bc702dc46b16cad867726d095ef299c45b416651eb0f81ec59b",
+        "scripts/balance_simulate.py": "160986db04cc79090452ca4e83878c0f7047e0f0f295e58767b4ae109319a50a",
+        "scripts/campaign_v1.py": "8a9718915a17dfb94dcb6b79d233366e5fd280d8e5039d31e9d0b36efd290cbf",
+        "scripts/deployment_experiment.py": "bbf997705d956cc7007076317e5a66116417a97727f759a4086a1c214b3c43cd",
+        "tests/fixtures/battles/demo_skirmish.yaml": "2d5b3e482110143bc6592a74e8848e2594747deb8236e206e4243d1c13e5f4f0"
+      }
+    },
+    "inputs": {
+      "inputs/tests/fixtures/battles/demo_skirmish.yaml": "2d5b3e482110143bc6592a74e8848e2594747deb8236e206e4243d1c13e5f4f0"
+    },
+    "schema": "szop.campaign/v1"
+  },
+  "cases_per_campaign": 32,
+  "executions_per_campaign": 64,
+  "campaigns": 2,
+  "deterministic_rows_equal": true,
+  "aggregates_equal": true,
+  "noop_bytes_unchanged": true,
+  "archive_verified": true,
+  "archive_noop_bytes_unchanged": true,
+  "deterministic_digest": "17674ac3426b42ebcc048e55c53ccbc0e684526f3b2808c8be7e696b72ab2baf",
+  "case_digests": [
+    {
+      "case_id": "6d1a4858ef6b20ce7905",
+      "sha256": "13f10f4a58d3e9015d9b2f3016d3e8f56d8799788a075cfc10ad3f1168beda48"
+    },
+    {
+      "case_id": "a0e8cbe25fed0690b9d3",
+      "sha256": "45a02c6eab458ab4c8caaf13b31b29801334b864dc055a02f0568224747ecf4c"
+    },
+    {
+      "case_id": "762b987db7935fad6f8e",
+      "sha256": "f7d5d98b0f3b41bf358503209bca1a5f0406e7147c12ecec6b2c29583536bdf7"
+    },
+    {
+      "case_id": "f638da6a6c85b94c7f69",
+      "sha256": "2d1334bff4280728b5c0f4a7ca508a6fcccf372642b8beb9c1f2218de6511015"
+    },
+    {
+      "case_id": "2b6c37a6741ae5a4d2b3",
+      "sha256": "a264c50ac3bce67d747a045201b1ea88f5b5209294ef95cca7765dddb53ba128"
+    },
+    {
+      "case_id": "9db51c0ea88e71bdfbc5",
+      "sha256": "6f6868484323a2d94505d641086b033f6a6de86736bb930ee851003c83b4daa5"
+    },
+    {
+      "case_id": "7003777f63f432b03367",
+      "sha256": "9d32d8a422eb3a2d4d5ee1fdc5b7ee3b7587b595541ab5b3735ab19758acf08a"
+    },
+    {
+      "case_id": "cc3bc678680fb2ad9c22",
+      "sha256": "bb1a5463c45db7a4b953cbe4aff3bca1b263a10d65545946167d59cccd0c23b3"
+    },
+    {
+      "case_id": "c45bc81c5c06e7a8eb37",
+      "sha256": "63a63b573e8f1b97efe98df59c067d3b64b37ac779791ec780e7b569ebe638dc"
+    },
+    {
+      "case_id": "e773c5380663f0884c96",
+      "sha256": "02c365516da19e1151be4d183a2f85c61043deaf2c50c06dc1613d10572ca103"
+    },
+    {
+      "case_id": "6f9a108b948b35a920cd",
+      "sha256": "5e91ec08f7d51a200060ecdc9ec3ea4569025e197399f9a86812bee85159d3c5"
+    },
+    {
+      "case_id": "05bfde1fe2d5e1348eeb",
+      "sha256": "1711390609923fce0ea914d9ce52b45e6533504714f875fd0fefbedc08540f1d"
+    },
+    {
+      "case_id": "1c0b28a8dac859e33362",
+      "sha256": "9033afbeb204202bbb1495ec8176cae45b6a5d7a48af2ccc744c986e7518db12"
+    },
+    {
+      "case_id": "5547e760557693668608",
+      "sha256": "9029a17c5fbae0b0d254f7c2c30c10160fd5a7b76c161c03d55af8276353bf98"
+    },
+    {
+      "case_id": "a2611702d7804a75bff2",
+      "sha256": "2279ecc2319c8b7145b4b7eed12934b4154b93bd3a478d3752ee09e20871ab43"
+    },
+    {
+      "case_id": "13c158508abadb8594ba",
+      "sha256": "27bb88778e588725e60336051bb3de31b98b29aedbf6d83159fa60ea43f0fdfe"
+    },
+    {
+      "case_id": "ec57383483fab4bc0e34",
+      "sha256": "8320c4d196c5b575ed1cbf379dc2cf830a39bfe58b75a145c4eb2181c673b403"
+    },
+    {
+      "case_id": "d48df137fc6a3261d968",
+      "sha256": "ef490a9c855154fc99251127500b52869cfc43e511ec37ba861d1759d4f13a4e"
+    },
+    {
+      "case_id": "492e8c69d1729f6c23e5",
+      "sha256": "d04d4692d3d5d931ed56eb07312c7fee4353af854197b649f8bd7baa864f583f"
+    },
+    {
+      "case_id": "626c49741c0d8ba885ae",
+      "sha256": "4a60eb54d24cac3995790814132f29ce422e8f6e2ca5f9051924050483d647f8"
+    },
+    {
+      "case_id": "4209ef136d1c0218e6ba",
+      "sha256": "e316b72fdc6aee312869f49dba5c8dad24ce05b4d6eb110dfaa0d377b4a5d50c"
+    },
+    {
+      "case_id": "802da5ce447bce77dd62",
+      "sha256": "42beee56f443124de372413d951d1824085a5ebcac9cd045717b9cb8eb1d0c13"
+    },
+    {
+      "case_id": "9a4da52e0b7803838e04",
+      "sha256": "de233267f9584a60417d7eccc475a5036eee2c54ef28647070506573f8580c3e"
+    },
+    {
+      "case_id": "6b6fefa89f28e156c4cc",
+      "sha256": "9d820c828f918bcba7a3b4d767f8e8aba25cb01f4931b6957ffc962c8c479343"
+    },
+    {
+      "case_id": "4b76d2176bdcc3009bad",
+      "sha256": "6bcb5e7e2d77410d4b87e9605bc8e0995ae05589628e3c7c2c53819a06de8cdc"
+    },
+    {
+      "case_id": "cc873e254e05eaf8ea9a",
+      "sha256": "926a5da5ba5b913f9761a5f6831a749f9aa4633b8f66a5f9dc444726d9575246"
+    },
+    {
+      "case_id": "18265c948c2438673a10",
+      "sha256": "5f6d6cd24398efd89d4013a2a08520c58bf0cc8388f94bd7214615cbc0b19294"
+    },
+    {
+      "case_id": "c65c39fc99b96cba8c97",
+      "sha256": "d8b2d52bb9cb4de552afc93e1664c9a09345217befed0108eab10627906820ef"
+    },
+    {
+      "case_id": "a5a0c78033c2c13ff2bf",
+      "sha256": "41b2566be3becff98a38fc15a15e5d83212b7e79b473b65523400f9afd7032ed"
+    },
+    {
+      "case_id": "28256c014c9a157731df",
+      "sha256": "0598353599e76314d35c38e87a55874b9d57c1afa613241a22ea764c7d929c05"
+    },
+    {
+      "case_id": "84f8d3fd38217e406513",
+      "sha256": "b68bccb2aa5702a84ac7d86a9aa0316df793d298059d52334cba1c17a06177cc"
+    },
+    {
+      "case_id": "61585a7bdb7d89a9ed95",
+      "sha256": "305a423145f63c8a9a796be627bc009150709c551fd815eddf637f182051a6bc"
+    }
+  ],
+  "summary": {
+    "cases": 32,
+    "statuses": {
+      "complete": 32
+    },
+    "mixed_cases": 16,
+    "complete_mixed": 16,
+    "mixed_outcomes": {
+      "objectives": 10,
+      "grid": 6
+    },
+    "non_reproducible": 0
+  },
+  "persistence_ms": {
+    "commits": 64,
+    "mean": 28.613900001801085,
+    "median": 36.185450153425336,
+    "max": 138.95329972729087
+  },
+  "archive_files": {
+    "checksums.json": "a748c2c98116171a0f2d19919e84058ec12cddd06aacb95e9d6ea7164354a1ae",
+    "header.json": "87971849998d4fc373a5739604654924a496bba27e056c9d0c320df5ecea15b1",
+    "journal.jsonl": "a23bff263c5ccb9c60cf25e08fd3197f3c615e0557dcfdddbc610b177a183e04",
+    "manifest.json": "11030b2077944cccc94601093b5f3f4157c8b9e3354e795ff21ce4c4f484f020",
+    "report.md": "01c5d47b0dc064264537fc2e83bbd4f9979956bfff49b44349615ded4786fbe1",
+    "inputs/tests/fixtures/battles/demo_skirmish.yaml": "2d5b3e482110143bc6592a74e8848e2594747deb8236e206e4243d1c13e5f4f0"
+  },
+  "steps": {
+    "full": {
+      "status": "complete",
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "committed": 32,
+      "total": 32,
+      "planned": 32,
+      "startup_ms": 117.21140006557107,
+      "persistence_ms": [
+        42.367300018668175,
+        5.854099988937378,
+        35.79929983243346,
+        40.56650027632713,
+        36.30750020965934,
+        59.09890029579401,
+        42.116899974644184,
+        15.496800187975168,
+        35.84309993311763,
+        4.328100010752678,
+        37.50189999118447,
+        3.075100015848875,
+        4.2121997103095055,
+        23.554399609565735,
+        41.34400002658367,
+        5.088599864393473,
+        41.77510039880872,
+        7.914099842309952,
+        39.0047999098897,
+        6.049399729818106,
+        39.6182001568377,
+        5.62020018696785,
+        5.165599752217531,
+        5.844499915838242,
+        36.60620003938675,
+        39.34490028768778,
+        8.151500020176172,
+        4.7842999920248985,
+        5.503499880433083,
+        42.06090001389384,
+        7.368599995970726,
+        39.11729995161295
+      ],
+      "exit_code": 0,
+      "command_ms": 17681.738500017673
+    },
+    "split_start": {
+      "status": "stopped",
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "committed": 8,
+      "total": 8,
+      "planned": 32,
+      "startup_ms": 111.74349999055266,
+      "persistence_ms": [
+        42.4194997176528,
+        42.01880004256964,
+        39.907099679112434,
+        8.119500242173672,
+        41.44029971212149,
+        7.871400099247694,
+        41.31089989095926,
+        6.881000008434057
+      ],
+      "exit_code": 2,
+      "command_ms": 8425.98420009017
+    },
+    "split_resume": {
+      "status": "complete",
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "committed": 24,
+      "total": 32,
+      "planned": 32,
+      "startup_ms": 159.4042000360787,
+      "persistence_ms": [
+        138.95329972729087,
+        41.1995998583734,
+        36.27940034493804,
+        37.42960002273321,
+        36.013499833643436,
+        36.36729996651411,
+        5.666099954396486,
+        41.719500441104174,
+        35.86529986932874,
+        40.048500057309866,
+        63.87070007622242,
+        36.2835000269115,
+        35.968400072306395,
+        20.419900305569172,
+        40.31720012426376,
+        36.48250037804246,
+        4.842699971050024,
+        40.37469998002052,
+        36.09149996191263,
+        6.48629991337657,
+        11.260100174695253,
+        6.230299826711416,
+        41.97350004687905,
+        4.693899769335985
+      ],
+      "exit_code": 0,
+      "command_ms": 13649.082399904728
+    },
+    "split_noop": {
+      "status": "complete",
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "committed": 0,
+      "total": 32,
+      "planned": 32,
+      "startup_ms": 116.59609992057085,
+      "persistence_ms": [],
+      "exit_code": 0,
+      "command_ms": 3474.663899745792
+    },
+    "verify": {
+      "verified": true,
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "total": 32,
+      "exit_code": 0,
+      "command_ms": 3348.713200073689
+    },
+    "report": {
+      "cases": 32,
+      "statuses": {
+        "complete": 32
+      },
+      "mixed_cases": 16,
+      "complete_mixed": 16,
+      "mixed_outcomes": {
+        "objectives": 10,
+        "grid": 6
+      },
+      "non_reproducible": 0,
+      "planned": 32,
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "campaign_failures": 0,
+      "exit_code": 0,
+      "command_ms": 3795.879299752414
+    },
+    "archive": {
+      "archived": "build\\campaigns\\d7_1\\pilot-20261122T195451Z\\archive",
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "total": 32,
+      "exit_code": 0,
+      "command_ms": 3793.8093999400735
+    },
+    "archive_verify": {
+      "verified": true,
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "total": 32,
+      "exit_code": 0,
+      "command_ms": 3494.859999977052
+    },
+    "archive_noop": {
+      "status": "complete",
+      "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+      "committed": 0,
+      "total": 32,
+      "planned": 32,
+      "startup_ms": 134.3450997956097,
+      "persistence_ms": [],
+      "exit_code": 0,
+      "command_ms": 3377.3554996587336
+    }
+  }
+}

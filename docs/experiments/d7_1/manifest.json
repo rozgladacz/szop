@@ -1,0 +1,21 @@
+{
+  "schema": "szop.deployment_experiment/v1",
+  "base_commit": "df60897edccd1648fa7102d0ccbbcfb3739866bb",
+  "fixtures": [
+    {"id": "demo_skirmish", "path": "tests/fixtures/battles/demo_skirmish.yaml"}
+  ],
+  "policies": ["priority"],
+  "battle_seeds": [11, 19],
+  "swaps": [false, true],
+  "initiatives": [0, 1],
+  "strategy_pairs": [
+    ["grid", "grid"],
+    ["grid", "objectives"],
+    ["objectives", "grid"],
+    ["objectives", "objectives"]
+  ],
+  "deployment_zones": [[0, 0, 72, 12], [0, 36, 72, 48]],
+  "repeats": 2,
+  "max_activations": 2000,
+  "ruleset_version": "v1"
+}

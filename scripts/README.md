@@ -704,3 +704,31 @@ D5.3b, więc uruchamiać sekwencyjnie. Exit1 oznacza niepowtarzalność.
 ```
 
 [Raport, zakres próbek i prerekwizyty integracji](../docs/boty-audit.md).
+
+## campaign_v1.py — D7.1
+
+Lokalna, sekwencyjna kampania nad niezmienionym adapterem D5.3b.
+Zapis JSONL z łańcuchem SHA256 i `fsync` po każdym przypadku; blokada OS
+wyklucza drugiego writera i zwalnia się po śmierci procesu. Manifest,
+istotne źródła i zależności muszą pozostać zgodne przy resume. Niepełny
+koniec wymaga jawnego `repair-tail`; korupcja zatwierdzonego rekordu
+zatrzymuje pracę. Raport i checksums są odbudowywalne z journalu.
+
+```powershell
+.\.venv\Scripts\python.exe -X utf8 scripts/campaign_v1.py start --manifest docs/experiments/d7_1/manifest.json --directory build/campaigns/example --max-cases 8
+.\.venv\Scripts\python.exe -X utf8 scripts/campaign_v1.py resume --directory build/campaigns/example --max-cases 24
+.\.venv\Scripts\python.exe -X utf8 scripts/campaign_v1.py verify --directory build/campaigns/example
+.\.venv\Scripts\python.exe -X utf8 scripts/campaign_v1.py report --directory build/campaigns/example
+.\.venv\Scripts\python.exe -X utf8 scripts/campaign_v1.py archive --directory build/campaigns/example --destination build/campaigns/example-backup
+```
+
+Exit 0 = ukończona seria/udana operacja, 2 = kontrolowany stop z pozostałymi
+przypadkami, 1 = błąd kampanii lub obsługi. Stabilne błędy symulacji są
+danymi, nie remisami; ich obecność sama nie zmienia exit 0 ukończonej serii.
+Niepowtarzalność, błąd replay/inwariantu i nieoczekiwany błąd adaptera
+utrwalają rekord i zatrzymują kampanię kodem 1. Wznawianie takiej kampanii
+nie ponawia obliczeń. Domyślnego limitu nie ma: `--max-cases` jest wymagane.
+Nie ma schedulera, retry sieciowego ani połączenia z DB.
+
+[Kontrakt, recovery i przeniesienie](../docs/trwala-kampania-v1.md),
+[zamrożony pilot](../docs/experiments/d7_1/README.md).

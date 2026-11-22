@@ -9,13 +9,13 @@
 
 ---
 
-## Aktywna kolejka — akceptacja 2026-11-22
+## Zakończona kolejka — akceptacja 2026-11-22
 
 Użytkownik wybrał „trwała kampania testowa v1” i jawnie wznowił cykl.
-Marker poniżej pochodzi z tej akceptacji. Jeden worker, jeden zamykany etap;
+Poniższy etap wykonano z tej akceptacji. Nie pozostawiono otwartych markerów;
 pozostałe propozycje Play vs AI i poprawki silnika wymagają osobnego wyboru.
 
-- [ ] **D7.1-campaign-v1** [automation-ready] — [trwała kampania testowa v1](trwala-kampania-v1.md): zapis każdego przypadku, zgodny resume, kontrola writerów/integralności, archiwum i pilot 32 przypadków na istniejącym harnessie D5.3b. Bez zmian silnika/API/UI i produkcyjnej DB.
+- [x] **D7.1-campaign-v1** — **DONE 2026-11-22**: [trwały runner v1](trwala-kampania-v1.md), JSONL/fsync, OS lock, source/integrity gates, report/archive; [pilot](experiments/d7_1/README.md) 32/64 pełny vs stop8+resume24 identyczny, końcowy resume no-op. Celowane **77 passed**, pełne **4146 passed**. Bez zmian silnika/API/UI/DB; większa kampania wymaga osobnego wyboru.
 
 ## Zakończona kolejka — akceptacje 2026-11-19
 
