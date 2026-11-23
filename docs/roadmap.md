@@ -22,7 +22,7 @@ pozostałe propozycje Play vs AI i poprawki silnika wymagają osobnego wyboru.
 [Plan danych testowych](plan-danych-testowych.md) definiuje osiem etapów
 do osobnego wyboru. Pierwszy jest D7.2a, wspólne archiwum kampanii.
 
-- [ ] **D7.2a** — wspólny katalog i publikacja zweryfikowanych kopii D7.1.
+- [x] **D7.2a** — **DONE 2026-11-23**. [Wspólny katalog eksperymentów](archiwum-eksperymentow.md) publikuje zweryfikowane kopie D7.1, odbudowuje katalog z deskryptorów i umożliwia weryfikację offline. Pilot 8/32 i 32/32, 49 testów celowanych i 4161 w pełnej suicie.
 - [ ] **D7.2b** — import historii i odtworzenie z kopii na innym komputerze.
 - [ ] **D7.3a** — bramka integralności, powtarzalności i kompletności.
 - [ ] **D7.3b** — bramka porównywalności i pomiar efektu strony.

@@ -27,6 +27,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [boty-connect.md](boty-connect.md) | D6.2: jednorazowy priority/v1 → pending proposal, osobna zgoda ownera, zakres i rekoncyliacja |
 | [play-vs-ai-plan.md](play-vs-ai-plan.md) | D6.3: małe etapy dojścia od podglądu i priority/v1 do gry w UI, consent/protokoły/setup/restart i testy |
 | [trwala-kampania-v1.md](trwala-kampania-v1.md) | D7.1: runner kampanii v1, trwały zapis przypadków, resume, integralność, archiwum i pilot |
+| [archiwum-eksperymentow.md](archiwum-eksperymentow.md) | D7.2a: lokalny katalog pakietów kampanii, publikacja, weryfikacja i pilot |
 | [plan-danych-testowych.md](plan-danych-testowych.md) | D7.2–D7.4: plan wspólnego archiwum, bramek jakości i pełnego eksportu decyzji |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |
 | [kolejka-po-c2d1.md](kolejka-po-c2d1.md) | Pięć kolejnych przebiegów z zależnościami, zakresem i kryteriami zakończenia |

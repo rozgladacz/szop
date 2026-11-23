@@ -732,3 +732,11 @@ Nie ma schedulera, retry sieciowego ani połączenia z DB.
 
 [Kontrakt, recovery i przeniesienie](../docs/trwala-kampania-v1.md),
 [zamrożony pilot](../docs/experiments/d7_1/README.md).
+
+## experiment_archive.py — D7.2a
+
+Publikuje zweryfikowaną kopię D7.1 w lokalnym archiwum. `import` zwraca
+identyfikator pakietu, `list` odbudowuje katalog z deskryptorów, a `verify`
+sprawdza komplet plików, rozmiary i hashe. Import wymaga zgodnych źródeł
+kampanii. Odczyt gotowych pakietów działa samodzielnie.
+[Polecenia, format i pilot](../docs/archiwum-eksperymentow.md).
