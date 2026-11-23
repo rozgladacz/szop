@@ -17,6 +17,20 @@ pozostałe propozycje Play vs AI i poprawki silnika wymagają osobnego wyboru.
 
 - [x] **D7.1-campaign-v1** — **DONE 2026-11-22**: [trwały runner v1](trwala-kampania-v1.md), JSONL/fsync, OS lock, source/integrity gates, report/archive; [pilot](experiments/d7_1/README.md) 32/64 pełny vs stop8+resume24 identyczny, końcowy resume no-op. Celowane **77 passed**, pełne **4146 passed**. Bez zmian silnika/API/UI/DB; większa kampania wymaga osobnego wyboru.
 
+## Propozycje po D7.1 — dane testowe
+
+[Plan danych testowych](plan-danych-testowych.md) definiuje osiem etapów
+do osobnego wyboru. Pierwszy jest D7.2a, wspólne archiwum kampanii.
+
+- [ ] **D7.2a** — wspólny katalog i publikacja zweryfikowanych kopii D7.1.
+- [ ] **D7.2b** — import historii i odtworzenie z kopii na innym komputerze.
+- [ ] **D7.3a** — bramka integralności, powtarzalności i kompletności.
+- [ ] **D7.3b** — bramka porównywalności i pomiar efektu strony.
+- [ ] **D7.4a** — obserwacja rzeczywistych decyzji i skutków w runnerze v1.
+- [ ] **D7.4b** — pełny eksport decyzji i sprawdzenie odtworzenia.
+- [ ] **D7.4c** — pilot od przerwanej kampanii do archiwum i oceny jakości.
+- [ ] **D7.3c** — kwalifikacja danych do uczenia w zweryfikowanym zakresie reguł.
+
 ## Zakończona kolejka — akceptacje 2026-11-19
 
 Użytkownik zaakceptował Ostrożnego (wyłącznie dystansowo), audyty Bastionu,
