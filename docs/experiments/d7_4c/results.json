@@ -1,0 +1,108 @@
+{
+  "battle_events": 14572,
+  "budget_bytes": 16777216,
+  "budget_per_execution_bytes": 262144,
+  "bytes_per_decision": 2004.62,
+  "campaign_id": "ee41bda1aa267c227f92a8e59598a8d41a94de5705e287fb9e749a74b8e4a331",
+  "cases": 32,
+  "copy": {
+    "expand_ms": 2559.09,
+    "expanded_rows": 196,
+    "quality_byte_identical": true,
+    "quality_ms": 514.5,
+    "verify_ms": 338.71
+  },
+  "decisions": 4472,
+  "deployment_events": 1024,
+  "duplicate_same_package": true,
+  "error": {
+    "id": "e684556840c302ad5ce03a76806bf36526048be7fe96e4f9ad929977b20f09dd",
+    "import_ms": 1738.75,
+    "quality": {
+      "categories": {
+        "activation_cap": 1
+      },
+      "missing": 31,
+      "outcomes": {},
+      "planned": 32,
+      "reasons": {
+        "activation_cap": 1,
+        "incomplete_decision_trace": 1,
+        "missing_replay_evidence": 1
+      },
+      "recorded": 1
+    },
+    "quality_ms": 195.67
+  },
+  "executions": 64,
+  "full_split_equal": true,
+  "manifest_sha256": "793cdb325ec8f65cfd51fb957f184c8a6fb7efc49d0850bbf06fcb46f4b3ac59",
+  "max_execution_bytes": 144984,
+  "noop_byte_identical": true,
+  "observations": 12952,
+  "package": {
+    "bytes": 9111241,
+    "duplicate_ms": 4831.72,
+    "id": "4cbeca259d939b28b1a37aa3547a6ebd90f877427e3d0fd39e39313a7845e583",
+    "import_ms": 4387.69,
+    "quality": {
+      "categories": {
+        "passed": 32
+      },
+      "missing": 0,
+      "outcomes": {
+        "draw": 4,
+        "player_0": 12,
+        "player_1": 16
+      },
+      "planned": 32,
+      "reasons": {},
+      "recorded": 32
+    },
+    "quality_ms": 621.75,
+    "quality_sha256": "0aaf0bbc892dc4500fc45e24ba3f8c9eaa4d5c403277e1b992e6fecd66b43c46"
+  },
+  "platform": "Windows",
+  "python": "3.13.14",
+  "runs": {
+    "full": {
+      "committed": 32,
+      "wall_ms": 20259.37
+    },
+    "noop": {
+      "committed": 0,
+      "wall_ms": 1771.32
+    },
+    "resume": {
+      "committed": 24,
+      "wall_ms": 14761.84
+    },
+    "stop": {
+      "committed": 8,
+      "wall_ms": 5889.68
+    }
+  },
+  "source_revision": "7728eb1737325e5410d37b68922bbc865ef843c4",
+  "stable_file_hashes_sha256": "0bbeb5653777e563bcce60b8ea15f5034aa92a395e3e17572b30fa3e9922847e",
+  "stable_rows_sha256": "17674ac3426b42ebcc048e55c53ccbc0e684526f3b2808c8be7e696b72ab2baf",
+  "stopped": {
+    "id": "3e2c04f2f4108a5ba5b95fa71045a7063da742bc1011b36fa2482b39682f85ee",
+    "import_ms": 2376.31,
+    "quality": {
+      "categories": {
+        "passed": 8
+      },
+      "missing": 24,
+      "outcomes": {
+        "draw": 1,
+        "player_0": 2,
+        "player_1": 5
+      },
+      "planned": 32,
+      "reasons": {},
+      "recorded": 8
+    },
+    "quality_ms": 256.31
+  },
+  "trace_bytes": 8964644
+}

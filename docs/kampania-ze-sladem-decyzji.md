@@ -84,3 +84,40 @@ Do odtworzenia oryginalnego pakietu na innym komputerze skopiuj całe
 komputerze. Zatrzymaną kampanię można przenieść osobno, kopiując jej
 pełny katalog po zakończonym wywołaniu runnera. Osierocone pliki zostają
 w źródłowym katalogu do inspekcji. Hashe sprawdzają integralność kopii.
+
+## Wynik pilota z 2026-11-24
+
+Rewizja źródłowa `7728eb1737325e5410d37b68922bbc865ef843c4`. Windows,
+Python 3.13.14. Przebiegi pełny i 8 → 24 dały te same wyniki i hashe pięciu
+plików danych w każdym z 64 wykonań. Wznowienie zakończonego przebiegu
+zwróciło zero nowych przypadków i nie zmieniło żadnego pliku danych.
+Ponowny import zwrócił ten sam identyfikator pakietu. Raport techniczny
+pełnej kopii był identyczny bajt w bajt na świeżym checkoutcie. Niezależny
+replay pierwszego powtórzenia z kopii odtworzył 196 obserwacji, w tym
+decyzje z odtworzonym stanem oraz zdarzeniami skutku.
+
+| Pomiar | Wynik |
+|---|---:|
+| Przypadki z oceną techniczną `passed` | 32/32 |
+| Decyzje / obserwacje | 4 472 / 12 952 |
+| Ślady / największe wykonanie | 8 964 644 B / 144 984 B |
+| Pełny pakiet, suma plików snapshotu | 9 111 241 B |
+| Start pełny / start do 8 / wznowienie 24 | 20,26 s / 5,89 s / 14,76 s |
+| Import pełny / ponowny import | 4,39 s / 4,83 s |
+| Weryfikacja kopii / ocena kopii | 0,34 s / 0,51 s |
+
+Zatrzymany pakiet pokazał 8 zaliczonych i 24 brakujące przypadki. Próba
+z limitem aktywacji zachowała prefiks i otrzymała `activation_cap` oraz
+`incomplete_decision_trace`. Wynik mieści się w budżecie pilota.
+Pełny identyfikator pakietu, hashe, liczniki i pomiary są w [raporcie
+pilota](experiments/d7_4c/results.json). Ponowne wyliczenie raportu
+porównywalności D5.3b zachowało jego historyczny SHA-256
+`2dc80b9755d69d15c2b73bb8232460721ee9b238866b4b8ee407e22d5ac224a8`.
+
+Zaliczono 140 testów celowanych i 4242 w pełnym zestawie, z czterema
+ostrzeżeniami zależności. Przerwanie przed zatwierdzeniem wpisu sprawdzono
+w oddzielnym procesie. Dodatkowe regresje obejmują brakujący plik,
+uszkodzoną zawartość, błąd zapisu, zachowanie prefiksu i dokładnie jedno
+wywołanie adaptera na powtórzenie. Repozytorium zawiera kod, użyty manifest
+i kompaktowy wynik. Kopia pełnego pakietu pozostaje lokalnie w
+`build/d74c-copy` i wymaga przeniesienia poza ten komputer.
