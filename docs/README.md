@@ -32,6 +32,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [obserwacja-decyzji-kampanii.md](obserwacja-decyzji-kampanii.md) | D7.4a — ślad wyborów, rozstrzygnięć i przejść automatycznych runnera v1 |
 | [eksport-decyzji-kampanii.md](eksport-decyzji-kampanii.md) | D7.4b — wersjonowany eksport decyzji, replay, budżet pilota i odtworzenie pakietu |
 | [kampania-ze-sladem-decyzji.md](kampania-ze-sladem-decyzji.md) | D7.4c — trwały ślad w kampanii, wznowienie, publikacja i ocena techniczna |
+| [kwalifikacja-decyzji-kampanii.md](kwalifikacja-decyzji-kampanii.md) | D7.3c — dowody dopuszczenia decyzji rozstawienia, wyłączenia i podział danych |
 | [plan-danych-testowych.md](plan-danych-testowych.md) | D7.2–D7.4: plan wspólnego archiwum, bramek jakości i pełnego eksportu decyzji |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |
 | [kolejka-po-c2d1.md](kolejka-po-c2d1.md) | Pięć kolejnych przebiegów z zależnościami, zakresem i kryteriami zakończenia |

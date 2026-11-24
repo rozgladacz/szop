@@ -1,0 +1,165 @@
+{
+  "benchmark": {
+    "cli_first_ms": 24291.24,
+    "cli_repeat_ms": 28746.29,
+    "os": "Windows",
+    "python": "3.13.14"
+  },
+  "coverage": {
+    "case_exclusions": {
+      "activation_cap": 1,
+      "attack_while_exhausted": 1,
+      "decision_rejected": 14,
+      "maneuver_while_pinned": 1,
+      "missing_replay_evidence": 58,
+      "no_decision_trace": 164,
+      "visible_enemy_within_2in": 1
+    },
+    "cases": {
+      "excluded": 240,
+      "qualified": 32
+    },
+    "observation_exclusions": {
+      "automatic_transition": 8480,
+      "outside_verified_scope": 3960
+    },
+    "observations": {
+      "excluded": 12440,
+      "qualified": 512
+    },
+    "rules_status": {
+      "confirmed": 32,
+      "unverified": 237,
+      "violation": 3
+    }
+  },
+  "known_audit_violations": [
+    {
+      "case_id": "fe93c54223f78e89e2f0593a04d0058365a58df818bdf39d468558363dbfc7a9",
+      "evidence": {
+        "file": "results.json",
+        "pointer": "/decisions/10"
+      },
+      "reason": "visible_enemy_within_2in",
+      "rule": "14.c.iv"
+    },
+    {
+      "case_id": "ec68fdccd6a579bf636f6ed32eb82c0114bdd74cf66db2098e673796d37029e6",
+      "evidence": {
+        "file": "results.json",
+        "pointer": "/decisions/57"
+      },
+      "reason": "maneuver_while_pinned",
+      "rule": "22.b.i"
+    },
+    {
+      "case_id": "06a223ff9d5f5a3fe42137dda8a4b10aff7e1325cca8f6e1b8b15183d83ed468",
+      "evidence": {
+        "file": "results.json",
+        "pointer": "/decisions/65"
+      },
+      "reason": "attack_while_exhausted",
+      "rule": "22.a.i"
+    }
+  ],
+  "package_hashes_unchanged": true,
+  "partition": {
+    "groups": {
+      "72b952a1791b71985dbc6eb03c9f704fff6979ff009c3d452e3817040f0ba043": {
+        "map_families": [
+          [
+            "fixture",
+            "tests/fixtures/battles/demo_skirmish.yaml"
+          ]
+        ],
+        "split": "train"
+      }
+    },
+    "observations": {
+      "test": 0,
+      "train": 512,
+      "validation": 0
+    },
+    "shared_groups": 0,
+    "shared_samples": 0,
+    "unique_samples": 96
+  },
+  "profile_digest": "72afe280ddcb4f4228a9d4994ed2cc7e27a058e5a872d5d79c29cd164aca5e07",
+  "qualification_published_once": true,
+  "replay_verified_executions": 64,
+  "report_bytes": 2054226,
+  "report_key": "85dfbb61bff69eefd1fb8429fe42b145b1d7bea356c0b0729ea5d22a46b2f16a",
+  "report_sha256": "31f68a1a9492344de6ad3c1aa2f5bd35583899aec799377a014d6531056a7f2b",
+  "schema": "szop.experiment.qualification/v1",
+  "snapshot_bytes": 9423871,
+  "sources": [
+    {
+      "completeness": "complete",
+      "coverage": {
+        "categories": {
+          "passed": 32
+        },
+        "missing": 0,
+        "outcomes": {
+          "draw": 4,
+          "player_0": 12,
+          "player_1": 16
+        },
+        "planned": 32,
+        "reasons": {},
+        "recorded": 32
+      },
+      "package_id": "4cbeca259d939b28b1a37aa3547a6ebd90f877427e3d0fd39e39313a7845e583",
+      "package_type": "campaign_v1",
+      "policy_digest": "6f7fe164fb28f88f1dca056ef726a93e65f05f303692d9fde5fa318e73897191",
+      "quality_report_sha256": "0aaf0bbc892dc4500fc45e24ba3f8c9eaa4d5c403277e1b992e6fecd66b43c46"
+    },
+    {
+      "completeness": "unknown",
+      "coverage": {
+        "categories": {
+          "decision_rejected": 14,
+          "missing_replay_evidence": 58,
+          "passed": 167
+        },
+        "missing": null,
+        "outcomes": {
+          "draw": 10,
+          "player_0": 2,
+          "player_1": 2
+        },
+        "planned": null,
+        "reasons": {
+          "decision_rejected": 14,
+          "missing_replay_evidence": 72
+        },
+        "recorded": 239
+      },
+      "package_id": "51a590e8aeedd158f61432991f76460caa1cd35e8d97db5a2609807d6669e3ea",
+      "package_type": "bots_audit_v1",
+      "policy_digest": "4bbb2e6c03f3c98c7c1a40367030746716015319475c7624ca3926c0e9224c64",
+      "quality_report_sha256": "99deff1035e860cfe63931fe2fa89fb091abe71c4b5432721282a8f3688d5c0d"
+    },
+    {
+      "completeness": "partial",
+      "coverage": {
+        "categories": {
+          "activation_cap": 1
+        },
+        "missing": 31,
+        "outcomes": {},
+        "planned": 32,
+        "reasons": {
+          "activation_cap": 1,
+          "incomplete_decision_trace": 1,
+          "missing_replay_evidence": 1
+        },
+        "recorded": 1
+      },
+      "package_id": "e684556840c302ad5ce03a76806bf36526048be7fe96e4f9ad929977b20f09dd",
+      "package_type": "campaign_v1",
+      "policy_digest": "6f7fe164fb28f88f1dca056ef726a93e65f05f303692d9fde5fa318e73897191",
+      "quality_report_sha256": "3e65e021c23ae43d8cf195188bd9ce5aa660eba00b02d1c8aab4e0836f3a362e"
+    }
+  ]
+}

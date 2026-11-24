@@ -16,11 +16,13 @@ from tempfile import TemporaryDirectory
 if __package__:
     from . import experiment_archive as archive
     from . import experiment_comparison as comparison
+    from . import experiment_qualification as qualification
 else:
     # Isolated Python omits the script directory from sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import experiment_archive as archive
     import experiment_comparison as comparison
+    import experiment_qualification as qualification
 
 
 SCHEMA = "szop.experiment.quality/v1"
@@ -422,13 +424,12 @@ def _group_summary(cases: list[dict], planned: int | None) -> dict:
                 categories=dict(categories), reasons=dict(reasons), outcomes=dict(outcomes))
 
 
-def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool = False) -> dict:
-    """Assess a verified package, optionally including the frozen comparison design."""
+def _evaluate(root: Path, package_id: str, *, min_repeats: int):
     if type(min_repeats) is not int or min_repeats < 2:
         raise ValueError("the minimum repeat count must be at least 2")
     policy = dict(schema=POLICY_SCHEMA, version=1, min_repeats=min_repeats,
                   replay="recorded_equality_and_digests", primary_order=list(PRIMARY_ORDER))
-    plan, results = [], {}
+    plan, results, rows = [], {}, []
     try:
         descriptor = archive.verify_package(root, package_id)
         snapshot = root / "packages" / package_id / archive.SNAPSHOT
@@ -478,6 +479,12 @@ def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool
                   campaign_id=descriptor.get("campaign_id"), policy=policy,
                   policy_digest=_sha(archive._canonical(policy)), integrity="verified", completeness=completeness,
                   status=status, coverage=coverage, groups=groups, cases=cases)
+    return report, descriptor, manifest, plan, results, rows
+
+
+def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool = False) -> dict:
+    """Assess a verified package, optionally including the frozen comparison design."""
+    report, descriptor, manifest, plan, results, _ = _evaluate(root, package_id, min_repeats=min_repeats)
     if compare:
         try:
             return comparison.compare(report, descriptor, manifest, plan, results)
@@ -486,14 +493,28 @@ def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool
     return report
 
 
+def evaluate_qualification(root: Path, package_ids: list[str], *, min_repeats: int = 2) -> dict:
+    """Assess the complete candidate dataset before assigning any splits."""
+    assessments = []
+    for package_id in sorted(set(package_ids)):
+        technical, descriptor, _, _, _, rows = _evaluate(root, package_id, min_repeats=min_repeats)
+        assessments.append((technical, descriptor, rows))
+    if not assessments:
+        raise ValueError("qualification requires at least one package")
+    return qualification.qualify(root, assessments)
+
+
 def _publish(root: Path, archive_root: Path, report: dict) -> tuple[Path, bool]:
     # The caller controls the output root. Path keys are computed or verified here.
     output = archive._separate_archive(root, archive._directory(archive_root))
-    parent = output / report["package_id"]
-    if report["schema"] == comparison.SCHEMA:
-        parent = parent / "comparison"
+    if report["schema"] == qualification.SCHEMA:
+        parent = output / "qualification"
+        name, key = "qualification.json", report["report_key"]
+    elif report["schema"] == comparison.SCHEMA:
+        parent = output / report["package_id"] / "comparison"
         name, key = "comparison.json", report["report_key"]
     else:
+        parent = output / report["package_id"]
         name, key = "quality.json", report["policy_digest"]
     parent = archive._directory(parent, create=True)
     destination = parent / key
@@ -521,24 +542,36 @@ def _publish(root: Path, archive_root: Path, report: dict) -> tuple[Path, bool]:
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive-root", type=Path, required=True)
-    parser.add_argument("--package-id", required=True)
+    parser.add_argument("--package-id", required=True, action="append")
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--min-repeats", type=int, default=2)
-    parser.add_argument("--comparison", choices=[comparison.PROFILE["id"]], help="enable the frozen comparison profile")
+    profiles = parser.add_mutually_exclusive_group()
+    profiles.add_argument("--comparison", choices=[comparison.PROFILE["id"]], help="enable the frozen comparison profile")
+    profiles.add_argument("--qualification", choices=[qualification.PROFILE_ID],
+                          help="qualify archived decisions and partition the supplied packages together")
     args = parser.parse_args(argv)
+    if not args.qualification and len(args.package_id) != 1:
+        parser.error("quality and comparison require exactly one package ID")
     try:
-        report = evaluate(args.archive_root, args.package_id, min_repeats=args.min_repeats,
-                          compare=args.comparison is not None)
+        if args.qualification:
+            report = evaluate_qualification(args.archive_root, args.package_id, min_repeats=args.min_repeats)
+        else:
+            report = evaluate(args.archive_root, args.package_id[0], min_repeats=args.min_repeats,
+                              compare=args.comparison is not None)
         path, created = _publish(args.output_root, args.archive_root, report)
     except IntegrityError as exc:
         print(archive._canonical(dict(status="integrity_error", error=str(exc))).decode("ascii"), file=sys.stderr)
         return 1
-    except (OSError, ValueError) as exc:
+    except (ImportError, OSError, ValueError) as exc:
         print(archive._canonical(dict(status="publication_error", error=str(exc))).decode("ascii"), file=sys.stderr)
         return 3
     details = (("profile_digest", "report_key", "quality", "source_reasons") if args.comparison
                else ("policy_digest", "completeness"))
-    result = {key: report[key] for key in ("package_id", "status", "coverage", *details)}
+    if args.qualification:
+        details = ("sources", "profile_digest", "report_key", "partition")
+    else:
+        details = ("package_id", *details)
+    result = {key: report[key] for key in ("status", "coverage", *details)}
     print(archive._canonical(dict(result, path=str(path), created=created)).decode("ascii"))
     return 0 if report["status"] == "passed" else 2
 
