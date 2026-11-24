@@ -13,7 +13,6 @@ import stat
 import sys
 from tempfile import TemporaryDirectory
 
-
 PACKAGE_SCHEMA = "szop.experiment.package/v1"
 CAMPAIGN_SCHEMA = "szop.campaign/v1"
 PACKAGE_TYPE = "campaign_v1"
@@ -38,6 +37,16 @@ DIGEST = re.compile(r"[0-9a-f]{64}")
 REVISION = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 DEVICE_NAME = re.compile(r"(?:CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])",
                          re.IGNORECASE)
+TRACE_SCHEMA = "szop.campaign.decision_trace/v1"
+DECISION_EXPORT_SCHEMA = "szop.decision_export/v1"
+EXPORT_DATA_FILES = ("manifest.json", "states.json", "deployment.jsonl", "battle.jsonl", "decisions.jsonl")
+EXPORT_FILES = (*EXPORT_DATA_FILES, "export.json")
+TRACE_LABEL = re.compile(r"[A-Za-z0-9_.-]{1,80}")
+_TRACE_ATTEMPT = re.compile(r"[0-9a-f]{32}")
+_TRACE_NAMES = "|".join(re.escape(name) for name in EXPORT_FILES)
+_TRACE_DIRECTORY = r"traces/[0-9a-f]{32}/[1-9][0-9]*"
+TRACE_FILE_PATH = re.compile(rf"{_TRACE_DIRECTORY}/(?:{_TRACE_NAMES})")
+TRACE_TEMPORARY_PATH = re.compile(rf"{_TRACE_DIRECTORY}/\.(?:{_TRACE_NAMES})\.[0-9a-f]{{32}}\.tmp")
 
 
 class ArchiveError(ValueError):
@@ -158,6 +167,42 @@ def _file_entries(files: dict[str, Path]) -> dict:
 
 def _matches(pattern: re.Pattern, value) -> bool:
     return isinstance(value, str) and pattern.fullmatch(value) is not None
+
+
+def check_trace_config(config):
+    if (type(config) is not dict or config.keys() != {"schema", "run_label", "exporter_sha256"}
+            or config["schema"] != TRACE_SCHEMA or not _matches(TRACE_LABEL, config["run_label"])
+            or not _matches(DIGEST, config["exporter_sha256"])):
+        raise ArchiveError("invalid campaign decision trace configuration")
+
+
+def check_trace_link(link, repeats):
+    if (type(link) is not dict or link.keys() != {"schema", "attempt", "repeats"}
+            or link["schema"] != TRACE_SCHEMA or not _matches(_TRACE_ATTEMPT, link["attempt"])
+            or type(link["repeats"]) is not list or len(link["repeats"]) != repeats):
+        raise ArchiveError("invalid campaign decision trace link")
+    for entry in link["repeats"]:
+        if type(entry) is not dict:
+            raise ArchiveError("invalid decision trace repeat")
+        status = entry.get("status")
+        if status in ("verified", "prefix_only"):
+            valid = entry.keys() == {"status", "descriptor_sha256"} and _matches(DIGEST, entry["descriptor_sha256"])
+        elif status == "collection_error":
+            valid = entry.keys() == {"status", "reason"} and _matches(TRACE_LABEL, entry["reason"])
+        else:
+            valid = status == "not_run" and entry.keys() == {"status"}
+        if not valid:
+            raise ArchiveError("invalid decision trace repeat")
+
+
+def trace_repeats(link):
+    for ordinal, entry in enumerate(link["repeats"], 1):
+        path = f"traces/{link['attempt']}/{ordinal}" if "descriptor_sha256" in entry else None
+        yield ordinal, entry, path
+
+
+def trace_files(link):
+    return {f"{path}/{name}" for _, _, path in trace_repeats(link) if path for name in EXPORT_FILES}
 
 
 def _validate_file_entries(files: dict) -> None:
@@ -298,7 +343,11 @@ def _describe(snapshot: Path, committed: int, planned: int) -> dict:
     files = _inventory(snapshot)
     header = _read_json(snapshot / "header.json")
     manifest = _read_json(snapshot / "manifest.json")
-    if set(files) != CAMPAIGN_FILES | _fixture_files(manifest):
+    baseline = CAMPAIGN_FILES | _fixture_files(manifest)
+    traced = "decision_trace" in header
+    extra = set(files) - baseline
+    if (not baseline <= files.keys()
+            or (extra and (not traced or not all(TRACE_FILE_PATH.fullmatch(name) for name in extra)))):
         raise ArchiveError("snapshot file set does not match campaign format")
     description = dict(
         schema=PACKAGE_SCHEMA, type=PACKAGE_TYPE, source_schema=header["schema"],
@@ -308,6 +357,9 @@ def _describe(snapshot: Path, committed: int, planned: int) -> dict:
         completeness="complete" if committed == planned else "partial",
         files=_file_entries(files),
     )
+    if traced:
+        check_trace_config(header["decision_trace"])
+        description["decision_trace_schema"] = TRACE_SCHEMA
     return _identified(description)
 
 
@@ -335,10 +387,16 @@ def _read_descriptor(package: Path, package_id: str) -> dict:
             raise ArchiveError("invalid historical scenarios in descriptor")
         _validate_file_entries(files)
         return descriptor
-    if set(identity) != {
+    traced = "decision_trace_schema" in descriptor
+    expected_fields = {
         "schema", "type", "source_schema", "campaign_id", "recorded_revision", "scenarios",
         "committed_cases", "planned_cases", "completeness", "files",
-    } or (descriptor["schema"], descriptor["type"], descriptor["source_schema"]) != (
+    }
+    if traced:
+        expected_fields.add("decision_trace_schema")
+        if descriptor["decision_trace_schema"] != TRACE_SCHEMA:
+            raise ArchiveError("unsupported campaign decision trace schema")
+    if set(identity) != expected_fields or (descriptor["schema"], descriptor["type"], descriptor["source_schema"]) != (
         PACKAGE_SCHEMA, PACKAGE_TYPE, CAMPAIGN_SCHEMA,
     ):
         raise ArchiveError("unsupported package descriptor")
@@ -363,6 +421,7 @@ def _read_descriptor(package: Path, package_id: str) -> dict:
     for name in files:
         if name not in CAMPAIGN_FILES and not (
             name.startswith("inputs/") and _is_fixture_path(name.removeprefix("inputs/"))
+            or traced and TRACE_FILE_PATH.fullmatch(name)
         ):
             raise ArchiveError("invalid snapshot path in descriptor")
     _validate_file_entries(files)
@@ -473,7 +532,7 @@ def import_campaign(root: Path, source: Path) -> tuple[dict, bool]:
             campaign.archive(source, snapshot)
         with campaign.locked(snapshot):
             copied_header, copied_manifest, rows, *_ = campaign.inspect(snapshot)
-            campaign.verify_derived(snapshot, copied_header)
+            campaign.verify_derived(snapshot, copied_header, rows)
         (snapshot / ".lock").unlink()
         planned = sum(1 for _ in campaign.experiment.iter_cases(copied_manifest))
         return _publish(packages, staging, _describe(snapshot, len(rows), planned))

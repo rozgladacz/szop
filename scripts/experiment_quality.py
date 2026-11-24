@@ -36,6 +36,10 @@ PRIMARY_ORDER = (
     "invariant_error", "harness_error",
     "non_reproducible", "replay_error", "missing_repeat_evidence", "missing_replay_evidence",
 )
+TRACE_REASONS = (
+    "decision_trace_collection_error", "missing_decision_trace", "corrupt_decision_trace",
+    "incomplete_decision_trace", "non_reproducible_decision_trace",
+)
 DEPLOYMENT_SCHEMA = archive.HISTORY_FORMATS[archive.DEPLOYMENT_TYPE][0]
 DEPLOYMENT_AXES = {
     "fixture": "fixtures", "policy": "policies", "seed": "battle_seeds", "swap": "swaps",
@@ -173,8 +177,13 @@ def _campaign_rows(snapshot: Path, descriptor: dict, manifest: dict, plan: list[
     _require(_same(header["inputs"], inputs), "frozen input digest mismatch")
     _require(_same(archive._json_object(_snapshot_bytes(snapshot, descriptor, "checksums.json")), derived),
              "campaign checksums mismatch")
+    traced = "decision_trace_schema" in descriptor
+    _require(("decision_trace" in header) == traced, "campaign trace configuration mismatch")
+    if traced:
+        archive.check_trace_config(header["decision_trace"])
 
     rows = []
+    attempts, linked_files = set(), set()
     journal = _snapshot_bytes(snapshot, descriptor, "journal.jsonl")
     _require(not journal or journal.endswith(b"\n"), "incomplete journal record")
     for index, line in enumerate(journal.split(b"\n")[:-1]):
@@ -186,10 +195,19 @@ def _campaign_rows(snapshot: Path, descriptor: dict, manifest: dict, plan: list[
                  and digest == _sha(archive._canonical(envelope)), f"journal chain mismatch at line {index + 1}")
         _require(index < len(plan) and _same(row["case"], plan[index]),
                  f"unexpected or duplicate journal case at line {index + 1}")
+        _require(("decision_trace" in row) == traced, "campaign trace record mismatch")
+        if traced:
+            link = row["decision_trace"]
+            archive.check_trace_link(link, manifest["repeats"])
+            _require(link["attempt"] not in attempts, "duplicate decision trace attempt")
+            attempts.add(link["attempt"])
+            linked_files.update(archive.trace_files(link))
         previous = digest
         rows.append(row)
     _require(len(rows) == descriptor["committed_cases"] and len(plan) == descriptor["planned_cases"],
              "campaign descriptor disagrees with manifest or journal case count")
+    _require(all(name in linked_files for name in descriptor["files"] if archive.TRACE_FILE_PATH.fullmatch(name)),
+             "snapshot contains uncommitted decision trace files")
     summary = _deployment_summary(rows, campaign=True)
     summary.update(planned=len(plan), campaign_id=descriptor["campaign_id"],
                    campaign_failures=sum(summary["statuses"].get(status, 0) for status in CAMPAIGN_FAILURES))
@@ -197,7 +215,59 @@ def _campaign_rows(snapshot: Path, descriptor: dict, manifest: dict, plan: list[
     aggregate = re.match(rb"[^\r\n]+\r?\n\r?\n```json\r?\n(.*?)\r?\n```", report, flags=re.DOTALL)
     _require(aggregate is not None and _same(archive._json_object(aggregate[1]), summary),
              "campaign report aggregate disagrees with journal")
-    return rows
+    return rows, header
+
+
+def _trace_export(snapshot, descriptor, header, row, manifest, ordinal, entry, path):
+    files = descriptor["files"]
+    if path is None:
+        status = entry["status"]
+        return status, ("decision_trace_collection_error" if status == "collection_error" else "missing_decision_trace"), None
+    if any(f"{path}/{name}" not in files for name in archive.EXPORT_FILES):
+        return "missing", "missing_decision_trace", None
+    name = f"{path}/export.json"
+    if files[name]["sha256"] != entry["descriptor_sha256"]:
+        return "corrupt", "corrupt_decision_trace", None
+    try:
+        meta = archive._json_object(_snapshot_bytes(snapshot, descriptor, name))
+    except ValueError:
+        return "corrupt", "corrupt_decision_trace", None
+    config = header["decision_trace"]
+    expected_source = dict(header["identity"], exporter_sha256=config["exporter_sha256"],
+                           source_commit=header["base_commit"])
+    expected_payload = {file: files[f"{path}/{file}"]["sha256"] for file in archive.EXPORT_DATA_FILES}
+    status = entry["status"]
+    result = row["result"]
+    expected_result = {key: result[key] for key in ("final_digest", "event_digest", "score", "winner", "rounds")
+                       if key in result}
+    if not (
+        meta.get("schema") == archive.DECISION_EXPORT_SCHEMA and meta.get("campaign_id") == header["campaign_id"]
+        and meta.get("run_label") == config["run_label"]
+        and _same(meta.get("origin"), dict(kind="campaign_execution", manifest_base_commit=manifest.get("base_commit")))
+        and _same(meta.get("case"), row["case"]) and _same(meta.get("repeat"), ordinal)
+        and _same(meta.get("source"), expected_source) and _same(meta.get("files"), expected_payload)
+        and _same(meta.get("replay"), {"status": status})
+        and meta.get("status") == ("complete" if status == "verified" else "incomplete")
+        and (result["status"] in CAMPAIGN_FAILURES or not row["reproducible"]
+             or (meta.get("runner_status") == result["status"]
+                 and _same(meta.get("result"), expected_result if status == "verified" else None)))
+    ):
+        return "corrupt", "corrupt_decision_trace", None
+    return status, "incomplete_decision_trace" if status == "prefix_only" else None, expected_payload
+
+
+def _trace_evidence(snapshot, descriptor, header, row, manifest):
+    evidence, reasons, payloads = [], set(), []
+    for ordinal, entry, path in archive.trace_repeats(row["decision_trace"]):
+        status, reason, payload = _trace_export(snapshot, descriptor, header, row, manifest, ordinal, entry, path)
+        evidence.append(dict(entry, repeat=ordinal, evidence=f"{path}/export.json" if path else None, assessed=status))
+        if reason:
+            reasons.add(reason)
+        if status == "verified":
+            payloads.append(payload)
+    if payloads and any(payload != payloads[0] for payload in payloads[1:]):
+        reasons.add("non_reproducible_decision_trace")
+    return evidence, reasons
 
 
 def _historical_matches(results: dict, plan: list[dict]) -> list[dict]:
@@ -310,7 +380,7 @@ def _observation(row: dict, group: str, *, audit: bool) -> tuple[str, str, str |
 
 
 def _assess(row: dict, case: dict, group: str, evidence: dict, policy: dict,
-            *, audit: bool, declared_repeats: int | None) -> dict:
+            *, audit: bool, declared_repeats: int | None, trace=None) -> dict:
     status, scope, domain_failure = _observation(row, group, audit=audit)
     result = row["result"]
     replay = _replay(result, scope)
@@ -326,6 +396,8 @@ def _assess(row: dict, case: dict, group: str, evidence: dict, policy: dict,
         reasons.add("missing_repeat_evidence")
     if replay != "passed":
         reasons.add("replay_error" if replay == "failed" else "missing_replay_evidence")
+    if trace is not None:
+        reasons.update(trace[1])
     ordered = [reason for reason in policy["primary_order"] if reason in reasons]
     outcome = None
     if not ordered and status == "complete" and "winner" in result:
@@ -333,10 +405,13 @@ def _assess(row: dict, case: dict, group: str, evidence: dict, policy: dict,
         _require(winner is None or _side(winner), "invalid winner")
         outcome = "draw" if winner is None else f"player_{winner}"
     case_id = case.get("id") or _sha(archive._canonical([group, case]))
-    return dict(case_id=case_id, group=group, case=case, evidence=evidence, recorded_status=status,
+    assessed = dict(case_id=case_id, group=group, case=case, evidence=evidence, recorded_status=status,
                 category=ordered[0] if ordered else "passed", reasons=ordered, outcome=outcome,
                 repeat_samples=samples, recorded_reproducible=reproducible,
                 replay=dict(scope=scope, status=replay))
+    if trace is not None:
+        assessed["decision_trace"] = trace[0]
+    return assessed
 
 
 def _group_summary(cases: list[dict], planned: int | None) -> dict:
@@ -361,6 +436,10 @@ def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool
         kind = descriptor["type"]
         campaign = kind == archive.PACKAGE_TYPE
         audit = kind == archive.BOTS_AUDIT_TYPE
+        traced = "decision_trace_schema" in descriptor
+        if traced:
+            policy.update(version=2, primary_order=[*PRIMARY_ORDER, *TRACE_REASONS],
+                          decision_trace="recorded_v1_export_bound_to_journal_and_payload_hashes")
         if audit:
             results = archive._json_object(_snapshot_bytes(snapshot, descriptor, "results.json"))
             counts = _audit_plan(manifest, results)
@@ -373,7 +452,7 @@ def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool
             plan = _deployment_plan(manifest, campaign=campaign)
             counts = {"match": len(plan)}
             if campaign:
-                rows = _campaign_rows(snapshot, descriptor, manifest, plan)
+                rows, header = _campaign_rows(snapshot, descriptor, manifest, plan)
             else:
                 results = archive._json_object(_snapshot_bytes(snapshot, descriptor, "results.json"))
                 rows = _historical_matches(results, plan)
@@ -381,7 +460,8 @@ def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool
                 _assess(row, row["case"], "match",
                         dict(file="journal.jsonl", line=index + 1, pointer="/row") if campaign
                         else dict(file="results.json", pointer=f"/records/{index}"),
-                        policy, audit=False, declared_repeats=manifest.get("repeats"))
+                        policy, audit=False, declared_repeats=manifest.get("repeats"),
+                        trace=_trace_evidence(snapshot, descriptor, header, row, manifest) if traced else None)
                 for index, row in enumerate(rows)
             ]
     except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError, RecursionError) as exc:

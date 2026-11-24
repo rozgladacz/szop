@@ -15,6 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts import campaign_v1 as campaign  # noqa: E402
+from scripts.experiment_archive import (  # noqa: E402
+    DECISION_EXPORT_SCHEMA as SCHEMA, EXPORT_DATA_FILES as FILES, TRACE_LABEL as LABEL,
+)
 from app.services.agents.deployment import DeploymentZone, is_deployment_position_legal  # noqa: E402
 from app.services.agents.match import DeploymentDecision  # noqa: E402
 from app.services.engine.action_codec import (  # noqa: E402
@@ -34,13 +37,11 @@ from app.services.engine.state_codec import (  # noqa: E402
 from app.services.engine.status import StatusFlag  # noqa: E402
 
 experiment = campaign.experiment
-SCHEMA = "szop.decision_export/v1"
 CODECS = {
     "action": {"schema": ACTION_WIRE_SCHEMA, "version": ACTION_WIRE_VERSION},
     "state": {"schema": STATE_CHECKPOINT_SCHEMA, "version": STATE_CHECKPOINT_VERSION},
     "event": {"version": SCHEMA_VERSION},
 }
-FILES = ("manifest.json", "states.json", "deployment.jsonl", "battle.jsonl", "decisions.jsonl")
 DEPLOYMENT_STEPS = {"deployment_moved", "deployment_finished"}
 BATTLE_STEPS = {
     "activation_started", "activation_stopped", "activation_finished",
@@ -52,7 +53,6 @@ MANIFEST_FIELDS = {
     "schema", "fixtures", "policies", "battle_seeds", "swaps", "initiatives", "strategy_pairs",
     "deployment_zones", "repeats", "max_activations", "ruleset_version",
 }
-LABEL = re.compile(r"[A-Za-z0-9_.-]{1,80}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 REVISION = re.compile(r"[0-9a-f]{40}|[0-9a-f]{64}")
 
@@ -225,18 +225,33 @@ def export_case(manifest_path: Path, case_id: str, repeat: int, label: str, dire
     _require(_int(repeat, 1) and repeat <= manifest["repeats"], "repeat is outside the manifest")
     _require(type(label) is str and LABEL.fullmatch(label), "invalid execution label")
     _require(not directory.exists() and not directory.is_symlink(), "export destination already exists")
-    source = campaign.compatibility(manifest)
-    campaign_id = _hash(source)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
-    source["source_commit"] = revision
-    source["exporter_sha256"] = campaign.sha(Path(__file__).read_text(encoding="utf-8").encode("utf-8"))
+    source = source_provenance(campaign.compatibility(manifest), revision)
+    result, records, _ = capture_execution(case, manifest)
+    return publish_execution(case, manifest, repeat, label, directory, source, result, records)
 
+
+def source_provenance(identity: dict, revision: str) -> dict:
+    exporter_digest = campaign.sha(Path(__file__).read_text(encoding="utf-8").encode("utf-8"))
+    return dict(identity, source_commit=revision, exporter_sha256=exporter_digest)
+
+
+def capture_execution(case: dict, manifest: dict):
+    """Run the adapter once while retaining the original result and any available trace."""
     records = []
     try:
         result = experiment.run_once(case, manifest, on_observation=records.append)
     except Exception as exc:
         # Retain the available prefix without exposing exception messages or paths.
-        result = {"status": "adapter_exception", "error_type": type(exc).__name__}
+        return {"status": "adapter_exception", "error_type": type(exc).__name__}, records, exc
+    return result, records, None
+
+
+def publish_execution(case, manifest, repeat, label, directory, source, result, records, *,
+                      origin="manifest_resimulation"):
+    """Project, verify and publish the observations from the supplied execution."""
+    identity = {key: source[key] for key in ("manifest_digest", "sources", "python_family", "dependencies")}
+    campaign_id = _hash(identity)
     trace = _Trace(records)
     trace.project()
     initial = battle_state_to_json(trace.initial) if trace.initial is not None else None
@@ -251,7 +266,7 @@ def export_case(manifest_path: Path, case_id: str, repeat: int, label: str, dire
     meta = dict(
         schema=SCHEMA, codecs=CODECS, campaign_id=campaign_id,
         run_id=_run_id(campaign_id, label), run_label=label,
-        origin={"kind": "manifest_resimulation", "manifest_base_commit": manifest.get("base_commit")},
+        origin={"kind": origin, "manifest_base_commit": manifest.get("base_commit")},
         case=case, repeat=repeat, seeds=_seeds(case), source=source,
         status=status, runner_status=runner_status, error_type=result.get("error_type"),
         result=_observed_result(result, trace),
@@ -367,8 +382,9 @@ def _verify_provenance(meta, manifest):
     _require(meta["campaign_id"] == _hash(identity), "campaign identity mismatch")
     _require(type(meta["run_label"]) is str and LABEL.fullmatch(meta["run_label"])
              and meta["run_id"] == _run_id(meta["campaign_id"], meta["run_label"]), "export identity mismatch")
-    _require(meta["origin"] == {"kind": "manifest_resimulation", "manifest_base_commit": manifest.get("base_commit")},
-             "manifest origin mismatch")
+    origin = _keys(meta["origin"], "kind", "manifest_base_commit")
+    _require(origin["kind"] in ("manifest_resimulation", "campaign_execution")
+             and origin["manifest_base_commit"] == manifest.get("base_commit"), "manifest origin mismatch")
     _require(meta["runner_status"] in MATCH_STATUSES, "unknown runner status")
     complete = meta["runner_status"] == "complete"
     _require(meta["status"] == ("complete" if complete else "incomplete"), "export status mismatch")

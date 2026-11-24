@@ -9,6 +9,8 @@ from time import monotonic, sleep
 
 import pytest
 
+from scripts import experiment_archive, experiment_quality, export_decisions
+
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("campaign_v1", ROOT / "scripts/campaign_v1.py")
 campaign = importlib.util.module_from_spec(spec)
@@ -27,11 +29,11 @@ def manifest_path(tmp_path):
     return path
 
 
-def initialized(tmp_path, manifest_path, name="campaign"):
+def initialized(tmp_path, manifest_path, name="campaign", **options):
     directory = tmp_path / name
     directory.mkdir()
     with campaign.locked(directory):
-        campaign.initialize(directory, manifest_path)
+        campaign.initialize(directory, manifest_path, **options)
     return directory
 
 
@@ -334,3 +336,108 @@ with c.locked(d):
         if process.poll() is None:
             process.kill()
         process.communicate(timeout=10)
+
+
+def test_trace_commit_uses_one_execution_per_repeat(tmp_path, manifest_path, monkeypatch):
+    traced = initialized(tmp_path, manifest_path, decision_trace="integration")
+    ordinary = initialized(tmp_path, manifest_path, "ordinary")
+    manifest = campaign.load_manifest(manifest_path)
+    first_case = next(campaign.experiment.iter_cases(manifest))
+    expected = campaign.experiment.run_case(first_case, manifest)
+    original = campaign.experiment.run_once
+    calls = []
+
+    def run_once(case, plan, *, on_observation=None):
+        calls.append((case["id"], on_observation is not None))
+        return original(case, plan, on_observation=on_observation)
+
+    monkeypatch.setattr(campaign.experiment, "run_once", run_once)
+    assert campaign.run(traced, 1)[0] == 2
+    assert campaign.run(ordinary, 1)[0] == 2
+    result = campaign.inspect(traced)[2][0]
+    link = result.pop("decision_trace")
+    assert result.pop("timings") and expected.pop("timings")
+    assert result == expected
+    assert calls == [(first_case["id"], True)] * manifest["repeats"] + [
+        (first_case["id"], False)] * manifest["repeats"]
+    for ordinal, entry, relative in experiment_archive.trace_repeats(link):
+        meta, expanded = export_decisions.verify_package(traced / relative, expand=True)
+        assert entry["status"] == "verified" and meta["repeat"] == ordinal
+        assert meta["origin"]["kind"] == "campaign_execution"
+        assert meta["result"]["event_digest"] == result["result"]["event_digest"]
+        assert any(item["events"] and item["states"]["seen"] for item in expanded)
+
+
+def test_trace_written_before_journal_is_never_archived(tmp_path, manifest_path):
+    traced = initialized(tmp_path, manifest_path, decision_trace="crash-test")
+    program = '''
+import os,sys
+from pathlib import Path
+from scripts import campaign_v1 as c
+d=Path(sys.argv[1])
+def exit_before_commit(*args):
+    assert list(d.glob('traces/*/*/export.json'))
+    os._exit(77)
+c.append_record=exit_before_commit
+with c.locked(d):
+    c.run(d,1)
+'''
+    killed = subprocess.run([sys.executable, "-B", "-X", "utf8", "-c", program, str(traced)],
+                            cwd=ROOT, capture_output=True, timeout=30)
+    assert killed.returncode == 77, killed.stderr.decode("utf-8", errors="replace")
+    assert (traced / "journal.jsonl").read_bytes() == b""
+    orphans = {name: data for name, data in content(traced).items() if name.startswith("traces/")}
+    assert orphans
+    resumed = cli("resume", "--directory", traced, "--max-cases", 2)
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    after = content(traced)
+    assert cli("resume", "--directory", traced, "--max-cases", 2).returncode == 0
+    assert content(traced) == after
+    assert all(after[name] == data for name, data in orphans.items())
+    root = tmp_path / "catalog"
+    descriptor, created = experiment_archive.import_campaign(root, traced)
+    assert created and not orphans.keys() & descriptor["files"].keys()
+    assert experiment_archive.import_campaign(root, traced) == (descriptor, False)
+    quality = experiment_quality.evaluate(root, descriptor["package_id"])
+    assert quality["status"] == "passed" and quality["coverage"]["categories"] == {"passed": 2}
+
+
+def test_trace_failure_and_damaged_evidence_have_quality_reasons(tmp_path, manifest_path, monkeypatch):
+    traced = initialized(tmp_path, manifest_path, decision_trace="bad-traces")
+    publish = export_decisions.publish_execution
+
+    def write(case, plan, repeat, *args, **kwargs):
+        if case["swap"] and repeat == 1:
+            raise OSError("simulated write failure")
+        return publish(case, plan, repeat, *args, **kwargs)
+
+    monkeypatch.setattr(export_decisions, "publish_execution", write)
+    assert campaign.run(traced, 2)[0] == 0
+    first, second = campaign.inspect(traced)[2]
+    assert first["result"]["status"] == second["result"]["status"] == "complete"
+    repeats = list(experiment_archive.trace_repeats(first["decision_trace"]))
+    (traced / repeats[0][2] / "decisions.jsonl").unlink()
+    (traced / repeats[1][2] / "states.json").write_bytes(b"corrupt\n")
+    root = tmp_path / "catalog"
+    descriptor, _ = experiment_archive.import_campaign(root, traced)
+    quality = experiment_quality.evaluate(root, descriptor["package_id"])
+    assert quality["status"] == "review"
+    assert quality["cases"][0]["reasons"] == ["missing_decision_trace", "corrupt_decision_trace"]
+    assert quality["cases"][1]["reasons"] == ["decision_trace_collection_error"]
+    assert quality["cases"][1]["decision_trace"][0]["reason"] == "OSError"
+
+
+def test_trace_preserves_domain_failure_prefix(tmp_path, manifest_path):
+    manifest = campaign.load_manifest(manifest_path)
+    manifest["max_activations"] = 1
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    traced = initialized(tmp_path, manifest_path, decision_trace="partial-domain")
+    assert campaign.run(traced, 1)[0] == 2
+    catalog = tmp_path / "catalog"
+    descriptor, _ = experiment_archive.import_campaign(catalog, traced)
+    assessed = experiment_quality.evaluate(catalog, descriptor["package_id"])["cases"][0]
+    assert assessed["category"] == "activation_cap" and "incomplete_decision_trace" in assessed["reasons"]
+    entry = assessed["decision_trace"][0]
+    target = catalog / "packages" / descriptor["package_id"] / "snapshot" / entry["evidence"]
+    meta, expanded = export_decisions.verify_package(target.parent, expand=True)
+    assert meta["replay"]["status"] == "prefix_only" and expanded

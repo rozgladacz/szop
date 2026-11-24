@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import platform
 import re
+import stat
 import subprocess
 import sys
 from time import perf_counter
@@ -21,6 +22,7 @@ for directory in (ROOT, ROOT / "scripts"):
         sys.path.insert(0, str(directory))
 
 import deployment_experiment as experiment  # noqa: E402
+from scripts import experiment_archive as trace_format  # noqa: E402
 
 SCHEMA = "szop.campaign/v1"
 RECORD_SCHEMA = "szop.campaign.record/v1"
@@ -151,7 +153,8 @@ def environment() -> dict:
 
 def compatibility(manifest: dict) -> dict:
     paths = {Path(__file__).resolve(), ROOT / "scripts/deployment_experiment.py",
-             ROOT / "scripts/balance_common.py", ROOT / "scripts/balance_simulate.py"}
+             ROOT / "scripts/balance_common.py", ROOT / "scripts/balance_simulate.py",
+             ROOT / "scripts/experiment_archive.py", ROOT / "scripts/campaign_decision_trace.py"}
     for folder in ("app/services/engine", "app/services/agents", "app/services/rulesets", "app/data"):
         paths.update((ROOT / folder).rglob("*.py"))
     paths.update((ROOT / "app/rulesets/v1").rglob("*.yaml"))
@@ -163,9 +166,11 @@ def compatibility(manifest: dict) -> dict:
                 dependencies={name: version(name) for name in ("pydantic", "pydantic_core", "PyYAML")})
 
 
-def initialize(directory: Path, manifest_path: Path) -> dict:
+def initialize(directory: Path, manifest_path: Path, *, decision_trace: str | None = None) -> dict:
     if any(p.name != ".lock" for p in directory.iterdir()):
         raise CampaignError("start requires an empty campaign directory")
+    if decision_trace is not None and not trace_format.TRACE_LABEL.fullmatch(decision_trace):
+        raise CampaignError("invalid decision trace run label")
     manifest = load_manifest(manifest_path)
     identity = compatibility(manifest)
     inputs = {}
@@ -182,6 +187,12 @@ def initialize(directory: Path, manifest_path: Path) -> dict:
     header = dict(schema=SCHEMA, campaign_id=sha(canonical(identity)), identity=identity,
                   inputs=inputs, environment=environment(),
                   base_commit=subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip())
+    if decision_trace is not None:
+        from scripts import export_decisions
+
+        source = export_decisions.source_provenance(identity, header["base_commit"])
+        header["decision_trace"] = dict(schema=trace_format.TRACE_SCHEMA, run_label=decision_trace,
+                                        exporter_sha256=source["exporter_sha256"])
     atomic_write(directory / "header.json", canonical(dict(header, sha256=sha(canonical(header)))) + b"\n")
     return header
 
@@ -196,19 +207,30 @@ def inspect(directory: Path, *, allow_tail=False):
         raise CampaignError("manifest integrity mismatch")
     if sha(canonical(header["identity"])) != header["campaign_id"]:
         raise CampaignError("campaign identity mismatch")
+    traced = "decision_trace" in header
+    if traced:
+        trace_format.check_trace_config(header["decision_trace"])
     for relative, digest in header["inputs"].items():
         if sha(contained_file(directory, relative).read_bytes()) != digest:
             raise CampaignError("frozen input integrity mismatch")
     allowed = BASE_FILES | DERIVED_FILES | set(header["inputs"]) | {".lock"}
     for path in directory.rglob("*"):
         relative = path.relative_to(directory).as_posix()
+        if traced and (relative == "traces" or relative.startswith("traces/")):
+            info = path.lstat()
+            if (getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                    or stat.S_ISREG(info.st_mode) and info.st_nlink != 1):
+                raise CampaignError("decision traces cannot use aliases or reparse points")
         derived_temporary = re.fullmatch(r"\.(report\.md|checksums\.json)\.[0-9a-f]{32}\.tmp", relative)
-        if path.is_symlink() or (path.is_file() and relative not in allowed and not derived_temporary):
+        trace_file = traced and (trace_format.TRACE_FILE_PATH.fullmatch(relative)
+                                 or trace_format.TRACE_TEMPORARY_PATH.fullmatch(relative))
+        if path.is_symlink() or (path.is_file() and relative not in allowed and not derived_temporary and not trace_file):
             raise CampaignError("unexpected campaign file; inspect before recovery")
     if compatibility(manifest) != header["identity"]:
         raise CampaignError("source/dependency compatibility conflict; start a new campaign")
     cases = list(experiment.iter_cases(manifest))
     rows, previous, valid_bytes = [], header["campaign_id"], 0
+    attempts = set()
     with plain_file(directory / "journal.jsonl").open("rb") as handle:
         for line in handle:
             if not line.endswith(b"\n"):
@@ -225,8 +247,15 @@ def inspect(directory: Path, *, allow_tail=False):
                         or len(rows) >= len(cases) or canonical(row["case"]) != canonical(cases[len(rows)])
                         or type(row["reproducible"]) is not bool
                         or row["result"]["status"] not in RESULT_STATUSES
+                        or ("decision_trace" in row) != traced
                         or not isinstance(row["timings"], list)):
                     raise CampaignError("journal chain, case or result mismatch")
+                if traced:
+                    trace_format.check_trace_link(row["decision_trace"], manifest["repeats"])
+                    attempt = row["decision_trace"]["attempt"]
+                    if attempt in attempts:
+                        raise CampaignError("decision trace attempt already committed")
+                    attempts.add(attempt)
             except (ValueError, KeyError, TypeError) as exc:
                 raise CampaignError("corrupt committed journal record") from exc
             rows.append(row)
@@ -252,6 +281,14 @@ def outcome(row: dict) -> str:
     return row["result"]["status"] if row["reproducible"] else "non_reproducible"
 
 
+def snapshot_files(directory: Path, header: dict, rows: list) -> set[str]:
+    names = BASE_FILES | {"report.md"} | set(header["inputs"])
+    if "decision_trace" in header:
+        names.update(name for row in rows for name in trace_format.trace_files(row["decision_trace"])
+                     if os.path.lexists(directory / name))
+    return names
+
+
 def rebuild(directory: Path, header: dict, manifest: dict, rows: list) -> dict:
     # Unstable results stay in the denominator, without contributing wins/draws.
     report_rows = [dict(row, result=dict(row["result"], status=outcome(row))) for row in rows]
@@ -265,10 +302,17 @@ def rebuild(directory: Path, header: dict, manifest: dict, rows: list) -> dict:
               "Błędy nie są remisami; powtórzenia sprawdzają determinizm.\n\n"
               + experiment.render_report(report_rows))
     atomic_write(directory / "report.md", report.encode("utf-8"))
-    names = BASE_FILES | {"report.md"} | set(header["inputs"])
+    names = snapshot_files(directory, header, rows)
     checksums = {name: sha(contained_file(directory, name).read_bytes()) for name in sorted(names)}
     atomic_write(directory / "checksums.json", canonical(checksums) + b"\n")
     return summary
+
+
+def _failed_case(case: dict, exc: Exception) -> dict:
+    status = ("replay_error" if isinstance(exc, AssertionError) and "replay" in str(exc)
+              else "invariant_error" if isinstance(exc, AssertionError) else "harness_error")
+    return dict(case=case, result=dict(status=status, error_type=type(exc).__name__),
+                reproducible=True, timings=[])
 
 
 def run(directory: Path, max_cases: int) -> tuple[int, dict]:
@@ -281,14 +325,21 @@ def run(directory: Path, max_cases: int) -> tuple[int, dict]:
     committed, persistence_ms = 0, []
     if any(outcome(row) in FAILURES for row in rows):
         return 1, dict(status="failed", committed=0, total=len(rows))
+    collect = None
+    if "decision_trace" in header:
+        from scripts.campaign_decision_trace import collector
+
+        collect = collector(directory, header, manifest)
     for case in cases[len(rows):len(rows) + max_cases]:
-        try:
-            row = experiment.run_case(case, manifest)
-        except Exception as exc:
-            status = ("replay_error" if isinstance(exc, AssertionError) and "replay" in str(exc)
-                      else "invariant_error" if isinstance(exc, AssertionError) else "harness_error")
-            row = dict(case=case, result=dict(status=status, error_type=type(exc).__name__),
-                       reproducible=True, timings=[])
+        if collect is None:
+            try:
+                row = experiment.run_case(case, manifest)
+            except Exception as exc:
+                row = _failed_case(case, exc)
+        else:
+            results, link, exc = collect(case)
+            row = _failed_case(case, exc) if exc is not None else experiment.case_result(case, results)
+            row["decision_trace"] = link
         previous, elapsed = append_record(directory, row, len(rows), previous)
         rows.append(row)
         committed += 1
@@ -328,9 +379,9 @@ def repair_tail(directory: Path) -> dict:
     return dict(repaired=True, total=len(rows), discarded_bytes=len(data), backup=str(backup))
 
 
-def verify_derived(directory: Path, header: dict) -> None:
+def verify_derived(directory: Path, header: dict, rows: list | None = None) -> None:
     checksums = json_read(plain_file(directory / "checksums.json"))
-    expected = BASE_FILES | {"report.md"} | set(header["inputs"])
+    expected = snapshot_files(directory, header, rows or [])
     if (not isinstance(checksums, dict) or set(checksums) != expected
             or any(sha(contained_file(directory, name).read_bytes()) != digest
                    for name, digest in checksums.items())):
@@ -370,6 +421,7 @@ def main(argv=None) -> int:
         child.add_argument("--directory", type=Path, required=True)
         if command == "start":
             child.add_argument("--manifest", type=Path, required=True)
+            child.add_argument("--decision-trace", metavar="RUN_LABEL")
         if command in {"start", "resume"}:
             child.add_argument("--max-cases", type=int, required=True)
         if command == "archive":
@@ -380,7 +432,7 @@ def main(argv=None) -> int:
             args.directory.mkdir(parents=True, exist_ok=False)
         with locked(args.directory):
             if args.command == "start":
-                initialize(args.directory, args.manifest)
+                initialize(args.directory, args.manifest, decision_trace=args.decision_trace)
             if args.command in {"start", "resume"}:
                 code, result = run(args.directory, args.max_cases)
             elif args.command == "repair-tail":
@@ -390,7 +442,7 @@ def main(argv=None) -> int:
             else:
                 header, manifest, rows, _, _, _ = inspect(args.directory)
                 if args.command == "verify":
-                    verify_derived(args.directory, header)
+                    verify_derived(args.directory, header, rows)
                 result = (rebuild(args.directory, header, manifest, rows) if args.command == "report"
                           else dict(verified=True, campaign_id=header["campaign_id"], total=len(rows)))
                 code = 0

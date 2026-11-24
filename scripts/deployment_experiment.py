@@ -183,7 +183,10 @@ def deterministic(record: dict) -> dict:
 
 
 def run_case(case: dict, manifest: dict) -> dict:
-    repeats = [run_once(case, manifest) for _ in range(manifest["repeats"])]
+    return case_result(case, [run_once(case, manifest) for _ in range(manifest["repeats"])])
+
+
+def case_result(case: dict, repeats: list[dict]) -> dict:
     stable = all(deterministic(r) == deterministic(repeats[0]) for r in repeats[1:])
     return dict(case=case, result=deterministic(repeats[0]), reproducible=stable,
                 timings=[{k: v for k, v in r.items() if k.endswith("_ms")} for r in repeats])
