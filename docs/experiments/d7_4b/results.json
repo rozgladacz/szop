@@ -1,0 +1,154 @@
+{
+  "budget": {
+    "max_bytes_per_case_execution": 262144,
+    "max_cases": 32,
+    "max_repeats": 2,
+    "max_total_bytes": 16777216
+  },
+  "campaign_id": "99fab88138f20f271505f15fd630421bb0f206b79dad9b48d514d0b77e3a4cd6",
+  "cases": {
+    "28256c014c9a157731df": {
+      "bytes_per_decision": 1996.54,
+      "counts": {
+        "battle_events": 231,
+        "decisions": 70,
+        "deployment_events": 16,
+        "observations": 202
+      },
+      "executions": [
+        {
+          "export_ms": 2105.64,
+          "repeat": 1,
+          "size_bytes": 139758,
+          "verify_ms": 1656.51
+        },
+        {
+          "export_ms": 1972.08,
+          "repeat": 2,
+          "size_bytes": 139758,
+          "verify_ms": 1623.99
+        }
+      ],
+      "file_sha256": {
+        "battle.jsonl": "11f4dd37d9eaf5367d2229f1177baf1fbaa483b4caa292fd46e282c18c0e3ba6",
+        "decisions.jsonl": "6c905e4796686328159e4e7bb619e3bad67507bc1f47dabc5ed6d0bae2f2eb03",
+        "deployment.jsonl": "ec008bd19174fdec0eecee813add973c15f7f38665c633a238c7fe8e95306f19",
+        "manifest.json": "11030b2077944cccc94601093b5f3f4157c8b9e3354e795ff21ce4c4f484f020",
+        "states.json": "d0f6417a5967ef0d4b2b784899507e848f2c3c2468b4e363daa1cb223b98d720"
+      },
+      "result": {
+        "event_digest": "7fb180ccf71b214de1e784af6d535c7d75932a99a8d602ae60fbfd79593da3ff",
+        "final_digest": "26c663a29ddec26bd74ec39dfd1b1b2d2dfb2eeaf68e2108775a2c24a71822c9",
+        "rounds": 4,
+        "score": [
+          3,
+          2
+        ],
+        "winner": 0
+      },
+      "seeds": {
+        "battle": 19,
+        "map": null,
+        "policy_by_player": [
+          1000022,
+          19
+        ]
+      },
+      "stable_payload_equal": true
+    },
+    "762b987db7935fad6f8e": {
+      "bytes_per_decision": 1994.56,
+      "counts": {
+        "battle_events": 236,
+        "decisions": 72,
+        "deployment_events": 16,
+        "observations": 209
+      },
+      "executions": [
+        {
+          "export_ms": 2144.72,
+          "repeat": 1,
+          "size_bytes": 143608,
+          "verify_ms": 1847.5
+        },
+        {
+          "export_ms": 2028.32,
+          "repeat": 2,
+          "size_bytes": 143608,
+          "verify_ms": 1875.95
+        }
+      ],
+      "file_sha256": {
+        "battle.jsonl": "1f11a5d50662831d3ce07b201cc43c0e71907df4d438db3ff644721beca5308a",
+        "decisions.jsonl": "cc8f9bc1f127eed7c2a8110cdafdfa117a17f7e8e6c8ea4fe0771f2e13722b3f",
+        "deployment.jsonl": "7529cf3832249b23318a09f772f8ca9efbbc725af72278d708338fe281c3d33b",
+        "manifest.json": "11030b2077944cccc94601093b5f3f4157c8b9e3354e795ff21ce4c4f484f020",
+        "states.json": "813cb0158a2fba42b18cf1bc7cd151696950e03f09253ba31fbd85032672993a"
+      },
+      "result": {
+        "event_digest": "9c45fee57913a9f10861ef3c2c9942822c483803da3bb1c00575823d1b8e2aad",
+        "final_digest": "21dae343844cd2c235e4776fdc979644ecd2dfe22ce8e40ff6882a625887ffcf",
+        "rounds": 4,
+        "score": [
+          3,
+          2
+        ],
+        "winner": 0
+      },
+      "seeds": {
+        "battle": 11,
+        "map": null,
+        "policy_by_player": [
+          11,
+          1000014
+        ]
+      },
+      "stable_payload_equal": true
+    }
+  },
+  "dependencies": {
+    "PyYAML": "6.0.1",
+    "pydantic": "2.13.4",
+    "pydantic_core": "2.46.4"
+  },
+  "environment": {
+    "os": "Windows",
+    "python": "3.13.14"
+  },
+  "exporter_sha256": "6299420b2097aa41c13a40a1f4dd69e4ec8d92f58904a99ebe770aec1b4d7221",
+  "incomplete_case": {
+    "case_id": "762b987db7935fad6f8e",
+    "counts": {
+      "battle_events": 7,
+      "decisions": 10,
+      "deployment_events": 16,
+      "observations": 23
+    },
+    "export_ms": 1965.01,
+    "file_sha256": {
+      "battle.jsonl": "f3ee2d344a9c6a563c37075fe59ffb412821555585421f5697896471da385b99",
+      "decisions.jsonl": "a4c4feac623522ea9853cb472631cb0c7b8b5abab64485db8ab60e001ab8acbd",
+      "deployment.jsonl": "7529cf3832249b23318a09f772f8ca9efbbc725af72278d708338fe281c3d33b",
+      "manifest.json": "f0f04b98530d8339382c4a7e91b202b3493950c3d11561f1b5d868bf526c3883",
+      "states.json": "813cb0158a2fba42b18cf1bc7cd151696950e03f09253ba31fbd85032672993a"
+    },
+    "manifest_overrides": {
+      "max_activations": 1
+    },
+    "replay": {
+      "status": "prefix_only"
+    },
+    "result": null,
+    "runner_status": "activation_cap",
+    "size_bytes": 34494,
+    "status": "incomplete",
+    "verify_ms": 1658.78
+  },
+  "manifest_file_sha256": "793cdb325ec8f65cfd51fb957f184c8a6fb7efc49d0850bbf06fcb46f4b3ac59",
+  "manifest_path": "docs/experiments/d7_1/manifest.json",
+  "measurement": "separate CLI processes including Python startup and filesystem publication",
+  "run_id": "f348e5979653f7a0dfd10dc866e6ec31d9dafc5a72eb37ca635e7cd58a4e9cda",
+  "run_label": "d7-4b-pilot",
+  "runner_source_commit": "4b923a3fecb3841cd4c46989f1a964918ba9602f",
+  "schema": "szop.decision_export.pilot/v1"
+}

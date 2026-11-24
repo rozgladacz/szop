@@ -30,6 +30,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [archiwum-eksperymentow.md](archiwum-eksperymentow.md) | D7.2: pakiety kampanii i historii, publikacja, weryfikacja, backup i odzyskiwanie |
 | [jakosc-eksperymentow.md](jakosc-eksperymentow.md) | D7.3a–b — ocena techniczna, porównywalne bloki, efekt strony i odtworzenie |
 | [obserwacja-decyzji-kampanii.md](obserwacja-decyzji-kampanii.md) | D7.4a — ślad wyborów, rozstrzygnięć i przejść automatycznych runnera v1 |
+| [eksport-decyzji-kampanii.md](eksport-decyzji-kampanii.md) | D7.4b — wersjonowany eksport decyzji, replay, budżet pilota i odtworzenie pakietu |
 | [plan-danych-testowych.md](plan-danych-testowych.md) | D7.2–D7.4: plan wspólnego archiwum, bramek jakości i pełnego eksportu decyzji |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |
 | [kolejka-po-c2d1.md](kolejka-po-c2d1.md) | Pięć kolejnych przebiegów z zależnościami, zakresem i kryteriami zakończenia |
