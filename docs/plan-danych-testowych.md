@@ -1,7 +1,8 @@
 # Plan archiwum, jakości i eksportu decyzji
 
 Plan z 2026-11-23 na bazie `f0dec461b93dd9be656333bc8be0c72e703c564d`
-na `Faza_A`. Etapy poniżej są propozycjami do wyboru. Pierwszym jest D7.2a.
+na `Faza_A`. D7.2a zakończono w commicie `755506d`. Użytkownik zaakceptował
+pozostałe etapy D7 2026-11-24. Bieżąca kolejka jest w [roadmapie](roadmap.md).
 
 [D7.1](trwala-kampania-v1.md) zapisuje wyniki przypadków w trwałym dzienniku
 i tworzy kopię pojedynczej kampanii. [Pilot](experiments/d7_1/README.md)

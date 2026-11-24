@@ -17,19 +17,21 @@ pozostałe propozycje Play vs AI i poprawki silnika wymagają osobnego wyboru.
 
 - [x] **D7.1-campaign-v1** — **DONE 2026-11-22**: [trwały runner v1](trwala-kampania-v1.md), JSONL/fsync, OS lock, source/integrity gates, report/archive; [pilot](experiments/d7_1/README.md) 32/64 pełny vs stop8+resume24 identyczny, końcowy resume no-op. Celowane **77 passed**, pełne **4146 passed**. Bez zmian silnika/API/UI/DB; większa kampania wymaga osobnego wyboru.
 
-## Propozycje po D7.1 — dane testowe
+## Aktywna kolejka D7 — akceptacja 2026-11-24
 
-[Plan danych testowych](plan-danych-testowych.md) definiuje osiem etapów
-do osobnego wyboru. Pierwszy jest D7.2a, wspólne archiwum kampanii.
+Użytkownik zaakceptował D7. [Plan danych testowych](plan-danych-testowych.md)
+określa zakres, zależności i warunki odbioru. Obowiązuje poniższa kolejność:
+jeden etap naraz, po zamknięciu poprzedniego i sprawdzeniu jego zależności.
+D7.3c wymaga potwierdzonego profilu reguł. Naprawy spoza D7 mają osobny zakres.
 
 - [x] **D7.2a** — **DONE 2026-11-23**. [Wspólny katalog eksperymentów](archiwum-eksperymentow.md) publikuje zweryfikowane kopie D7.1, odbudowuje katalog z deskryptorów i umożliwia weryfikację offline. Pilot 8/32 i 32/32, 49 testów celowanych i 4161 w pełnej suicie.
-- [ ] **D7.2b** — import historii i odtworzenie z kopii na innym komputerze.
-- [ ] **D7.3a** — bramka integralności, powtarzalności i kompletności.
-- [ ] **D7.3b** — bramka porównywalności i pomiar efektu strony.
-- [ ] **D7.4a** — obserwacja rzeczywistych decyzji i skutków w runnerze v1.
-- [ ] **D7.4b** — pełny eksport decyzji i sprawdzenie odtworzenia.
-- [ ] **D7.4c** — pilot od przerwanej kampanii do archiwum i oceny jakości.
-- [ ] **D7.3c** — kwalifikacja danych do uczenia w zweryfikowanym zakresie reguł.
+- [ ] **D7.2b** [automation-ready] — import historii i odtworzenie z kopii na innym komputerze.
+- [ ] **D7.3a** [automation-ready] — bramka integralności, powtarzalności i kompletności.
+- [ ] **D7.3b** [automation-ready] — bramka porównywalności i pomiar efektu strony.
+- [ ] **D7.4a** [automation-ready] — obserwacja rzeczywistych decyzji i skutków w runnerze v1.
+- [ ] **D7.4b** [automation-ready] — pełny eksport decyzji i sprawdzenie odtworzenia.
+- [ ] **D7.4c** [automation-ready] — pilot od przerwanej kampanii do archiwum i oceny jakości.
+- [ ] **D7.3c** [automation-ready] — kwalifikacja danych do uczenia po zweryfikowaniu zakresu reguł.
 
 ## Zakończona kolejka — akceptacje 2026-11-19
 
