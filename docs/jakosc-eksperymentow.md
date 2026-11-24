@@ -1,4 +1,4 @@
-# D7.3a — bramka techniczna eksperymentów
+# D7.3 — jakość i porównywalność eksperymentów
 
 `scripts/experiment_quality.py` ocenia opublikowany pakiet offline. Sprawdza
 tożsamość i hashe pakietu przez `experiment_archive.verify_package`, następnie
@@ -131,3 +131,122 @@ pełnej suicie.
 
 Warstwy zmiany to pliki archiwum i raportu, CLI offline oraz testy i
 dokumentacja. Ocena używa ścieżek danych snapshotu i wykonuje zero zapytań SQL.
+
+## D7.3b — porównywalność i efekt strony
+
+Flaga `--comparison d5_3b` stosuje profil [historycznego eksperymentu D5.3b](experiments/d5_3b/README.md)
+w tym samym CLI. Profil deklaruje rozstawienie po obu stronach jako badaną
+zmienną i grupuje przypadki według mapy lub fixtury, polityki i seedu bitwy.
+Przypina kanoniczny digest manifestu zamrożonego przed kampanią, bazową
+rewizję, wersję runnera v1 i kanoniczny digest mapy zapisanych odcisków
+źródeł silnika, botów, skryptów i fixtur. Porównanie dotyczy jednego
+zweryfikowanego pakietu.
+
+Kompletny blok obejmuje 16 przypadków. Składa się z obu zamian armii i obu
+inicjatyw oraz grid/grid, grid/objectives, objectives/grid i objectives/objectives
+dla każdej kombinacji. Każdy przypadek musi przejść bramkę z dowodem `match`
+i mieć wynik. Cztery strategie dla tej samej zamiany i inicjatywy muszą mieć
+identyczny `input_digest` sprzed rozstawienia. Różne kombinacje zamiany i
+inicjatywy wymagają odrębnych digestów. Przydziały do celów i identyfikatory
+oddziałów przypisane do stron potwierdzają strategię oraz zamianę armii
+w zapisanym przebiegu. Seedy i polityka pochodzą z deklaracji przypadku
+w manifeście oraz proweniencji runnera. Dowód replay pochodzi z zapisów
+runnera. Odtwarzanie z ogona zdarzeń jest częścią planu D7.4b.
+
+Brak lub wyłączenie jednego przypadku wyłącza cały blok z wyliczania
+zwycięstw. `blocks` zachowuje planowane identyfikatory przypadków, decyzję
+oraz mapę przyczyn na identyfikatory. `source_reasons` stosuje się do całego
+pakietu. Niezgodna rewizja, mechanika lub projekt powodują wyłączenie
+wszystkich zadeklarowanych bloków pakietu. `blocks_by_exclusion` liczy bloki
+z daną przyczyną i może przypisać jeden blok do kilku przyczyn.
+`cases_excluded` liczy zapisane przypadki z wyłączonych bloków, a
+`cases_missing` oznacza niezapisane przypadki ze znanego planu.
+
+`totals` podaje P0/P1/remisy dla obu kontroli, wyniki mieszane i podział
+wyników mieszanych według fizycznej strony objectives. `breakdown` zawiera
+te same liczniki i pokrycie w przekrojach mapa/fixtura × polityka × inicjatywa.
+`side_effect` podaje różnicę P0 minus P1 w kontrolach lub `null` przy braku
+pełnych bloków. D5.3b nie ustalił progu przed pomiarem. Różnica jest
+ostrzeżeniem opisowym. Zamiany stron i próby z tym samym seedem są
+skorelowane. Powtórzenia dokumentują stabilność, a jednostką porównania
+jest pełny blok.
+
+### Odtworzenie i format
+
+```powershell
+$pilot = Get-Content -Raw -Encoding UTF8 docs/experiments/d7_2b/results.json | ConvertFrom-Json
+$packages = @($pilot.history.d5_3b.package_id, $pilot.history.d6_1.package_id)
+foreach ($package in $packages) {
+    python -I -S -B -X utf8 scripts/experiment_quality.py --archive-root build/experiment-archive/d7_2b-guide-check --package-id $package --output-root build/experiment-quality/d7_3b --comparison d5_3b
+    if ($LASTEXITCODE -notin @(0, 2)) { throw "Błąd porównania pakietu $package" }
+}
+```
+
+`comparison.json` ma schemat `szop.experiment.comparison/v1` i trafia do
+`<output-root>/<package_id>/comparison/<report_key>/comparison.json`.
+`profile_digest` to SHA-256 kanonicznego JSON profilu. `report_key` liczy
+ten sam skrót z obiektu zawierającego `profile_digest` i `policy_digest`
+oceny technicznej. Zmiana kryteriów dopasowania wymaga nowej wersji profilu.
+Sekcja `quality` zawiera schemat, digest polityki,
+pokrycie oraz `report_sha256`. Ten ostatni jest skrótem bajtów odtworzonego
+`quality.json` wraz z końcowym LF. Ocena techniczna i dopasowanie używają
+tej samej zweryfikowanej zawartości pakietu. `case_ids` można łączyć przez
+`package_id`, `case_id` i grupę `match` z technicznymi wskazaniami dowodów.
+
+Kod wyjścia `0` oznacza objęcie wszystkich zadeklarowanych bloków.
+`2` oznacza opublikowany raport `review`, m.in. przy brakach lub źródle
+spoza projektu. `1` oznacza błąd integralności, a `3` błąd publikacji.
+Ponowna publikacja tego samego wyniku zwraca `created: false`. Osobna
+polityka techniczna tworzy nową ścieżkę. Zastany rozbieżny plik daje konflikt.
+
+### Pilot i przekazanie
+
+Pilot D5.3b zakwalifikował **30/30 bloków i 480/480 przypadków**. Z 240
+porównań mieszanych cele wygrały **174**, grid **30**, a **36** było remisami.
+Cele wygrały 74 ze 120 gier jako P0 i 100 ze 120 jako P1. Kontrole pokazały
+przewagę P0 dla gridu i przewagę P1 dla strategii objectives w tym zestawie.
+
+| Kontrola | P0 | P1 | Remis | Różnica P0 − P1 |
+|---|---:|---:|---:|---:|
+| grid/grid | 58 | 8 | 54 | +50 |
+| objectives/objectives | 42 | 66 | 12 | −24 |
+
+D6.1 zachował wszystkie **239 zapisanych prób**, z których **167** przeszło
+ocenę techniczną. Audyt znajduje się poza zamrożonym projektem D5.3b.
+Raport ma status `review`, przyczynę `outside_experiment_design`, 239
+wyłączeń i nieznany plan bloków. Pakiety D7.1 również są poza tym profilem.
+
+Mediana z 10 odczytów po rozgrzaniu pamięci podręcznej wyniosła **77,42 ms**
+dla D5.3b i **25,98 ms** dla D6.1 na Windows i Pythonie 3.12.14, bez startu
+procesu i publikacji. Raporty zajęły odpowiednio 24 242 i 2 303 bajty.
+Grupowanie i agregacja są liniowe po liczbie przypadków poza sortowaniem
+wierszy wyniku. Walidacja plików i hashowanie zależą również od rozmiaru
+pakietu. Zużycie SQL wynosi zero.
+
+[Kompaktowy wynik](experiments/d7_3b/results.json) zawiera identyfikatory
+i skróty raportów. Powtórzenie zwróciło identyczne bajty. Przed i po
+pilocie porównano bajty archiwum i istniejących raportów technicznych.
+Na innym komputerze pobierz `Faza_A` i odtwórz porównania z osobno
+skopiowanego `build/experiment-archive/d7_2b-guide-check/packages/`.
+Pełne `comparison.json` z `build/experiment-quality/d7_3b/` można osobno
+zarchiwizować lub odtworzyć. Źródła D5.3b i D6.1 są też w Git i można je
+ponownie zaimportować zgodnie z [instrukcją archiwum](archiwum-eksperymentow.md#import-historii-d72b).
+Porównując hashe raportów, zachowaj oryginalne bajty pakietu i jego ID.
+
+### Weryfikacja D7.3b
+
+Zestaw celowany zaliczył **99 testów**. Obejmuje brakujący przypadek,
+niezaliczony dowód replay, niezgodne stany wejściowe, pozorną parę po zamianie
+etykiet, niezgodną rewizję lub mechanikę, zmianę projektu oraz poprawne
+przemianowanie stron. Pełny `pytest` zaliczył **4211 testów** z czterema
+ostrzeżeniami deprecjacji zależności.
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short tests/test_experiment_comparison.py tests/test_experiment_quality.py tests/test_experiment_archive.py tests/test_experiment_archive_history.py tests/test_campaign_v1.py
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short
+```
+
+Audyt wywołań potwierdził, że istniejące polecenia i testy `evaluate` używają
+domyślnej oceny technicznej. Tryb porównania został dodany jako opt-in w
+tym samym CLI. Przegląd uproszczeń i diffu objął wspólny odczyt techniczny,
+kontrolę ścieżek archiwum, atomową publikację i obsługę konfliktów.

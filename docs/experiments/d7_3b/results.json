@@ -1,0 +1,140 @@
+{
+  "archive_byte_identical": true,
+  "benchmark": {
+    "operation": "offline evaluation without process startup and publication",
+    "os": "Windows",
+    "python": "3.12.14",
+    "warm_samples": 10
+  },
+  "packages": {
+    "d5_3b": {
+      "comparison_bytes": 24242,
+      "comparison_sha256": "2dc80b9755d69d15c2b73bb8232460721ee9b238866b4b8ee407e22d5ac224a8",
+      "coverage": {
+        "blocks_by_exclusion": {},
+        "blocks_excluded": 0,
+        "blocks_included": 30,
+        "blocks_planned": 30,
+        "cases_excluded": 0,
+        "cases_included": 480,
+        "cases_missing": 0,
+        "cases_planned": 480,
+        "cases_recorded": 480
+      },
+      "median_evaluate_ms": 77.42,
+      "package_id": "3dadf6945e64c4f94bfed77b834dae14b0c2c36ac500f1aa748cd2a8f9212780",
+      "quality": {
+        "coverage": {
+          "categories": {
+            "passed": 480
+          },
+          "missing": 0,
+          "outcomes": {
+            "draw": 102,
+            "player_0": 186,
+            "player_1": 192
+          },
+          "planned": 480,
+          "reasons": {},
+          "recorded": 480
+        },
+        "policy_digest": "4bbb2e6c03f3c98c7c1a40367030746716015319475c7624ca3926c0e9224c64",
+        "report_sha256": "389c5d88994b7cd5f574125718a15e1388c242acb9da297ada7ea9d25119f52a",
+        "schema": "szop.experiment.quality/v1"
+      },
+      "repeated_publication_identical": true,
+      "report_key": "fb69ba288069b840a3e201c4c7854218de68e9b34af4167b55295e0a069e4174",
+      "side_effect": {
+        "control_delta_p0_minus_p1": {
+          "grid": 50,
+          "objectives": -24
+        },
+        "interpretation": "descriptive_control_imbalance",
+        "threshold": null,
+        "unit": "block"
+      },
+      "source_reasons": [],
+      "status": "passed",
+      "totals": {
+        "controls": {
+          "grid": {
+            "draw": 54,
+            "player_0": 58,
+            "player_1": 8
+          },
+          "objectives": {
+            "draw": 12,
+            "player_0": 42,
+            "player_1": 66
+          }
+        },
+        "mixed": {
+          "draw": 36,
+          "grid": 30,
+          "objectives": 174
+        },
+        "mixed_by_objectives_side": {
+          "player_0": {
+            "draw": 28,
+            "grid": 18,
+            "objectives": 74
+          },
+          "player_1": {
+            "draw": 8,
+            "grid": 12,
+            "objectives": 100
+          }
+        }
+      }
+    },
+    "d6_1": {
+      "comparison_bytes": 2303,
+      "comparison_sha256": "e3b79a09e4ae673ce65b2f56c7d37b87b6b32a12944282075dfbfa32956e18d9",
+      "coverage": {
+        "blocks_by_exclusion": {},
+        "blocks_excluded": null,
+        "blocks_included": 0,
+        "blocks_planned": null,
+        "cases_excluded": 239,
+        "cases_included": 0,
+        "cases_missing": null,
+        "cases_planned": null,
+        "cases_recorded": 239
+      },
+      "median_evaluate_ms": 25.98,
+      "package_id": "51a590e8aeedd158f61432991f76460caa1cd35e8d97db5a2609807d6669e3ea",
+      "quality": {
+        "coverage": {
+          "categories": {
+            "decision_rejected": 14,
+            "missing_replay_evidence": 58,
+            "passed": 167
+          },
+          "missing": null,
+          "outcomes": {
+            "draw": 10,
+            "player_0": 2,
+            "player_1": 2
+          },
+          "planned": null,
+          "reasons": {
+            "decision_rejected": 14,
+            "missing_replay_evidence": 72
+          },
+          "recorded": 239
+        },
+        "policy_digest": "4bbb2e6c03f3c98c7c1a40367030746716015319475c7624ca3926c0e9224c64",
+        "report_sha256": "99deff1035e860cfe63931fe2fa89fb091abe71c4b5432721282a8f3688d5c0d",
+        "schema": "szop.experiment.quality/v1"
+      },
+      "repeated_publication_identical": true,
+      "report_key": "fb69ba288069b840a3e201c4c7854218de68e9b34af4167b55295e0a069e4174",
+      "source_reasons": [
+        "outside_experiment_design"
+      ],
+      "status": "review"
+    }
+  },
+  "profile_digest": "69c3ed171774352b6e7fac76c82fdeb17e4a00bf67a7839bbeeb380f410c4b19",
+  "technical_reports_byte_identical": true
+}

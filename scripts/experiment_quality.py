@@ -15,10 +15,12 @@ from tempfile import TemporaryDirectory
 
 if __package__:
     from . import experiment_archive as archive
+    from . import experiment_comparison as comparison
 else:
     # Isolated Python omits the script directory from sys.path.
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import experiment_archive as archive
+    import experiment_comparison as comparison
 
 
 SCHEMA = "szop.experiment.quality/v1"
@@ -345,12 +347,13 @@ def _group_summary(cases: list[dict], planned: int | None) -> dict:
                 categories=dict(categories), reasons=dict(reasons), outcomes=dict(outcomes))
 
 
-def evaluate(root: Path, package_id: str, *, min_repeats: int = 2) -> dict:
-    """Return a deterministic report for a verified package and technical policy."""
+def evaluate(root: Path, package_id: str, *, min_repeats: int = 2, compare: bool = False) -> dict:
+    """Assess a verified package, optionally including the frozen comparison design."""
     if type(min_repeats) is not int or min_repeats < 2:
         raise ValueError("the minimum repeat count must be at least 2")
     policy = dict(schema=POLICY_SCHEMA, version=1, min_repeats=min_repeats,
                   replay="recorded_equality_and_digests", primary_order=list(PRIMARY_ORDER))
+    plan, results = [], {}
     try:
         descriptor = archive.verify_package(root, package_id)
         snapshot = root / "packages" / package_id / archive.SNAPSHOT
@@ -391,33 +394,45 @@ def evaluate(root: Path, package_id: str, *, min_repeats: int = 2) -> dict:
     partial = any(group["missing"] for group in groups.values())
     completeness = "partial" if partial else ("unknown" if planned is None else "complete")
     status = "passed" if completeness == "complete" and all(case["category"] == "passed" for case in cases) else "review"
-    return dict(schema=SCHEMA, package_id=package_id, package_type=kind, source_schema=descriptor["source_schema"],
-                campaign_id=descriptor.get("campaign_id"), policy=policy,
-                policy_digest=_sha(archive._canonical(policy)), integrity="verified", completeness=completeness,
-                status=status, coverage=coverage, groups=groups, cases=cases)
+    report = dict(schema=SCHEMA, package_id=package_id, package_type=kind, source_schema=descriptor["source_schema"],
+                  campaign_id=descriptor.get("campaign_id"), policy=policy,
+                  policy_digest=_sha(archive._canonical(policy)), integrity="verified", completeness=completeness,
+                  status=status, coverage=coverage, groups=groups, cases=cases)
+    if compare:
+        try:
+            return comparison.compare(report, descriptor, manifest, plan, results)
+        except (ValueError, OverflowError, RecursionError) as exc:
+            raise IntegrityError(str(exc)) from exc
+    return report
 
 
 def _publish(root: Path, archive_root: Path, report: dict) -> tuple[Path, bool]:
-    # The caller controls the output root. Package ID and policy digest are computed or verified hex values.
+    # The caller controls the output root. Path keys are computed or verified here.
     output = archive._separate_archive(root, archive._directory(archive_root))
-    parent = archive._directory(output / report["package_id"], create=True)
-    destination = parent / report["policy_digest"]
+    parent = output / report["package_id"]
+    if report["schema"] == comparison.SCHEMA:
+        parent = parent / "comparison"
+        name, key = "comparison.json", report["report_key"]
+    else:
+        name, key = "quality.json", report["policy_digest"]
+    parent = archive._directory(parent, create=True)
+    destination = parent / key
     data = archive._canonical(report) + b"\n"
     with TemporaryDirectory(dir=parent, prefix=".quality-") as temporary:
         staging = Path(temporary) / "report"
         staging.mkdir()
-        with (staging / "quality.json").open("xb") as handle:
+        with (staging / name).open("xb") as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
         if not os.path.lexists(destination):
             try:
                 staging.rename(destination)
-                return destination / "quality.json", True
+                return destination / name, True
             except OSError:
                 if not os.path.lexists(destination):
                     raise
-    result = archive._directory(destination) / "quality.json"
+    result = archive._directory(destination) / name
     if (not stat.S_ISREG(archive._stat(result).st_mode) or result.read_bytes() != data):
         raise ValueError("existing evaluation differs for this package and policy")
     return result, False
@@ -429,9 +444,11 @@ def main(argv=None) -> int:
     parser.add_argument("--package-id", required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--min-repeats", type=int, default=2)
+    parser.add_argument("--comparison", choices=[comparison.PROFILE["id"]], help="enable the frozen comparison profile")
     args = parser.parse_args(argv)
     try:
-        report = evaluate(args.archive_root, args.package_id, min_repeats=args.min_repeats)
+        report = evaluate(args.archive_root, args.package_id, min_repeats=args.min_repeats,
+                          compare=args.comparison is not None)
         path, created = _publish(args.output_root, args.archive_root, report)
     except IntegrityError as exc:
         print(archive._canonical(dict(status="integrity_error", error=str(exc))).decode("ascii"), file=sys.stderr)
@@ -439,7 +456,9 @@ def main(argv=None) -> int:
     except (OSError, ValueError) as exc:
         print(archive._canonical(dict(status="publication_error", error=str(exc))).decode("ascii"), file=sys.stderr)
         return 3
-    result = {key: report[key] for key in ("package_id", "policy_digest", "status", "completeness", "coverage")}
+    details = (("profile_digest", "report_key", "quality", "source_reasons") if args.comparison
+               else ("policy_digest", "completeness"))
+    result = {key: report[key] for key in ("package_id", "status", "coverage", *details)}
     print(archive._canonical(dict(result, path=str(path), created=created)).decode("ascii"))
     return 0 if report["status"] == "passed" else 2
 

@@ -742,9 +742,13 @@ kampanii. `import-history` przyjmuje zachowane zestawy D5.3b i D6.1.
 Odczyt i weryfikacja gotowych pakietów działają samodzielnie.
 [Polecenia, format, backup i pilot](../docs/archiwum-eksperymentow.md).
 
-## experiment_quality.py — D7.3a
+## experiment_quality.py — D7.3a i D7.3b
 
 Ocenia integralność, kompletność, powtarzalność i zapisany dowód replay
 pakietów D7.1, D5.3b i D6.1. Publikuje wersjonowany `quality.json` w osobnym
 katalogu. Do odczytu wystarcza Python z biblioteką standardową.
 [Polecenia, kody CLI, kontrakt i pilot](../docs/jakosc-eksperymentow.md).
+
+`--comparison d5_3b` liczy wyniki wyłącznie dla pełnych bloków zamrożonego
+eksperymentu. Publikuje osobny `comparison.json` z pokryciem, wyłączeniami
+i licznikami kontroli efektu strony. [Profil i odtworzenie pilota](../docs/jakosc-eksperymentow.md#d73b--porównywalność-i-efekt-strony).
