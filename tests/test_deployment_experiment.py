@@ -5,6 +5,10 @@ from pathlib import Path
 
 import pytest
 
+from app.services.engine.observation import AutomaticTransition
+from app.services.engine.phases import deployment_round
+from app.services.engine.state import Position
+
 ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("deployment_experiment", ROOT / "scripts/deployment_experiment.py")
 experiment = importlib.util.module_from_spec(spec)
@@ -113,6 +117,86 @@ def test_deployment_failure_is_retained_without_partial_positions():
     assert row["reproducible"]
     assert experiment.match.objective_deployment_choice is original
     assert experiment.summarize([row])["mixed_outcomes"] == {}
+
+
+def test_observer_records_strategy_choices_and_real_deployment_events():
+    m = experiment.load_manifest(ROOT / "docs/experiments/d7_1/manifest.json")
+    c = next(c for c in experiment.iter_cases(m) if c["strategies"] == ["objectives", "grid"])
+    trace = []
+    observed = experiment.run_once(c, m, on_observation=trace.append)
+    assert observed["status"] == "complete" and observed["replay_equal"]
+    assert experiment.deterministic(observed) == experiment.deterministic(experiment.run_once(c, m))
+
+    choices = [r for r in trace if isinstance(r, experiment.match.DeploymentDecision)]
+    moves = [r for r in trace if isinstance(r, AutomaticTransition) and r.kind == "deployment_moved"]
+    finished, = [r for r in trace if isinstance(r, AutomaticTransition) and r.kind == "deployment_finished"]
+    assert len(choices) == len(moves) == len(observed["placements"])
+    assert {r.strategy for r in choices} == {"objectives", "grid"}
+    for decision, move, placement in zip(choices, moves, observed["placements"], strict=True):
+        event, = move.events
+        assert move.before == decision.seen_state
+        assert decision.outcome == "accepted"
+        assert event.sequence == decision.placement_index
+        assert event.unit_id == move.unit_id == decision.unit_id == placement["unit"]
+        assert list(event.to_pos) == [decision.position.x, decision.position.y] == placement["position"]
+        assert decision.target_id == placement["assigned_target"]
+        assert len(decision.occupied) + 1 == decision.placement_index
+        assert decision.zone == experiment.dep.DeploymentZone(*m["deployment_zones"][decision.perspective])
+        assert experiment.apply_events(move.before, move.events) == move.after
+    assert all(not r.assignments for r in choices if r.strategy == "grid")
+    assert any(r.assignments for r in choices if r.strategy == "objectives")
+    before_deploy, _, _ = experiment.prepare(c, m)
+    actions = [experiment.match.DeploymentAction(r.unit_id, r.position) for r in choices]
+    initial, deploy_events = deployment_round(before_deploy, actions)
+    assert finished.before == moves[-1].after
+    assert finished.after == initial
+    assert (*[event for move in moves for event in move.events], *finished.events) == deploy_events
+
+
+@pytest.mark.parametrize("reject", [False, True])
+def test_observer_records_actual_deployment_callback_and_validation(monkeypatch, reject):
+    m = manifest()
+    c = case(strategies=["grid", "grid"])
+    _, players, zones = experiment.prepare(c, m)
+    fx = experiment.fixture_for(c)
+    trace, calls = [], []
+    original = players[0].choose_deployment
+
+    def choose(state, unit_id, zone):
+        position = Position(-999, -999) if reject and calls else original(state, unit_id, zone)
+        calls.append((state, unit_id, zone, experiment.dep._deployment_occupied(state), position))
+        return position
+
+    def simulate():
+        return experiment.match.simulate_from_rosters(
+            fx.rosters, players, seed=c["seed"], terrain=fx.terrain, objectives=fx.objectives,
+            deployment_zones=zones, deployment_strategies=(None, "grid"),
+            on_observation=trace.append,
+        )
+
+    monkeypatch.setattr(players[0], "choose_deployment", choose)
+    if reject:
+        with pytest.raises(experiment.IllegalActionError) as error:
+            simulate()
+        accepted, decision = trace
+        assert accepted.outcome == "accepted" and accepted.placement_index == 1
+        assert decision.outcome == "rejected" and decision.placement_index is None
+        assert decision.reason == error.value.code == "invalid_deployment_position"
+    else:
+        assert simulate().final_state.is_game_over
+    callbacks = [r for r in trace if isinstance(r, experiment.match.DeploymentDecision) and r.strategy is None]
+    assert callbacks
+    assert [(r.seen_state, r.unit_id, r.zone, r.occupied, r.position) for r in callbacks] == calls
+
+
+def test_adapter_observer_records_selection_exhaustion_without_fake_move():
+    m = manifest()
+    m["deployment_zones"] = [[0, 0, 0.1, 0.1], [0, 0, 0.1, 0.1]]
+    trace = []
+    row = experiment.run_once(case(strategies=["objectives", "grid"]), m, on_observation=trace.append)
+    assert row["status"] == "deployment_error"
+    decision, = trace
+    assert (decision.outcome, decision.reason, decision.position) == ("error", "no_deployment_candidate", None)
 
 
 def test_repeat_does_not_compare_wall_clock_but_detects_outcome_drift(monkeypatch):

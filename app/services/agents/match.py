@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
-from typing import Callable, Sequence
+from typing import Callable, Literal, Sequence
 
 from app.services.agents.base import Player, own_active_units
 from app.services.agents.deployment import (
@@ -36,6 +36,7 @@ from app.services.agents.deployment import (
 from app.services.engine.actions import Action, DeploymentAction
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
+from app.services.engine.observation import ActionDecision, AutomaticTransition, BattleObserver
 from app.services.engine.phases import (
     deployment_round,
     round_end_phase,
@@ -52,7 +53,9 @@ from app.services.engine.state import (
     BattleState,
     Lokalizacja,
     Objective,
+    Position,
     Terrain,
+    UnitBlob,
 )
 
 #: Bezpiecznik anty-zapętlenie — maks. aktywacji na całą grę. Realna gra to
@@ -69,6 +72,28 @@ DEFAULT_MAX_ACTIVATIONS: int = 2000
 #: wall-clock wyboru TEJ akcji (`choose_action` dla 1., `continue_activation` dla
 #: kolejnych). Czysto obserwacyjny — nie wpływa na przebieg gry ani event-log.
 OnDecision = Callable[[int, int, "Action", "BattleState", "BattleState", float], None]
+
+
+@dataclass(frozen=True, slots=True)
+class DeploymentDecision:
+    """One returned choice or failed selection, before engine deployment."""
+
+    seen_state: BattleState
+    perspective: int
+    unit_id: int
+    strategy: str | None
+    zone: DeploymentZone
+    occupied: tuple[UnitBlob, ...]
+    assignments: tuple[tuple[int, int], ...]
+    position: Position | None
+    outcome: Literal["accepted", "rejected", "error"]
+    reason: str | None = None
+    target_id: int | None = None
+    placement_index: int | None = None
+
+
+DeploymentObserver = Callable[[DeploymentDecision], None]
+MatchObserver = Callable[[DeploymentDecision | ActionDecision | AutomaticTransition], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +132,7 @@ def _apply_activation_with_telemetry(
     perspective: int,
     first_action_elapsed_ms: float,
     on_decision: OnDecision,
+    on_observation: BattleObserver | None = None,
 ) -> ResolverResult:
     """`apply_activation` z telemetrią per-akcja (ADR-0017, opcja A).
 
@@ -149,6 +175,7 @@ def _apply_activation_with_telemetry(
         sequence=sequence,
         continuation=timed_continuation,
         on_action=on_action,
+        on_observation=on_observation,
     )
 
 
@@ -159,6 +186,7 @@ def run_match(
     *,
     max_activations: int = DEFAULT_MAX_ACTIVATIONS,
     on_decision: OnDecision | None = None,
+    on_observation: BattleObserver | None = None,
 ) -> MatchResult:
     """Rozgrywa pełną grę od stanu **po rozstawieniu** (round ≥ 1) do końca.
 
@@ -172,6 +200,7 @@ def run_match(
             wcześniej — bez wpływu na stan/event-log). Gdy podany, wołany dla
             KAŻDEJ akcji aktywacji (opcja A) — patrz `OnDecision` i
             `_apply_activation_with_telemetry`.
+        on_observation: opcjonalny synchroniczny odbiorca decyzji i przejść.
 
     Returns:
         `MatchResult(final_state, events, winner, rounds_played)`.
@@ -184,33 +213,49 @@ def run_match(
     activations = 0
 
     while not is_battle_over(state):
+        round_end_reason = None
         while not should_end_round(state):
             active = state.active_player
             _t0 = time.perf_counter()
-            action = players[active].choose_action(state, active)
+            try:
+                action = players[active].choose_action(state, active)
+            except Exception:
+                if on_observation is not None:
+                    on_observation(ActionDecision(
+                        "choose_action", state, None, (), None, "error", reason="policy_error",
+                    ))
+                raise
             _elapsed_ms = (time.perf_counter() - _t0) * 1000.0
             if action is None:
+                if on_observation is not None:
+                    on_observation(ActionDecision("choose_action", state, None, (), None, "none"))
                 # Brak własnych aktywowalnych oddziałów (legal_actions zawsze
                 # daje Obronę per oddział → None ⟺ own_active_units pusty).
                 opponent = 1 - active
                 if own_active_units(state, opponent):
                     # Przekaż inicjatywę (pkt 8.a) — emit InitiativePassed dla
                     # spójności log-u eventów (jak resolver._switch_active_player).
-                    events.append(
-                        InitiativePassed(
-                            sequence=seq,
-                            previous_active_player=active,
-                            new_active_player=opponent,
-                        )
+                    event = InitiativePassed(
+                        sequence=seq,
+                        previous_active_player=active,
+                        new_active_player=opponent,
                     )
+                    events.append(event)
                     seq += 1
+                    before_pass = state
                     state = replace(state, active_player=opponent)
+                    if on_observation is not None:
+                        on_observation(AutomaticTransition(
+                            "initiative_passed", before_pass, state, (event,),
+                            reason="choose_action_none",
+                        ))
                     continue
                 # Żaden gracz nie ma aktywowalnych oddziałów na Froncie —
                 # kończymy rundę. Ścieżka istotna dla rezerw Zaplecze (pkt 26):
                 # `should_end_round` liczy je jako "żywe nieaktywowane", ale
                 # runner ich nie rozstawia mid-game (MVP) → bez tego break pętla
                 # rundy nie zakończyłaby się. Round_end i tak domknie grę po pkt 5.f.
+                round_end_reason = "choose_action_none_no_eligible_opponent"
                 break
 
             # Aktywacja do 2 akcji (pkt 11.b.iv) — aktywny gracz dostarcza
@@ -223,7 +268,8 @@ def run_match(
             )
             if on_decision is None:
                 result = apply_activation(
-                    state, action, dice, sequence=seq, continuation=base_continuation
+                    state, action, dice, sequence=seq, continuation=base_continuation,
+                    on_observation=on_observation,
                 )
             else:
                 # Telemetria per-akcja (ADR-0017, opcja A) — czas i staty każdej
@@ -238,6 +284,7 @@ def run_match(
                     perspective=active,
                     first_action_elapsed_ms=_elapsed_ms,
                     on_decision=on_decision,
+                    on_observation=on_observation,
                 )
             state = result.state
             seq = result.next_sequence
@@ -249,9 +296,14 @@ def run_match(
                     f"— possible non-terminating player"
                 )
 
+        before_round_end = state
         state, end_events = round_end_phase(state, sequence=seq)
         seq += len(end_events)
         events.extend(end_events)
+        if on_observation is not None:
+            on_observation(AutomaticTransition(
+                "round_ended", before_round_end, state, end_events, reason=round_end_reason,
+            ))
 
     return MatchResult(
         final_state=state,
@@ -267,6 +319,7 @@ def _build_deployment_from_players(
     deployment_zones: Sequence[DeploymentZone],
     *,
     deployment_strategies: Sequence[str | None] | None = None,
+    on_observation: DeploymentObserver | None = None,
 ) -> list[DeploymentAction]:
     """D5 — pyta każdego gracza o pozycję startową jego oddziałów (pkt 13).
 
@@ -302,27 +355,43 @@ def _build_deployment_from_players(
             continue
         zone = deployment_zones[blob.owner_player]
         strategy = strategies[blob.owner_player]
+        counts = assignments[blob.owner_player]
+        if on_observation is not None:
+            context = (working, blob.owner_player, blob.id, strategy, zone,
+                       tuple(occupied), tuple(counts.items()))
+        pos = None
         target_id = None
-        with _deployment_selection(working, occupied):
-            if strategy == "objectives":
-                pos, target_id = objective_deployment_choice(
-                    working, blob.id, zone, assignments=assignments[blob.owner_player],
+        try:
+            with _deployment_selection(working, occupied):
+                if strategy == "objectives":
+                    pos, target_id = objective_deployment_choice(
+                        working, blob.id, zone, assignments=counts,
+                    )
+                elif strategy == "grid":
+                    pos = grid_deployment_position(working, blob.id, zone)
+                else:
+                    pos = players[blob.owner_player].choose_deployment(working, blob.id, zone)
+            if not is_deployment_position_legal(
+                blob, pos, zone, occupied=occupied, terrain=state.terrain,
+            ):
+                raise IllegalActionError(
+                    f"Rozstawienie oddziału {blob.id} (gracz {blob.owner_player}) "
+                    f"w nielegalnym miejscu (pkt 13.a): pozycja {pos}, "
+                    f"koło r={blob.radius_inches}, strefa {zone}",
+                    code="invalid_deployment_position",
                 )
-            elif strategy == "grid":
-                pos = grid_deployment_position(working, blob.id, zone)
-            else:
-                pos = players[blob.owner_player].choose_deployment(working, blob.id, zone)
-        if not is_deployment_position_legal(
-            blob, pos, zone, occupied=occupied, terrain=state.terrain,
-        ):
-            raise IllegalActionError(
-                f"Rozstawienie oddziału {blob.id} (gracz {blob.owner_player}) "
-                f"w nielegalnym miejscu (pkt 13.a): pozycja {pos}, "
-                f"koło r={blob.radius_inches}, strefa {zone}"
-            )
+        except Exception as exc:
+            if on_observation is not None:
+                reason = exc.code if isinstance(exc, IllegalActionError) else "deployment_selection_error"
+                outcome = "rejected" if reason == "invalid_deployment_position" else "error"
+                on_observation(DeploymentDecision(*context, pos, outcome, reason=reason, target_id=target_id))
+            raise
         actions.append(DeploymentAction(unit_id=blob.id, position=pos))
+        if on_observation is not None:
+            on_observation(DeploymentDecision(
+                *context, pos, "accepted", target_id=target_id, placement_index=len(actions),
+            ))
         if target_id is not None:
-            counts = assignments[blob.owner_player]
             counts[target_id] = counts.get(target_id, 0) + 1
         placed = replace(blob, position=pos)
         occupied.append(placed)
@@ -347,6 +416,7 @@ def simulate_from_rosters(
     ruleset_version: str = "v1",
     max_activations: int = DEFAULT_MAX_ACTIVATIONS,
     on_decision: OnDecision | None = None,
+    on_observation: MatchObserver | None = None,
 ) -> MatchResult:
     """Wygoda dla D2: `setup_phase` + `deployment_round` + `run_match`.
 
@@ -365,6 +435,9 @@ def simulate_from_rosters(
     grid botów deterministycznych i seeded Random zachowują dotychczasowy wynik.
     Jawny wybór wymaga `deployment_zones`; nie zmienia polityki walki ani RNG
     silnika. Heurystyka celów porównuje legalne próbki geometrycznie, bez tras.
+
+    `on_observation` odbiera decyzje rozstawienia, przejścia faz i wynik
+    decyzji w trakcie gry. Zdarzenia rozstawienia i gry mają osobne sekwencje.
 
     Raises:
         ValueError: konflikt deployment/zones lub nieprawidłowy wybór strategii.
@@ -387,8 +460,9 @@ def simulate_from_rosters(
             )
         deployment = _build_deployment_from_players(
             state, players, deployment_zones, deployment_strategies=deployment_strategies,
+            on_observation=on_observation,
         )
-    state, _deploy_events = deployment_round(state, deployment)
+    state, _deploy_events = deployment_round(state, deployment, on_observation=on_observation)
     dice = DeterministicDice(seed=seed)
     return run_match(
         state,
@@ -396,4 +470,5 @@ def simulate_from_rosters(
         dice,
         max_activations=max_activations,
         on_decision=on_decision,
+        on_observation=on_observation,
     )

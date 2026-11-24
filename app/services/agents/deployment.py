@@ -277,7 +277,8 @@ def _first_legal_position(
             return position
     raise IllegalActionError(
         f"Rozstawienie oddziału {unit.id}: brak legalnego kandydata "
-        "w ograniczonym przeszukanym zbiorze (pkt 13.a)"
+        "w ograniczonym przeszukanym zbiorze (pkt 13.a)",
+        code="no_deployment_candidate",
     )
 
 

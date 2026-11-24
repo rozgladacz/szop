@@ -57,6 +57,7 @@ from app.services.engine.events import (
     StatusRemoved,
 )
 from app.services.engine.geometry import distance as _distance
+from app.services.engine.observation import AutomaticTransition, TransitionObserver
 from app.services.engine.state import (
     BattleState,
     Lokalizacja,
@@ -250,6 +251,8 @@ def setup_phase(
 def deployment_round(
     state: BattleState,
     deployment_actions: Iterable[DeploymentAction],
+    *,
+    on_observation: TransitionObserver | None = None,
 ) -> tuple[BattleState, tuple[BattleEvent, ...]]:
     """Pkt 13 — Aktywacje rozstawienia w kolejności podanej przez deployment_actions.
 
@@ -266,19 +269,25 @@ def deployment_round(
     current = state
     for action in deployment_actions:
         blob = _find_blob(current, action.unit_id)
-        events.append(
-            MoveExecuted(
-                sequence=seq,
-                unit_id=blob.id,
-                from_pos=(blob.position.x, blob.position.y),
-                to_pos=(action.position.x, action.position.y),
-                move_type="deploy",
-            )
+        event = MoveExecuted(
+            sequence=seq,
+            unit_id=blob.id,
+            from_pos=(blob.position.x, blob.position.y),
+            to_pos=(action.position.x, action.position.y),
+            move_type="deploy",
         )
+        events.append(event)
         seq += 1
         moved = replace(blob, position=action.position)
+        before = current
         current = _replace_blob(current, moved)
+        if on_observation is not None:
+            on_observation(AutomaticTransition(
+                "deployment_moved", before, current, (event,), unit_id=blob.id,
+            ))
 
+    before_finalization = current
+    finalization_start = len(events)
     # R5.f pkt 13.c (faza-b-rules-resync 2026-06): KAŻDY rozstawiony oddział
     # (niezależnie czy explicit DeploymentAction wykonana) zyskuje Przygotowany
     # na początek rundy 1. Persists do startu własnej aktywacji (CR-fix G:
@@ -307,6 +316,11 @@ def deployment_round(
     # Po deployment: round = 1, status Aktywowany resetowany przed pierwszą rundą
     reset_blobs = tuple(_remove_status(b, STATUS_AKTYWOWANY) for b in current.blobs)
     current = replace(current, blobs=reset_blobs, round=1)
+    if on_observation is not None:
+        on_observation(AutomaticTransition(
+            "deployment_finished", before_finalization, current,
+            tuple(events[finalization_start:]),
+        ))
     return current, tuple(events)
 
 

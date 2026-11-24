@@ -109,8 +109,8 @@ def prepare(case: dict, manifest: dict):
     return state, players, [dep.DeploymentZone(*z) for z in manifest["deployment_zones"]]
 
 
-def run_once(case: dict, manifest: dict) -> dict:
-    """Use actual deployment runner and match; never reconstruct their policy."""
+def run_once(case: dict, manifest: dict, *, on_observation: match.MatchObserver | None = None) -> dict:
+    """Run deployment and match. Optional observations stream outside the result."""
     start = perf_counter()
     state, players, zones = prepare(case, manifest)
     record = dict(status="deployment_error", input_digest=digest(battle_state_to_json(state)))
@@ -133,6 +133,7 @@ def run_once(case: dict, manifest: dict) -> dict:
                 patch.object(dep, "is_deployment_position_legal", observe_candidate):
             actions = match._build_deployment_from_players(
                 state, players, zones, deployment_strategies=case["strategies"],
+                on_observation=on_observation,
             )
         deployment_ms = (perf_counter() - deploy_start) * 1000
         occupied, placements = [], []
@@ -152,12 +153,13 @@ def run_once(case: dict, manifest: dict) -> dict:
                                    nearest_target=nearest.id if nearest else None,
                                    nearest_gap=gap(nearest) if nearest else None))
             occupied.append(replace(unit, position=action.position))
-        initial, _ = deployment_round(state, actions)
+        initial, _ = deployment_round(state, actions, on_observation=on_observation)
         record.update(placements=placements, candidates=[candidates[0], candidates[1]],
                       deployment_ms=deployment_ms)
         stage = "match"
         result = match.run_match(initial, players, DeterministicDice(seed=case["seed"]),
-                                 max_activations=manifest["max_activations"])
+                                 max_activations=manifest["max_activations"],
+                                 on_observation=on_observation)
         match_end = perf_counter()
         replayed = apply_events(initial, result.events)
         if replayed != result.final_state:

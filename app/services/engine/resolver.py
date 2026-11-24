@@ -28,7 +28,7 @@ zero state mutation poza zwracanym ResolverResult.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Callable
+from typing import Callable, Literal
 
 from app.services.engine.actions import (
     ACTION_TYPE_BY_CLASS,
@@ -41,6 +41,13 @@ from app.services.engine.dice import DeterministicDice
 from app.services.engine.events import BattleEvent, InitiativePassed
 from app.services.engine.geometry import distance
 from app.services.engine.movement import MOVE_EPSILON
+from app.services.engine.observation import (
+    ActionDecision,
+    AutomaticTransition,
+    BattleObserver,
+    snapshot_action,
+    snapshot_events,
+)
 from app.services.engine.pathfinding import ManeuverPlanner, is_finite_position
 from app.services.engine.phases import (
     _apply_single_action,
@@ -72,6 +79,10 @@ class IllegalActionError(Exception):
     do zadeklarowanego punktu (pkt 2.d, 4.c.i/iv, 14.a i 15).
     """
 
+    def __init__(self, *args: object, code: str = "illegal_action") -> None:
+        super().__init__(*args)
+        self.code = code
+
 
 @dataclass(frozen=True, slots=True)
 class ResolverResult:
@@ -97,16 +108,21 @@ def _validate_maneuver(state: BattleState, actor: UnitBlob, action: ManeuverActi
     if ManeuverPlanner(state, actor, budget).can_reach(action.target_position):
         return
     if not is_finite_position(action.target_position):
-        raise IllegalActionError(f"Unit {action.unit_id} maneuver target must be finite")
+        raise IllegalActionError(
+            f"Unit {action.unit_id} maneuver target must be finite",
+            code="non_finite_maneuver_target",
+        )
     dist = distance(actor.position, action.target_position)
     if dist > budget + MOVE_EPSILON:
         raise IllegalActionError(
             f"Unit {action.unit_id} maneuver distance {dist:.3f}\" exceeds move "
-            f"budget {budget:.3f}\" (pkt 15.a + zdolność 33 Szybki/Wolny)"
+            f"budget {budget:.3f}\" (pkt 15.a + zdolność 33 Szybki/Wolny)",
+            code="maneuver_over_budget",
         )
     raise IllegalActionError(
         f"Unit {action.unit_id} has no legal maneuver route to target "
-        "(pkt 2.d, 4.c.i/iv, 14.a i 15)"
+        "(pkt 2.d, 4.c.i/iv, 14.a i 15)",
+        code="no_maneuver_route",
     )
 
 
@@ -114,27 +130,27 @@ def _validate_action(state: BattleState, action: Action) -> None:
     """Raise `IllegalActionError` gdy akcja niedozwolona w obecnym state."""
     if state.is_game_over:
         raise IllegalActionError(
-            "Game is over (pkt 5.f); no more actions allowed"
+            "Game is over (pkt 5.f); no more actions allowed", code="game_over",
         )
 
     actor = next((b for b in state.blobs if b.id == action.unit_id), None)
     if actor is None:
         raise IllegalActionError(
-            f"Unit {action.unit_id} not found in state"
+            f"Unit {action.unit_id} not found in state", code="unit_not_found",
         )
     if actor.models_alive == 0:
         raise IllegalActionError(
-            f"Unit {action.unit_id} is defeated (models_alive=0)"
+            f"Unit {action.unit_id} is defeated (models_alive=0)", code="unit_defeated",
         )
     if STATUS_AKTYWOWANY in actor.status_flags:
         raise IllegalActionError(
             f"Unit {action.unit_id} already activated this round "
-            f"(pkt 22.d.i)"
+            "(pkt 22.d.i)", code="unit_already_activated",
         )
     if actor.owner_player != state.active_player:
         raise IllegalActionError(
             f"Unit {action.unit_id} belongs to player {actor.owner_player}, "
-            f"but active_player is {state.active_player} (pkt 11.a)"
+            f"but active_player is {state.active_player} (pkt 11.a)", code="wrong_player",
         )
     if isinstance(action, ManeuverAction):
         _validate_maneuver(state, actor, action)
@@ -246,6 +262,21 @@ def _can_take_followup(action: Action, actions_taken: tuple[Action, ...]) -> boo
     return can_append_activation_action_type(action_type, action_types)
 
 
+def _followup_rejection(
+    state: BattleState, actor: UnitBlob, action: Action, taken: tuple[Action, ...],
+) -> str | None:
+    if action.unit_id != actor.id:
+        return "different_activation_unit"
+    if not _can_take_followup(action, taken):
+        return "followup_not_allowed"
+    if isinstance(action, ManeuverAction):
+        try:
+            _validate_maneuver(state, actor, action)
+        except IllegalActionError as exc:
+            return exc.code
+    return None
+
+
 def apply_activation(
     state: BattleState,
     first_action: Action,
@@ -254,6 +285,7 @@ def apply_activation(
     *,
     continuation: ActionProvider | None = None,
     on_action: ActionObserver | None = None,
+    on_observation: BattleObserver | None = None,
 ) -> ResolverResult:
     """Pełna aktywacja (pkt 11.b) — do 2 akcji jednego oddziału, potem switch.
 
@@ -271,50 +303,114 @@ def apply_activation(
     zaaplikowanej akcji z `(action, state_before, state_after)`. `None` → zero
     wywołań; nie zmienia stanu, eventów ani replay (B7 golden bez zmian).
 
+    `on_observation` odbiera wynik pierwszego wyboru dostarczonego przez runner,
+    decyzje `continuation` oraz automatyczne przejścia w kolejności wykonania.
+
     Raises:
         IllegalActionError: pierwsza akcja niedozwolona (zob. `_validate_action`).
     """
-    _validate_action(state, first_action)
+    try:
+        _validate_action(state, first_action)
+    except IllegalActionError as exc:
+        if on_observation is not None:
+            on_observation(ActionDecision(
+                "choose_action", state, first_action.unit_id, (),
+                snapshot_action(first_action), "rejected", reason=exc.code,
+            ))
+        raise
     unit_id = first_action.unit_id
     events: list[BattleEvent] = []
     seq = sequence
 
+    seen_state = state
     state, begin_events, seq = _begin_activation(state, unit_id, seq)
     events.extend(begin_events)
+    if on_observation is not None:
+        on_observation(AutomaticTransition(
+            "activation_started", seen_state, state, begin_events, unit_id=unit_id,
+        ))
 
     actions_taken: list[Action] = []
-    action: Action | None = first_action
-    while action is not None:
+    prior_actions: tuple[Action, ...] = ()
+    kind: Literal["choose_action", "continue_activation"] = "choose_action"
+    action = first_action
+    while True:
         state_before_action = state
-        state, action_events, seq = _apply_single_action(state, action, dice, seq)
+        observed = snapshot_action(action) if on_observation is not None else None
+        try:
+            state, action_events, seq = _apply_single_action(state, action, dice, seq)
+        except Exception:
+            if on_observation is not None:
+                on_observation(ActionDecision(
+                    kind, seen_state, unit_id, prior_actions, observed,
+                    "error", reason="action_execution_error", before=state_before_action,
+                ))
+            raise
         events.extend(action_events)
         actions_taken.append(action)
+        if on_observation is not None:
+            on_observation(ActionDecision(
+                kind, seen_state, unit_id, prior_actions, observed, "applied",
+                before=state_before_action, after=state, events=snapshot_events(action_events),
+            ))
         if on_action is not None:
             on_action(action, state_before_action, state)
 
-        if continuation is None or len(actions_taken) >= MAX_ACTIONS_PER_ACTIVATION:
+        if continuation is None:
+            stop_reason = "no_continuation_provider"
+            break
+        if len(actions_taken) >= MAX_ACTIONS_PER_ACTIVATION:
+            stop_reason = "action_limit"
             break
         actor = next((b for b in state.blobs if b.id == unit_id), None)
         if actor is None or actor.models_alive == 0:
-            break  # oddział pokonany w trakcie — koniec aktywacji
-        nxt = continuation(state, unit_id, tuple(actions_taken))
-        if (
-            nxt is None
-            or nxt.unit_id != unit_id  # tylko ten sam oddział (pkt 11: jedna aktywacja)
-            or not _can_take_followup(nxt, tuple(actions_taken))
-        ):
+            stop_reason = "activation_unit_unavailable"
             break
-        if isinstance(nxt, ManeuverAction):
-            try:
-                _validate_maneuver(state, actor, nxt)
-            except IllegalActionError:
-                break
+        taken = tuple(actions_taken)
+        if on_observation is not None:
+            kind = "continue_activation"
+            seen_state = state
+            prior_actions = tuple(snapshot_action(item) for item in taken)
+        try:
+            nxt = continuation(state, unit_id, taken)
+        except Exception:
+            if on_observation is not None:
+                on_observation(ActionDecision(
+                    kind, seen_state, unit_id, prior_actions, None,
+                    "error", reason="policy_error",
+                ))
+            raise
+        rejection = None if nxt is None else _followup_rejection(state, actor, nxt, taken)
+        if nxt is None or rejection is not None:
+            stop_reason = None
+            if on_observation is not None:
+                on_observation(ActionDecision(
+                    kind, seen_state, unit_id, prior_actions,
+                    snapshot_action(nxt) if nxt is not None else None,
+                    "none" if nxt is None else "rejected", reason=rejection,
+                ))
+            break
         action = nxt
 
+    if on_observation is not None and stop_reason is not None:
+        on_observation(AutomaticTransition(
+            "activation_stopped", state, state, unit_id=unit_id, reason=stop_reason,
+        ))
+    before_finalization = state
     state, final_events, seq = _finalize_activation(state, unit_id, seq)
     events.extend(final_events)
+    if on_observation is not None:
+        on_observation(AutomaticTransition(
+            "activation_finished", before_finalization, state, final_events, unit_id=unit_id,
+        ))
+    before_switch = state
     state, switch_events = _switch_active_player(state, sequence=seq)
     events.extend(switch_events)
+    if on_observation is not None and switch_events:
+        on_observation(AutomaticTransition(
+            "initiative_passed", before_switch, state, switch_events,
+            unit_id=unit_id, reason="activation_finished",
+        ))
 
     return ResolverResult(
         state=state,
