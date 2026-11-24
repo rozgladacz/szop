@@ -28,6 +28,12 @@ HISTORY_FORMATS = {
     BOTS_AUDIT_TYPE: ("szop.bots_audit/v1", {"manifest.json", "results.json", "side_analysis.json",
                                            "transport_probe.json", BOTS_REPORT}),
 }
+AUDIT_GROUPS = {
+    "decision": ("decisions", ("kind", "seed", "scenario")),
+    "deployment": ("deployments", ("kind", "strategy", "narrow")),
+    "ending": ("endings", ("kind",)),
+    "fixture": ("fixtures", ("kind", "fixture")),
+}
 DIGEST = re.compile(r"[0-9a-f]{64}")
 REVISION = re.compile(r"(?:[0-9a-f]{40}|[0-9a-f]{64})")
 DEVICE_NAME = re.compile(r"(?:CON|CONIN\$|CONOUT\$|PRN|AUX|NUL|COM[1-9¹²³]|LPT[1-9¹²³])",
@@ -101,7 +107,10 @@ def _canonical(value) -> bytes:
 def _read_json(path: Path) -> dict:
     if not stat.S_ISREG(_stat(path).st_mode):
         raise ArchiveError(f"expected a JSON file: {path}")
+    return _json_object(path.read_bytes(), label=str(path))
 
+
+def _json_object(data: bytes, *, label: str = "input") -> dict:
     def unique_object(pairs):
         result = dict(pairs)
         if len(result) != len(pairs):
@@ -111,10 +120,10 @@ def _read_json(path: Path) -> dict:
     def reject_constant(_value):
         raise ArchiveError("nonfinite JSON number")
 
-    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_object,
+    value = json.loads(data.decode("utf-8"), object_pairs_hook=unique_object,
                        parse_constant=reject_constant)
     if not isinstance(value, dict):
-        raise ArchiveError(f"expected a JSON object: {path}")
+        raise ArchiveError(f"expected a JSON object: {label}")
     return value
 
 
@@ -248,14 +257,8 @@ def _bots_audit_history(manifest: dict, results: dict) -> dict:
         if hashlib.sha256(_canonical(manifest)).hexdigest() != results["manifest_digest"]:
             raise ArchiveError("historical audit manifest digest mismatch")
         bindings.append("canonical_sha256")
-    groups = {
-        "decision": ("decisions", ("kind", "seed", "scenario")),
-        "deployment": ("deployments", ("kind", "strategy", "narrow")),
-        "ending": ("endings", ("kind",)),
-        "fixture": ("fixtures", ("kind", "fixture")),
-    }
     counts, samples = {}, {}
-    for kind, (field, identity_fields) in groups.items():
+    for kind, (field, identity_fields) in AUDIT_GROUPS.items():
         counts[kind], samples[kind] = _trial_counts(
             results[field], lambda row: [row[key] for key in identity_fields], "timings_ms")
         if counts[kind] != results["summary"][kind + "_cases"]:

@@ -26,7 +26,7 @@ D7.3c wymaga potwierdzonego profilu reguł. Naprawy spoza D7 mają osobny zakres
 
 - [x] **D7.2a** — **DONE 2026-11-23**. [Wspólny katalog eksperymentów](archiwum-eksperymentow.md) publikuje zweryfikowane kopie D7.1, odbudowuje katalog z deskryptorów i umożliwia weryfikację offline. Pilot 8/32 i 32/32, 49 testów celowanych i 4161 w pełnej suicie.
 - [x] **D7.2b** — **DONE 2026-11-24**. [Import historii i odzyskiwanie](archiwum-eksperymentow.md#import-historii-d72b) obejmuje 480 przypadków D5.3b i 239 D6.1. [Pilot](experiments/d7_2b/results.json) odbudował katalog bez indeksu i wznowił D7.1 z 8 do 32 przypadków w osobnym checkoutcie z identycznym wynikiem i końcowym no-op. Celowane **60 passed**, pełne **4172 passed**. Pełne pakiety wymagają osobnego backupu.
-- [ ] **D7.3a** [automation-ready] — bramka integralności, powtarzalności i kompletności.
+- [x] **D7.3a** — **DONE 2026-11-24**. [Bramka techniczna](jakosc-eksperymentow.md) ocenia integralność, kompletność, powtarzalność i zapisany dowód replay. [Pilot](experiments/d7_3a/results.json) obejmuje D7.1 32/32 i 8/32, D5.3b 480/480 oraz 239 prób D6.1, w tym 167 z kompletnym dowodem technicznym. Celowane **86 passed**, pełne **4198 passed**. Przenieś źródłowe snapshoty osobnym backupem.
 - [ ] **D7.3b** [automation-ready] — bramka porównywalności i pomiar efektu strony.
 - [ ] **D7.4a** [automation-ready] — obserwacja rzeczywistych decyzji i skutków w runnerze v1.
 - [ ] **D7.4b** [automation-ready] — pełny eksport decyzji i sprawdzenie odtworzenia.

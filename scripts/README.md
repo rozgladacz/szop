@@ -741,3 +741,10 @@ sprawdza komplet plików, rozmiary i hashe. Import wymaga zgodnych źródeł
 kampanii. `import-history` przyjmuje zachowane zestawy D5.3b i D6.1.
 Odczyt i weryfikacja gotowych pakietów działają samodzielnie.
 [Polecenia, format, backup i pilot](../docs/archiwum-eksperymentow.md).
+
+## experiment_quality.py — D7.3a
+
+Ocenia integralność, kompletność, powtarzalność i zapisany dowód replay
+pakietów D7.1, D5.3b i D6.1. Publikuje wersjonowany `quality.json` w osobnym
+katalogu. Do odczytu wystarcza Python z biblioteką standardową.
+[Polecenia, kody CLI, kontrakt i pilot](../docs/jakosc-eksperymentow.md).

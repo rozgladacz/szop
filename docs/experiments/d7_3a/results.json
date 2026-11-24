@@ -1,0 +1,226 @@
+{
+  "archive_byte_identical": true,
+  "benchmark": "median of 10 warm-cache evaluate-only reads; Windows; external process startup and report writes excluded",
+  "packages": {
+    "d5_3b": {
+      "completeness": "complete",
+      "coverage": {
+        "categories": {
+          "passed": 480
+        },
+        "missing": 0,
+        "outcomes": {
+          "draw": 102,
+          "player_0": 186,
+          "player_1": 192
+        },
+        "planned": 480,
+        "reasons": {},
+        "recorded": 480
+      },
+      "groups": {
+        "match": {
+          "categories": {
+            "passed": 480
+          },
+          "missing": 0,
+          "outcomes": {
+            "draw": 102,
+            "player_0": 186,
+            "player_1": 192
+          },
+          "planned": 480,
+          "reasons": {},
+          "recorded": 480
+        }
+      },
+      "median_evaluate_ms": 80.05,
+      "package_id": "3dadf6945e64c4f94bfed77b834dae14b0c2c36ac500f1aa748cd2a8f9212780",
+      "policy_digest": "4bbb2e6c03f3c98c7c1a40367030746716015319475c7624ca3926c0e9224c64",
+      "quality_sha256": "389c5d88994b7cd5f574125718a15e1388c242acb9da297ada7ea9d25119f52a",
+      "re_evaluation_identical": true,
+      "snapshot_bytes": 1009389,
+      "status": "passed"
+    },
+    "d6_1": {
+      "completeness": "unknown",
+      "coverage": {
+        "categories": {
+          "decision_rejected": 14,
+          "missing_replay_evidence": 58,
+          "passed": 167
+        },
+        "missing": null,
+        "outcomes": {
+          "draw": 10,
+          "player_0": 2,
+          "player_1": 2
+        },
+        "planned": null,
+        "reasons": {
+          "decision_rejected": 14,
+          "missing_replay_evidence": 72
+        },
+        "recorded": 239
+      },
+      "groups": {
+        "decision": {
+          "categories": {
+            "decision_rejected": 14,
+            "missing_replay_evidence": 4,
+            "passed": 144
+          },
+          "missing": 0,
+          "outcomes": {},
+          "planned": 162,
+          "reasons": {
+            "decision_rejected": 14,
+            "missing_replay_evidence": 18
+          },
+          "recorded": 162
+        },
+        "deployment": {
+          "categories": {
+            "missing_replay_evidence": 54
+          },
+          "missing": 0,
+          "outcomes": {},
+          "planned": 54,
+          "reasons": {
+            "missing_replay_evidence": 54
+          },
+          "recorded": 54
+        },
+        "ending": {
+          "categories": {
+            "passed": 9
+          },
+          "missing": 0,
+          "outcomes": {},
+          "planned": 9,
+          "reasons": {},
+          "recorded": 9
+        },
+        "fixture": {
+          "categories": {
+            "passed": 14
+          },
+          "missing": null,
+          "outcomes": {
+            "draw": 10,
+            "player_0": 2,
+            "player_1": 2
+          },
+          "planned": null,
+          "reasons": {},
+          "recorded": 14
+        }
+      },
+      "median_evaluate_ms": 27.297,
+      "package_id": "51a590e8aeedd158f61432991f76460caa1cd35e8d97db5a2609807d6669e3ea",
+      "policy_digest": "4bbb2e6c03f3c98c7c1a40367030746716015319475c7624ca3926c0e9224c64",
+      "quality_sha256": "99deff1035e860cfe63931fe2fa89fb091abe71c4b5432721282a8f3688d5c0d",
+      "re_evaluation_identical": true,
+      "snapshot_bytes": 227246,
+      "status": "review"
+    },
+    "d7_1_full": {
+      "completeness": "complete",
+      "coverage": {
+        "categories": {
+          "passed": 32
+        },
+        "missing": 0,
+        "outcomes": {
+          "draw": 4,
+          "player_0": 12,
+          "player_1": 16
+        },
+        "planned": 32,
+        "reasons": {},
+        "recorded": 32
+      },
+      "groups": {
+        "match": {
+          "categories": {
+            "passed": 32
+          },
+          "missing": 0,
+          "outcomes": {
+            "draw": 4,
+            "player_0": 12,
+            "player_1": 16
+          },
+          "planned": 32,
+          "reasons": {},
+          "recorded": 32
+        }
+      },
+      "median_evaluate_ms": 16.782,
+      "package_id": "397d3db256431bcc5abadcf14dcb82d80bb23cf25b7517336c092430ee49e94b",
+      "policy_digest": "4bbb2e6c03f3c98c7c1a40367030746716015319475c7624ca3926c0e9224c64",
+      "quality_sha256": "de4fdab1c99572471bc55984c82d08cf3568f109f745f78a8322cb10fd6c3b5c",
+      "re_evaluation_identical": true,
+      "snapshot_bytes": 87346,
+      "status": "passed"
+    },
+    "d7_1_stopped": {
+      "completeness": "partial",
+      "coverage": {
+        "categories": {
+          "passed": 8
+        },
+        "missing": 24,
+        "outcomes": {
+          "draw": 1,
+          "player_0": 2,
+          "player_1": 5
+        },
+        "planned": 32,
+        "reasons": {},
+        "recorded": 8
+      },
+      "groups": {
+        "match": {
+          "categories": {
+            "passed": 8
+          },
+          "missing": 24,
+          "outcomes": {
+            "draw": 1,
+            "player_0": 2,
+            "player_1": 5
+          },
+          "planned": 32,
+          "reasons": {},
+          "recorded": 8
+        }
+      },
+      "median_evaluate_ms": 14.303,
+      "package_id": "adddf8ed4a7cc64d77c45bde5d1308669ac942bdbcff7b8092f62f6258841f50",
+      "policy_digest": "4bbb2e6c03f3c98c7c1a40367030746716015319475c7624ca3926c0e9224c64",
+      "quality_sha256": "30be39fef8ceeb5982418df79d3b1648a5094bc78e271be845e69b62d1a56571",
+      "re_evaluation_identical": true,
+      "snapshot_bytes": 31231,
+      "status": "review"
+    }
+  },
+  "schema": "szop.experiment.quality_pilot/v1",
+  "stricter_policy": {
+    "coverage": {
+      "categories": {
+        "missing_repeat_evidence": 32
+      },
+      "missing": 0,
+      "outcomes": {},
+      "planned": 32,
+      "reasons": {
+        "missing_repeat_evidence": 32
+      },
+      "recorded": 32
+    },
+    "original_preserved": true,
+    "policy_digest": "075402c042bf461b8ba6b5c50f2ec5e517082fec7e5e2dc6e3e91124f4bac549",
+    "status": "review"
+  }
+}
