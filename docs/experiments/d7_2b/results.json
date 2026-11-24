@@ -1,0 +1,131 @@
+{
+  "campaign": {
+    "campaign_id": "a7419713a34be8760e28a5974307619c90252eab37b3d0098863eefa52b22be4",
+    "compatible_checkout": "1592aaf6d68d0e455ab3fba346d1605ce0f50d87",
+    "dependencies": {
+      "PyYAML": "6.0.1",
+      "pydantic": "2.13.4",
+      "pydantic_core": "2.46.4"
+    },
+    "deterministic_rows_equal": true,
+    "deterministic_rows_sha256": "17674ac3426b42ebcc048e55c53ccbc0e684526f3b2808c8be7e696b72ab2baf",
+    "execution_environment": "isolated detached checkout on the same Windows host; project venv",
+    "full_reference_package_id": "397d3db256431bcc5abadcf14dcb82d80bb23cf25b7517336c092430ee49e94b",
+    "full_reference_transfer": {
+      "seconds": 0.011686,
+      "size_bytes": 88473
+    },
+    "noop_bytes_unchanged": true,
+    "noop_committed": 0,
+    "python_family": [
+      3,
+      13
+    ],
+    "recorded_base_commit": "06e8c8a492bc12a61f6f38422f47b30e36659dcd",
+    "report_summary_equal": true,
+    "resumed_cases": 24,
+    "snapshot_journal_prefix_preserved": true,
+    "source_paths_verified": 61,
+    "stopped_package_id": "adddf8ed4a7cc64d77c45bde5d1308669ac942bdbcff7b8092f62f6258841f50",
+    "stopped_transfer": {
+      "seconds": 0.014749,
+      "size_bytes": 32356
+    },
+    "verified_after": 32,
+    "verified_before": 8
+  },
+  "catalog": {
+    "all_packages_verified": true,
+    "index_copied": false,
+    "packages": 4,
+    "transfer_seconds": 0.041546,
+    "transferred_bytes": 1359774
+  },
+  "history": {
+    "d5_3b": {
+      "byte_identical": true,
+      "case_counts": {
+        "deployment": 480
+      },
+      "deduplicated": true,
+      "evidence": {
+        "campaign_journal": false,
+        "kind": "historical_results",
+        "manifest_binding": "file_sha256",
+        "source_fingerprints": "recorded"
+      },
+      "package_id": "3dadf6945e64c4f94bfed77b834dae14b0c2c36ac500f1aa748cd2a8f9212780",
+      "recorded_revision": "5588fedfc021129c6a0480c8dd4b7d4609c99d39",
+      "source_files": {
+        "README.md": {
+          "sha256": "2ede949d2aea0a0dbc86155c04c2b0430f4795a4450294c0dac26ced97bafadb",
+          "size_bytes": 9375
+        },
+        "manifest.json": {
+          "sha256": "494281e8c03b5b316af751131642ba325446cccf3a8f19743b1a882e95bd672d",
+          "size_bytes": 1268
+        },
+        "results.json": {
+          "sha256": "29b1ab90ba444482760de2ebdcd3ddbee68fe39aef946f2590f8c0eb3e428367",
+          "size_bytes": 996884
+        },
+        "results.md": {
+          "sha256": "59b6a72ccf1066a2edf441a6e455495d9bdda44beee4fe3f08e3601eaaa7f601",
+          "size_bytes": 1862
+        }
+      },
+      "timing_samples": {
+        "deployment": 960
+      },
+      "type": "deployment_experiment_v1"
+    },
+    "d6_1": {
+      "byte_identical": true,
+      "case_counts": {
+        "decision": 162,
+        "deployment": 54,
+        "ending": 9,
+        "fixture": 14
+      },
+      "deduplicated": true,
+      "evidence": {
+        "campaign_journal": false,
+        "kind": "historical_results",
+        "manifest_binding": "embedded_manifest+canonical_sha256",
+        "source_fingerprints": "recorded"
+      },
+      "package_id": "51a590e8aeedd158f61432991f76460caa1cd35e8d97db5a2609807d6669e3ea",
+      "recorded_revision": "4082bd9005b2567c781dc9e0805214f791d1cea0",
+      "source_files": {
+        "boty-audit.md": {
+          "sha256": "5a3e914815efee674197c78239dd7c292fd2d6bf2f6414e3fdf3a20046112db1",
+          "size_bytes": 22629
+        },
+        "manifest.json": {
+          "sha256": "b220bf46ebc10a56fa4100838cb785adc524cc13963f1b7764fd5e06d58de9e8",
+          "size_bytes": 427
+        },
+        "results.json": {
+          "sha256": "b1e1385be8e20fa51fd81bc131c1da23db5bea96cd95f09bc4f4a26d18122945",
+          "size_bytes": 201091
+        },
+        "side_analysis.json": {
+          "sha256": "2d836db5385aca98dd47be486c4b5cb7e8ca974582e76770e04c3ad50e4f8e70",
+          "size_bytes": 2062
+        },
+        "transport_probe.json": {
+          "sha256": "27b207a93c4a7a7eade0b1ecf123cb4d4255fe6ccdce64c442af3911df6676e5",
+          "size_bytes": 1037
+        }
+      },
+      "timing_samples": {
+        "decision": 324,
+        "deployment": 108,
+        "ending": 18,
+        "fixture": 28
+      },
+      "type": "bots_audit_v1"
+    }
+  },
+  "schema": "szop.experiment_archive.recovery_pilot/v1"
+}
