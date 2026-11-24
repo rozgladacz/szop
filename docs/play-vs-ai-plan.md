@@ -157,6 +157,49 @@ bitwy/checkpointu, zero nowych SELECT. Testy: v1 positive, v2/v3/mismatch,
 stare pending, owner/foreign/scope i approval race w
 `test_battle_action_proposals.py`/`test_agent_proposals_router.py`.
 
+#### Wynik P1
+
+Tworzenie propozycji akcji i zatwierdzanie propozycji `pending` wymagają
+metadanych bitwy v1 oraz dekodowalnego checkpointu v1 na aktualnym końcu
+dziennika. Wspólna bramka działa przed rozstrzygnięciem akcji i użyciem RNG.
+Niezgodność wersji lub błąd dekodowania zwraca HTTP 409. Zatwierdzenie cofa
+przejęcie w tej samej transakcji. Propozycja pozostaje `pending`, a zdarzenia,
+checkpoint i RNG zachowują wartości sprzed odmowy. Propozycje już rozstrzygnięte
+korzystają z zapisanego wyniku. Konflikt sekwencji w zgodnej bitwie v1 nadal
+oznacza `stale`.
+
+Oba wywołania routera propozycji włączają bramkę w `battle_actions.py`.
+Bezpośrednie akcje i testowe wywołania usług odtwarzania używają dotychczasowej
+ścieżki. Router filtruje bitwę po uczestniku, a zatwierdzenie po właścicielu
+propozycji. `HttpClient` korzysta z dotychczasowego HTTP 409, a adapter D6.2
+kończy próbę po tym statusie.
+
+W izolowanej próbie D6.2 każdy z trzech dodatnich przepływów nadal wykonał
+15 zapytań SELECT (4 + 5 + 6), a decyzja bota wykonała zero zapytań. Pomiar
+`choose_action` bez I/O, po rozgrzaniu i dla seedów 0–99, dał p95 0,112 ms
+dla 2 jednostek i 2,725 ms dla 12. Próbka liczyła 1 lub 6 jednostek na stronę,
+bez broni i terenu, z celem w `(24, 24)`. Pozycje miały `x = 6 + 6*i` dla
+indeksu jednostki na stronie i `y` równe 6 lub 42.
+
+Weryfikacja transportem HTTP objęła v2, v3, rozbieżne metadane i checkpoint,
+nieobsługiwaną wersję checkpointu, uprawnienia, niezmienione bajty checkpointu
+i RNG oraz zachowanie istniejącego `pending`. Regresje obejmują zatwierdzenie
+v1, równoległe zatwierdzenia i odtwarzanie. Do powtórzenia na checkoutcie
+`origin/Faza_A` z odtworzonym `.venv` i instalacją editable `szop_client`
+wystarczą dane testowe z repozytorium.
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q -s --tb=short tests/test_battle_action_proposals.py tests/test_agent_proposals_router.py tests/test_bot_proposals.py tests/test_battle_activation_transport.py tests/test_battles_router.py tests/test_agent_token_security.py tests/test_clients_http_replay.py tests/test_battle_replay_router.py
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short
+git diff --check
+```
+
+Zaliczono **314 testów celowanych i 4257 w pełnym zestawie**, z czterema
+ostrzeżeniami zależności w pełnym przebiegu. Przegląd uproszczenia, kodu i
+bezpieczeństwa sprawdził wspólny odczyt checkpointu, kolejność autoryzacji,
+atomowy rollback oraz obsługę ponownego zatwierdzenia. Kolejny etap
+zatwierdzonej kolejki to P6.
+
 ### P2. Zamrożenie kontraktu producenta i trwałej próby
 
 Zależność: P1. Dokumentacyjny ADR: zamknięta komenda, identyfikator próby,

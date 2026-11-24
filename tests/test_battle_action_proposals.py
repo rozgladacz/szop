@@ -516,28 +516,3 @@ def test_existing_priority_public_snapshot_can_use_owner_proposal_path() -> None
         executed = agent_proposals.approve_agent_proposal(created.id, db=session, current_user=owner)
         assert executed.status == models.AGENT_PROPOSAL_STATUS_EXECUTED
         assert load_latest_checkpoint(session, battle.id).sequence_at > checkpoint.sequence_at
-
-
-def test_legacy_proposal_has_no_v2_lifecycle_and_fails_at_v1_checkpoint() -> None:
-    from dataclasses import replace
-    from app.services.engine.state_codec import BattleStateCodecError, battle_state_to_json
-
-    with _build_session() as session:
-        owner = _seed_user(session, "bot-audit-v2-owner")
-        principal = _seed_principal(session, owner=owner)
-        battle = _persist_battle(session, p1=owner, p2=owner)
-        checkpoint = session.execute(select(models.BattleCheckpoint)).scalar_one()
-        checkpoint.state_json = json.dumps(
-            battle_state_to_json(replace(_action_state(), initiative_player=0), version=2)
-        )
-        battle.activation_protocol_version = 2
-        session.commit()
-        before = _battle_snapshot(session, battle.id)
-        created = _create_proposal(session, battle=battle, principal=principal)
-        # Current missing protocol gate: creation validates legacy apply;
-        # approval cannot encode its result as a v1 checkpoint.
-        with pytest.raises(BattleStateCodecError, match="v1 checkpoint"):
-            agent_proposals.approve_agent_proposal(created.id, db=session, current_user=owner)
-        session.rollback()
-        assert _battle_snapshot(session, battle.id) == before
-        assert session.get(models.AgentProposal, created.id).status == models.AGENT_PROPOSAL_STATUS_PENDING

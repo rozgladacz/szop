@@ -139,6 +139,14 @@ def count_proposals(h):
         return len(session.scalars(select(models.AgentProposal)).all())
 
 
+def login_session(api, user_id):
+    cookie = TimestampSigner("d6-test-cookie").sign(
+        base64.b64encode(json.dumps({"user_id": user_id}).encode())
+    ).decode()
+    api.cookies.clear()
+    api.cookies.set("session", cookie)
+
+
 # === SECTION: Real bot decisions, separate owner approval and replay ===
 @pytest.mark.parametrize("mode", ["maneuver", "special", "defend"])
 def test_real_priority_http_pending_approval_events_and_replay(harness, monkeypatch, mode):
@@ -177,10 +185,7 @@ def test_real_priority_http_pending_approval_events_and_replay(harness, monkeypa
     print(f"D6.2 {mode}: decision_ms={result.decision_ms:.3f}; SELECT=4+5+6; botSQL=0")
 
     # Separate existing owner session / consent endpoint. Adapter has no approval method.
-    cookie = TimestampSigner("d6-test-cookie").sign(
-        base64.b64encode(json.dumps({"user_id": h.owner_id}).encode())
-    ).decode()
-    h.api.cookies.set("session", cookie)
+    login_session(h.api, h.owner_id)
     approved = h.api.post(f"/agent_proposals/{result.proposal_id}/approve")
     assert approved.status_code == 200, approved.text
     assert approved.json()["status"] == "executed"
@@ -306,6 +311,60 @@ def test_invalid_selected_actor_is_rejected(harness, monkeypatch, change):
 
 
 # === SECTION: Server authority, stale CAS, uncertainty and one-shot ledger ===
+@pytest.mark.parametrize("battle_version, checkpoint_version", [
+    (2, 2), (3, 3), (2, 1), (1, 2), (1, 3), (1, 99),
+])
+def test_legacy_proposal_rejects_wrong_protocol_at_create_and_approval(
+    harness, battle_version, checkpoint_version,
+):
+    h = harness
+    payload = {
+        "battle_id": h.battle_id,
+        "expected_sequence": 0,
+        "action": action_to_json(DefendAction(unit_id=1)),
+        "summary": "One v1 step",
+    }
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+    path = "/agent_proposals/battle-actions"
+    created = h.api.post(path, headers=headers, json=payload)
+    assert created.status_code == 201
+    pending = created.json()
+    assert pending["status"] == "pending"
+    proposal_path = f"/agent_proposals/{pending['id']}"
+
+    version = checkpoint_version if checkpoint_version in (2, 3) else 1
+    state = safe_state()
+    if version != 1:
+        state = replace(state, initiative_player=0)
+    wire = battle_state_to_json(state, version=version)
+    wire["version"] = checkpoint_version
+    checkpoint_fields = select(
+        models.BattleCheckpoint.sequence_at,
+        models.BattleCheckpoint.state_json,
+        models.BattleCheckpoint.rng_json,
+    )
+    with h.sessions() as session:
+        session.get(models.Battle, h.battle_id).activation_protocol_version = battle_version
+        session.scalar(select(models.BattleCheckpoint)).state_json = json.dumps(wire)
+        session.commit()
+        before = session.execute(checkpoint_fields).one()
+
+    refused_create = h.api.post(path, headers=headers, json=payload)
+    login_session(h.api, h.other_id)
+    assert h.api.post(f"{proposal_path}/approve").status_code == 404
+    login_session(h.api, h.owner_id)
+    refused_approve = h.api.post(f"{proposal_path}/approve")
+    assert refused_create.status_code == refused_approve.status_code == 409
+    assert refused_create.json() == refused_approve.json() == {
+        "detail": "Battle action proposals require a valid v1 battle and checkpoint."
+    }
+    assert h.api.get(proposal_path).json() == pending
+    assert count_proposals(h) == 1
+    with h.sessions() as session:
+        assert session.execute(checkpoint_fields).all() == [before]
+        assert session.scalar(select(models.BattleEvent)) is None
+
+
 @pytest.mark.parametrize("mode,status", [("missing", 401), ("expired", 401), ("scope", 403), ("foreign", 404), ("absent", 404)])
 def test_server_auth_scopes_and_no_oracle_remain_authoritative(harness, mode, status):
     h = harness

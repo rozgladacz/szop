@@ -9,6 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..battle_protocol import ACTIVATION_PROTOCOL_VERSION_V1
 from .engine.action_codec import (
     ActionCodecError,
     action_from_json,
@@ -43,6 +44,13 @@ class BattleActionUnavailable(BattleActionError):
     def __init__(self, *, actual_sequence: int) -> None:
         self.actual_sequence = actual_sequence
         super().__init__("Current battle checkpoint is unavailable")
+
+
+class BattleActionProposalProtocolConflict(BattleActionError):
+    """Legacy action proposals require a coherent v1 battle and checkpoint."""
+
+    def __init__(self) -> None:
+        super().__init__("Battle action proposals require a valid v1 battle and checkpoint.")
 
 
 class BattleActionSequenceConflict(BattleActionError):
@@ -107,13 +115,26 @@ def prepare_battle_action(
     actor_user_id: int,
     expected_sequence: int,
     action_payload: Mapping[str, Any],
+    require_v1_protocol: bool = False,
 ) -> PreparedBattleAction:
-    """Validate and resolve an action against an isolated checkpoint copy."""
-    checkpoint = load_latest_checkpoint(db, battle.id)
+    """Resolve an action in isolation, optionally requiring a v1 checkpoint."""
+    if (
+        require_v1_protocol
+        and battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V1
+    ):
+        raise BattleActionProposalProtocolConflict
+    try:
+        checkpoint = load_latest_checkpoint(db, battle.id)
+    except (TypeError, ValueError) as exc:
+        if not require_v1_protocol:
+            raise
+        raise BattleActionProposalProtocolConflict from exc
     if checkpoint is None:
         raise BattleActionUnavailable(
             actual_sequence=latest_event_sequence(db, battle.id)
         )
+    if require_v1_protocol and checkpoint.version != ACTIVATION_PROTOCOL_VERSION_V1:
+        raise BattleActionProposalProtocolConflict
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActionSequenceConflict(
             expected_sequence=expected_sequence,
@@ -179,6 +200,7 @@ def stage_battle_action(
     actor_user_id: int,
     expected_sequence: int,
     action_payload: Mapping[str, Any],
+    require_v1_protocol: bool = False,
 ) -> PreparedBattleAction:
     """Stage one action, checkpoint, and metadata update without committing."""
     prepared = prepare_battle_action(
@@ -187,6 +209,7 @@ def stage_battle_action(
         actor_user_id=actor_user_id,
         expected_sequence=expected_sequence,
         action_payload=action_payload,
+        require_v1_protocol=require_v1_protocol,
     )
     save_events(
         db,

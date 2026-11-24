@@ -23,6 +23,7 @@ from ..services.battle_actions import (
     BattleActionForbidden,
     BattleActionInvalid,
     BattleActionNotFound,
+    BattleActionProposalProtocolConflict,
     BattleActionSequenceConflict,
     BattleActionUnavailable,
     get_participant_battle,
@@ -429,6 +430,7 @@ def _execute_battle_action_proposal(
             actor_user_id=current_user.id,
             expected_sequence=expected_sequence,
             action_payload=action_payload,
+            require_v1_protocol=True,
         )
         execution_result = {
             "battle_id": battle_id,
@@ -460,6 +462,12 @@ def _execute_battle_action_proposal(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=exc.detail,
+        ) from exc
+    except BattleActionProposalProtocolConflict as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
         ) from exc
     except (BattleActionUnavailable, BattleActionSequenceConflict) as exc:
         db.rollback()
@@ -545,6 +553,7 @@ def create_battle_action_proposal(
             actor_user_id=principal.owner_user_id,
             expected_sequence=payload.expected_sequence,
             action_payload=payload.action,
+            require_v1_protocol=True,
         )
     except BattleActionNotFound as exc:
         db.rollback()
@@ -558,7 +567,11 @@ def create_battle_action_proposal(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=exc.detail,
         ) from exc
-    except (BattleActionUnavailable, BattleActionSequenceConflict) as exc:
+    except (
+        BattleActionProposalProtocolConflict,
+        BattleActionUnavailable,
+        BattleActionSequenceConflict,
+    ) as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

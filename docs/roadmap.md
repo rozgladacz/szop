@@ -25,7 +25,7 @@ zakresy, zależności, budżety i warunki odbioru. Realizujemy jeden etap naraz,
 po zamknięciu poprzedniego. P3 i P4 opierają się na zatwierdzonym kontrakcie
 P2, obejmującym tożsamość producenta i uprawnienia.
 
-- [ ] **P1** [automation-ready] — bramka wersji przy tworzeniu i zatwierdzaniu propozycji v1; zależność D6.2 zamknięta.
+- [x] **P1** — **DONE 2026-11-24**. [Bramka propozycji v1](play-vs-ai-plan.md#wynik-p1) sprawdza metadane i checkpoint przy tworzeniu oraz zatwierdzaniu. Niezgodność to HTTP 409 i atomowe wycofanie, a dodatni przepływ D6.2 zachowuje 15 SELECT. Celowane **314 passed**, pełne **4257 passed**.
 - [ ] **P6** [automation-ready] — wspólna walidacja walki i statusów oraz regresje D6.1; po P1.
 - [ ] **P2** [automation-ready] — ADR producenta propozycji i trwałej próby; po P6 w zaakceptowanej kolejności.
 - [ ] **P3** [automation-ready] — trwała deduplikacja tworzenia propozycji v1; po zaakceptowanym kontrakcie P2.
