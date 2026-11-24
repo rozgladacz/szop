@@ -17,7 +17,22 @@ pozostałe propozycje Play vs AI i poprawki silnika wymagają osobnego wyboru.
 
 - [x] **D7.1-campaign-v1** — **DONE 2026-11-22**: [trwały runner v1](trwala-kampania-v1.md), JSONL/fsync, OS lock, source/integrity gates, report/archive; [pilot](experiments/d7_1/README.md) 32/64 pełny vs stop8+resume24 identyczny, końcowy resume no-op. Celowane **77 passed**, pełne **4146 passed**. Bez zmian silnika/API/UI/DB; większa kampania wymaga osobnego wyboru.
 
-## Aktywna kolejka D7 — akceptacja 2026-11-24
+## Aktywna kolejka Play vs AI — akceptacja 2026-11-24
+
+Użytkownik zatwierdził kolejność **P1 → P6 → P2 → P3 → P4 → P5**.
+[Plan Play vs AI](play-vs-ai-plan.md#kolejność-etapów-do-wyboru) określa
+zakresy, zależności, budżety i warunki odbioru. Realizujemy jeden etap naraz,
+po zamknięciu poprzedniego. P3 i P4 opierają się na zatwierdzonym kontrakcie
+P2, obejmującym tożsamość producenta i uprawnienia.
+
+- [ ] **P1** [automation-ready] — bramka wersji przy tworzeniu i zatwierdzaniu propozycji v1; zależność D6.2 zamknięta.
+- [ ] **P6** [automation-ready] — wspólna walidacja walki i statusów oraz regresje D6.1; po P1.
+- [ ] **P2** [automation-ready] — ADR producenta propozycji i trwałej próby; po P6 w zaakceptowanej kolejności.
+- [ ] **P3** [automation-ready] — trwała deduplikacja tworzenia propozycji v1; po zaakceptowanym kontrakcie P2.
+- [ ] **P4** [automation-ready] — producent jednej propozycji `priority/v1`; po P3.
+- [ ] **P5** [automation-ready] — pierwszy interfejs Play vs AI dla pojedynczego kroku w istniejącej bitwie; po P4.
+
+## Zakończona kolejka D7 — akceptacja 2026-11-24
 
 Użytkownik zaakceptował D7. [Plan danych testowych](plan-danych-testowych.md)
 określa zakres, zależności i warunki odbioru. Obowiązuje poniższa kolejność:
