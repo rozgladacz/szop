@@ -39,10 +39,10 @@ def normalize_roster_unit_count(count: Any, *, default: int = 0) -> int:
     """
     try:
         normalized = int(count)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         try:
             normalized = int(float(count))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             normalized = int(default)
     return normalized if normalized > 0 else 0
 

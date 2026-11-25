@@ -15,6 +15,21 @@ Wymagania:
 
 ---
 
+## Limity wyceny i zapisu oddziału
+
+Pomiar na tej samej kopii rzeczywistej bazy. Cztery uruchomienia w kolejności przed, po, po, przed. Po rozgrzewce zebrano po 14 próbek na wariant i przypadek. Czasy wyceny to sumy czasów obsługi wszystkich jednostek rozpiski. Widok to czas renderowania jednej odpowiedzi `/rosters/{id}`.
+
+| Rozpiska | Przypadek | Przed (ms) | Po (ms) | Zmiana | SELECT przed i po |
+|---:|---|---:|---:|---:|---:|
+| 10 | Wycena pełna | 349,99 | 347,80 | −0,62% | 227 |
+| 10 | Wycena skrócona | 194,18 | 196,27 | +1,08% | 227 |
+| 10 | Widok | 63,10 | 63,58 | +0,76% | 28 |
+| 13 | Wycena pełna | 385,33 | 387,75 | +0,63% | 277 |
+| 13 | Wycena skrócona | 244,59 | 242,47 | −0,87% | 277 |
+| 13 | Widok | 67,05 | 67,66 | +0,91% | 28 |
+
+Odpowiedzi JSON wyceny zgodne po kanonizacji kluczy. Wszystkie 84 zapisane oddziały z kopii bazy przechodzą walidację. Kontrola budżetu wykorzystuje istniejące liczniki i zestawy opcji. Pomiary obejmują handler i pracę ORM z nową sesją dla każdego żądania, z wyłączeniem routingu HTTP i pobrania użytkownika.
+
 ## Aktualny baseline
 
 **Data:** 2026-10-29, `Rozwoj`, naprawa Transportu Valkyrii.

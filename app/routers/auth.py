@@ -50,8 +50,9 @@ def _registration_response(request: Request, registration_open: bool, error=None
             "request": request, "error": error, "registration_open": registration_open,
             "form_token": public_access.issue_form(request) if protected else None,
             "requires_code": protected and bool(public_access.REGISTRATION_CODE),
-            "password_min": public_access.PASSWORD_MIN if protected else None,
+            "password_min": public_access.PLAYER_PASSWORD_MIN if protected else None,
             "password_max": public_access.PASSWORD_MAX if protected else None,
+            "password_requirements": public_access.password_requirements(public_access.PLAYER_PASSWORD_MIN),
         },
         status_code=status_code,
         headers={"Cache-Control": "no-store", **(headers or {})},
@@ -121,8 +122,8 @@ def register(
             return _registration_response(request, True, public_access.ATTEMPT_ERROR, 429, {"Retry-After": str(retry)})
         if not public_access.valid_form(request, form_token, website, access_code):
             return _registration_response(request, True, public_access.FORM_ERROR, 400)
-        if not public_access.valid_password(password):
-            return _registration_response(request, True, public_access.PASSWORD_ERROR, 400)
+        if not public_access.valid_password(password, minimum=public_access.PLAYER_PASSWORD_MIN):
+            return _registration_response(request, True, public_access.password_requirements(public_access.PLAYER_PASSWORD_MIN), 400)
     username = username.strip()
     if not is_valid_username(username):
         return _registration_response(

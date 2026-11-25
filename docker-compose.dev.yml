@@ -12,5 +12,7 @@ services:
       - ./app:/app/app:ro
     environment:
       DEBUG: "true"
+      PUBLIC_ORIGIN: ""
+      LOCAL_PUBLIC_PREVIEW: "false"
       SESSION_HTTPS_ONLY: "false"
       TRUSTED_HOSTS: "szop.localhost,localhost,127.0.0.1"

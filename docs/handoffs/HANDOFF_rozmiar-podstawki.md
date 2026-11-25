@@ -29,6 +29,7 @@ Pełny plan zaakceptowany przez usera (kontekst, algorytm, decyzje D1-D6) w:
 - `data/szop.db` — po migracji (backup w `data/szop.db.bak-pre-base-size`)
 
 ## Blokuje / Blokowane przez
+- **Koordynacja z publiczne-testy:** walidacja budżetu przed alokacją w quote/crowding oraz na zapisach oddziałów. Zasady rabatu, kolejność modeli, klasyfikacja, `base_size` i schemat pozostają bez zmian dla poprawnych danych.
 - **Blokuje:** (brak znanych w tej chwili)
 - **Blokowane przez:** (brak — wątki kolekcja i demoralizacja-mag zamknięte 2026-07-14)
 

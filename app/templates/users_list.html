@@ -33,9 +33,9 @@
           <div class="mb-3">
             <label class="form-label" for="new-password">Hasło</label>
             <input class="form-control" id="new-password" name="password" type="password"
-                   required minlength="{{ 15 if request.state.public_mode else 4 }}"
-                   {% if request.state.public_mode %}maxlength="128"{% endif %} autocomplete="new-password" />
-            <div class="form-text">{% if request.state.public_mode %}Hasło musi mieć od 15 do 128 znaków.{% else %}Minimum 4 znaki.{% endif %}</div>
+                   required minlength="{{ player_password_min if request.state.public_mode else 4 }}"
+                   {% if request.state.public_mode %}maxlength="{{ password_max }}"{% endif %} autocomplete="new-password" />
+            <div class="form-text">{% if request.state.public_mode %}{{ t(player_password_requirements) }}{% else %}Minimum 4 znaki.{% endif %}</div>
           </div>
           <button class="btn btn-primary" type="submit">Utwórz konto</button>
         </form>
@@ -53,8 +53,12 @@
           Przy dostępie publicznym (internet) zalecane jest wyłączenie.
         </p>
         <div class="mt-auto d-flex align-items-center gap-3">
-          {% if registration_open %}
-          <span class="badge bg-success fs-6">Włączona</span>
+          <span class="badge {{ 'bg-success' if registration_open else 'bg-secondary' }} fs-6">
+            {% if registration_open %}Włączona{% else %}Wyłączona{% endif %}
+          </span>
+          {% if registration_locked %}
+          <span class="text-muted small">Stan rejestracji ustawia zmienna REGISTRATION_OPEN.</span>
+          {% elif registration_open %}
           <form method="post" action="/users/registration-toggle">
             <button class="btn btn-outline-danger btn-sm" type="submit"
                     onclick="return confirm('Wyłączyć rejestrację publiczną? Nowi użytkownicy będą mogli być tworzeni tylko przez administratora.');">
@@ -62,7 +66,6 @@
             </button>
           </form>
           {% else %}
-          <span class="badge bg-secondary fs-6">Wyłączona</span>
           <form method="post" action="/users/registration-toggle">
             <button class="btn btn-outline-success btn-sm" type="submit">
               Włącz rejestrację
@@ -114,8 +117,8 @@
                 name="new_password"
                 placeholder="Nowe hasło"
                 required
-                minlength="{{ 15 if request.state.public_mode else 4 }}"
-                {% if request.state.public_mode %}maxlength="128"{% endif %}
+                minlength="{{ (admin_password_min if item.is_admin else player_password_min) if request.state.public_mode else 4 }}"
+                {% if request.state.public_mode %}maxlength="{{ password_max }}"{% endif %}
               />
               <button class="btn btn-sm btn-primary" type="submit">Zmień hasło</button>
             </form>

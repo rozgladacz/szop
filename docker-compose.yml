@@ -4,6 +4,7 @@ services:
   szop-app:
     image: ${SZOP_IMAGE:-ghcr.io/rozgladacz/szop:latest}
     restart: unless-stopped
+    command: ["uvicorn", "app.main:public_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     # Brak sekcji "ports" — publiczny dostęp zapewnia osobny stos brama.
     volumes:
       - ${SZOP_DATA_DIR:-./data}:/app/data

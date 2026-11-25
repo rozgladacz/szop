@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import models
-from .config import DEBUG, SECRET_KEY, SESSION_HTTPS_ONLY, TRUSTED_HOSTS
+from . import config, models
+from .config import DEBUG, LOCAL_PUBLIC_PREVIEW, SECRET_KEY, SESSION_HTTPS_ONLY, TRUSTED_HOSTS
 from .db import get_db, init_db
 from .middleware_public import PublicAccessMiddleware
 from .i18n import (
@@ -38,11 +38,19 @@ from .routers import (
 )
 from .security import get_current_user
 from .services import costs
+from .services.costs.budget import UnitBudgetExceeded
 from .templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(debug=DEBUG)
+
+
+def public_app() -> FastAPI:
+    if not config.PUBLIC_ORIGIN or config.LOCAL_PUBLIC_PREVIEW:
+        raise RuntimeError("Production Compose requires PUBLIC_ORIGIN and cannot use LOCAL_PUBLIC_PREVIEW")
+    config.validate_public_config()
+    return app
 
 # Trusted-host guard — zapobiega atakom Host-header injection gdy za reverse proxy.
 # Domyślnie "*" (wszystkie hosty dozwolone) — zawężamy przez TRUSTED_HOSTS w .env.
@@ -52,6 +60,7 @@ if TRUSTED_HOSTS != ["*"]:
 app.add_middleware(
     SessionMiddleware,
     secret_key=SECRET_KEY,
+    session_cookie="szop_preview_session" if LOCAL_PUBLIC_PREVIEW else "session",
     # https_only=True aktywować gdy SESSION_HTTPS_ONLY=true (np. za Tailscale serve TLS)
     https_only=SESSION_HTTPS_ONLY,
     same_site="lax",
@@ -78,6 +87,11 @@ def translation_script(request: Request, language: str):
 async def localized_http_error(request: Request, exc):
     detail = translate(exc.detail, language_for(request)) if isinstance(exc.detail, str) else exc.detail
     return JSONResponse({'detail': detail}, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.exception_handler(UnitBudgetExceeded)
+async def unit_budget_error(request: Request, exc: UnitBudgetExceeded) -> JSONResponse:
+    return JSONResponse({'detail': translate(str(exc), language_for(request))}, status_code=422)
 
 
 @app.post('/language')

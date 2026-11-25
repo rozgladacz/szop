@@ -18,6 +18,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app import config, main, models
+from app import db as app_db
 from app.db import Base, _ensure_admin, get_db
 from app.security import hash_password, verify_password
 from app.services import public_access
@@ -102,20 +103,43 @@ def login(client, username, password=PASSWORD):
 def test_public_register_creates_regular_account_without_contact_fields(public_app):
     sessions, _ = public_app
     client = browser()
-    response = client.get("/auth/register")
+    response = client.get("/auth/register", headers={"Accept-Language": "en"})
     assert response.status_code == 200
+    assert 'minlength="8"' in response.text
+    assert "Your password must be 8 to 128 characters long." in response.text
     inputs = FormInputs(response.text).values
     assert {"username", "password", "form_token", "website"} <= inputs.keys()
     assert not {"email", "phone", "access_code"} & inputs.keys()
 
-    response = post(client, "/auth/register", register_data(client))
+    player_password = "prostota"
+    response = post(client, "/auth/register", register_data(client, password=player_password))
     assert response.status_code == 303
     with sessions() as db:
         user = db.scalars(select(models.User)).one()
         assert user.username == "tester"
         assert not user.is_admin
-        assert user.password_hash != PASSWORD
-        assert verify_password(PASSWORD, user.password_hash)
+        assert user.password_hash != player_password
+        assert verify_password(player_password, user.password_hash)
+
+
+def test_public_user_panel_applies_password_minimum_by_role(public_app):
+    sessions, _ = public_app
+    admin_id = seed_user(sessions, "admin", is_admin=True)
+    player_id = seed_user(sessions, "player")
+    client = browser()
+    assert login(client, "admin").status_code == 303
+    panel = client.get("/users")
+    assert "Stan rejestracji ustawia zmienna REGISTRATION_OPEN." in panel.text
+    assert 'action="/users/registration-toggle"' not in panel.text
+    assert post(client, "/users/create", {"username": "new-player", "password": "prostota"}).status_code == 303
+    assert post(client, f"/users/{player_id}/password", {"new_password": "prostota"}).status_code == 303
+    refused = post(client, f"/users/{admin_id}/password", {"new_password": "prostota"})
+    assert refused.status_code == 400
+    assert "Hasło musi mieć od 15 do 128 znaków." in refused.text
+
+    with sessions() as db:
+        assert verify_password("prostota", db.get(models.User, player_id).password_hash)
+        assert verify_password(PASSWORD, db.get(models.User, admin_id).password_hash)
 
 
 def test_registration_cooldown_counts_successes_and_accepts_at_boundary(public_app):
@@ -165,7 +189,7 @@ def test_parallel_registrations_share_database_limits(public_app, monkeypatch, l
     {"form_token": "invalid"},
     {"website": "present"},
     {"access_code": "incorrect"},
-    {"password": "too short"},
+    {"password": "shorter"},
     {"password": "x" * 129},
 ])
 def test_public_registration_form_guards_reject_without_consuming_slot(public_app, monkeypatch, invalid):
@@ -217,6 +241,14 @@ def test_public_auth_rejects_unsupported_and_oversized_bodies(public_app):
     client = browser()
     assert client.post("/auth/login", headers={"Origin": ORIGIN}, json={}).status_code == 415
     assert login(client, "legacy", "x" * 4096).status_code == 413
+
+
+def test_public_path_guards_apply_below_the_application_root(public_app):
+    client = TestClient(main.app, base_url=ORIGIN, root_path="/preview")
+    assert client.get("/preview/auth/register").status_code == 200
+    assert client.get("/preview/admin").status_code == 404
+    assert client.get("/preview/users/backup").status_code == 404
+    assert client.post("/preview/auth/login", headers={"Origin": ORIGIN}, json={}).status_code == 415
 
 
 def test_public_login_blocks_repeated_failures(public_app):
@@ -274,6 +306,10 @@ def test_public_admin_bootstrap_requires_safe_credentials(public_app, monkeypatc
     with sessions() as db, pytest.raises(RuntimeError, match="INITIAL_ADMIN_PASSWORD"):
         _ensure_admin(db)
 
+    monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", "prostota")
+    with sessions() as db, pytest.raises(RuntimeError, match="INITIAL_ADMIN_PASSWORD"):
+        _ensure_admin(db)
+
     monkeypatch.setenv("INITIAL_ADMIN_PASSWORD", PASSWORD)
     with sessions() as db:
         _ensure_admin(db)
@@ -288,6 +324,41 @@ def test_public_admin_bootstrap_requires_safe_credentials(public_app, monkeypatc
         _ensure_admin(db)
         db.commit()
         assert db.scalars(select(models.User)).one().password_hash == password_hash
+
+
+def test_public_start_requires_a_prepared_database(tmp_path, monkeypatch):
+    database = tmp_path / "missing.db"
+    db_url = f"sqlite:///{database.as_posix()}"
+    monkeypatch.setattr(app_db, "DB_URL", db_url)
+    monkeypatch.setattr(config, "DB_URL", db_url)
+    monkeypatch.setattr(config, "LOCAL_PUBLIC_PREVIEW", False)
+    monkeypatch.setattr(config, "PUBLIC_ORIGIN", ORIGIN)
+    monkeypatch.setattr(config, "TRUSTED_HOSTS", ["testserver"])
+    monkeypatch.setattr(config, "SESSION_HTTPS_ONLY", True)
+    monkeypatch.setattr(config, "DEBUG", False)
+
+    with pytest.raises(RuntimeError, match="Prepare a separate SQLite database"):
+        app_db.init_db()
+    assert not database.exists()
+
+
+@pytest.mark.parametrize(("origin", "local_preview", "accepted"), [
+    ("", False, False),
+    ("http://example.test", False, False),
+    ("http://127.0.0.1:8002", True, False),
+    ("https://example.test", False, True),
+])
+def test_production_app_requires_real_public_origin(monkeypatch, origin, local_preview, accepted):
+    monkeypatch.setattr(config, "PUBLIC_ORIGIN", origin)
+    monkeypatch.setattr(config, "LOCAL_PUBLIC_PREVIEW", local_preview)
+    monkeypatch.setattr(config, "TRUSTED_HOSTS", ["example.test", "localhost"])
+    monkeypatch.setattr(config, "SESSION_HTTPS_ONLY", True)
+    monkeypatch.setattr(config, "DEBUG", False)
+    if accepted:
+        assert main.public_app() is main.app
+    else:
+        with pytest.raises(RuntimeError, match="PUBLIC_ORIGIN"):
+            main.public_app()
 
 
 @pytest.mark.parametrize(

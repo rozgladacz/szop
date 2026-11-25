@@ -53,6 +53,7 @@ def _fake_request() -> SimpleNamespace:
 @pytest.fixture(autouse=True)
 def _isolate_registration(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "_SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.delenv("REGISTRATION_OPEN", raising=False)
 
 
 # ── settings.py unit tests ────────────────────────────────────────────────────
@@ -114,6 +115,20 @@ class TestRegistrationToggleEndpoint:
         with pytest.raises(HTTPException) as exc_info:
             users_router.toggle_registration(current_user=regular)
         assert exc_info.value.status_code == 403
+
+    @pytest.mark.parametrize("forced_open", [True, False])
+    def test_toggle_reports_environment_lock_without_overwriting_saved_state(self, monkeypatch, forced_open):
+        session = _build_session()
+        admin = _seed_admin(session)
+        set_registration_open(forced_open)
+        monkeypatch.setenv("REGISTRATION_OPEN", str(forced_open).lower())
+
+        response = users_router.toggle_registration(current_user=admin)
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/users?error=registration-locked"
+        monkeypatch.delenv("REGISTRATION_OPEN")
+        assert get_registration_open() is forced_open
 
 
 # ── create user endpoint ──────────────────────────────────────────────────────

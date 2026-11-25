@@ -28,6 +28,7 @@ from ... import models
 from ..utils import ARMY_RULE_OFF_PREFIX
 from ._engine import ORDER_LIKE_ACTIVE_SLUGS, ROLE_SLUGS
 from .abilities import ability_cost_from_name, base_model_cost
+from .budget import require_equipment_count, require_option_count
 from .passive_state import (
     _parse_passive_counts,
     compute_passive_state,
@@ -45,7 +46,8 @@ def unit_default_weapons(unit: models.Unit | None) -> list[models.Weapon]:
     seen: set[int] = set()
     links = getattr(unit, "weapon_links", None) or []
     for link in links:
-        if link.weapon is None:
+        weapon = link.weapon
+        if weapon is None:
             continue
         is_default = bool(getattr(link, "is_default", False))
         count_raw = getattr(link, "default_count", None)
@@ -59,12 +61,13 @@ def unit_default_weapons(unit: models.Unit | None) -> list[models.Weapon]:
             is_default = True
         if not is_default or count <= 0:
             continue
-        for _ in range(count):
-            weapons.append(link.weapon)
-        seen.add(link.weapon.id)
+        require_equipment_count(len(weapons) + count)
+        weapons.extend([weapon] * count)
+        seen.add(weapon.id)
     if unit.default_weapon:
         default_id = unit.default_weapon_id or getattr(unit.default_weapon, "id", None)
         if default_id is None or default_id not in seen:
+            require_equipment_count(len(weapons) + 1)
             weapons.append(unit.default_weapon)
             if default_id is not None:
                 seen.add(default_id)
@@ -270,16 +273,16 @@ def _normalize_loadout_section_ids(
         except (TypeError, ValueError):
             try:
                 parsed_id = int(float(base_id))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 continue
         if parsed_id not in allowed_ids:
             continue
         try:
             parsed_value = int(raw_value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             try:
                 parsed_value = int(float(raw_value))
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 parsed_value = 0
         normalized[raw_id_str] = max(parsed_value, 0)
     return normalized
@@ -293,8 +296,11 @@ def normalize_roster_unit_loadout(
     mode = str(raw_loadout.get("mode") or "").strip().lower()
     normalized_mode = "total" if mode == "total" else "per_model"
 
+    weapon_links = getattr(unit, "weapon_links", []) or []
+    ability_links = getattr(unit, "abilities", []) or []
+    require_option_count(len(weapon_links) + len(ability_links))
     weapon_ids: set[int] = set()
-    for link in getattr(unit, "weapon_links", []) or []:
+    for link in weapon_links:
         weapon_id = getattr(link, "weapon_id", None)
         if weapon_id is not None:
             weapon_ids.add(int(weapon_id))
@@ -304,7 +310,7 @@ def normalize_roster_unit_loadout(
 
     active_ids: set[int] = set()
     aura_ids: set[int] = set()
-    for link in getattr(unit, "abilities", []) or []:
+    for link in ability_links:
         ability = getattr(link, "ability", None)
         ability_id = getattr(ability, "id", None)
         if ability is None or ability_id is None:
@@ -315,6 +321,7 @@ def normalize_roster_unit_loadout(
             aura_ids.add(int(ability_id))
 
     passive_state = compute_passive_state(unit, raw_loadout)
+    require_option_count(len(weapon_links) + len(ability_links) + len(passive_state.payload))
     allowed_passive_lookup: dict[str, str] = {}
     for entry in passive_state.payload:
         slug = str(entry.get("slug") or "").strip()

@@ -26,6 +26,7 @@ from ... import models
 from ..utils import ARMY_RULE_OFF_PREFIX
 from ._engine import COST_ENGINE_VERSION, ROLE_SLUGS, _roster_unit_classification
 from .abilities import base_model_cost
+from .budget import loadout_instance_count, require_equipment_count, require_model_count
 from .crowding import crowded_melee_total, melee_crowding_factors, melee_vector_from_counts
 from .passive_state import compute_passive_state, normalize_roster_unit_count
 from .primitives import _strip_role_traits, _with_role_trait, ability_identifier
@@ -101,8 +102,9 @@ def calculate_roster_unit_quote(
         }
 
     raw_loadout = loadout if isinstance(loadout, dict) else {}
-    normalized_loadout = normalize_roster_unit_loadout(unit, raw_loadout)
     unit_count = normalize_roster_unit_count(count, default=0)
+    require_model_count(unit_count)
+    normalized_loadout = normalize_roster_unit_loadout(unit, raw_loadout)
     if unit_count <= 0:
         return {
             "cost_engine_version": COST_ENGINE_VERSION,
@@ -124,11 +126,17 @@ def calculate_roster_unit_quote(
             "loadout": normalized_loadout,
         }
 
+    mode_total = normalized_loadout.get("mode") == "total"
+    model_count = unit_count
+    instances = loadout_instance_count(
+        normalized_loadout["weapons"].values(), normalized_loadout["active"].values(), normalized_loadout["aura"].values(),
+        multiplier=1 if mode_total else model_count,
+    )
+    require_equipment_count(instances)
+
     roster_unit = SimpleNamespace(unit=unit, count=unit_count, extra_weapons_json=None)
     _passive_state_cache = compute_passive_state(unit, normalized_loadout)
     base_traits = _strip_role_traits(_passive_state_cache.traits)
-    mode_total = normalized_loadout.get("mode") == "total"
-    model_count = unit_count
 
     weapon_by_id: dict[int, Any] = {}
     for link in getattr(unit, "weapon_links", []) or []:
@@ -184,9 +192,12 @@ def calculate_roster_unit_quote(
     # regardless of loadout mode -- matches melee_vector_from_counts's
     # mode_total=False contract (see crowding.py).
     melee_mode_total = mode_total
+    default_weapons = []
     if not has_explicit_weapons:
         melee_mode_total = False
-        for default_weapon in unit_default_weapons(unit):
+        default_weapons = unit_default_weapons(unit)
+        require_equipment_count(instances + len(default_weapons) * model_count)
+        for default_weapon in default_weapons:
             components = weapon_cost_components(default_weapon, unit.quality, base_traits)
             ranged_bucket += float(components.get("ranged") or 0.0) * model_count
             default_weapon_key = getattr(default_weapon, "id", None)
@@ -315,7 +326,7 @@ def calculate_roster_unit_quote(
     weapon_component = _section_total("weapons")
     if not has_explicit_weapons:
         default_weapon_total = 0.0
-        for default_weapon in unit_default_weapons(unit):
+        for default_weapon in default_weapons:
             default_weapon_total += weapon_cost(
                 default_weapon, unit.quality, selected_traits
             ) * model_count

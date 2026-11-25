@@ -14,6 +14,7 @@ from ..paths import TEMPLATES_DIR
 from ..security import get_current_user
 from ..services import collection_match
 from ..services.costs import ability_link_loadout_key
+from ..services.costs.budget import require_equipment_count
 from ..templating import Jinja2Templates
 
 router = APIRouter(prefix="/collections", tags=["collections"])
@@ -200,18 +201,23 @@ def _parse_slots(
     return slots
 
 
-def _persist_slots(
-    db: Session,
-    collection_model_id: int,
+def _parse_model_equipment(
     form_multi: dict[str, Any],
     valid_weapon_ids: set[int],
     valid_ability_keys: set[str],
-) -> None:
-    """Zapisuje sloty magnetyzacji z formularza (wspólny tor add/update). Nowe
-    kolumny slotu dokłada się TU raz — nie w dwóch endpointach osobno."""
-    if not form_multi.get("magnetyzacja"):
-        return
-    for i, slot in enumerate(_parse_slots(form_multi, valid_weapon_ids, valid_ability_keys)):
+) -> tuple[dict, list[dict]]:
+    loadout = _parse_loadout(form_multi, valid_weapon_ids, valid_ability_keys)
+    slots = _parse_slots(form_multi, valid_weapon_ids, valid_ability_keys) if form_multi.get("magnetyzacja") else []
+    mounted_count = sum(
+        bool(slot["option_weapon_ids"] or slot["option_ability_keys"]) for slot in slots
+    )
+    require_equipment_count(sum(loadout["weapons"].values()) + len(loadout["abilities"]) + mounted_count)
+    return loadout, slots
+
+
+def _persist_slots(db: Session, collection_model_id: int, slots: list[dict]) -> None:
+    """Zapisuje przygotowane sloty magnetyzacji na ścieżce dodawania i edycji."""
+    for i, slot in enumerate(slots):
         db.add(models.CollectionModelSlot(
             collection_model_id=collection_model_id,
             name=slot["name"],
@@ -423,7 +429,7 @@ async def add_collection_model(
     valid_weapon_ids = {o["id"] for o in weapon_opts}
     valid_ability_keys = {o["key"] for o in ability_opts}
 
-    loadout = _parse_loadout(form_multi, valid_weapon_ids, valid_ability_keys)
+    loadout, slots = _parse_model_equipment(form_multi, valid_weapon_ids, valid_ability_keys)
 
     max_pos_row = db.execute(
         select(models.CollectionModel.position)
@@ -444,7 +450,7 @@ async def add_collection_model(
     db.add(cm)
     db.flush()
 
-    _persist_slots(db, cm.id, form_multi, valid_weapon_ids, valid_ability_keys)
+    _persist_slots(db, cm.id, slots)
 
     db.commit()
     db.refresh(cm)
@@ -499,7 +505,7 @@ async def update_collection_model(
     valid_weapon_ids = {o["id"] for o in weapon_opts}
     valid_ability_keys = {o["key"] for o in ability_opts}
 
-    loadout = _parse_loadout(form_multi, valid_weapon_ids, valid_ability_keys)
+    loadout, slots = _parse_model_equipment(form_multi, valid_weapon_ids, valid_ability_keys)
 
     cm.label = label
     cm.count = count
@@ -510,7 +516,7 @@ async def update_collection_model(
         db.delete(slot)
     db.flush()
 
-    _persist_slots(db, cm.id, form_multi, valid_weapon_ids, valid_ability_keys)
+    _persist_slots(db, cm.id, slots)
 
     db.commit()
 

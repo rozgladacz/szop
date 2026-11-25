@@ -17,6 +17,8 @@ from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user
 from ..services import ability_registry, army_rules as army_rule_service, costs, utils
+from ..services.costs.budget import require_equipment_count, require_model_count, require_option_count
+from ..services.costs.unit_helpers import _ability_link_is_default
 
 MAX_ARMY_SPELLS = 6
 FORBIDDEN_SPELL_SLUGS = {"mag", "przekaznik"}
@@ -1276,6 +1278,7 @@ def _parse_weapon_payload(
         return []
 
     weapon_ids = {weapon_id for weapon_id, _ in pending_entries}
+    require_option_count(len(weapon_ids))
     weapon_stmt = (
         select(models.Weapon)
         .where(
@@ -1404,6 +1407,7 @@ def _apply_unit_form_data(
     weapon_entries: list[tuple[models.Weapon, bool, int]],
     db: Session,
 ) -> None:
+    require_option_count(len(weapon_entries) + len(passive_items) + len(active_items) + len(aura_items))
     existing_role = _existing_role_entry(unit)
 
     sanitized_passives: list[dict] = []
@@ -1452,6 +1456,9 @@ def _apply_unit_form_data(
         normalized_models = 1
     if normalized_models < 1:
         normalized_models = 1
+    require_model_count(normalized_models)
+    default_weapons = sum(count for _, _, count in weapon_entries)
+    require_equipment_count(default_weapons * normalized_models)
     unit.typical_models = normalized_models
     if base_size not in costs.BASE_SIZE_MELEE_LIMITS:
         base_size = getattr(unit, "base_size", None) or costs.DEFAULT_BASE_SIZE
@@ -1487,6 +1494,9 @@ def _apply_unit_form_data(
     ability_links = (
         ability_registry.build_unit_abilities(db, active_items, "active")
         + ability_registry.build_unit_abilities(db, aura_items, "aura")
+    )
+    require_equipment_count(
+        (default_weapons + sum(_ability_link_is_default(link) for link in ability_links)) * normalized_models
     )
     for index, link in enumerate(ability_links):
         link.position = index

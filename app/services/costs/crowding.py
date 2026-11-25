@@ -16,6 +16,7 @@ from typing import Any, Mapping, Sequence
 
 from ... import models
 from ._engine import base_size_melee_limits
+from .budget import require_equipment_count, require_model_count
 from .unit_helpers import unit_default_weapons
 from .weapons import weapon_cost_components
 
@@ -50,11 +51,13 @@ def melee_vector_from_counts(
     """
     if model_count <= 0:
         return []
+    require_model_count(model_count)
     if mode_total:
         instances: list[float] = []
         for weapon_id, count in weapons_counts.items():
             if count <= 0:
                 continue
+            require_equipment_count(len(instances) + count)
             cost = float(melee_cost_by_weapon.get(weapon_id) or 0.0)
             instances.extend([cost] * count)
         instances.sort(reverse=True)

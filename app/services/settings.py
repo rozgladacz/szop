@@ -42,6 +42,15 @@ def _write(data: dict) -> None:
         _SETTINGS_FILE.write_text(payload, encoding="utf-8")
 
 
+def registration_override() -> bool | None:
+    env = os.getenv("REGISTRATION_OPEN", "").strip().lower()
+    if env in {"true", "1", "yes"}:
+        return True
+    if env in {"false", "0", "no"}:
+        return False
+    return None
+
+
 def get_registration_open() -> bool:
     """Czy rejestracja publiczna jest aktywna.
 
@@ -50,11 +59,9 @@ def get_registration_open() -> bool:
     2. Ustawienie w data/settings.json
     3. Domyślnie zamknięta w trybie publicznym, otwarta lokalnie
     """
-    env = os.getenv("REGISTRATION_OPEN", "").strip().lower()
-    if env in {"true", "1", "yes"}:
-        return True
-    if env in {"false", "0", "no"}:
-        return False
+    override = registration_override()
+    if override is not None:
+        return override
     configured = _read().get("registration_open")
     return configured if isinstance(configured, bool) else not config.PUBLIC_ORIGIN
 

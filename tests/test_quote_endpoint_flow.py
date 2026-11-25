@@ -6,7 +6,8 @@ import sys
 
 import pytest
 
-from sqlalchemy import create_engine
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import sessionmaker
 from starlette.requests import Request
 
@@ -14,10 +15,12 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from app import models
-from app.db import Base
+from app import config, main, models
+from app.db import Base, get_db
 from app.routers import rosters
+from app.security import hash_password
 from app.services import costs
+from app.services.costs.budget import MAX_UNIT_EQUIPMENT, MAX_UNIT_MODELS, UnitBudgetExceeded
 
 
 SNAPSHOT_DIR = Path(__file__).parent / "fixtures" / "quote_snapshots"
@@ -158,6 +161,87 @@ def _assert_snapshot(snapshot_name: str, payload: dict[str, object]) -> None:
     snapshot_path = SNAPSHOT_DIR / f"{snapshot_name}.json"
     expected = json.loads(snapshot_path.read_text(encoding="utf-8"))
     assert payload == expected
+
+
+def test_unit_budget_is_enforced_before_quote_and_save(tmp_path, monkeypatch):
+    engine = create_engine(f"sqlite:///{(tmp_path / 'unit-budget.db').as_posix()}")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(engine, autoflush=False)
+    with sessions() as session:
+        fixture = _build_roster_fixture(session)
+        fixture["user"].password_hash = hash_password("tester password")
+        roster_id = fixture["roster"].id
+        army_id = fixture["roster"].army_id
+        roster_unit_id = fixture["unit_a"].id
+        unit_id = fixture["unit_a"].unit_id
+        rifle_id = str(fixture["unit_a"].unit.default_weapon_id)
+        scout_id = str(fixture["ids"]["scout"])
+        session.commit()
+
+    def override_db():
+        with sessions() as session:
+            yield session
+
+    monkeypatch.setattr(config, "PUBLIC_ORIGIN", "")
+    monkeypatch.setitem(main.app.dependency_overrides, get_db, override_db)
+    client = TestClient(main.app, follow_redirects=False)
+    assert client.post("/auth/login", data={"username": "owner", "password": "tester password"},
+                       headers={"accept-language": "en"}).status_code == 303
+    target = f"/rosters/{roster_id}/units/{roster_unit_id}"
+    oversized = {"mode": "total", "weapons": {rifle_id: MAX_UNIT_EQUIPMENT}, "active": {scout_id: 1}}
+    boundary = {"mode": "total", "weapons": {rifle_id: MAX_UNIT_EQUIPMENT}}
+
+    assert client.post(f"{target}/quote", json={"count": MAX_UNIT_MODELS, "loadout": boundary,
+                                              "include_item_costs": False}).status_code == 200
+    too_many_models = client.post(f"{target}/quote", json={"count": MAX_UNIT_MODELS + 1})
+    assert too_many_models.status_code == 422
+    assert too_many_models.json()["detail"] == f"A unit can have at most {MAX_UNIT_MODELS} models."
+    assert client.post(f"{target}/quote", json={"count": 2, "loadout": oversized}).status_code == 422
+    assert client.post(f"{target}/quote", json={"count": MAX_UNIT_MODELS, "loadout": {
+        "mode": "per_model", "weapons": {rifle_id: MAX_UNIT_EQUIPMENT // MAX_UNIT_MODELS + 1},
+    }}).status_code == 422
+
+    for data in (
+        {"count": MAX_UNIT_MODELS + 1},
+        {"count": 2, "loadout_json": json.dumps(oversized)},
+        {"count": 1, "composed_models_json": json.dumps([{"id": None, "qty": MAX_UNIT_MODELS + 1}])},
+        {"count": 1, "composed_models_json": json.dumps([{
+            "id": None, "qty": 2, "weapons": {rifle_id: MAX_UNIT_EQUIPMENT // 2 + 1},
+        }])},
+    ):
+        assert client.post(f"{target}/update", data=data).status_code == 422
+
+    assert client.post(f"/rosters/{roster_id}/units/add", data={
+        "unit_id": unit_id, "count": MAX_UNIT_MODELS + 1,
+    }).status_code == 422
+    assert client.post(f"/armies/{army_id}/units/new", data={
+        "name": "Too much equipment", "quality": 4, "defense": 4, "toughness": 1,
+        "typical_models": MAX_UNIT_MODELS, "weapons": json.dumps([
+            {"weapon_id": rifle_id, "count": MAX_UNIT_EQUIPMENT // MAX_UNIT_MODELS + 1},
+        ]),
+    }).status_code == 422
+    assert client.post(f"/collections/units/{unit_id}/models/add", data={
+        f"weapon_{rifle_id}": MAX_UNIT_EQUIPMENT + 1,
+    }).status_code == 422
+
+    with sessions() as session:
+        stored = session.get(models.RosterUnit, roster_unit_id)
+        assert (stored.count, stored.extra_weapons_json, stored.composed_models_json) == (3, None, None)
+        assert session.scalar(select(func.count()).select_from(models.RosterUnit)) == 2
+        assert session.scalar(select(func.count()).select_from(models.Unit)) == 2
+        assert session.scalar(select(func.count()).select_from(models.CollectionModel)) == 0
+    assert client.post(f"{target}/update", data={"count": MAX_UNIT_MODELS,
+                                                 "loadout_json": json.dumps(boundary)}).status_code == 303
+    client.close()
+    engine.dispose()
+
+
+def test_oversized_existing_weapon_default_stops_before_expansion():
+    with _session() as session:
+        unit = _build_roster_fixture(session)["unit_a"].unit
+        unit.weapon_links[0].default_count = MAX_UNIT_EQUIPMENT + 1
+        with pytest.raises(UnitBudgetExceeded, match=str(MAX_UNIT_EQUIPMENT)):
+            costs.unit_default_weapons(unit)
 
 
 def test_quote_endpoint_handles_modes_dynamic_passives_and_classification() -> None:

@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, selectinload
 from .. import models
 from ..data import abilities as ability_catalog
 from .costs import ability_link_loadout_key, calculate_roster_unit_quote, normalize_range_value
+from .costs.budget import loadout_instance_count, require_equipment_count, require_model_count
 
 
 def _coerce_int(value: Any) -> int | None:
@@ -482,20 +483,21 @@ def compose_loadout(
         if qty <= 0:
             continue
         cm_id = _coerce_int(entry.get("id")) if entry.get("id") is not None else None
-        if cm_id is not None:
-            cm = owned_by_id.get(cm_id)
-            if cm is None:
-                continue  # obcy/nieznany model — pomijamy (izolacja właściciela)
-            count += qty
+        cm = owned_by_id.get(cm_id) if cm_id is not None else None
+        if cm_id is not None and cm is None:
+            continue  # obcy/nieznany model — pomijamy (izolacja właściciela)
+        count += qty
+        require_model_count(count)
+        if cm is not None:
             for wid, c in collection_model_effective_weapons(cm, entry.get("mounted")).items():
                 weapons[str(wid)] = weapons.get(str(wid), 0) + qty * c
             _add_abilities(_model_ability_base_ids(cm), qty)
         else:
-            count += qty
             for wid, c in _weapon_multiset(entry.get("weapons")).items():
                 if wid in valid_weapon_ids:
                     weapons[str(wid)] = weapons.get(str(wid), 0) + qty * c
             _add_abilities(entry.get("abilities") or [], qty)
+    require_equipment_count(loadout_instance_count(weapons.values(), active.values(), aura.values(), multiplier=1))
     loadout = dict(base_loadout) if isinstance(base_loadout, dict) else {}
     loadout["weapons"] = weapons
     loadout["active"] = active
@@ -618,6 +620,7 @@ def derive_composition(
     Dzięki temu proxy odtwarzają dokładny agregat broni oddziału (nie zawyżają
     broni podstawowej klonowaniem „domyślnego modelu"). Zdolności bare id.
     """
+    require_model_count(count)
     cl = current_loadout or {}
     raw = _weapon_multiset(cl.get("weapons"))
     mode = str(cl.get("mode") or "per_model").strip().lower()
@@ -634,6 +637,7 @@ def derive_composition(
                 n = _coerce_int(cnt) or 0
                 if aid is not None and n > 0:
                     ability_target[aid] = ability_target.get(aid, 0) + n
+    require_equipment_count(sum(weapon_target.values()) + sum(ability_target.values()))
 
     # „Domyślny model" — baza proxy: domyślne uzbrojenie oddziału.
     default_weapons: dict[int, int] = {}

@@ -43,6 +43,10 @@ Kontenery korzystają z `/srv/szop/data`. Nie twórz pustej bazy w miejsce istni
 
 ## Publiczne testy
 
+Produkcyjny `docker-compose.yml` uruchamia fabrykę `app.main:public_app`. Kontener aplikacji odmawia startu bez `PUBLIC_ORIGIN` w postaci adresu HTTPS albo przy próbie użycia `LOCAL_PUBLIC_PREVIEW`. Użyj obrazu zawierającego tę fabrykę. `docker-compose.dev.yml` uruchamia aplikację deweloperską z wyłączonym trybem publicznym.
+
+Przygotuj bazę SQLite dla publicznej instancji przed uruchomieniem kontenera. Jeśli pliku brakuje, tryb publiczny zatrzyma start, zanim aplikacja skopiuje bazę startową z repozytorium.
+
 Kontener `szop-app` działa za Caddy z repo `brama` w izolowanej sieci `brama-szop`. W `.env` wpisz domenę widoczną w przeglądarce i stały adres Caddy w tej sieci. `localhost` jest potrzebny do healthchecku kontenera.
 
 ```dotenv
@@ -76,10 +80,16 @@ Po weryfikacji HTTPS, logowania administratora, kopii zapasowej i konfiguracji C
 
 Do publicznych testów użyj obrazu z FastAPI 0.162.3, Starlette 1.9.0, `python-multipart` 0.0.32 i Jinja2 3.1.6. Te wersje obejmują poprawki dla zgłoszonych problemów z parsowaniem formularzy i plikami statycznymi. Po zbudowaniu obrazu sprawdź logowanie, rejestrację, limit prób i brak niepotrzebnych danych w logach Caddy. [Komunikaty bezpieczeństwa Starlette](https://github.com/Kludex/starlette/security/advisories) · [Komunikaty bezpieczeństwa python-multipart](https://github.com/Kludex/python-multipart/security/advisories) · [Jinja 3.1.6](https://github.com/pallets/jinja/releases/tag/3.1.6)
 
+W trybie publicznym hasło gracza ma od 8 do 128 znaków. Dla administratorów minimum wynosi 15 znaków.
+
+Panel pokazuje blokadę przełącznika, gdy `REGISTRATION_OPEN` jest ustawiona w środowisku. Aby zmieniać stan rejestracji z panelu, usuń zmienną i odtwórz kontener.
+
+Wycena i zapis oddziału obsługują do 100 modeli oraz 1000 instancji wyposażenia i zdolności łącznie. Liczniki typu „na model” mnożą się przez liczebność oddziału. Definicja oddziału może udostępniać do 100 opcji wyposażenia i zdolności. Przekroczenie limitu zwraca HTTP 422 przed kosztowną alokacją.
+
 ### Otwarte ustalenia audytu
 
-- Publiczne zapisy i wycena wymagają limitów liczby modeli oraz łącznej liczby instancji wyposażenia na oddział. Dotychczasowe operacje w `app/routers/rosters.py`, `app/routers/armies.py` i `app/services/collection_match.py` mogą przyjąć małe żądanie opisujące kosztowne obliczenie. Zakończ tę poprawkę przed otwarciem samodzielnej rejestracji.
 - Zanim użyjesz dotychczasowej bazy do testów, zweryfikuj konta i prywatne rozpiski. Śledzona kopia startowa zawiera odziedziczone konto testowe i prywatne rekordy. Dla publicznego pokazu użyj osobnej bazy z zatwierdzonymi danymi gry oraz nowymi kontami.
+- Zweryfikuj na serwerze połączenie przez Caddy, zaufane IP proxy, limity ciała żądań i zakres zapisywanych logów.
 
 ## Dostęp lokalny
 

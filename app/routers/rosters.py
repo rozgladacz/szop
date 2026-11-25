@@ -30,6 +30,7 @@ from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user
 from ..services import ability_registry, collection_match, costs, utils
+from ..services.costs.budget import require_model_count
 from ..services.roster_grouping import group_available_units, group_roster_items
 from ..services.rules import unit_is_hero
 
@@ -905,6 +906,7 @@ def add_roster_unit(
     _ensure_roster_edit_access(roster, current_user)
 
     count = max(int(count), 1)
+    require_model_count(count)
     weapon_options = _unit_weapon_options(unit)
     active_items = _ability_entries(unit, "active")
     aura_items = _ability_entries(unit, "aura")
@@ -1229,9 +1231,11 @@ def update_roster_unit(
     if not roster or roster_unit is None or roster_unit.roster_id != roster.id:
         raise HTTPException(status_code=404)
     _ensure_roster_edit_access(roster, current_user)
-    roster_unit.count = max(int(count), 1)
     # Lista albo None (None ⇒ brak kompozycji → zwykła ścieżka klienta).
     composed_selection = collection_match.parse_selection(composed_models_json) or None
+    if composed_selection is None:
+        require_model_count(count)
+        roster_unit.count = max(int(count), 1)
     unit_data_cache: dict[int, dict[str, Any]] = {}
     unit_payloads: dict[int, dict[str, Any]] = {}
 
@@ -3308,10 +3312,10 @@ def _sanitize_loadout(
             raw_value = incoming_map.get(key_str, defaults_section.get(key_str, 0))
             try:
                 value = int(raw_value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 try:
                     value = int(float(raw_value))
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OverflowError):
                     value = defaults_section.get(key_str, 0)
             if value < 0:
                 value = 0

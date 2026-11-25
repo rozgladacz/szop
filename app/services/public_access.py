@@ -23,9 +23,10 @@ FORM_LIFETIME = 15 * 60
 SESSION_LIFETIME = 8 * 60 * 60
 SESSION_KEY = "public_session"
 SIGNUP_NONCE = "signup_nonce"
-PASSWORD_MIN = 15
+PLAYER_PASSWORD_MIN = 8
+ADMIN_PASSWORD_MIN = 15
 PASSWORD_MAX = 128
-PASSWORD_ERROR = "Hasło musi mieć od 15 do 128 znaków."
+PASSWORD_REQUIREMENTS = "Hasło musi mieć od {minimum} do {maximum} znaków."
 LOGIN_ERROR = "Nieprawidłowy login lub hasło"
 ATTEMPT_ERROR = "Za dużo prób. Spróbuj ponownie później."
 FORM_ERROR = "Sprawdź formularz rejestracji i spróbuj ponownie."
@@ -90,8 +91,12 @@ class AttemptLimiter:
 attempts = AttemptLimiter()
 
 
-def valid_password(password: str) -> bool:
-    return PASSWORD_MIN <= len(password) <= PASSWORD_MAX and bool(password.strip())
+def valid_password(password: str, *, minimum: int) -> bool:
+    return minimum <= len(password) <= PASSWORD_MAX and bool(password.strip())
+
+
+def password_requirements(minimum: int) -> str:
+    return PASSWORD_REQUIREMENTS.format(minimum=minimum, maximum=PASSWORD_MAX)
 
 
 def _form_signer() -> URLSafeSerializer:

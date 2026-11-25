@@ -37,6 +37,7 @@ from ... import models
 from ..utils import ARMY_RULE_OFF_PREFIX
 from ._engine import ROLE_SLUGS, PassiveState
 from .abilities import _transport_cost, ability_cost_components_from_name, base_model_cost
+from .budget import loadout_instance_count, require_equipment_count, require_model_count
 from .passive_state import (
     _active_traits_from_payload,
     _ensure_extra_data,
@@ -96,6 +97,10 @@ def roster_unit_role_totals(
     unit = getattr(roster_unit, "unit", None)
     if unit is None:
         return {"wojownik": 0.0, "strzelec": 0.0}
+    model_count = normalize_roster_unit_count(getattr(roster_unit, "count", 0), default=0)
+    if model_count <= 0:
+        return {"wojownik": 0.0, "strzelec": 0.0}
+    require_model_count(model_count)
 
     extra_data = (
         payload
@@ -155,14 +160,14 @@ def roster_unit_role_totals(
                 except (TypeError, ValueError):
                     try:
                         parsed_id = int(float(base_id))
-                    except (TypeError, ValueError):
+                    except (TypeError, ValueError, OverflowError):
                         continue
             try:
                 parsed_value = int(raw_value)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError, OverflowError):
                 try:
                     parsed_value = int(float(raw_value))
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, OverflowError):
                     parsed_value = 0
             if parsed_value < 0:
                 parsed_value = 0
@@ -175,16 +180,11 @@ def roster_unit_role_totals(
     passive_counts = passive_state.counts
 
     total_mode = loadout_mode == "total"
-    model_multiplier = normalize_roster_unit_count(
-        getattr(roster_unit, "count", 0), default=0
-    )
-    if model_multiplier <= 0:
-        return {"wojownik": 0.0, "strzelec": 0.0}
-    model_count = model_multiplier
-
-    ability_multiplier = (
-        0 if model_multiplier == 0 else 1 if has_massive_trait else model_count
-    )
+    require_equipment_count(loadout_instance_count(
+        weapons_counts.values(), active_counts.values(), aura_counts.values(),
+        multiplier=1 if total_mode else model_count,
+    ))
+    ability_multiplier = 1 if has_massive_trait else model_count
 
     def _to_total(value: int, *, ability: bool = False) -> int:
         safe_value = max(int(value), 0)

@@ -524,7 +524,7 @@ def _ensure_admin(session) -> None:
 
     from . import config, models
     from .security import hash_password, verify_password
-    from .services.public_access import valid_password
+    from .services.public_access import ADMIN_PASSWORD_MIN, PASSWORD_MAX, valid_password
 
     if config.PUBLIC_ORIGIN:
         admins = list(session.scalars(select(models.User).where(models.User.is_admin.is_(True))))
@@ -537,8 +537,10 @@ def _ensure_admin(session) -> None:
         if not needs_password:
             return
         password = os.getenv("INITIAL_ADMIN_PASSWORD", "")
-        if not valid_password(password):
-            raise RuntimeError("Set INITIAL_ADMIN_PASSWORD to a new administrator password of 15–128 characters")
+        if not valid_password(password, minimum=ADMIN_PASSWORD_MIN):
+            raise RuntimeError(
+                f"Set INITIAL_ADMIN_PASSWORD to a new administrator password of {ADMIN_PASSWORD_MIN}–{PASSWORD_MAX} characters"
+            )
         admin = session.scalar(select(models.User).where(models.User.username == "admin"))
         if admin is not None and not admin.is_admin:
             raise RuntimeError("The username 'admin' is already in use by a non-administrator")
@@ -565,6 +567,8 @@ def init_db() -> None:
     first_start = db_path is not None and not db_path.exists()
 
     if first_start:
+        if config.PUBLIC_ORIGIN and not config.LOCAL_PUBLIC_PREVIEW:
+            raise RuntimeError("Prepare a separate SQLite database before starting the public instance")
         import shutil
         _seed = Path(__file__).resolve().parents[1] / "seeds" / "szop.db.seed"
         if _seed.exists():

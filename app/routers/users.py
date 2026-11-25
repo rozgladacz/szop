@@ -13,7 +13,7 @@ from ..paths import TEMPLATES_DIR
 from ..security import get_current_user, hash_password, is_valid_username
 from ..services import backup as backup_service
 from ..services import db_restore, public_access
-from ..services.settings import get_registration_open, set_registration_open
+from ..services.settings import get_registration_open, registration_override, set_registration_open
 from ..templating import Jinja2Templates
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -52,6 +52,11 @@ def _render_user_list(
             "error_user_id": error_user_id,
             "create_error": create_error,
             "registration_open": get_registration_open(),
+            "registration_locked": registration_override() is not None,
+            "player_password_min": public_access.PLAYER_PASSWORD_MIN,
+            "admin_password_min": public_access.ADMIN_PASSWORD_MIN,
+            "password_max": public_access.PASSWORD_MAX,
+            "player_password_requirements": public_access.password_requirements(public_access.PLAYER_PASSWORD_MIN),
         },
         status_code=status_code,
     )
@@ -89,6 +94,7 @@ def list_users(
     error_map = {
         "self-delete": "Nie można usunąć własnego konta.",
         "public-delete-disabled": "Usuwanie kont jest wyłączone w trybie publicznym, aby zachować prywatność danych.",
+        "registration-locked": "Stan rejestracji ustawia zmienna REGISTRATION_OPEN.",
         "missing-user": "Użytkownik nie istnieje.",
         "restore-error": detail or "Przywracanie bazy danych nie powiodło się.",
     }
@@ -139,13 +145,14 @@ def change_password(
 
     password = new_password.strip()
     public_mode = bool(config.PUBLIC_ORIGIN)
-    valid_password = public_access.valid_password(password) if public_mode else len(password) >= 4
+    minimum = public_access.ADMIN_PASSWORD_MIN if target_user.is_admin else public_access.PLAYER_PASSWORD_MIN
+    valid_password = public_access.valid_password(password, minimum=minimum) if public_mode else len(password) >= 4
     if not valid_password:
         return _render_user_list(
             request,
             db,
             current_user,
-            error=public_access.PASSWORD_ERROR if public_mode else "Hasło musi zawierać co najmniej 4 znaki.",
+            error=public_access.password_requirements(minimum) if public_mode else "Hasło musi zawierać co najmniej 4 znaki.",
             error_user_id=user_id,
             status_code=400,
         )
@@ -208,11 +215,12 @@ def create_user(
             status_code=400,
         )
     public_mode = bool(config.PUBLIC_ORIGIN)
-    valid_password = public_access.valid_password(password) if public_mode else len(password) >= 4
+    minimum = public_access.PLAYER_PASSWORD_MIN
+    valid_password = public_access.valid_password(password, minimum=minimum) if public_mode else len(password) >= 4
     if not valid_password:
         return _render_user_list(
             request, db, current_user,
-            create_error=public_access.PASSWORD_ERROR if public_mode else "Hasło musi mieć co najmniej 4 znaki.",
+            create_error=public_access.password_requirements(minimum) if public_mode else "Hasło musi mieć co najmniej 4 znaki.",
             status_code=400,
         )
 
@@ -241,6 +249,8 @@ def toggle_registration(
     current_user: models.User = Depends(get_current_user()),
 ):
     _require_admin(current_user)
+    if registration_override() is not None:
+        return RedirectResponse(url="/users?error=registration-locked", status_code=303)
     new_state = not get_registration_open()
     set_registration_open(new_state)
     status = "registration-opened" if new_state else "registration-closed"
