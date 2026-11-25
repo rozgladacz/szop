@@ -213,19 +213,18 @@ ukrytego uprzywilejowanego tokena ani ogólnego executora.
 Pliki/warstwy: nowy ADR + schema/examples i plan testów (**D**), budżet **D**.
 DoD: request/response/error i migracja/kompatybilność opisane, crash before/
 after commit, dwa procesy i inny payload dla tego samego klucza rozstrzygnięte.
-To propozycja nowego API/auth, wymagająca wyboru kontraktu przed P3/P4;
-nie jest zatwierdzona przez samo D6.3.
+API i reguły dostępu P3/P4 określa zaakceptowany ADR-0060.
 
 #### Wynik P2
 
 Projekt przewiduje serwerowego producenta `priority/v1` zlecanego przez
 sesję właściciela, trwałą próbę z unikalnym ID i osobną zgodę na wykonanie
-propozycji. Zaproponowano 24 h na ponawianie tego samego ID i 30 dni odczytu
+propozycji. Ustalono 24 h na ponawianie tego samego ID i 30 dni odczytu
 wyniku. ADR określa tożsamość producenta, regułę Origin, addytywną migrację,
 transakcję i zachowanie po awarii, a także przykłady API i przypadki odbioru.
-P3 korzysta z konkretnego kontraktu po jego akceptacji. Do kontynuacji na
-innym komputerze wystarcza checkout `origin/Faza_A` i ADR.
-[Proponowany kontrakt](adr/0060-server-bot-proposal-attempts.md)
+Użytkownik zaakceptował kontrakt 2026-11-25. Do kontynuacji P3 na innym
+komputerze wystarcza checkout `origin/Faza_A` i ADR.
+[Zaakceptowany kontrakt](adr/0060-server-bot-proposal-attempts.md)
 
 ### P3. Trwała deduplikacja tworzenia v1
 
@@ -517,9 +516,8 @@ P14 od P10; te zależności mają pierwszeństwo przed numeracją.
 
 ## Co wymaga późniejszej decyzji
 
-D6.3 nie wymaga nowej decyzji, aby zakończyć sam plan. Do wyboru implementacji
-rekomendowany jest P1. P2/P11/P13 zamrażają przyszłe nowe kontrakty i mają
-własne punkty akceptacji; plan nie traktuje ich jako uzgodnionych API.
+Kontrakt P2 zaakceptowano w ADR-0060. P11 i P13 definiują przyszłe API
+i mają własne punkty akceptacji.
 
 Gra wspomagana z osobną zgodą dla każdej komendy zachowuje obecny model.
 **Automatyczne wykonywanie całych tur bota** wymaga osobnej decyzji produktowej

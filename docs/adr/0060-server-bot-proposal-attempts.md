@@ -1,8 +1,8 @@
 # ADR-0060 — Serwerowa propozycja bota i trwała próba
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Data:** 2026-11-25
-- **Kontekst:** P2 po P1 i P6 na `b2dcb2b`. Kontrakt do akceptacji przed P3/P4.
+- **Kontekst:** P2 po P1 i P6 na `b2dcb2b`. Użytkownik zaakceptował kontrakt 2026-11-25 do realizacji P3/P4.
 
 ## Decyzja
 
@@ -257,11 +257,11 @@ requestu względem bazy (K: +20% +10 ms). V mierzy p95 wyboru na seedach 0–99
 przy 2 i 12 jednostkach (odpowiednio ≤100 ms i ≤500 ms), bez I/O. P2
 weryfikuje wyłącznie dokumentację. [Pomiar D6.2](../boty-connect.md) · [Budżety i wynik P1](../play-vs-ai-plan.md)
 
-## Alternatywa do decyzji
+## Rozważana alternatywa
 
 Można rozbudować obecny POST tokenowy o trwałą próbę i pozostawić decyzję po
 stronie posiadacza tokena. D6.2 nadal służy takim klientom. Do pierwszego
-przepływu w przeglądarce rekomendowany jest producent ograniczony do sesji
+przepływu w przeglądarce zatwierdzono producenta ograniczonego do sesji
 właściciela. Zachowuje jednoznaczne źródło zlecenia bez wydawania bearer tokena
 przeglądarce. Wybór obejmuje przedstawione API, pochodzenie, zasady sesji
-i 30-dniową retencję. Wdrożenie rozpoczyna się od P3 po akceptacji ADR.
+i 30-dniową retencję. Wdrożenie rozpoczyna się od P3.
