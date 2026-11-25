@@ -89,7 +89,7 @@ liczba milisekund UTC od epoki, myślnik i mały kanoniczny UUIDv4. P5 może uż
 ponowienie, również z drugiej karty, jeśli karta otrzymała zapisaną próbę.
 
 `battle_id` w ścieżce jest dziesiętną liczbą całkowitą od 1 do
-`9007199254740991` w zapisie bez zbędnych zer. Treść JSON ma poniższe pięć
+`9007199254740991` w zapisie bez zbędnych zer. Treść JSON ma poniższe sześć
 obowiązkowych pól. `schema_version` i `protocol` to liczba całkowita 1,
 `kind` to dokładnie `priority`, `side` to całkowite 0 lub 1.
 `expected_sequence` jest nieujemną bezpieczną liczbą całkowitą JS,

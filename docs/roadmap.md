@@ -28,7 +28,7 @@ P2, obejmującym tożsamość producenta i uprawnienia.
 - [x] **P1** — **DONE 2026-11-24**. [Bramka propozycji v1](play-vs-ai-plan.md#wynik-p1) sprawdza metadane i checkpoint przy tworzeniu oraz zatwierdzaniu. Niezgodność to HTTP 409 i atomowe wycofanie, a dodatni przepływ D6.2 zachowuje 15 SELECT. Celowane **314 passed**, pełne **4257 passed**.
 - [x] **P6** — **DONE 2026-11-25**. [Wspólna walidacja walki i statusów](play-vs-ai-plan.md#wynik-p6) obejmuje reprodukcje D6.1, kandydatów botów i protokoły v1–v3. Mobilizacja korzysta z istniejącej kolizji statusów. Historyczny raport D7.3c ma identyczny SHA-256. Celowane **960 passed**, B7 **23 passed**, pełne **4296 passed**.
 - [x] **P2** — **DONE 2026-11-25**. Użytkownik zaakceptował [ADR-0060](adr/0060-server-bot-proposal-attempts.md), który definiuje serwerową propozycję bota, trwałą próbę i odzyskiwanie wyniku.
-- [ ] **P3** [automation-ready] — trwała deduplikacja tworzenia propozycji v1 zgodnie z zaakceptowanym [ADR-0060](adr/0060-server-bot-proposal-attempts.md).
+- [x] **P3** — **DONE 2026-11-25**. [Trwały zapis prób](play-vs-ai-plan.md#wynik-p3) zapisuje atomowo wynik, propozycję i audyt oraz odtwarza wynik po utracie odpowiedzi. Narzut to 1 indeksowany SELECT i 1 INSERT. Celowane **133 passed**, pełne **4320 passed**. Publiczne operacje należą do P4.
 - [ ] **P4** [automation-ready] — producent jednej propozycji `priority/v1`; po P3.
 - [ ] **P5** [automation-ready] — pierwszy interfejs Play vs AI dla pojedynczego kroku w istniejącej bitwie; po P4.
 

@@ -19,6 +19,8 @@ from ..security import (
     require_agent_scope,
     require_agent_scopes,
 )
+from ..services.agent_proposal_records import BATTLE_ACTION_PROPOSAL
+from ..services.agent_proposal_records import audit_proposal as _audit_proposal
 from ..services.battle_actions import (
     BattleActionForbidden,
     BattleActionInvalid,
@@ -40,7 +42,6 @@ router = APIRouter(prefix="/agent_proposals", tags=["agent_proposals"])
 
 CREATE_PROPOSAL_SCOPE = "agent_proposals:create"
 BATTLE_READ_SCOPE = "battle:read"
-BATTLE_ACTION_PROPOSAL = "battle:action"
 _MAX_ACTION_LENGTH = 120
 _MAX_SUMMARY_LENGTH = 500
 _MAX_PAYLOAD_JSON_CHARS = 20_000
@@ -142,32 +143,6 @@ def _result_from_json(result_json: str | None) -> dict[str, Any] | None:
     if result_json is None:
         return None
     return _payload_from_json(result_json)
-
-
-def _audit_proposal(
-    db: Session,
-    *,
-    proposal: models.AgentProposal,
-    action: str,
-    route: str = "/agent_proposals",
-    details: dict[str, Any] | None = None,
-) -> None:
-    payload = {
-        "action": action,
-        "proposal_id": proposal.id,
-        "proposal_action": proposal.action,
-        "token_id": proposal.token_id,
-    }
-    if details:
-        payload.update(details)
-    db.add(
-        models.AgentAuditLog(
-            user_id=proposal.owner_user_id,
-            agent_user_id=proposal.agent_user_id,
-            route=route,
-            params_json=json.dumps(payload, sort_keys=True),
-        )
-    )
 
 
 def _public_proposal(proposal: models.AgentProposal) -> AgentProposalPublic:

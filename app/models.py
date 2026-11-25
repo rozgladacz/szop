@@ -142,12 +142,42 @@ class AgentProposal(TimestampMixin, Base):
     decided_by_user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id"), nullable=True, index=True
     )
+    producer_owner_created_at: Mapped[Optional[datetime]] = mapped_column(DateTime)
 
     owner_user: Mapped[User] = relationship(foreign_keys=[owner_user_id])
     agent_user: Mapped[User] = relationship(foreign_keys=[agent_user_id])
     token: Mapped[Optional[AgentToken]] = relationship(foreign_keys=[token_id])
     decided_by_user: Mapped[Optional[User]] = relationship(
         foreign_keys=[decided_by_user_id]
+    )
+
+
+class BotProposalAttempt(Base):
+    """Frozen result of creating one proposal for one account generation."""
+
+    __tablename__ = "bot_proposal_attempts"
+    __table_args__ = (
+        UniqueConstraint("owner_user_id", "owner_created_at", "attempt_id"),
+        Index("ix_bot_proposal_attempts_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Historical identities deliberately survive deletion of an account or battle.
+    owner_user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    owner_created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    battle_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempt_id: Mapped[str] = mapped_column(String(50), nullable=False)
+    side: Mapped[int] = mapped_column(Integer, nullable=False)
+    command_json: Mapped[str] = mapped_column(Text, nullable=False)
+    command_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    reason: Mapped[Optional[str]] = mapped_column(String(32))
+    expected_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    actual_sequence: Mapped[Optional[int]] = mapped_column(Integer)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    proposal_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("agent_proposals.id", ondelete="RESTRICT"), unique=True
     )
 
 

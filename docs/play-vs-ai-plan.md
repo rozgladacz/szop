@@ -241,6 +241,65 @@ DoD/testy: równoległe dwa połączenia SQLite, restart, timeout po commit,
 rollback, expiry/foreign, stable result i zgodność starych klientów;
 zero dodatkowych eventów i RNG przy retry.
 
+#### Wynik P3
+
+`app/db.py` dodaje nullable `producer_owner_created_at` do istniejącej
+tabeli propozycji. `Base.metadata.create_all` tworzy rejestr prób z unikalnym
+kluczem właściciela, generacji i próby, unikalnym powiązaniem z propozycją
+oraz indeksem retencji. Ogólne i tokenowe tworzenie propozycji, zatwierdzenie,
+odrzucenie, wykonanie i oznaczenie `stale` zachowują format audytu
+po przeniesieniu jego zapisu do wspólnego modułu. Przy wyłączonych FK ścieżka retencji usuwa wyłącznie
+wiersze prób. W aplikacji nie ma ścieżki usuwania propozycji.
+
+`create_bot_proposal_attempt` dostaje wcześniej uwierzytelnioną tożsamość
+właściciela, kanoniczne polecenie i funkcję przygotowania. Po uzyskaniu
+blokady `BEGIN IMMEDIATE` ponownie sprawdza żywe konto, generację i stronę.
+Wspólna transakcja zapisuje wynik i ewentualną propozycję `pending` z audytem
+`create`. Zgodne ponowienie zwraca zapisany wynik po sprawdzeniu okna ID,
+również po zmianie headu. Rekoncyliacja używa `get_bot_proposal_attempt`,
+a `purge_bot_proposal_attempts` usuwa po retencji jedną ograniczoną partię
+wierszy z rejestru. Okna wynoszą 24 h na ponowienie i 30 dni na odczyt.
+Czas oczekiwania SQLite w transakcji rejestru jest ograniczony do 2 s. Po zwolnieniu
+połączenie odzyskuje poprzednią konfigurację.
+
+P4 podłączy sesję i publiczny transport do wewnętrznego serwisu P3 oraz
+przekaże funkcję przygotowania jednego kroku `priority/v1`. W testach P3
+funkcja wywołuje istniejące przygotowanie akcji ze stałym wyborem. Kod
+serwisu, testy i dokumentacja wystarczają do kontynuacji na innym komputerze.
+Przed przeniesieniem używanej bazy wykonaj spójną kopię całej SQLite,
+obejmującą rejestr prób, propozycje i audyt z tego samego momentu.
+
+Pomiar na tym samym komputerze użył plikowej SQLite z tymi samymi danymi
+i transakcją w trzech trybach. Baza porównania sprawdzała właściciela,
+przygotowywała stały wybór i zapisywała propozycję z audytem, pomijając tabelę
+prób. Dwie konfiguracje miały odpowiednio 2 i 12 jednostek. Dodatkowe
+jednostki były kopiami jednostek z fixture `ledger_battle` w osobnych pozycjach.
+Na każdy tryb przypadło 5 uruchomień rozgrzewkowych i 60 mierzonych prób
+w przeplatanej kolejności, seed 19. Czas blokady liczono od uzyskania jej
+przez `BEGIN IMMEDIATE` do zwrócenia wyniku, tak aby objąć także commit.
+
+| Jednostki | Tryb | SELECT | INSERT | p95 operacji | p95 od blokady do wyniku |
+|---:|---|---:|---:|---:|---:|
+| 2 | Baza | 3 | 2 | 9,572 ms | 9,357 ms |
+| 2 | Nowa próba | 4 | 3 | 10,843 ms | 10,567 ms |
+| 2 | Ponowienie | 2 | 0 | 2,268 ms | 2,102 ms |
+| 12 | Baza | 3 | 2 | 11,638 ms | 11,390 ms |
+| 12 | Nowa próba | 4 | 3 | 13,062 ms | 12,589 ms |
+| 12 | Ponowienie | 2 | 0 | 2,416 ms | 2,251 ms |
+
+Narzut rejestru wyniósł jeden indeksowany SELECT oraz jeden INSERT na nową
+próbę. Oba pomiary mieszczą się w budżecie K. Testy D6.2 zachowały
+15 SELECT (4 + 5 + 6) w dotychczasowej ścieżce. Pomiar HTTP nowej operacji
+należy do P4.
+
+Zaliczono 133 testy celowane i 4320 testów w pełnym zestawie. Cztery
+ostrzeżenia dotyczyły zależności ReportLab i openpyxl.
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short tests/test_bot_proposal_attempts.py tests/test_db_schema_migrations.py tests/test_bot_proposals.py tests/test_agent_proposals_router.py tests/test_battle_action_proposals.py tests/test_agent_token_security.py
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short
+```
+
 ### P4. Ograniczony producent priority/v1
 
 Zależności: P1–P3 i zatwierdzona tożsamość/auth z P2. Zakres: jeden request

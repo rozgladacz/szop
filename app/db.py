@@ -471,6 +471,11 @@ def _migrate_schema() -> None:
                 connection.execute(
                     text("ALTER TABLE agent_proposals ADD COLUMN result_json TEXT")
                 )
+            if "producer_owner_created_at" not in column_names:
+                logger.info("Adding producer account generation to agent_proposals table")
+                connection.execute(text(
+                    "ALTER TABLE agent_proposals ADD COLUMN producer_owner_created_at DATETIME"
+                ))
 
         if "weapons" in table_names:
             columns = inspector.get_columns("weapons")

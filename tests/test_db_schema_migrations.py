@@ -613,7 +613,7 @@ def test_migrate_schema_adds_user_role_column(monkeypatch):
     ]
 
 
-def test_migrate_schema_adds_agent_proposal_result_column(monkeypatch):
+def test_migrate_schema_adds_nullable_proposal_columns_without_changing_pending(monkeypatch):
     engine = _memory_engine()
     with engine.begin() as connection:
         connection.execute(
@@ -640,16 +640,30 @@ def test_migrate_schema_adds_agent_proposal_result_column(monkeypatch):
                 """
             )
         )
+        connection.execute(text(
+            "INSERT INTO agent_proposals "
+            "(id, owner_user_id, agent_user_id, action, summary, created_at, updated_at) "
+            "VALUES (1, 3, 4, 'battle:action', 'legacy', '2026-07-19', '2026-07-19')"
+        ))
 
     monkeypatch.setattr(db, "engine", engine)
     monkeypatch.setattr(db, "DB_URL", "sqlite://")
-    db._migrate_schema()
+    for _ in range(2):
+        Base.metadata.create_all(engine)
+        db._migrate_schema()
 
     columns = {
         column["name"]: column
         for column in inspect(engine).get_columns("agent_proposals")
     }
     assert columns["result_json"]["nullable"] is True
+    assert columns["producer_owner_created_at"]["nullable"] is True
+    with engine.connect() as connection:
+        assert tuple(connection.execute(text(
+            "SELECT status, summary, payload_json, result_json, producer_owner_created_at "
+            "FROM agent_proposals WHERE id=1"
+        )).one()) == ("pending", "legacy", "{}", None, None)
+    assert "bot_proposal_attempts" in inspect(engine).get_table_names()
 
 
 def test_create_all_adds_battle_invites_to_legacy_schema_idempotently():
