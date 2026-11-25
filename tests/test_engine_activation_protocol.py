@@ -1976,7 +1976,9 @@ def test_action_bridge_uses_canonical_type_for_representative_actions(
     action_type: str,
 ) -> None:
     ready = _ready_for_action(
-        state=_action_idle_state(actor_statuses=(STATUS_WYCZERPANY,)),
+        state=_action_idle_state(
+            actor_statuses=(STATUS_WYCZERPANY,) if action_type == "special" else (),
+        ),
         sequence=860,
     )
 
@@ -1990,6 +1992,27 @@ def test_action_bridge_uses_canonical_type_for_representative_actions(
     assert result.events[-1].action_type == action_type
     assert result.state.activation.action_types == (action_type,)
     assert result.state.activation.phase is ActivationPhase.AWAITING_CONTINUATION
+
+
+def test_closed_v3_attack_rechecks_the_current_shooting_lock():
+    ready = _ready_for_action(sequence=875)
+    dice = DeterministicDice(29)
+    rng_before = dice.to_checkpoint()
+    declared = _commit_v3(
+        ready.state, ShootAction(11, 21, RIFLE), dice, sequence=ready.next_sequence,
+    )
+    first = _pass_attack(declared.state, caller_player=0, sequence=declared.next_sequence)
+    closed = _pass_attack(first.state, caller_player=1, sequence=first.next_sequence)
+    actor, target = closed.state.blobs
+    locked = replace(closed.state, blobs=(actor, replace(target, position=Position(2, 0))))
+    before = _battle_state_to_json_v3(locked)
+    with pytest.raises(ActivationProtocolError) as exc:
+        _resolve_attack(locked, dice, sequence=closed.next_sequence)
+    assert exc.value.reason is ActivationProtocolErrorReason.ILLEGAL_ACTION
+    assert _battle_state_to_json_v3(locked) == before
+    assert dice.to_checkpoint() == rng_before
+    resolved = _resolve_attack(closed.state, dice, sequence=closed.next_sequence)
+    assert resolved.state == apply_events(closed.state, resolved.events)
 
 
 @pytest.mark.parametrize(

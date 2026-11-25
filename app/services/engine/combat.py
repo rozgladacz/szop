@@ -39,6 +39,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Iterable
 
+from app.services.engine.action_constraints import attack_allowed_by_status
 from app.services.engine.dice import DeterministicDice, RollResult
 from app.services.engine.events import (
     BattleEvent,
@@ -912,7 +913,7 @@ def resolve_charge_attack(
     # Faza 2: Kontratak pkt 14.d.iv (reactive window — ADR-0015a)
     can_counter = (
         counter_attack_declared
-        and STATUS_WYCZERPANY not in defender.status_flags
+        and attack_allowed_by_status(defender)
         and defender.models_alive > 0
     )
     if can_counter:

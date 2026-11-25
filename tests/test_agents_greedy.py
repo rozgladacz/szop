@@ -149,9 +149,9 @@ def test_attack_prefers_enemy_contesting_my_objective():
     # Dwa identyczne, wymiataalne wrogie oddziały: A kontestuje mój cel, B w polu.
     # Obrażenia równe → bonus kontroli celu (wymiecenie A → przejęcie) rozstrzyga.
     own = _blob(1, 0, 0, 0, ranged_weapons=(STRONG,))
-    enemy_a = _blob(2, 1, 1, 0, models_alive=1, toughness_per_model=1)  # na celu
-    enemy_b = _blob(3, 1, 5, 0, models_alive=1, toughness_per_model=1)  # w polu
-    obj = Objective(id=1, position=Position(0, 0), controller=None)
+    enemy_a = _blob(2, 1, 5, 0, models_alive=1, toughness_per_model=1)  # przy celu
+    enemy_b = _blob(3, 1, 0, 5, models_alive=1, toughness_per_model=1)  # w polu
+    obj = Objective(id=1, position=Position(2.5, 0), controller=None)
     action = GreedyPlayer().choose_action(
         _state((own, enemy_a, enemy_b), (obj,)), perspective=0
     )

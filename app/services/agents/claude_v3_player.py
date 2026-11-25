@@ -35,7 +35,11 @@ from app.services.engine.actions import (
 )
 from app.services.engine.prediction import expected_damage
 from app.services.engine.state import BattleState, UnitBlob, effective_move_inches
-from app.services.engine.status import STATUS_PRZYSZPILONY, STATUS_WYCZERPANY
+from app.services.engine.action_constraints import (
+    attack_allowed_by_status,
+    maneuver_allowed_by_status,
+    shooting_lock_reason,
+)
 
 #: Waga oczekiwanych ran (HP fine-grained) — skuteczność strzału.
 MEAN_W: float = 8.0
@@ -107,9 +111,10 @@ class ClaudeV3Player(PriorityPlayer):
         shoot_used = any(isinstance(a, ShootAction) for a in actions_taken)
         charge_used = any(isinstance(a, ChargeAction) for a in actions_taken)
 
-        if STATUS_WYCZERPANY in unit.status_flags:  # 1.
+        if not attack_allowed_by_status(unit):  # 1.
             return SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
-        if not shoot_used:  # 2. Ostrzał — najlepszy cel (dobij), nie najbliższy.
+        # 2. Ostrzał — najlepszy cel (dobij), nie najbliższy.
+        if not shoot_used and unit.ranged_weapons and shooting_lock_reason(state, unit) is None:
             shoot = self._best_shoot(unit, enemies, state.terrain)
             if shoot is not None:
                 return shoot
@@ -117,7 +122,7 @@ class ClaudeV3Player(PriorityPlayer):
             charge = self._best_charge(unit, enemies, move)
             if charge is not None:
                 return charge
-        if STATUS_PRZYSZPILONY in unit.status_flags:  # 4.
+        if not maneuver_allowed_by_status(unit):  # 4.
             return DefendAction(unit_id=unit.id)
         # 5–7 + bezpiecznik: identyczne z PriorityPlayer (ruch na cele/wroga/Obrona).
         return super()._act(

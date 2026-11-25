@@ -71,6 +71,10 @@ from app.services.engine.events import (
     InterruptTriggered,
     StatusAdded,
 )
+from app.services.engine.action_constraints import (
+    attack_allowed_by_status,
+    shooting_lock_reason,
+)
 from app.services.engine.geometry import circle_edge_distance
 from app.services.engine.los import LoSState, check_los
 from app.services.engine.state import (
@@ -546,36 +550,15 @@ def _validate_straznik_lock(
     state: BattleState,
     source: UnitBlob,
 ) -> None:
-    source_passives = frozenset(effective_passives(source))
-    for enemy in state.blobs:
-        if (
-            enemy.owner_player == source.owner_player
-            or enemy.models_alive <= 0
-            or enemy.location is not Lokalizacja.FRONT
-        ):
-            continue
-        gap = circle_edge_distance(
-            source.position,
-            source.radius_inches,
-            enemy.position,
-            enemy.radius_inches,
+    reason = shooting_lock_reason(state, source, require_supported_elevation=True)
+    if reason == "unsupported_close_enemy_line_of_sight":
+        raise InvalidInterruptError(
+            "straznik: elevated 2-inch lock line of sight is not representable"
         )
-        if gap > 2.0:
-            continue
-        enemy_passives = frozenset(effective_passives(enemy))
-        if state.terrain and (
-            "wysoki" in source_passives
-            or "wysoki" in enemy_passives
-            or "samolot" in source_passives
-            or "samolot" in enemy_passives
-        ):
-            raise InvalidInterruptError(
-                "straznik: elevated 2-inch lock line of sight is not representable"
-            )
-        if check_los(source, enemy, state.terrain) is not LoSState.NIE_WIDZI:
-            raise InvalidInterruptError(
-                "straznik: Ostrzal is locked by a visible enemy within 2 inches"
-            )
+    if reason is not None:
+        raise InvalidInterruptError(
+            "straznik: Ostrzal is locked by a visible enemy within 2 inches"
+        )
 
 
 def _execute_straznik_activation_interrupt_outcomes(
@@ -622,7 +605,7 @@ def _execute_straznik_activation_interrupt_outcomes(
         or current_source.models_alive <= 0
         or current_source.location is not Lokalizacja.FRONT
         or "straznik" not in source_passives
-        or STATUS_WYCZERPANY in current_source.status_flags
+        or not attack_allowed_by_status(current_source)
         or type(active_unit.owner_player) is not int
         or active_unit.owner_player not in (0, 1)
         or type(active_unit.models_alive) is not int

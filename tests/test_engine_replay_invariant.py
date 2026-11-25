@@ -318,7 +318,7 @@ def test_replay_last_model_killed_becomes_wycofany():
         state,
         [
             DeploymentAction(unit_id=1, position=Position(6, 0)),
-            DeploymentAction(unit_id=3, position=Position(10, 0)),
+            DeploymentAction(unit_id=3, position=Position(12, 0)),
         ],
     )
     initial = state
@@ -362,7 +362,7 @@ def test_replay_zguba_wipe_becomes_eliminowany():
         state,
         [
             DeploymentAction(unit_id=1, position=Position(6, 0)),
-            DeploymentAction(unit_id=3, position=Position(10, 0)),
+            DeploymentAction(unit_id=3, position=Position(12, 0)),
         ],
     )
     initial = state

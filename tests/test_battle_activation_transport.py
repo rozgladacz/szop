@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import ExitStack
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
@@ -20,6 +20,7 @@ from app import models
 from app.db import Base, get_db
 from app.routers import battles
 from app.security import hash_agent_token
+from app.services import battle_invites
 from app.services.engine.actions import DefendAction, ShootAction
 from app.services.engine.action_codec import action_to_json
 from app.services.engine.activation_protocol import (
@@ -29,7 +30,8 @@ from app.services.engine.activation_protocol import (
 from app.services.engine.dice import DeterministicDice
 from app.services.engine.persistence import load_latest_checkpoint
 from app.services.engine.state import ActivationPhase
-from app.services.engine.state_codec import battle_state_from_json
+from app.services.engine.state_codec import battle_state_from_json, battle_state_to_json
+from app.services.engine.status import STATUS_WYCZERPANY
 from szop_client import (
     HttpClient,
     HttpClientActivationError,
@@ -753,6 +755,53 @@ def test_v3_attack_strict_guards_are_write_free(
     assert stale.status_code == 409
     assert stale.json() == {"detail": {"code": "stale_attack"}}
     assert _stream_counts(world, battle_id) == before
+
+
+@pytest.mark.parametrize("protocol_version", [1, 2, 3])
+def test_exhausted_attack_is_rejected_without_appending_to_the_stream(
+    activation_transport_world: ActivationTransportWorld,
+    protocol_version: int,
+) -> None:
+    world = activation_transport_world
+    battle = _create_same_owner_battle(world, protocol_version=protocol_version)
+    battle_id = battle["battle_id"]
+    with world.sessions() as session:
+        row = session.scalar(select(models.BattleCheckpoint).where(
+            models.BattleCheckpoint.battle_id == battle_id,
+            models.BattleCheckpoint.sequence_at == battle["latest_sequence"],
+        ))
+        initial = load_latest_checkpoint(session, battle_id)
+        assert row is not None and initial is not None
+        actor = next(unit for unit in initial.state.blobs if unit.id == 1)
+        exhausted = replace(actor, status_flags=(*actor.status_flags, STATUS_WYCZERPANY))
+        seeded = replace(
+            initial.state,
+            blobs=tuple(exhausted if unit.id == actor.id else unit for unit in initial.state.blobs),
+        )
+        row.state_json = json.dumps(battle_state_to_json(seeded, version=protocol_version))
+        session.commit()
+    if protocol_version == 1:
+        guards = {"expected_sequence": initial.sequence_at}
+        state = seeded
+    else:
+        started = _start(world.p0, battle)
+        ready = _pass(world.p0, battle_id, _pass(world.p0, battle_id, started))
+        assert ready.status_code == 200, ready.text
+        guards = _activation_guards(ready)
+        state = _wire_state(ready)
+    actor = next(unit for unit in state.blobs if unit.id == 1)
+    target = next(unit for unit in state.blobs if unit.owner_player != actor.owner_player)
+    before = _stream_counts(world, battle_id)
+    response = world.p0.post(
+        f"/battles/{battle_id}/actions",
+        json={**guards, "action": action_to_json(ShootAction(actor.id, target.id, actor.ranged_weapons[0]))},
+    )
+    assert response.status_code == 422, response.text
+    detail = "Illegal action" if protocol_version == 1 else {"code": "illegal_action"}
+    assert response.json() == {"detail": detail}
+    assert _stream_counts(world, battle_id) == before
+    with world.sessions() as session:
+        assert load_latest_checkpoint(session, battle_id).state == state
 
 
 def test_v3_two_bearers_enforce_priority_and_control(
@@ -1775,8 +1824,10 @@ def test_http_client_real_transport_straznik_is_exactly_one_post(
 
 def test_public_two_owner_straznik_uses_two_bearers_and_closed_errors(
     activation_transport_world: ActivationTransportWorld,
+    monkeypatch,
 ) -> None:
     world = activation_transport_world
+    monkeypatch.setattr(battle_invites, "_new_rng_seed", lambda: 20260729)
     battle = _create_two_owner_battle(world)
     battle_id = battle["battle_id"]
     token_by_user_id = {

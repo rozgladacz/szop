@@ -26,7 +26,7 @@ po zamknięciu poprzedniego. P3 i P4 opierają się na zatwierdzonym kontrakcie
 P2, obejmującym tożsamość producenta i uprawnienia.
 
 - [x] **P1** — **DONE 2026-11-24**. [Bramka propozycji v1](play-vs-ai-plan.md#wynik-p1) sprawdza metadane i checkpoint przy tworzeniu oraz zatwierdzaniu. Niezgodność to HTTP 409 i atomowe wycofanie, a dodatni przepływ D6.2 zachowuje 15 SELECT. Celowane **314 passed**, pełne **4257 passed**.
-- [ ] **P6** [automation-ready] — wspólna walidacja walki i statusów oraz regresje D6.1; po P1.
+- [x] **P6** — **DONE 2026-11-25**. [Wspólna walidacja walki i statusów](play-vs-ai-plan.md#wynik-p6) obejmuje reprodukcje D6.1, kandydatów botów i protokoły v1–v3. Mobilizacja korzysta z istniejącej kolizji statusów. Historyczny raport D7.3c ma identyczny SHA-256. Celowane **960 passed**, B7 **23 passed**, pełne **4296 passed**.
 - [ ] **P2** [automation-ready] — ADR producenta propozycji i trwałej próby; po P6 w zaakceptowanej kolejności.
 - [ ] **P3** [automation-ready] — trwała deduplikacja tworzenia propozycji v1; po zaakceptowanym kontrakcie P2.
 - [ ] **P4** [automation-ready] — producent jednej propozycji `priority/v1`; po P3.
@@ -983,6 +983,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 | 0056 | Trwały protokół aktywacji i okien przerwań (B4.4a design) | ✓ |
 | 0057 | [Trasy Manewru i kolizje](adr/0057-maneuver-pathfinding.md) | Accepted |
 | 0058 | [Kontrola celu w promieniu 2″](adr/0058-objective-control-two-inches.md) | Accepted |
+| 0059 | [Wspólne ograniczenia wyboru akcji i statusy](adr/0059-combat-action-restrictions.md) | Accepted |
 
 ---
 

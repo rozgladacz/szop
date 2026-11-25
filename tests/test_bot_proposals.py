@@ -278,7 +278,7 @@ def test_actual_priority_combat_candidate_is_blocked_without_fallback(harness, s
     state = safe_state()
     weapon = WeaponProfile("bow", "bow", 24, 1) if shooting else WeaponProfile("sword", "sword", 0, 1)
     actor = replace(state.blobs[0], **{"ranged_weapons" if shooting else "melee_weapons": (weapon,)})
-    enemy = replace(state.blobs[1], position=Position(4, 0))
+    enemy = replace(state.blobs[1], position=Position(12 if shooting else 4, 0))
     set_state(harness, replace(state, blobs=(actor, enemy)))
     assert attempt(harness).run().code == "action_not_supported"
     assert len(harness.requests) == 2

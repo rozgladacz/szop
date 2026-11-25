@@ -413,22 +413,13 @@ def _apply_maneuver(
 def _apply_defend(
     state: BattleState, action: DefendAction, sequence: int
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
-    """Pkt 14.b Obrona — oddział zyskuje Przygotowany (pkt 22.c). Przyszpilony
-    odrzucany (pkt 22.b.v: Przyszpilony zostaje odrzucony gdy oddział staje się
-    Przygotowany).
-
-    B3.9.d (ADR-0046) — emit `StatusAdded(Przygotowany)` + opcjonalny
-    `StatusRemoved(Przyszpilony)` zamiast silent `replace(status_flags=...)`.
-    `EffectApplied(slug="defend")` zachowany jako annotation/audit log (nie
-    redukuje state — to dwa równolegle eventy: Status* niesie deltę state,
-    EffectApplied niesie semantykę akcji).
+    """Pkt 14.b: Mobilizacja nadaje Przygotowany. Wspólny mutex rozstrzyga
+    współwystępowanie z Przyszpilonym (pkt 22.b.iii / 22.c.iv).
     """
     blob = _find_blob(state, action.unit_id)
-    had_przyszpilony = STATUS_PRZYSZPILONY in blob.status_flags
     blob = _add_status(blob, STATUS_PRZYGOTOWANY)
-    blob = _remove_status(blob, STATUS_PRZYSZPILONY)
 
-    events: list[BattleEvent] = [
+    events = (
         EffectApplied(
             sequence=sequence,
             slug="defend",
@@ -441,18 +432,8 @@ def _apply_defend(
             target_id=blob.id,
             status=STATUS_PRZYGOTOWANY,
         ),
-    ]
-    next_seq = sequence + 2
-    if had_przyszpilony:
-        events.append(
-            StatusRemoved(
-                sequence=next_seq,
-                target_id=blob.id,
-                status=STATUS_PRZYSZPILONY,
-            )
-        )
-        next_seq += 1
-    return _replace_blob(state, blob), tuple(events), next_seq
+    )
+    return _replace_blob(state, blob), events, sequence + len(events)
 
 
 def _apply_shoot(
@@ -652,14 +633,9 @@ def _apply_mutex_collisions(
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Pkt 22.b/c — Przyszpilony i Przygotowany wzajemnie się wykluczają.
 
-    R5.e (faza-b-rules-resync 2026-06 / decyzja H2 opcja (c)): gdy oddział po
-    fazie akcji+Przegrupowania ma OBA statusy, oba zostają odrzucone. Jedyne
-    miejsce powstania kolizji w MVP: `_regroup_test` dodaje Przyszpilony (2
-    porażki) do oddziału który był Przygotowany (np. defender szarży
-    rozstawiony z Przygotowany w rundzie 1, testujący Przegrupowanie w
-    aktywacji chargera). Deployment (pkt 13.c) i Obrona (pkt 14.b) same w
-    sobie nie kolidują — deployment startuje bez statusów, `_apply_defend`
-    explicite usuwa Przyszpilony.
+    Po akcji i Przegrupowaniu oddział traci oba statusy, jeśli współwystępują.
+    Może to nastąpić po Mobilizacji Przyszpilonego (pkt 14.b) albo nadaniu
+    Przyszpilonego Przygotowanemu w Przegrupowaniu (pkt 20.f).
 
     Pipeline event-sourced: emit `MutexCollision(target_id, dropped_statuses)`
     + mutacja live state. Reducer (`reducers._reduce_mutex_collision`) aplikuje
@@ -748,7 +724,7 @@ def _begin_activation(
 ) -> tuple[BattleState, tuple[BattleEvent, ...], int]:
     """Początek aktywacji (pkt 11.b) — RAZ, przed pierwszą akcją.
 
-    CR-fix G (pkt 22.c.iv): Przygotowany odrzucany na POCZĄTKU aktywacji
+    CR-fix G (pkt 22.c.iii): Przygotowany odrzucany na POCZĄTKU aktywacji
     własnego oddziału. Musi być raz (nie per-akcja) — inaczej Obrona jako akcja
     #1 nadałaby Przygotowany, a początek akcji #2 by go zdjął.
     """
@@ -831,10 +807,8 @@ def _apply_single_action(
         )
         events.extend(regroup_events)
 
-    # R5.e (resync 2026-06) pkt 22.b/c: mutex Przyszpilony↔Przygotowany —
-    # po Przegrupowaniu oddział który zyskał Przyszpilony (2 porażki) mając już
-    # Przygotowany traci oba. Kandydaci = subjects Przegrupowania (jedyne
-    # miejsce dodania Przyszpilony w tej aktywacji).
+    # Pkt 22.b.iii / 22.c.iv: sprawdź aktora po Mobilizacji i oddziały,
+    # które mogły otrzymać Przyszpilony w Przegrupowaniu.
     state, mutex_events, seq = _apply_mutex_collisions(
         state, regroup_subjects, seq
     )

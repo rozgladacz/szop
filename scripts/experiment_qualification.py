@@ -15,6 +15,13 @@ SCHEMA = "szop.experiment.qualification/v1"
 PROFILE_ID = "deployment-position-mvp-v1"
 RULES = "app/static/docs/SZOP_Rozjemca.md"
 EXPORTER = "scripts/export_decisions.py"
+PHASES = "app/services/engine/phases.py"
+
+# ADR-0059 compared the deployment and setup code on the two exact revisions.
+_BASELINE_PHASES_CRLF_SHA256 = "fb49eb2dd6d06945b498af2ddbf125e7fae8e80c73fbcfc44312764c7d785afa"
+_P6_PHASES_LF_SHA256 = "0ba67bafb68a08d926189942c751765f76c0b9ee7196fdc29cd8413b7adb3cf3"
+_P6_PHASES_CRLF_SHA256 = "8d6b6447934cdb915fde5e784e6d19c01412baeab31ffa69fb7ebff135e80836"
+_P6_PHASES_DIGESTS = {_P6_PHASES_LF_SHA256, _P6_PHASES_CRLF_SHA256}
 
 # Independently reproduced first decisions in the exact results of D6.1.
 # These bindings do not treat arbitrary scenario labels as rule evidence.
@@ -44,7 +51,7 @@ PROFILE = {
         EXPORTER: "087b022eff787047d535faaa1b143d14ec0f4bd620f83782734193f78aa37297",
         "scripts/deployment_experiment.py": "ad781e4164bd8b2d722ccd6b7dbeb26001096bb4eb5118180faa17be44cc0728",
         "app/services/agents/deployment.py": "4aedf46fddad3404b9e305560b74ce0d2e6524d2ced9a32cdf1633d82c196ed3",
-        "app/services/engine/phases.py": "eef7b6365132df0b2dea9a5c8224960c2bc278092018745a62dbcffcf4537a6c",
+        PHASES: "eef7b6365132df0b2dea9a5c8224960c2bc278092018745a62dbcffcf4537a6c",
         "app/services/engine/geometry.py": "21f587e36da4cd9e1ad16eb966c561f049896e7b1147a486c044664c9a46a30b",
         "app/services/engine/movement.py": "346e86291c4a6cb2b5ff8ed329c4975c8ad9815e78663a9658650fd1fa360f41",
         "app/services/engine/terrain_complex.py": "56d43f45f380abf6907bbf89ec77637f6d3922107762020dc750bba4ccd6a01a",
@@ -71,9 +78,13 @@ def _source_variants() -> dict[str, set[str]]:
     expected = {**PROFILE["sources_lf_sha256"], RULES: PROFILE["rules"]["sha256"]}
     for name, digest in expected.items():
         content = (ROOT / name).read_bytes().replace(b"\r\n", b"\n")
-        if _sha(content) != digest:
+        actual = _sha(content)
+        if name == PHASES and actual in (digest, _P6_PHASES_LF_SHA256):
+            variants[name] = {digest, _BASELINE_PHASES_CRLF_SHA256, *_P6_PHASES_DIGESTS}
+        elif actual == digest:
+            variants[name] = {digest, _sha(content.replace(b"\n", b"\r\n"))}
+        else:
             raise ValueError(f"qualification profile requires its pinned source: {name}")
-        variants[name] = {digest, _sha(content.replace(b"\n", b"\r\n"))}
     return variants
 
 
@@ -135,6 +146,8 @@ def _execution(export, snapshot: Path, result: dict, entry: dict, variants: dict
         return dict(analysis, replay="failed", observations=[])
     supported = (first is not None and _profile_sources(meta, variants)
                  and _plain_deployment(export.battle_state_from_json(first["states"]["seen"])))
+    if supported and meta["source"]["sources"].get(PHASES) in _P6_PHASES_DIGESTS:
+        analysis["compatible_phase_sha256"] = _P6_PHASES_LF_SHA256
     return dict(analysis, replay="verified", observations=[_observation(item, supported) for item in observations])
 
 
@@ -242,14 +255,18 @@ def qualify(root: Path, assessments: list[tuple[dict, dict, list[dict]]]) -> dic
                      for assessed in technical["cases"])
 
     partition = _partition(cases)
-    observations = [row for case in cases for e in case["executions"] for row in e["observations"]]
+    executions = [execution for case in cases for execution in case["executions"]]
+    observations = [row for execution in executions for row in execution["observations"]]
     coverage = dict(cases=dict(Counter(case["eligibility"] for case in cases)),
                     rules_status=dict(Counter(case["rules_status"] for case in cases)),
                     case_exclusions=dict(Counter(case["reason"] for case in cases if "reason" in case)),
                     observations=dict(Counter(row["eligibility"] for row in observations)),
                     observation_exclusions=dict(Counter(row["reason"] for row in observations if "reason" in row)))
-    profile_digest = _digest(PROFILE)
-    return dict(schema=SCHEMA, profile=PROFILE, profile_digest=profile_digest,
+    profile = PROFILE
+    if any("compatible_phase_sha256" in execution for execution in executions):
+        profile = {**PROFILE, "compatible_sources_lf_sha256": {PHASES: _P6_PHASES_LF_SHA256}}
+    profile_digest = _digest(profile)
+    return dict(schema=SCHEMA, profile=profile, profile_digest=profile_digest,
                 report_key=_digest([profile_digest, sources]), sources=sources,
                 status="passed" if partition["unique_samples"] else "review",
                 coverage=coverage, partition=partition, cases=cases)

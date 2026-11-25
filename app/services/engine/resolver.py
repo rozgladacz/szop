@@ -30,11 +30,18 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Callable, Literal
 
+from app.services.engine.action_constraints import (
+    attack_allowed_by_status,
+    maneuver_allowed_by_status,
+    shooting_lock_reason,
+)
 from app.services.engine.actions import (
     ACTION_TYPE_BY_CLASS,
     MAX_ACTIONS_PER_ACTIVATION,
     Action,
+    ChargeAction,
     ManeuverAction,
+    ShootAction,
     can_append_activation_action_type,
 )
 from app.services.engine.dice import DeterministicDice
@@ -152,8 +159,29 @@ def _validate_action(state: BattleState, action: Action) -> None:
             f"Unit {action.unit_id} belongs to player {actor.owner_player}, "
             f"but active_player is {state.active_player} (pkt 11.a)", code="wrong_player",
         )
+    _validate_action_choice(state, actor, action)
+
+
+def _validate_action_choice(state: BattleState, actor: UnitBlob, action: Action) -> None:
+    """Validate restrictions that apply to the first and subsequent choices."""
     if isinstance(action, ManeuverAction):
+        if not maneuver_allowed_by_status(actor):
+            raise IllegalActionError(
+                f"Unit {actor.id} cannot maneuver while Przyszpilony (pkt 22.b.i)",
+                code="maneuver_while_pinned",
+            )
         _validate_maneuver(state, actor, action)
+    elif isinstance(action, (ShootAction, ChargeAction)):
+        if not attack_allowed_by_status(actor):
+            raise IllegalActionError(
+                f"Unit {actor.id} cannot attack while Wyczerpany (pkt 22.a.i)",
+                code="attack_while_exhausted",
+            )
+        if isinstance(action, ShootAction) and shooting_lock_reason(state, actor) is not None:
+            raise IllegalActionError(
+                f"Unit {actor.id} cannot shoot with a visible enemy within 2 inches (pkt 14.c.iv)",
+                code="visible_enemy_within_2in",
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -269,11 +297,10 @@ def _followup_rejection(
         return "different_activation_unit"
     if not _can_take_followup(action, taken):
         return "followup_not_allowed"
-    if isinstance(action, ManeuverAction):
-        try:
-            _validate_maneuver(state, actor, action)
-        except IllegalActionError as exc:
-            return exc.code
+    try:
+        _validate_action_choice(state, actor, action)
+    except IllegalActionError as exc:
+        return exc.code
     return None
 
 

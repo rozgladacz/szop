@@ -276,6 +276,79 @@ native/ability exclusion, wejściowe state/RNG bez zmian po błędzie,
 prediction/replay i publiczny transport; dawne testy reprodukcji zmieniają
 się na odrzucenie, a nie chronią istniejącego błędu.
 
+#### Wynik P6
+
+Wspólne ograniczenia rozdzielają wybór akcji od rozstrzygnięcia. Resolver
+stosuje tę samą walidację przy pierwszym wyborze i kontynuacji v1.
+Protokół używa jej przy wykonaniu v2 oraz przy deklaracji i rozwiązaniu
+ataku v3. Odmowa pozostawia wejściowy stan i RNG bez zmian. Testy HTTP
+sprawdzają niezmieniony head zdarzeń, checkpoint i RNG w v1–v3.
+W v1 odrzucona kontynuacja zachowuje prawidłowo wykonaną pierwszą akcję.
+
+`legal_actions` obsługuje wspólny filtr dla Random, Greedy, Minimax,
+ClaudeV1 i ClaudeV2. Priority, PriorityV2, PriorityV3 i ClaudeV3
+stosują te ograniczenia w wyspecjalizowanym wyborze, z zachowaniem
+dotychczasowej kolejności i ocen opcji, które nadal są dostępne.
+Strażnik i kontratak korzystają ze wspólnego sprawdzania dla swojego
+aktora. [Reguły, granice geometrii i różnice B7](adr/0059-combat-action-restrictions.md)
+
+Walidator działa na pamięciowym stanie, wykonuje 0 zapytań SQL oraz
+0 operacji I/O. Ścieżki `/quote` i `/rosters/{id}` nie wywołują tego kodu.
+Na Windows z Pythonem 3.13.14 p95 średnich z serii, w ms dla dawnej i nowej wersji
+`_validate_action` wyniósł odpowiednio
+0,001787 → 0,003205 w `ranged` i 0,001347 → 0,008047 w `contact`.
+Obie różnice mieszczą się w budżecie G. Każdy pomiar liczył 100 serii
+po 500 wywołań, poprzedzonych 1000 rozgrzewających wywołań.
+Do odtworzenia P6 wystarczą repozytorium i `.venv` z zależnościami testowymi.
+Zaliczono 960 testów celowanych, 23 testy osobnego gate B7 i 4296 testów
+w pełnym zestawie. Cztery ostrzeżenia pochodzą z zależności.
+
+Na trzech oryginalnych pakietach D7.3c osobna publikacja dała raport o
+SHA-256 `31f68a1a9492344de6ad3c1aa2f5bd35583899aec799377a014d6531056a7f2b`.
+Nowy ślad P6 z tym samym profilem rozstawienia wskazuje w raporcie
+dodatkowy sprawdzony wariant źródła. Odtworzenie dawnych raportów wymaga
+tych samych pakietów w osobnym backupie.
+[Pakiety i polecenie](kwalifikacja-decyzji-kampanii.md#uruchomienie)
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short tests/test_bots_audit.py tests/test_engine_phases.py tests/test_engine_status.py tests/test_engine_activation_protocol.py tests/test_engine_replay_invariant.py tests/test_battle_activation_transport.py tests/test_battle_activations.py tests/test_bot_proposals.py tests/test_agents_match.py tests/test_engine_multi_action.py tests/test_engine_interrupts.py tests/test_engine_combat.py tests/test_agents_greedy.py tests/test_experiment_qualification.py tests/test_campaign_v1.py tests/test_export_decisions.py
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q tests/test_engine_regression.py
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short
+```
+
+Pomiar powtórz poza pytest na bazie `0b99a06` i na commicie P6:
+
+```powershell
+@'
+from time import perf_counter_ns
+
+from app.services.engine.actions import ShootAction
+from app.services.engine.resolver import IllegalActionError, _validate_action
+from scripts.bots_audit import scenario
+
+for name in ("ranged", "contact"):
+    state = scenario(name)
+    actor, enemy = state.blobs[:2]
+    action = ShootAction(actor.id, enemy.id, actor.ranged_weapons[0])
+
+    def sample():
+        try:
+            _validate_action(state, action)
+        except IllegalActionError:
+            pass
+
+    for _ in range(1000):
+        sample()
+    durations = []
+    for _ in range(100):
+        start = perf_counter_ns()
+        for _ in range(500):
+            sample()
+        durations.append((perf_counter_ns() - start) / 500)
+    print(name, round(sorted(durations)[94] / 1_000_000, 6), "ms")
+'@ | .\.venv\Scripts\python.exe -B -X utf8 -
+```
+
 ### P7. Consent v2: start i pass
 
 Zależności: P2–P3. Oddzielny, wersjonowany i zamknięty union komend v2,

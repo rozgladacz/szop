@@ -30,6 +30,11 @@ from abc import ABC, abstractmethod
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
+from app.services.engine.action_constraints import (
+    attack_allowed_by_status,
+    maneuver_allowed_by_status,
+    shooting_lock_reason,
+)
 from app.services.engine.actions import (
     Action,
     ChargeAction,
@@ -50,7 +55,7 @@ from app.services.engine.state import (
     WeaponProfile,
     effective_move_inches,
 )
-from app.services.engine.status import STATUS_AKTYWOWANY, STATUS_WYCZERPANY
+from app.services.engine.status import STATUS_AKTYWOWANY
 from app.services.rulesets.loader import load_ruleset
 
 if TYPE_CHECKING:
@@ -129,6 +134,8 @@ def _maneuver_targets(
     Deduplikacja po zaokrągleniu do 0.01″ (unikamy duplikatów gdy "stój" pokrywa
     się z już-osiągniętym celem).
     """
+    if not maneuver_allowed_by_status(unit):
+        return []
     planner = ManeuverPlanner(state, unit, move)
     targets: list[Position] = []
     if planner.can_reach(unit.position):
@@ -217,16 +224,17 @@ def legal_actions(state: BattleState, perspective: int) -> list[Action]:
     - Szarża (14.d) — per broń wręcz × wrogi oddział w zasięgu Związania.
 
     Zwraca pustą listę gdy gracz nie ma aktywowalnych oddziałów (sygnał dla
-    `choose_action` → None). Nie waliduje pełnej legalności (limit akcji,
-    blokada Ostrzału w zwarciu) — to robi resolver. Kandydaci Manewru
-    korzystają z tego samego planera tras co resolver (ADR-0057).
+    `choose_action` → None). Ograniczenia statusów i blokadę Ostrzału
+    sprawdza wspólnie z resolverem. Kandydaci Manewru korzystają ze wspólnego
+    planera tras (ADR-0057).
     """
     enemies = enemy_units(state, perspective)
     actions: list[Action] = []
     for unit in own_active_units(state, perspective):
         move = effective_move_inches(unit)  # per-oddział: pkt 15.a ± Szybki/Wolny
         actions.append(DefendAction(unit_id=unit.id))
-        if STATUS_WYCZERPANY in unit.status_flags:
+        can_attack = attack_allowed_by_status(unit)
+        if not can_attack:
             actions.append(
                 SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
             )
@@ -236,14 +244,17 @@ def legal_actions(state: BattleState, perspective: int) -> list[Action]:
             actions.append(
                 ManeuverAction(unit_id=unit.id, target_position=target_pos)
             )
-        for weapon in unit.ranged_weapons:
-            for enemy in enemies:
-                if _can_shoot(unit, enemy, weapon, state.terrain):
-                    actions.append(
-                        ShootAction(
-                            unit_id=unit.id, target_id=enemy.id, weapon=weapon
+        if not can_attack:
+            continue
+        if unit.ranged_weapons and shooting_lock_reason(state, unit) is None:
+            for weapon in unit.ranged_weapons:
+                for enemy in enemies:
+                    if _can_shoot(unit, enemy, weapon, state.terrain):
+                        actions.append(
+                            ShootAction(
+                                unit_id=unit.id, target_id=enemy.id, weapon=weapon
+                            )
                         )
-                    )
         for weapon in unit.melee_weapons:
             for enemy in enemies:
                 if _can_charge(unit, enemy, move):

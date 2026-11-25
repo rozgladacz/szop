@@ -354,8 +354,10 @@ def test_activation_defend_adds_ufortyfikowany():
     assert STATUS_AKTYWOWANY in blob.status_flags
 
 
-def test_activation_defend_removes_pinned_status():
-    """Pkt 22.b.v — Przyszpilony zostaje odrzucony gdy oddział staje się Przygotowany."""
+def test_activation_mobilization_cancels_both_conflicting_statuses():
+    """Pkt 14.b i 22.b.iii / 22.c.iv: zdarzenie mutex odrzuca oba stany."""
+    from app.services.engine.events import MutexCollision
+    from app.services.engine.state import apply_events
     rosters = [
         make_roster(0, [make_unit(1)]),
         make_roster(1, [make_unit(2, x=20)]),
@@ -370,10 +372,14 @@ def test_activation_defend_removes_pinned_status():
         state,
         blobs=tuple(pinned_blob if b.id == 1 else b for b in state.blobs),
     )
-    new_state, _ = activation_phase(state, DefendAction(unit_id=1), DeterministicDice(42))
+    new_state, events = activation_phase(state, DefendAction(unit_id=1), DeterministicDice(42))
     blob = next(b for b in new_state.blobs if b.id == 1)
     assert STATUS_PRZYSZPILONY not in blob.status_flags
-    assert STATUS_PRZYGOTOWANY in blob.status_flags
+    assert STATUS_PRZYGOTOWANY not in blob.status_flags
+    assert [event.dropped_statuses for event in events if isinstance(event, MutexCollision)] == [
+        (STATUS_PRZYSZPILONY, STATUS_PRZYGOTOWANY),
+    ]
+    assert apply_events(state, events) == new_state
 
 
 def test_activation_shoot_emits_shot_resolved():

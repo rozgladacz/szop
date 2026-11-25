@@ -65,6 +65,11 @@ from app.services.engine.state import (
     UnitBlob,
     effective_move_inches,
 )
+from app.services.engine.action_constraints import (
+    attack_allowed_by_status,
+    maneuver_allowed_by_status,
+    shooting_lock_reason,
+)
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYSZPILONY,
@@ -172,10 +177,10 @@ class PriorityV2Player(GridDeploymentMixin, Player):
         charge_used = any(isinstance(a, ChargeAction) for a in actions_taken)
 
         # 1. Zdejmij Wyczerpany.
-        if STATUS_WYCZERPANY in unit.status_flags:
+        if not attack_allowed_by_status(unit):
             return SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
         # 2. Strzelaj (najlepszy cel; pkt 14.c.v — raz na aktywację).
-        if not shoot_used and unit.ranged_weapons:
+        if not shoot_used and unit.ranged_weapons and shooting_lock_reason(state, unit) is None:
             weapon = unit.ranged_weapons[0]
             in_range = [e for e in enemies if _can_shoot(unit, e, weapon, state.terrain)]
             target = _best_target(unit, in_range, weapon, state.terrain)
@@ -191,8 +196,8 @@ class PriorityV2Player(GridDeploymentMixin, Player):
             target = _best_target(unit, reachable, weapon, ())
             if target is not None:
                 return ChargeAction(unit_id=unit.id, target_id=target.id, weapon=weapon)
-        # 4. Zdejmij Przyszpilony (Obrona → Przygotowany odrzuca Przyszpilony, pkt 22.b.v).
-        if STATUS_PRZYSZPILONY in unit.status_flags:
+        # 4. Mobilizacja Przyszpilonego rozstrzyga kolizję stanów (pkt 22.b.iii).
+        if not maneuver_allowed_by_status(unit):
             return DefendAction(unit_id=unit.id)
 
         mine, not_mine = _split_objectives_by_control(state, perspective)

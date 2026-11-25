@@ -7,9 +7,10 @@ import pytest
 
 from app.services.agents.factory import make_player
 from app.services.agents.registry import ALL_KINDS
-from app.services.engine.actions import ShootAction
+from app.services.engine.actions import ChargeAction, DefendAction, ManeuverAction, ShootAction
 from app.services.engine.dice import DeterministicDice
-from app.services.engine.resolver import apply, IllegalActionError
+from app.services.engine.resolver import apply, apply_activation, IllegalActionError
+from app.services.engine.state import Lokalizacja, Position, TerrainLine, apply_events
 from app.services.engine.state_codec import battle_state_to_json, battle_state_from_json
 
 _SPEC = importlib.util.spec_from_file_location("bots_audit", Path(__file__).parents[1] / "scripts/bots_audit.py")
@@ -28,13 +29,86 @@ def test_audit_public_state_decision_and_continuation_replay(kind):
     assert audit.deterministic(first) == audit.deterministic(repeated)
 
 
-def test_contact_shoot_is_resolver_accepted_but_not_a_rule_conformity_proof():
-    # Deliberate reproduction of current limitation, not endorsement of it:
-    # canonical Rozjemca 14.c.iv forbids this visible close-enemy Shoot.
-    state = audit.scenario("contact")
-    action = make_player("priority", 19).choose_action(state, 0)
-    assert isinstance(action, ShootAction)
-    assert apply(state, action, DeterministicDice(19)).events
+@pytest.mark.parametrize("kind", ALL_KINDS)
+@pytest.mark.parametrize(("scenario", "forbidden", "reason"), [
+    ("contact", (ShootAction,), "visible_enemy_within_2in"),
+    ("exhausted", (ShootAction, ChargeAction), "attack_while_exhausted"),
+    ("pinned", (ManeuverAction,), "maneuver_while_pinned"),
+])
+def test_d61_reproductions_are_excluded_by_bot_and_resolver(kind, scenario, forbidden, reason):
+    state = audit.scenario(scenario)
+    actor, target = state.blobs
+    illegal = {
+        ShootAction: ShootAction(actor.id, target.id, actor.ranged_weapons[0]),
+        ChargeAction: ChargeAction(actor.id, target.id, actor.melee_weapons[0]),
+        ManeuverAction: ManeuverAction(actor.id, Position(2, 0)),
+    }
+    player = make_player(kind, 19)
+    assert not isinstance(player.choose_action(state, 0), forbidden)
+    assert not isinstance(player.continue_activation(state, 0, actor.id, (DefendAction(actor.id),)), forbidden)
+    before = battle_state_to_json(state)
+    dice = DeterministicDice(19)
+    rng_before = dice.to_checkpoint()
+    for action_type in forbidden:
+        with pytest.raises(IllegalActionError) as exc:
+            apply(state, illegal[action_type], dice)
+        assert exc.value.code == reason
+        assert battle_state_to_json(state) == before
+        assert dice.to_checkpoint() == rng_before
+
+
+@pytest.mark.parametrize(("distance", "hidden", "role", "locked"), [
+    (2.999, False, "enemy", True),
+    (3.0, False, "enemy", True),  # Edge to edge: 3 - 0.5 - 0.5.
+    (3.001, False, "enemy", False),
+    (3.0, True, "enemy", False),
+    (3.0, False, "ally", False),
+    (3.0, False, "reserve", False),
+    (3.0, False, "defeated", False),
+])
+def test_shoot_lock_considers_every_visible_live_enemy_on_the_front(distance, hidden, role, locked):
+    state = audit.scenario("ranged")
+    attacker, target = state.blobs
+    nearby = replace(target, id=3, position=Position(0, distance))
+    if role == "ally":
+        nearby = replace(nearby, owner_player=0)
+    elif role == "reserve":
+        nearby = replace(nearby, location=Lokalizacja.ZAPLECZE)
+    elif role == "defeated":
+        nearby = replace(nearby, models_alive=0, location=Lokalizacja.WYCOFANY)
+    wall = TerrainLine(Position(-4, 1.5), Position(4, 1.5), ("Blokujacy",))
+    state = replace(state, blobs=(attacker, target, nearby), terrain=(wall,) if hidden else ())
+    # Niebezpośredni waives target LoS (Zdolności 62), so the close-enemy
+    # restriction (Rozjemca 14.c.iv) still applies to the action.
+    weapon = replace(attacker.ranged_weapons[0], weapon_abilities=("niebezposredni",))
+    action = ShootAction(attacker.id, target.id, weapon)
+    if locked:
+        with pytest.raises(IllegalActionError) as exc:
+            apply(state, action, DeterministicDice(19))
+        assert exc.value.code == "visible_enemy_within_2in"
+    else:
+        result = apply(state, action, DeterministicDice(19))
+        assert apply_events(state, result.events) == result.state
+
+
+def test_illegal_followup_preserves_completed_first_action_and_its_rng():
+    state = audit.scenario("exhausted")
+    actor, target = state.blobs
+    first = DefendAction(actor.id)
+    second = ShootAction(actor.id, target.id, actor.ranged_weapons[0])
+    dice = DeterministicDice(19)
+    expected_dice = DeterministicDice(19)
+    observations = []
+    expected = apply(state, first, expected_dice)
+    result = apply_activation(
+        state, first, dice, continuation=lambda *_: second,
+        on_observation=observations.append,
+    )
+    assert result == expected
+    assert dice.to_checkpoint() == expected_dice.to_checkpoint()
+    rejected = next(row for row in observations if row.kind == "continue_activation")
+    assert rejected.outcome == "rejected"
+    assert rejected.reason == "attack_while_exhausted"
 
 
 def test_terminal_state_must_be_guarded_by_adapter_even_with_existing_bot():

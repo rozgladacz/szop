@@ -54,7 +54,11 @@ from app.services.engine.state import (
     UnitBlob,
     effective_move_inches,
 )
-from app.services.engine.status import STATUS_PRZYSZPILONY, STATUS_WYCZERPANY
+from app.services.engine.action_constraints import (
+    attack_allowed_by_status,
+    maneuver_allowed_by_status,
+    shooting_lock_reason,
+)
 
 
 def _blob_by_id(state: BattleState, unit_id: int) -> UnitBlob | None:
@@ -178,10 +182,10 @@ class PriorityPlayer(GridDeploymentMixin, Player):
         charge_used = any(isinstance(a, ChargeAction) for a in actions_taken)
 
         # 1. Zdejmij Wyczerpany.
-        if STATUS_WYCZERPANY in unit.status_flags:
+        if not attack_allowed_by_status(unit):
             return SpecialAction(unit_id=unit.id, ability_slug="discard_exhausted")
         # 2. Strzelaj do najbliższego widocznego (o ile Ostrzał nie wykonany, pkt 14.c.v).
-        if not shoot_used:
+        if not shoot_used and unit.ranged_weapons and shooting_lock_reason(state, unit) is None:
             shoot = _nearest_enemy_shoot(unit, enemies, state.terrain)
             if shoot is not None:
                 return shoot
@@ -190,8 +194,8 @@ class PriorityPlayer(GridDeploymentMixin, Player):
             charge = _nearest_enemy_charge(unit, enemies, move)
             if charge is not None:
                 return charge
-        # 4. Zdejmij Przyszpilony (Obrona → Przygotowany odrzuca Przyszpilony, pkt 22.b.v).
-        if STATUS_PRZYSZPILONY in unit.status_flags:
+        # 4. Mobilizacja Przyszpilonego rozstrzyga kolizję stanów (pkt 22.b.iii).
+        if not maneuver_allowed_by_status(unit):
             return DefendAction(unit_id=unit.id)
 
         # 5/6. Ruch do najbliższego celu nie zajętego przez naszą stronę (pkt 5.d).

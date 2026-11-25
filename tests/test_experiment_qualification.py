@@ -7,6 +7,9 @@ from shutil import copytree
 
 import pytest
 
+from app.services.engine.action_codec import action_from_json
+from app.services.engine.dice import DeterministicDice
+from app.services.engine.resolver import IllegalActionError, apply
 from scripts import bots_audit, campaign_v1, experiment_archive as archive
 from scripts import experiment_qualification as qualification
 from scripts import experiment_quality as quality
@@ -43,6 +46,9 @@ def test_qualified_campaign_replay_groups_repeats_and_side_swaps(campaign_packag
     assert result["coverage"]["observation_exclusions"]["automatic_transition"] > 0
     assert result["partition"]["unique_samples"] < 32
     assert result["partition"]["shared_groups"] == result["partition"]["shared_samples"] == 0
+    assert result["profile"]["compatible_sources_lf_sha256"] == {
+        qualification.PHASES: qualification._P6_PHASES_LF_SHA256,
+    }
     assert len({case["partition_group"] for case in result["cases"]}) == 1
     assert len({case["split"] for case in result["cases"]}) == 1
     for case in result["cases"]:
@@ -111,6 +117,19 @@ def test_unsupported_context_and_placement_without_effect():
     assert qualification._observation(item, False)["reason"] == "unsupported_deployment_context"
 
 
+def test_unknown_phase_source_still_fails_closed(monkeypatch):
+    phases = qualification.ROOT / qualification.PHASES
+    read_bytes = type(phases).read_bytes
+
+    def read_with_unknown_change(path):
+        content = read_bytes(path)
+        return content + b"\n# unexpected revision\n" if path == phases else content
+
+    monkeypatch.setattr(type(phases), "read_bytes", read_with_unknown_change)
+    with pytest.raises(ValueError, match="requires its pinned source: .*phases.py"):
+        qualification._source_variants()
+
+
 @pytest.mark.parametrize("newline", ["\n", "\r\n"])
 def test_archive_observations_bind_audited_rule_violations(tmp_path, newline):
     audit = tmp_path / "source"
@@ -123,6 +142,7 @@ def test_archive_observations_bind_audited_rule_violations(tmp_path, newline):
                                            report=ROOT / "docs/boty-audit.md")
     report = quality.evaluate_qualification(archive_root, [descriptor["package_id"]])
     assert report["status"] == "review"
+    assert report["profile"] == qualification.PROFILE
     assert report["coverage"]["cases"] == {"excluded": 239}
     assert report["coverage"]["rules_status"] == {"unverified": 236, "violation": 3}
     extras = {row["evidence"]["pointer"]: row for row in report["cases"] if row["rules_status"] == "violation"}
@@ -130,11 +150,14 @@ def test_archive_observations_bind_audited_rule_violations(tmp_path, newline):
     expected_types = {"14.c.iv": "shoot", "22.a.i": "shoot", "22.b.i": "maneuver"}
     for pointer, assessed in extras.items():
         row = audited[int(pointer.rsplit("/", 1)[1])]
-        reproduced = bots_audit.deterministic(bots_audit.decision_once(row["kind"], row["seed"], row["scenario"]))
-        assert reproduced["first"] == row["result"]["first"]
-        assert reproduced["first"]["action_type"] == expected_types[assessed["rule"]]
-        assert reproduced["resolver_accepted"] and reproduced["replay_equal"]
-        assert reproduced["first"] in reproduced["applied"]
+        historical = row["result"]
+        assert historical["first"]["action_type"] == expected_types[assessed["rule"]]
+        assert historical["resolver_accepted"] and historical["replay_equal"]
+        assert historical["first"] in historical["applied"]
+        with pytest.raises(IllegalActionError) as exc:
+            apply(bots_audit.scenario(row["scenario"]), action_from_json(historical["first"]),
+                  DeterministicDice(row["seed"]))
+        assert exc.value.code == assessed["reason"]
         assert assessed["eligibility"] == "excluded"
 
 

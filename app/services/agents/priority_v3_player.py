@@ -63,6 +63,11 @@ from app.services.engine.state import (
     UnitBlob,
     effective_move_inches,
 )
+from app.services.engine.action_constraints import (
+    attack_allowed_by_status,
+    maneuver_allowed_by_status,
+    shooting_lock_reason,
+)
 from app.services.engine.status import (
     STATUS_AKTYWOWANY,
     STATUS_PRZYGOTOWANY,
@@ -95,12 +100,12 @@ def _target_weight(attacker: UnitBlob, target: UnitBlob, weapon, terrain: tuple)
     return w
 
 
-def _shoot_candidates(unit: UnitBlob, enemies: list[UnitBlob], terrain: tuple):
+def _shoot_candidates(state: BattleState, unit: UnitBlob, enemies: list[UnitBlob]):
     """(weapon, [targets]) dla Ostrzału — pierwsza broń dystansowa (MVP)."""
-    if not unit.ranged_weapons:
+    if not unit.ranged_weapons or shooting_lock_reason(state, unit) is not None:
         return None, []
     weapon = unit.ranged_weapons[0]
-    return weapon, [e for e in enemies if _can_shoot(unit, e, weapon, terrain)]
+    return weapon, [e for e in enemies if _can_shoot(unit, e, weapon, state.terrain)]
 
 
 def _charge_candidates(unit: UnitBlob, enemies: list[UnitBlob], move: float):
@@ -165,11 +170,11 @@ def _c_has_shoot_target(c: _Ctx) -> bool:
 
 
 def _c_exhausted(c: _Ctx) -> bool:
-    return STATUS_WYCZERPANY in c.unit.status_flags
+    return not attack_allowed_by_status(c.unit)
 
 
 def _c_pinned(c: _Ctx) -> bool:
-    return STATUS_PRZYSZPILONY in c.unit.status_flags
+    return not maneuver_allowed_by_status(c.unit)
 
 
 def _c_przygotowanie_first_not_fortified(c: _Ctx) -> bool:
@@ -223,6 +228,8 @@ def _a_shoot(c: _Ctx) -> Action:
 
 
 def _a_charge(c: _Ctx) -> Action:
+    if _c_exhausted(c):
+        return _a_defend(c)
     # Osłona (pkt 19) dotyczy tylko Ostrzału — silnik melee nie liczy `compute_cover`.
     # Scoring celu Szarży z pustym terenem, by prediction był spójny z combatem.
     t = _best_target(c.unit, c.charge_targets, c.charge_weapon, ())
@@ -306,7 +313,7 @@ class PriorityV3Player(GridDeploymentMixin, Player):
         enemies = enemy_units(state, perspective)
         move = effective_move_inches(unit)  # pkt 15.a ± Szybki/Wolny (zdolność 33)
         mine, not_mine = _split_objectives_by_control(state, perspective)
-        sw, st = _shoot_candidates(unit, enemies, state.terrain)
+        sw, st = _shoot_candidates(state, unit, enemies)
         cw, ct = _charge_candidates(unit, enemies, move)
         return _Ctx(
             state=state, perspective=perspective, unit=unit, actions_taken=tuple(actions_taken),

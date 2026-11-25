@@ -47,6 +47,13 @@ błąd integralności archiwum, a 3 błąd środowiska lub publikacji.
    zapis LF lub CRLF. Zmiana źródeł wymaga aktualnej weryfikacji profilu.
    [Wspólny walidator](kolejka-po-c2d1.md#2-d51--wspólna-walidacja-miejsca-rozstawienia) · [Kontrakt replay](eksport-decyzji-kampanii.md)
 
+Po P6 kwalifikator rozpoznaje dodatkową, dokładnie przypiętą wersję
+`phases.py` ze zweryfikowanym kodem rozstawienia. Dowód w tej wersji
+otrzymuje `executions[].compatible_phase_sha256`. Jego raport podaje
+kompatybilne źródło w `profile.compatible_sources_lf_sha256`, objęte
+skrótem profilu i kluczem raportu. Wcześniejsze pakiety zachowują
+pierwotny profil i klucz raportu. [Weryfikacja zgodności P6](adr/0059-combat-action-restrictions.md#zgodność-dowodu-d73c)
+
 `rules_status` przy przypadku i obserwacji rozróżnia `confirmed`
 (dowód w zadanym zakresie), `unverified` (poza zakresem dowodu) i
 `violation` (udokumentowane naruszenie w przypiętym audycie).
@@ -61,8 +68,9 @@ Audyt D6.1 zawiera trzy potwierdzone kontrprzykłady. Dla
 `priority`/19/`contact` pierwszą decyzją był Ostrzał przy bliskim widocznym
 wrogu (pkt 14.c.iv). Dla `random`/19/`exhausted` był to atak
 Wyczerpanego (pkt 22.a.i), a dla `random`/11/`pinned` Manewr
-Przyszpilonego (pkt 22.b.i). Ponowne wykonanie tych jawnych fixture
-potwierdziło przyjęcie przez resolver i zgodne replay. Raport wiąże wyniki
+Przyszpilonego (pkt 22.b.i). W rewizji audytu wykonanie potwierdziło
+przyjęcie przez resolver i zgodne replay. Od P6 testy sprawdzają odmowę
+wykonania tych samych zarchiwizowanych akcji. Raport wiąże wyniki
 z hashem pliku (warianty LF i CRLF) i wskaźnikiem JSON do konkretnego
 zarchiwizowanego przypadku.
 [Źródło reguł](../app/static/docs/SZOP_Rozjemca.md) · [Audyt](boty-audit.md#konkretne-ograniczenia-legalności)
