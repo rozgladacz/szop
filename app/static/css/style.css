@@ -400,3 +400,17 @@ tbody .spell-row-chosen { background: #fff3cd !important; }
   min-width: 2.5rem;
   text-align: center;
 }
+
+@media (hover: hover) and (pointer: fine) {
+  .model-count-control > .btn {
+    display: none;
+  }
+
+  .model-count-control > .form-control {
+    flex-basis: 5rem;
+    width: 5rem;
+    /* Bootstrap still treats the input as attached to its hidden siblings. */
+    margin-left: 0 !important;
+    border-radius: var(--bs-border-radius) !important;
+  }
+}

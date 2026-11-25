@@ -48,6 +48,10 @@
 
 *(Append-only, najnowsze na górze. Krótka notatka per zakończone zadanie. Starsze wpisy w [docs/handoffs/LOG_ARCHIVE.md](docs/handoffs/LOG_ARCHIVE.md).)*
 
+### 2026-11-25 — liczebnosc-desktop (archived)
+- W widoku komputerowym liczebność zmieniają natywne strzałki w polu. Na ekranach dotykowych dostępne są duże przyciski −/+.
+- Weryfikacja w Edge objęła tryb klasyczny, kolekcję i proxy oraz automatyczny zapis.
+
 ### 2026-11-04 — wydanie-poprawek (archived)
 - Poprawki zapisano jako `5950224`, opublikowano najpierw na Rozwoj, potem na main przez fast-forward po scaleniu historii (`3996723`) zachowującym aktualny SZOP, zgodnie z potwierdzeniem usera o oddzieleniu OPOS. Bez force push; stary main pozostaje w historii. Usunięto z indeksu 32 pliki cache Pythona.
 - Wydanie **v1.2.0** na `3a4b138`: https://github.com/rozgladacz/szop/releases/tag/v1.2.0. Lokalnie 370/370, CI Tests + Build & Push + Create Release success: https://github.com/rozgladacz/szop/actions/runs/41796075798. GHCR `1.2.0` i `latest` dostępne publicznie (HTTP 200), wspólny digest `sha256:19facbfdc97eb9102ff6040b1deb18e3a2292daa0f890cd8b0a648425c13f356`. Gotowe do aktualizacji z panelu aplikacji; produkcji nie aktualizowano. Kolejny commit wyłącznie archiwizuje dokumentację.
