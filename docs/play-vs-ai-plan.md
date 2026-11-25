@@ -216,6 +216,17 @@ after commit, dwa procesy i inny payload dla tego samego klucza rozstrzygnięte.
 To propozycja nowego API/auth, wymagająca wyboru kontraktu przed P3/P4;
 nie jest zatwierdzona przez samo D6.3.
 
+#### Wynik P2
+
+Projekt przewiduje serwerowego producenta `priority/v1` zlecanego przez
+sesję właściciela, trwałą próbę z unikalnym ID i osobną zgodę na wykonanie
+propozycji. Zaproponowano 24 h na ponawianie tego samego ID i 30 dni odczytu
+wyniku. ADR określa tożsamość producenta, regułę Origin, addytywną migrację,
+transakcję i zachowanie po awarii, a także przykłady API i przypadki odbioru.
+P3 korzysta z konkretnego kontraktu po jego akceptacji. Do kontynuacji na
+innym komputerze wystarcza checkout `origin/Faza_A` i ADR.
+[Proponowany kontrakt](adr/0060-server-bot-proposal-attempts.md)
+
 ### P3. Trwała deduplikacja tworzenia v1
 
 Zależność: zaakceptowany P2. Zakres: implementacja tylko trwałej próby i

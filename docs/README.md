@@ -26,6 +26,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [boty-audit.md](boty-audit.md) | D6.1: bot × protokół × scenariusz, reprodukcje luk legalności, koszt i prerekwizyty D6.2 |
 | [boty-connect.md](boty-connect.md) | D6.2: jednorazowy priority/v1 → pending proposal, osobna zgoda ownera, zakres i rekoncyliacja |
 | [play-vs-ai-plan.md](play-vs-ai-plan.md) | D6.3: małe etapy dojścia od podglądu i priority/v1 do gry w UI, consent/protokoły/setup/restart i testy |
+| [ADR-0060](adr/0060-server-bot-proposal-attempts.md) | P2: proponowany kontrakt serwerowej propozycji bota, trwałej próby i odzyskiwania wyniku |
 | [trwala-kampania-v1.md](trwala-kampania-v1.md) | D7.1: runner kampanii v1, trwały zapis przypadków, resume, integralność, archiwum i pilot |
 | [archiwum-eksperymentow.md](archiwum-eksperymentow.md) | D7.2: pakiety kampanii i historii, publikacja, weryfikacja, backup i odzyskiwanie |
 | [jakosc-eksperymentow.md](jakosc-eksperymentow.md) | D7.3a–b — ocena techniczna, porównywalne bloki, efekt strony i odtworzenie |
