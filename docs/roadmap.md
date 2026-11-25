@@ -17,7 +17,7 @@ pozostałe propozycje Play vs AI i poprawki silnika wymagają osobnego wyboru.
 
 - [x] **D7.1-campaign-v1** — **DONE 2026-11-22**: [trwały runner v1](trwala-kampania-v1.md), JSONL/fsync, OS lock, source/integrity gates, report/archive; [pilot](experiments/d7_1/README.md) 32/64 pełny vs stop8+resume24 identyczny, końcowy resume no-op. Celowane **77 passed**, pełne **4146 passed**. Bez zmian silnika/API/UI/DB; większa kampania wymaga osobnego wyboru.
 
-## Aktywna kolejka Play vs AI — akceptacja 2026-11-24
+## Zakończona kolejka Play vs AI — akceptacja 2026-11-24
 
 Użytkownik zatwierdził kolejność **P1 → P6 → P2 → P3 → P4 → P5**.
 [Plan Play vs AI](play-vs-ai-plan.md#kolejność-etapów-do-wyboru) określa
@@ -30,7 +30,7 @@ P2, obejmującym tożsamość producenta i uprawnienia.
 - [x] **P2** — **DONE 2026-11-25**. Użytkownik zaakceptował [ADR-0060](adr/0060-server-bot-proposal-attempts.md), który definiuje serwerową propozycję bota, trwałą próbę i odzyskiwanie wyniku.
 - [x] **P3** — **DONE 2026-11-25**. [Trwały zapis prób](play-vs-ai-plan.md#wynik-p3) zapisuje atomowo wynik, propozycję i audyt oraz odtwarza wynik po utracie odpowiedzi. Narzut to 1 indeksowany SELECT i 1 INSERT. Celowane **133 passed**, pełne **4320 passed**. Publiczne operacje należą do P4.
 - [x] **P4** — **DONE 2026-11-25**. [Serwerowy producent `priority/v1`](play-vs-ai-plan.md#wynik-p4) tworzy najwyżej jedną trwałą propozycję na próbę i wymaga osobnej zgody na wykonanie. Narzut to 1 SELECT i 1 INSERT. Celowane **165 passed**, pełne **4352 passed**.
-- [ ] **P5** [automation-ready] — pierwszy interfejs Play vs AI dla pojedynczego kroku w istniejącej bitwie; po P4.
+- [x] **P5** — **DONE 2026-11-25**. Podgląd bitwy wysyła jedną świadomą próbę `priority/v1` i prowadzi do istniejącej karty osobnej zgody. Edge potwierdził zatwierdzenie, odrzucenie, odświeżenie i nieaktualny checkpoint. Celowane **131 passed**, pełne **4354 passed**. [Wynik P5 i wznowienie](play-vs-ai-plan.md#wynik-p5)
 
 ## Zakończona kolejka D7 — akceptacja 2026-11-24
 

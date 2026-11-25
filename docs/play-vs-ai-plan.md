@@ -401,6 +401,64 @@ Node deferred responses/double-click/cancel/keyboard, istniejące
 `test_battle_preview.py` i `test_agent_proposals_frontend.py`, realny smoke
 pending→osobne approve→executed→reload; odrzucenie i stale bez dalszego kroku.
 
+#### Wynik P5
+
+W podglądzie bitwy wybierz aktywną stronę
+z checkpointu, podaj całkowity seed i użyj „Zaproponuj jeden krok”. Tab
+przechodzi przez wybór, seed i przycisk. Enter zleca próbę i przenosi fokus
+na komunikat z wynikiem. „Otwórz propozycję” prowadzi do konkretnej karty
+w dotychczasowym panelu i ustawia na niej fokus. Dopiero „Zezwól i wykonaj”
+uruchamia istniejącą ścieżkę wykonania. W tej samej karcie można odrzucić
+propozycję. Wczytanie widoku lub jego odświeżenie nie wysyła polecenia.
+[Szablon podglądu](../app/templates/battle_preview.html)
+
+Sterownik zapisuje lokalnie sam
+identyfikator próby (`czas-UUIDv4`) i zamrożone polecenie `priority/v1`.
+Klucz łączy bitwę z nieprzezroczystym oznaczeniem zweryfikowanej generacji
+konta. Brak zapisu blokuje wysłanie. Anulowanie przed wysłaniem kończy
+próbę lokalnie. Po wysłaniu przerwanie oczekiwania uruchamia odczyt statusu
+pod tym samym ID, tak samo jak timeout i niepewna odpowiedź. Ponowienie jest
+jawne, używa tego samego polecenia i ID, a okno zapisu trwa do 24 godzin.
+Po `stale` trzeba wczytać bieżący checkpoint przed wysłaniem nowej próby.
+Odczyty i decyzje wciąż podlegają uprawnieniom serwera.
+[Moduł Play vs AI](../app/static/js/modules/bot_step.js)
+
+Smoke w Edge 158.0.4370.33 użył serwera na `127.0.0.1` i spójnej,
+odizolowanej kopii bazy z danymi oraz osobnymi kontami i bitwami testowymi.
+Potwierdzono klawiaturę, fokus karty, osobne `approve` i wykonanie,
+przeładowanie bez ponownego POST, `reject`, `stale` i odmowę dla innego
+konta. Przy `stale` ręczne odświeżenie wykonało jeden GET checkpointu.
+Na szerokości 390 px widok mieścił się w oknie. Test blokował zewnętrzny CDN.
+
+Budżet U sprawdzono na tej samej przeglądarce, w widoku 1280 × 900, przez
+odtworzenie prawdziwego formatu checkpointu ze 100 i 500 obiektami.
+Po 5 rozgrzewkach zmierzono po 30 renderów od gotowej odpowiedzi JSON
+do projekcji, rysowania, zbudowania list i przeliczenia układu. p95 wyniósł
+10,8 ms i 33,9 ms przy limitach 50 ms i 100 ms. Render i wybór jednostki
+nie wymagają zapytań do serwera. Uzgadnianie jest inicjowane przez działanie
+użytkownika lub pojedynczy odczyt zapisanej próby przy wczytaniu, bez
+pollingu i SSE. V/K wykorzystują ten sam transport i ścieżki SQL,
+w tym 15 SELECT dla D6.2. [Pomiary P4](#wynik-p4)
+
+Na innym komputerze pobierz `origin/Faza_A`, zainstaluj `requirements-dev.txt`
+i uruchom testy z Node.js obsługującym `node --test`. W środowisku testowym
+użyj odizolowanej bazy z danymi i
+ustaw `BOT_PROPOSAL_ORIGIN` na pochodzenie widoku (schemat, host i port), np.
+`http://127.0.0.1:8000` lokalnie. Dla HTTPS włącz `SESSION_HTTPS_ONLY=true`.
+Następnie zaloguj się ponownie, by uzupełnić generację starszej sesji.
+Do przeniesienia działającego środowiska potrzebny jest osobny spójny backup
+SQLite z próbami, propozycjami, audytem, bitwami i checkpointami oraz
+konfiguracja instancji. Lokalne odniesienie nie przechodzi do innej
+przeglądarki. Zapisane propozycje są dostępne w panelu po zalogowaniu.
+
+Zaliczono 7 scenariuszy Node, 131 celowanych testów pytest i 4354 testy
+w pełnym zestawie. Cztery ostrzeżenia dotyczyły ReportLab i openpyxl.
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short tests/test_battle_preview.py tests/test_agent_proposals_frontend.py tests/test_bot_proposal_producer.py tests/test_bot_proposal_attempts.py tests/test_bot_proposals.py
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short
+```
+
 ### P6. Wspólna legalność walki i statusów
 
 Zależność: P1; może poprzedzać P2–P5. Zakres: naprawić reprodukcje D6.1

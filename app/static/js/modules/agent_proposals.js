@@ -121,6 +121,8 @@
     const item = documentRef.createElement('article');
     item.className = 'list-group-item py-3';
     item.setAttribute('data-agent-proposal-id', String(proposal.id));
+    item.id = `agent-proposal-${proposal.id}`;
+    item.tabIndex = -1;
 
     const header = documentRef.createElement('div');
     header.className = 'd-flex flex-column flex-lg-row justify-content-between gap-2';
@@ -234,10 +236,17 @@
       method: 'GET',
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
+      redirect: 'error',
     })
       .then(ensureJsonResponse)
       .then((proposals) => {
         renderAgentProposals(panel, proposals);
+        const hash = globalScope.location?.hash || '';
+        if (/^#agent-proposal-[1-9]\d*$/.test(hash)) {
+          const card = panel.ownerDocument.getElementById(hash.slice(1));
+          if (card && panel.contains(card)) card.focus();
+          else if (panel.id) globalScope.location.hash = panel.id;
+        }
         return proposals;
       })
       .catch((err) => {
@@ -252,6 +261,7 @@
       method: 'POST',
       headers: { Accept: 'application/json' },
       credentials: 'same-origin',
+      redirect: 'error',
     })
       .then(ensureJsonResponse)
       .then((updatedProposal) => {

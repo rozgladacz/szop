@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import replace
 from pathlib import Path
@@ -14,7 +15,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from app import models
+from app import config, models
 from app.config import SECRET_KEY
 from app.db import Base, get_db
 from app.main import app
@@ -128,10 +129,13 @@ def preview_world():
         engine.dispose()
 
 
-def login_cookie(client: TestClient, user_id: int) -> None:
+def login_cookie(client: TestClient, user_id: int, generation: str | None = None) -> None:
     from base64 import b64encode
 
-    session = b64encode(json.dumps({"user_id": user_id}).encode())
+    cookie = {"user_id": user_id}
+    if generation is not None:
+        cookie["owner_created_at"] = generation
+    session = b64encode(json.dumps(cookie).encode())
     client.cookies.clear()
     client.cookies.set("session", TimestampSigner(SECRET_KEY).sign(session).decode())
 
@@ -179,6 +183,34 @@ def test_existing_checkpoint_api_keeps_codec_and_domain_unchanged(preview_world,
         assert db.scalars(select(models.BattleEvent)).all() == []
 
 
+def test_bot_step_namespace_requires_live_session_generation(preview_world, monkeypatch):
+    client, engine, owner, outsider, ids, _ = preview_world
+    monkeypatch.setattr(config, "BOT_PROPOSAL_ORIGIN", "http://localhost:8000")
+
+    def logged_view(user_id, generation):
+        login_cookie(client, user_id, generation)
+        response = client.get(f"/battle-preview?battle_id={ids[0]}")
+        assert response.status_code == 200
+        assert response.headers["cache-control"] == "private, no-store"
+        return response.text
+
+    with Session(engine) as db:
+        owner_generation = db.get(models.User, owner).created_at.isoformat(timespec="microseconds")
+        outsider_generation = db.get(models.User, outsider).created_at.isoformat(timespec="microseconds")
+
+    old = logged_view(owner, None)
+    assert 'data-enabled="1" data-namespace=""' in old
+    assert 'data-enabled="1" data-namespace=""' in logged_view(owner, "2024-01-01T00:00:00.000000")
+    namespace = re.compile(r'data-namespace="([a-f0-9]{64})"')
+    owned = logged_view(owner, owner_generation)
+    assert owner_generation not in owned
+    assert namespace.search(owned).group(1) == namespace.search(logged_view(owner, owner_generation)).group(1)
+    assert namespace.search(owned).group(1) != namespace.search(logged_view(outsider, outsider_generation)).group(1)
+    assert owned.index("/js/modules/bot_step.js") < owned.index("/js/modules/battle_canvas.js")
+    monkeypatch.setattr(config, "BOT_PROPOSAL_ORIGIN", "")
+    assert 'data-enabled="0"' in logged_view(owner, owner_generation)
+
+
 # === SECTION: Executed Node renderer/controller/DOM smoke with real wire fixtures ===
 def test_canvas_renderer_and_request_controller():
     result = subprocess.run(
@@ -190,3 +222,10 @@ def test_canvas_renderer_and_request_controller():
         capture_output=True, text=True, encoding="utf-8", check=True, cwd=ROOT,
     )
     assert json.loads(result.stdout)["passed"] is True
+
+
+def test_bot_step_transport_controller():
+    subprocess.run(
+        [resolve_node_binary(), "--test", str(ROOT / "tests/js/bot_step.test.js")],
+        check=True, cwd=ROOT,
+    )

@@ -268,6 +268,12 @@
     }
     function update(state) {
       view = state.view || null; selectedId = null;
+      if (win.CustomEvent) host.dispatchEvent(new win.CustomEvent('szop:checkpoint', {
+        detail: view ? {
+          battleId: view.battleId, version: view.version, sequence: view.sequence,
+          activePlayer: view.activePlayer, gameOver: view.gameOver
+        } : null
+      }));
       summary.hidden = true; summary.textContent = '';
       get('fit').disabled = !view;
       get('front').replaceChildren(); get('off').replaceChildren(); get('features').replaceChildren();

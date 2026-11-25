@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from hmac import digest
 from typing import Optional
 
 from fastapi import Depends, FastAPI, Request
@@ -15,6 +16,7 @@ from sqlalchemy.orm import Session, selectinload
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import models
+from .bot_proposal_security import PRIVATE_RESPONSE, configured_proposal_origin, matching_owner_generation
 from .config import DEBUG, SECRET_KEY, SESSION_HTTPS_ONLY, TRUSTED_HOSTS
 from .db import get_db, init_db
 from .paths import STATIC_DIR, TEMPLATES_DIR
@@ -73,11 +75,19 @@ def battle_preview(
     request: Request,
     current_user: Optional[models.User] = Depends(get_current_user(optional=True)),
 ):
-    """Read-only HTML shell; battle access remains in the checkpoint API."""
+    """Render the preview shell; its state and proposal requests check access separately."""
     if not current_user:
         return RedirectResponse(url="/auth/login", status_code=303)
+    generation = matching_owner_generation(request, current_user)
+    namespace = ""
+    if generation is not None:
+        account = f"bot-proposal-browser:v1:{current_user.id}:{generation.isoformat()}"
+        namespace = digest(SECRET_KEY.encode(), account.encode(), "sha256").hex()
     return templates.TemplateResponse(
-        request, "battle_preview.html", {"user": current_user}
+        request, "battle_preview.html",
+        {"user": current_user, "bot_step_enabled": configured_proposal_origin() is not None,
+         "bot_step_namespace": namespace},
+        headers=PRIVATE_RESPONSE,
     )
 
 
