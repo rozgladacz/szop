@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..bot_proposal_security import clear_owner_session, set_owner_session
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user, hash_password, is_valid_username, verify_password
@@ -41,7 +42,7 @@ def login(
             {"error": "Nieprawidłowy login lub hasło"},
             status_code=400,
         )
-    request.session["user_id"] = user.id
+    set_owner_session(request, user)
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -96,11 +97,11 @@ def register(
     user = models.User(username=username, password_hash=hash_password(password))
     db.add(user)
     db.commit()
-    request.session["user_id"] = user.id
+    set_owner_session(request, user)
     return RedirectResponse(url="/", status_code=303)
 
 
 @router.get("/logout")
 def logout(request: Request):
-    request.session.pop("user_id", None)
+    clear_owner_session(request)
     return RedirectResponse(url="/", status_code=303)

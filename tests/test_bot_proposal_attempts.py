@@ -318,6 +318,7 @@ def test_scope_checks_generation_and_current_side(ledger_battle):
     with h.engine.begin() as connection:
         connection.execute(update(models.User).where(models.User.id == h.owner_id)
                            .values(created_at=newer_generation))
-    assert_error("not_found", read, h)
+    assert_error("owner_session_required", read, h)
+    assert_error("owner_session_required", submit, h, decide=unexpected_prepare)
     assert_error("not_found", read, h, generation=newer_generation)
     assert_error("not_found", submit, h, generation=newer_generation, decide=unexpected_prepare)

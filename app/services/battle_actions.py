@@ -18,6 +18,7 @@ from .engine.action_codec import (
 from .engine.dice import DeterministicDice
 from .engine.events import BattleEvent
 from .engine.persistence import (
+    LoadedBattleCheckpoint,
     latest_event_sequence,
     load_latest_checkpoint,
     save_checkpoint,
@@ -108,16 +109,12 @@ def get_participant_battle(
     return battle
 
 
-def prepare_battle_action(
+def load_battle_action_checkpoint(
     db: Session,
     *,
     battle: models.Battle,
-    actor_user_id: int,
-    expected_sequence: int,
-    action_payload: Mapping[str, Any],
     require_v1_protocol: bool = False,
-) -> PreparedBattleAction:
-    """Resolve an action in isolation, optionally requiring a v1 checkpoint."""
+) -> LoadedBattleCheckpoint:
     if (
         require_v1_protocol
         and battle.activation_protocol_version != ACTIVATION_PROTOCOL_VERSION_V1
@@ -135,6 +132,37 @@ def prepare_battle_action(
         )
     if require_v1_protocol and checkpoint.version != ACTIVATION_PROTOCOL_VERSION_V1:
         raise BattleActionProposalProtocolConflict
+    return checkpoint
+
+
+def prepare_battle_action(
+    db: Session,
+    *,
+    battle: models.Battle,
+    actor_user_id: int,
+    expected_sequence: int,
+    action_payload: Mapping[str, Any],
+    require_v1_protocol: bool = False,
+) -> PreparedBattleAction:
+    """Resolve an action in isolation, optionally requiring a v1 checkpoint."""
+    checkpoint = load_battle_action_checkpoint(
+        db, battle=battle, require_v1_protocol=require_v1_protocol,
+    )
+    return prepare_battle_action_from_checkpoint(
+        checkpoint, battle=battle, actor_user_id=actor_user_id,
+        expected_sequence=expected_sequence, action_payload=action_payload,
+    )
+
+
+def prepare_battle_action_from_checkpoint(
+    checkpoint: LoadedBattleCheckpoint,
+    *,
+    battle: models.Battle,
+    actor_user_id: int,
+    expected_sequence: int,
+    action_payload: Mapping[str, Any],
+) -> PreparedBattleAction:
+    """Prepare against an already verified checkpoint in the same transaction."""
     if expected_sequence != checkpoint.sequence_at:
         raise BattleActionSequenceConflict(
             expected_sequence=expected_sequence,

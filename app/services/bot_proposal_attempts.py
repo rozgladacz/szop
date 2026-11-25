@@ -151,7 +151,6 @@ def _current_owner_conditions(owner_created_at):
     return (
         models.User.created_at == owner_created_at,
         models.User.role.in_((models.USER_ROLE_USER, models.USER_ROLE_ADMIN)),
-        models.Battle.created_at >= models.User.created_at,
     )
 
 
@@ -260,15 +259,21 @@ def create_bot_proposal_attempt(
     """
     with _write_session(engine) as db:
         stamp = now()
-        battle = db.scalar(
-            select(models.Battle)
-            .join(models.User, models.User.id == owner_user_id)
-            .where(
-                models.Battle.id == command.battle_id,
-                *_current_owner_conditions(owner_created_at),
-                _owner_controls_side(owner_user_id, command.side),
+        access = db.execute(
+            select(models.User.id, models.Battle)
+            .outerjoin(
+                models.Battle,
+                and_(
+                    models.Battle.id == command.battle_id,
+                    models.Battle.created_at >= models.User.created_at,
+                    _owner_controls_side(owner_user_id, command.side),
+                ),
             )
-        )
+            .where(models.User.id == owner_user_id, *_current_owner_conditions(owner_created_at))
+        ).one_or_none()
+        if access is None:
+            raise BotProposalAttemptError("owner_session_required")
+        _, battle = access
         if battle is None:
             raise BotProposalAttemptError("not_found")
 
@@ -319,23 +324,33 @@ def get_bot_proposal_attempt(
     attempt_id: str,
     now: Callable[[], datetime] = utcnow,
 ) -> BotProposalAttemptResult:
+    if not _safe_integer(battle_id, 1):
+        raise BotProposalAttemptError("invalid_command")
     _issued_at(attempt_id)
     attempt = models.BotProposalAttempt
     with Session(engine, autoflush=False) as db:
-        record = db.scalar(
-            select(attempt)
-            .join(models.Battle, models.Battle.id == attempt.battle_id)
-            .join(models.User, models.User.id == attempt.owner_user_id)
-            .where(
-                attempt.owner_user_id == owner_user_id,
-                attempt.owner_created_at == owner_created_at,
-                attempt.battle_id == battle_id,
-                attempt.attempt_id == attempt_id,
-                attempt.created_at > now() - _RETENTION,
-                *_current_owner_conditions(owner_created_at),
-                _owner_controls_side(owner_user_id, attempt.side),
+        access = db.execute(
+            select(models.User.id, attempt)
+            .outerjoin(
+                models.Battle,
+                and_(models.Battle.id == battle_id, models.Battle.created_at >= models.User.created_at),
             )
-        )
+            .outerjoin(
+                attempt,
+                and_(
+                    attempt.owner_user_id == owner_user_id,
+                    attempt.owner_created_at == owner_created_at,
+                    attempt.battle_id == models.Battle.id,
+                    attempt.attempt_id == attempt_id,
+                    attempt.created_at > now() - _RETENTION,
+                    _owner_controls_side(owner_user_id, attempt.side),
+                ),
+            )
+            .where(models.User.id == owner_user_id, *_current_owner_conditions(owner_created_at))
+        ).one_or_none()
+        if access is None:
+            raise BotProposalAttemptError("owner_session_required")
+        _, record = access
         if record is None:
             raise BotProposalAttemptError("not_found")
         return BotProposalAttemptResult.from_record(record)

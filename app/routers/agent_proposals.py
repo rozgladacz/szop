@@ -5,13 +5,18 @@ import re
 from datetime import UTC, datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..bot_proposal_security import (
+    PRIVATE_RESPONSE,
+    matching_owner_generation,
+    require_proposal_origin,
+)
 from ..db import get_db
 from ..security import (
     AgentPrincipal,
@@ -163,20 +168,34 @@ def _public_proposal(proposal: models.AgentProposal) -> AgentProposalPublic:
     )
 
 
+def _proposal_generation_filter(owner_user_id: int, generation: datetime | None):
+    producer_generation = models.AgentProposal.producer_owner_created_at
+    if generation is None:
+        return producer_generation.is_(None)
+    live_account = select(models.User.id).where(
+        models.User.id == owner_user_id,
+        models.User.created_at == generation,
+        models.User.role.in_((models.USER_ROLE_USER, models.USER_ROLE_ADMIN)),
+    ).exists()
+    return or_(producer_generation.is_(None), and_(producer_generation == generation, live_account))
+
+
 def _get_owned_proposal(
     db: Session,
     *,
     proposal_id: int,
     owner_user_id: int,
+    owner_generation: datetime | None = None,
 ) -> models.AgentProposal:
     proposal = db.execute(
         select(models.AgentProposal).where(
             models.AgentProposal.id == proposal_id,
             models.AgentProposal.owner_user_id == owner_user_id,
+            _proposal_generation_filter(owner_user_id, owner_generation),
         )
     ).scalar_one_or_none()
     if proposal is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, headers=PRIVATE_RESPONSE)
     return proposal
 
 
@@ -188,6 +207,7 @@ def _decide_proposal(
     target_status: str,
     audit_action: str,
     conflict_action: str,
+    owner_generation: datetime | None = None,
 ) -> AgentProposalPublic:
     if proposal.status == target_status:
         return _public_proposal(proposal)
@@ -195,11 +215,39 @@ def _decide_proposal(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Only pending agent proposals can be {conflict_action}.",
+            headers=PRIVATE_RESPONSE,
         )
 
-    proposal.status = target_status
-    proposal.decided_at = _now()
-    proposal.decided_by_user_id = current_user.id
+    if proposal.producer_owner_created_at is not None:
+        now = _now()
+        updated = db.execute(
+            update(models.AgentProposal)
+            .where(
+                models.AgentProposal.id == proposal.id,
+                models.AgentProposal.owner_user_id == current_user.id,
+                models.AgentProposal.status == models.AGENT_PROPOSAL_STATUS_PENDING,
+                _proposal_generation_filter(current_user.id, owner_generation),
+            )
+            .values(status=target_status, decided_at=now, decided_by_user_id=current_user.id, updated_at=now)
+            .execution_options(synchronize_session=False)
+        )
+        if updated.rowcount != 1:
+            proposal_id, owner_id = proposal.id, current_user.id
+            db.rollback()
+            current = _get_owned_proposal(
+                db, proposal_id=proposal_id, owner_user_id=owner_id, owner_generation=owner_generation,
+            )
+            if current.status == target_status:
+                return _public_proposal(current)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Only pending agent proposals can be {conflict_action}.",
+                headers=PRIVATE_RESPONSE,
+            )
+    else:
+        proposal.status = target_status
+        proposal.decided_at = _now()
+        proposal.decided_by_user_id = current_user.id
     _audit_proposal(
         db,
         proposal=proposal,
@@ -223,6 +271,7 @@ def _battle_action_fields(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Battle action proposal payload is unavailable.",
+            headers=PRIVATE_RESPONSE,
         )
     battle_id = payload["battle_id"]
     expected_sequence = payload["expected_sequence"]
@@ -237,6 +286,7 @@ def _battle_action_fields(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Battle action proposal payload is unavailable.",
+            headers=PRIVATE_RESPONSE,
         )
     return battle_id, expected_sequence, action_payload
 
@@ -258,6 +308,7 @@ def _claim_battle_action_proposal(
     *,
     proposal: models.AgentProposal,
     current_user: models.User,
+    owner_generation: datetime | None,
 ) -> bool:
     now = _now()
     result = db.execute(
@@ -266,6 +317,7 @@ def _claim_battle_action_proposal(
             models.AgentProposal.id == proposal.id,
             models.AgentProposal.owner_user_id == current_user.id,
             models.AgentProposal.status == models.AGENT_PROPOSAL_STATUS_PENDING,
+            _proposal_generation_filter(current_user.id, owner_generation),
         )
         .values(
             status=models.AGENT_PROPOSAL_STATUS_EXECUTED,
@@ -288,11 +340,13 @@ def _proposal_after_claim_conflict(
     *,
     proposal_id: int,
     owner_user_id: int,
+    owner_generation: datetime | None,
 ) -> AgentProposalPublic:
     proposal = _get_owned_proposal(
         db,
         proposal_id=proposal_id,
         owner_user_id=owner_user_id,
+        owner_generation=owner_generation,
     )
     if proposal.status in {
         models.AGENT_PROPOSAL_STATUS_EXECUTED,
@@ -302,6 +356,7 @@ def _proposal_after_claim_conflict(
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail="Only pending battle action proposals can be executed.",
+        headers=PRIVATE_RESPONSE,
     )
 
 
@@ -313,6 +368,7 @@ def _mark_battle_action_stale(
     battle_id: int,
     expected_sequence: int,
     actual_sequence: int,
+    owner_generation: datetime | None,
 ) -> AgentProposalPublic:
     now = _now()
     stale_result = {
@@ -326,6 +382,7 @@ def _mark_battle_action_stale(
             models.AgentProposal.id == proposal_id,
             models.AgentProposal.owner_user_id == current_user.id,
             models.AgentProposal.status == models.AGENT_PROPOSAL_STATUS_PENDING,
+            _proposal_generation_filter(current_user.id, owner_generation),
         )
         .values(
             status=models.AGENT_PROPOSAL_STATUS_STALE,
@@ -342,11 +399,13 @@ def _mark_battle_action_stale(
             db,
             proposal_id=proposal_id,
             owner_user_id=current_user.id,
+            owner_generation=owner_generation,
         )
     proposal = _get_owned_proposal(
         db,
         proposal_id=proposal_id,
         owner_user_id=current_user.id,
+        owner_generation=owner_generation,
     )
     db.refresh(proposal)
     _audit_proposal(
@@ -369,6 +428,7 @@ def _execute_battle_action_proposal(
     *,
     proposal: models.AgentProposal,
     current_user: models.User,
+    owner_generation: datetime | None,
 ) -> AgentProposalPublic:
     if proposal.status in {
         models.AGENT_PROPOSAL_STATUS_EXECUTED,
@@ -379,6 +439,7 @@ def _execute_battle_action_proposal(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Only pending battle action proposals can be executed.",
+            headers=PRIVATE_RESPONSE,
         )
 
     battle_id, expected_sequence, action_payload = _battle_action_fields(proposal)
@@ -386,11 +447,13 @@ def _execute_battle_action_proposal(
         db,
         proposal=proposal,
         current_user=current_user,
+        owner_generation=owner_generation,
     ):
         return _proposal_after_claim_conflict(
             db,
             proposal_id=proposal.id,
             owner_user_id=current_user.id,
+            owner_generation=owner_generation,
         )
 
     try:
@@ -428,21 +491,23 @@ def _execute_battle_action_proposal(
         db.commit()
     except BattleActionNotFound as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND) from exc
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, headers=PRIVATE_RESPONSE) from exc
     except BattleActionForbidden as exc:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN) from exc
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, headers=PRIVATE_RESPONSE) from exc
     except BattleActionInvalid as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=exc.detail,
+            headers=PRIVATE_RESPONSE,
         ) from exc
     except BattleActionProposalProtocolConflict as exc:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
+            headers=PRIVATE_RESPONSE,
         ) from exc
     except (BattleActionUnavailable, BattleActionSequenceConflict) as exc:
         db.rollback()
@@ -453,6 +518,7 @@ def _execute_battle_action_proposal(
             battle_id=battle_id,
             expected_sequence=expected_sequence,
             actual_sequence=exc.actual_sequence,
+            owner_generation=owner_generation,
         )
     except (
         BattleEventSequenceConflict,
@@ -467,6 +533,7 @@ def _execute_battle_action_proposal(
             battle_id=battle_id,
             expected_sequence=expected_sequence,
             actual_sequence=latest_event_sequence(db, battle_id),
+            owner_generation=owner_generation,
         )
 
     db.refresh(proposal)
@@ -587,11 +654,19 @@ def create_battle_action_proposal(
 def list_agent_proposals(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
+    request: Request = None,
+    response: Response = None,
 ) -> list[AgentProposalPublic]:
+    generation = matching_owner_generation(request, current_user)
+    if response is not None:
+        response.headers.update(PRIVATE_RESPONSE)
     proposals = (
         db.execute(
             select(models.AgentProposal)
-            .where(models.AgentProposal.owner_user_id == current_user.id)
+            .where(
+                models.AgentProposal.owner_user_id == current_user.id,
+                _proposal_generation_filter(current_user.id, generation),
+            )
             .order_by(
                 models.AgentProposal.created_at.desc(),
                 models.AgentProposal.id.desc(),
@@ -608,12 +683,17 @@ def get_agent_proposal(
     proposal_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
+    request: Request = None,
+    response: Response = None,
 ) -> AgentProposalPublic:
     proposal = _get_owned_proposal(
         db,
         proposal_id=proposal_id,
         owner_user_id=current_user.id,
+        owner_generation=matching_owner_generation(request, current_user),
     )
+    if proposal.producer_owner_created_at is not None and response is not None:
+        response.headers.update(PRIVATE_RESPONSE)
     return _public_proposal(proposal)
 
 
@@ -622,17 +702,26 @@ def approve_agent_proposal(
     proposal_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
+    request: Request = None,
+    response: Response = None,
 ) -> AgentProposalPublic:
+    generation = matching_owner_generation(request, current_user)
     proposal = _get_owned_proposal(
         db,
         proposal_id=proposal_id,
         owner_user_id=current_user.id,
+        owner_generation=generation,
     )
+    if proposal.producer_owner_created_at is not None:
+        require_proposal_origin(request)
+        if response is not None:
+            response.headers.update(PRIVATE_RESPONSE)
     if proposal.action == BATTLE_ACTION_PROPOSAL:
         return _execute_battle_action_proposal(
             db,
             proposal=proposal,
             current_user=current_user,
+            owner_generation=generation,
         )
     return _decide_proposal(
         db,
@@ -649,12 +738,20 @@ def reject_agent_proposal(
     proposal_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user()),
+    request: Request = None,
+    response: Response = None,
 ) -> AgentProposalPublic:
+    generation = matching_owner_generation(request, current_user)
     proposal = _get_owned_proposal(
         db,
         proposal_id=proposal_id,
         owner_user_id=current_user.id,
+        owner_generation=generation,
     )
+    if proposal.producer_owner_created_at is not None:
+        require_proposal_origin(request)
+        if response is not None:
+            response.headers.update(PRIVATE_RESPONSE)
     return _decide_proposal(
         db,
         proposal=proposal,
@@ -662,4 +759,5 @@ def reject_agent_proposal(
         target_status=models.AGENT_PROPOSAL_STATUS_REJECTED,
         audit_action="reject",
         conflict_action="rejected",
+        owner_generation=generation,
     )

@@ -315,6 +315,77 @@ nie tworzy drugiej próby. DoD/testy: trzy pozytywne akcje D6.2, unsupported
 bez fallbacku, wrong side/protocol/owner, stale/cancel przed POST,
 sekrety/redakcja, timeout/5xx i brak mutacji bitwy przed zgodą.
 
+#### Wynik P4
+
+`POST /battles/{battle_id}/bot-proposal-attempts/{attempt_id}` przyjmuje
+jedno polecenie `priority/v1` z jawną stroną, seedem i oczekiwanym headem.
+`GET` pod tym samym adresem zwraca zapisany wynik. Pierwszy zapis zwraca
+201 ze względnym `Location`, a zgodne ponowienie i odczyt zwracają 200.
+Serwer sprawdza podpisaną sesję, aktualną generację konta, czas utworzenia
+bitwy oraz właściciela strony. Przy nowej próbie używa jednego checkpointu
+do wyboru i przygotowania propozycji na prywatnej kopii RNG. Rejestr P3
+zapisuje wynik, opcjonalne `pending` i jego audyt w jednej transakcji SQLite.
+Osobne `approve` wykonuje akcję dotychczasową ścieżką. Serwerowe propozycje
+wymagają prawidłowej generacji sesji przy listowaniu, odczycie i decyzji.
+Stare propozycje i tokenowy D6.2 zachowują dotychczasowy format i dostęp.
+[Kontrakt HTTP, przykład, błędy i uzgadnianie](adr/0060-server-bot-proposal-attempts.md)
+
+Do prób integracyjnych skonfiguruj dokładnie jeden publiczny origin UI,
+np. `BOT_PROPOSAL_ORIGIN=https://szop.example` oraz `SESSION_HTTPS_ONLY=true`
+za Caddy lub Tailscale. Aplikacja porównuje `Origin` z konfiguracją,
+również gdy proxy przekazuje inne `Host` lub `Forwarded`. W środowisku
+deweloperskim można jawnie ustawić np. `BOT_PROPOSAL_ORIGIN=http://localhost:8000`
+i pozostawić `SESSION_HTTPS_ONLY=false`. Domyślnie origin jest pusty, więc
+nowe operacje zwracają 404. Starsze sesje wymagają ponownego zalogowania
+do P4. Do testów użyj odizolowanej bazy SQLite. Żadne wdrożenie ani klucze
+sesji nie są częścią tej konfiguracji w repozytorium.
+
+P5 może kontynuować pracę na aktualnej `Faza_A`. Zalogowany widok musi
+oznaczyć generację konta na potrzeby przestrzeni lokalnego zapisu prób.
+Uzgadnianie korzysta z tego samego ID i zamrożonego polecenia zgodnie z ADR,
+a zgoda z istniejącego panelu. Konfiguracja serwera pozostaje lokalna dla
+konkretnego środowiska. Przy przenoszeniu działającego środowiska wykonaj
+jeden spójny backup SQLite obejmujący rejestr P3, propozycje, audyt, bitwy
+i checkpointy. Samo repozytorium przenosi kod, testy i dokumentację.
+
+Testy transportu sprawdzają trzy przypadki D6.2, statusy HTTP i treść
+poleceń, własność oraz generację, HTTPS, Origin, utratę odpowiedzi po
+commicie, timeout blokady, równoległe ponowienie i osobną zgodę. Testy P3
+uzupełniają restart, retencję, purge i rollback przy awarii audytu. Porównanie
+bazy przed i po utworzeniu obejmuje log, checkpoint i RNG.
+
+Pomiar V/K wykonano na Windows, Python 3.13.14, na tymczasowej plikowej
+SQLite przez FastAPI `TestClient`. Zestaw 12 jednostek powstał z fixture
+P4 przez umieszczenie po sześć jednostek na stronę. Bazowy request użył
+tego samego transportu, sprawdzenia właściciela, przygotowania oraz
+transakcji propozycji z audytem. Dodana ścieżka zapisuje też próbę.
+Każdy tryb obejmował 5 rozgrzewek i 60 przeplatanych pomiarów z seedem 19.
+Czas transakcji liczono od uzyskania `BEGIN IMMEDIATE` do wyniku po commicie.
+
+| Jednostki | Tryb | SELECT | INSERT | p95 HTTP | p95 transakcji |
+|---:|---|---:|---:|---:|---:|
+| 2 | Baza | 3 | 2 | 14,633 ms | 11,931 ms |
+| 2 | Nowa próba | 4 | 3 | 15,964 ms | 12,647 ms |
+| 2 | Ponowienie | 2 | 0 | 4,934 ms | 2,000 ms |
+| 12 | Baza | 3 | 2 | 18,018 ms | 14,576 ms |
+| 12 | Nowa próba | 4 | 3 | 16,437 ms | 13,874 ms |
+| 12 | Ponowienie | 2 | 0 | 6,080 ms | 2,880 ms |
+
+Weryfikacja żywej generacji konta mieści się w tym samym SELECT co odczyt
+dostępu do bitwy. Narzut rejestru wyniósł 1 SELECT i 1 INSERT przy obu
+rozmiarach. Czas p95 decyzji na 100 seedach `0..99` po 5 rozgrzewkach wyniósł
+1,019 ms i 2,300 ms przy 2 i 12 jednostkach. Wybór wykonuje zero SQL.
+Dotychczasowy D6.2 zachował 15 SELECT (4 + 5 + 6). Oba budżety zostały
+spełnione.
+
+Zaliczono 165 testów celowanych i 4352 testy w pełnym zestawie. Cztery
+ostrzeżenia dotyczyły zależności ReportLab i openpyxl.
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short tests/test_bot_proposal_producer.py tests/test_bot_proposal_attempts.py tests/test_bot_proposals.py tests/test_battle_action_proposals.py tests/test_agent_proposals_router.py tests/test_agent_token_security.py tests/test_db_schema_migrations.py
+.\.venv\Scripts\python.exe -B -X utf8 -m pytest -q --tb=short
+```
+
 ### P5. Pierwszy UI: jeden krok dla istniejącej bitwy
 
 Zależność: P4. Zakres: przy istniejącym podglądzie wybór jawnej strony,

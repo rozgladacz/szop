@@ -92,6 +92,7 @@ TRUSTED_HOSTS = [
 ] or ["*"]
 
 SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "false").lower() in {"1", "true", "yes"}
+BOT_PROPOSAL_ORIGIN = os.getenv("BOT_PROPOSAL_ORIGIN", "")
 
 
 def _load_json_list(env_key: str, default: list) -> list:

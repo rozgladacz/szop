@@ -26,6 +26,7 @@ from .routers import (
     armies,
     auth,
     battles,
+    bot_proposal_attempts,
     exploit_candidates,
     export,
     export_xlsx,
@@ -139,6 +140,7 @@ app.include_router(users.router)
 app.include_router(agent_tokens.router)
 app.include_router(agent_proposals.router)
 app.include_router(battles.router)
+app.include_router(bot_proposal_attempts.router)
 app.include_router(loadout_validation.router)
 app.include_router(roster_scoring.router)
 app.include_router(exploit_candidates.router)
