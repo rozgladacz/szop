@@ -26,7 +26,7 @@
                id="task-{{ card.slug }}"
                {% if card.slug in selected_tasks_set %}checked{% endif %}
                {% if not can_edit %}disabled{% endif %} />
-        <label class="form-check-label" for="task-{{ card.slug }}">{{ card.text }}</label>
+        <label class="form-check-label" for="task-{{ card.slug }}">{{ t(card.text) }}</label>
       </div>
       {% endfor %}
     </div>
@@ -43,7 +43,7 @@
                id="support-{{ card.slug }}"
                {% if card.slug in selected_supports_set %}checked{% endif %}
                {% if not can_edit %}disabled{% endif %} />
-        <label class="form-check-label" for="support-{{ card.slug }}">{{ card.text }}</label>
+        <label class="form-check-label" for="support-{{ card.slug }}">{{ t(card.text) }}</label>
       </div>
       {% endfor %}
     </div>

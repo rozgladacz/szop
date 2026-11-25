@@ -1,4 +1,9 @@
 (function initSZOPRosterRenderingModule(globalScope) {
+  const ruleLabelUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityLabel(text) : text;
+  const ruleDescriptionUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityDescription(text) : text;
+
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   const payloadAdapters = globalScope.SZOPPayloadAdapters || (typeof globalThis !== 'undefined' ? globalThis.SZOPPayloadAdapters : null) || {
     adaptWeaponOptions(options) { return Array.isArray(options) ? options : []; },
     adaptAbilityEntries(entries) { return Array.isArray(entries) ? entries : []; },
@@ -18,7 +23,7 @@ function formatPoints(value) {
   if (!Number.isInteger(number)) {
     baseOptions.minimumFractionDigits = 2;
   }
-  return number.toLocaleString('pl-PL', baseOptions);
+  return number.toLocaleString(globalScope.SZOPI18n?.locale || 'pl-PL', baseOptions);
 }
 
 function createRosterItemElement(data, options = {}) {
@@ -29,7 +34,7 @@ function createRosterItemElement(data, options = {}) {
   const itemId = data.id !== undefined && data.id !== null ? String(data.id) : '';
   const count = Number.isFinite(Number(data.count)) ? Number(data.count) : 1;
   const cachedCost = Number.isFinite(Number(data.cached_cost)) ? Number(data.cached_cost) : 0;
-  const unitName = data.unit_name || 'Jednostka';
+  const unitName = data.unit_name || trUI('Jednostka');
   const unitQuality = data.unit_quality !== undefined ? data.unit_quality : '-';
   const unitDefense = data.unit_defense !== undefined ? data.unit_defense : '-';
   const unitToughness = data.unit_toughness !== undefined ? data.unit_toughness : '-';
@@ -107,7 +112,7 @@ function createRosterItemElement(data, options = {}) {
       button.setAttribute('data-roster-move', '');
       button.setAttribute(
         'aria-label',
-        direction === 'up' ? 'Przesuń jednostkę w górę' : 'Przesuń jednostkę w dół',
+        direction === 'up' ? 'Przesuń jednostkę w górę' : trUI('Przesuń jednostkę w dół'),
       );
       button.textContent = direction === 'up' ? '↑' : '↓';
       form.appendChild(button);
@@ -155,7 +160,7 @@ function createRosterItemElement(data, options = {}) {
   const costBadge = document.createElement('span');
   costBadge.className = 'badge text-bg-primary roster-cost-badge';
   costBadge.setAttribute('data-roster-unit-cost', '');
-  costBadge.textContent = `${formatPoints(cachedCost)} pkt`;
+  costBadge.textContent = `${formatPoints(cachedCost)} ${trUI('pkt')}`;
   item.appendChild(costBadge);
 
   const title = document.createElement('div');
@@ -176,7 +181,7 @@ function createRosterItemElement(data, options = {}) {
 
   const stats = document.createElement('div');
   stats.className = 'text-muted small';
-  stats.textContent = `Jakość ${unitQuality} / Obrona ${unitDefense} / Wytrzymałość ${unitToughness}`;
+  stats.textContent = `${trUI('Jakość')} ${unitQuality} / ${trUI('Obrona')} ${unitDefense} / ${trUI('Wytrzymałość')} ${unitToughness}`;
   item.appendChild(stats);
 
   const abilities = document.createElement('div');
@@ -246,9 +251,9 @@ function renderPassiveEditor(
     info.className = 'roster-ability-details flex-grow-1';
     const name = document.createElement('span');
     name.className = 'roster-ability-label';
-    name.textContent = entry.display_label || entry.label || entry.raw || slug;
+    name.textContent = entry.display_label || ruleLabelUI(entry.label || entry.raw || slug);
     if (entry.description) {
-      name.title = entry.description;
+      name.title = entry.display_description || ruleDescriptionUI(entry.description);
     }
     info.appendChild(name);
     const cost = document.createElement('span');
@@ -304,10 +309,10 @@ function renderPassiveEditor(
     const formatDeltaText = () => {
       const normalizedDelta = normalizeDeltaForDisplay(deltaValue);
       if (!Number.isFinite(normalizedDelta) || Math.abs(normalizedDelta) < 0.005) {
-        return 'Δ 0 pkt';
+        return `Δ 0 ${trUI('pkt')}`;
       }
       const prefix = normalizedDelta > 0 ? '+' : '-';
-      return `Δ ${prefix}${formatPoints(Math.abs(normalizedDelta))} pkt`;
+      return `Δ ${prefix}${formatPoints(Math.abs(normalizedDelta))} ${trUI('pkt')}`;
     };
     cost.textContent = formatDeltaText();
     info.appendChild(cost);
@@ -326,7 +331,7 @@ function renderPassiveEditor(
 
       const selectLabel = document.createElement('label');
       selectLabel.className = 'form-label small mb-0';
-      selectLabel.textContent = 'Dołącz do:';
+      selectLabel.textContent = trUI('Dołącz do:');
       const selectId = `hero-attach-${slug}-${Math.random().toString(16).slice(2)}`;
       selectLabel.setAttribute('for', selectId);
       heroWrap.appendChild(selectLabel);
@@ -336,14 +341,14 @@ function renderPassiveEditor(
       heroSelect.id = selectId;
       const noneOpt = document.createElement('option');
       noneOpt.value = '';
-      noneOpt.textContent = '— (samodzielny)';
+      noneOpt.textContent = trUI('— (samodzielny)');
       heroSelect.appendChild(noneOpt);
       (heroContext.attachable || [])
         .filter((u) => u && u.id && String(u.id) !== String(heroContext.rosterUnitId))
         .forEach((u) => {
           const opt = document.createElement('option');
           opt.value = String(u.id);
-          opt.textContent = u.label || `Oddział ${u.id}`;
+          opt.textContent = u.label || `${trUI('Oddział')} ${u.id}`;
           heroSelect.appendChild(opt);
         });
       heroSelect.value = heroContext.currentParentId || '';
@@ -357,7 +362,7 @@ function renderPassiveEditor(
         const newParentId = heroSelect.value;
         const { rosterId: rId, rosterUnitId: ruId } = heroContext;
         if (!rId || !ruId) {
-          errorBox.textContent = 'Nie można ustalić kontekstu dołączenia.';
+          errorBox.textContent = trUI('Nie można ustalić kontekstu dołączenia.');
           errorBox.classList.remove('d-none');
           return;
         }
@@ -379,7 +384,7 @@ function renderPassiveEditor(
         Promise.resolve()
           .then(() => typeof heroContext.beforeAttach === 'function' ? heroContext.beforeAttach() : true)
           .then((saved) => {
-            if (saved === false) throw new Error('Najpierw zapisz poprawną kompozycję modeli.');
+            if (saved === false) throw new Error(trUI('Najpierw zapisz poprawną kompozycję modeli.'));
             return fetch(url, init);
           })
           .then((r) => {
@@ -395,7 +400,7 @@ function renderPassiveEditor(
           })
           .catch((err) => {
             heroSelect.disabled = false;
-            errorBox.textContent = `Błąd: ${err && err.message ? err.message : String(err)}`;
+            errorBox.textContent = `${trUI('Błąd:')} ${err && err.message ? err.message : String(err)}`;
             errorBox.classList.remove('d-none');
           });
       });
@@ -417,10 +422,10 @@ function renderPassiveEditor(
       label.setAttribute('for', input.id);
       const updateLabel = () => {
         if (isLockedAbility) {
-          label.textContent = 'Zawsze aktywna';
+          label.textContent = trUI('Zawsze aktywna');
           return;
         }
-        label.textContent = input.checked ? 'Aktywna' : 'Wyłączona';
+        label.textContent = input.checked ? 'Aktywna' : trUI('Wyłączona');
       };
       updateLabel();
       if (!isLockedAbility) {
@@ -442,7 +447,7 @@ function renderPassiveEditor(
     } else {
       const status = document.createElement('div');
       status.className = 'text-muted small';
-      status.textContent = currentFlag > 0 ? 'Aktywna' : 'Wyłączona';
+      status.textContent = currentFlag > 0 ? 'Aktywna' : trUI('Wyłączona');
       controls.appendChild(status);
     }
 

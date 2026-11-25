@@ -76,7 +76,7 @@
                 <select class="form-select range-picker-select" id="range-choice">
                   <option value="">Wybierz zasięg</option>
                   {% for option in range_options %}
-                  <option value="{{ option.value }}">{{ option.label }}</option>
+                  <option value="{{ option.value }}">{{ t(option.label) }}</option>
                   {% endfor %}
                   <option value="__custom__">Inny…</option>
                 </select>
@@ -168,9 +168,9 @@
                     value="{{ ability.slug }}"
                     data-requires-value="{{ 'true' if ability.requires_value else 'false' }}"
                     data-value-type="{{ ability.value_type or '' }}"
-                    title="{{ ability.description }}"
+                    title="{{ (ability.display_description or ability.description) | ability_description }}"
                   >
-                    {{ ability.display_name }}
+                    {{ (ability.display_name) | ability }}
                   </option>
                   {% endfor %}
                 </select>

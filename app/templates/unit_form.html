@@ -65,8 +65,8 @@
                 <select class="form-select ability-picker-select">
                   <option value="">Wybierz zdolność</option>
                   {% for ability in passive_definitions %}
-                  <option value="{{ ability.slug }}" data-requires-value="{{ 'true' if ability.requires_value else 'false' }}" data-value-type="{{ ability.value_type or '' }}" title="{{ ability.description }}">
-                    {{ ability.display_name }}
+                  <option value="{{ ability.slug }}" data-requires-value="{{ 'true' if ability.requires_value else 'false' }}" data-value-type="{{ ability.value_type or '' }}" title="{{ (ability.display_description or ability.description) | ability_description }}">
+                    {{ (ability.display_name) | ability }}
                   </option>
                   {% endfor %}
                 </select>
@@ -101,8 +101,8 @@
                 <select class="form-select ability-picker-select">
                   <option value="">Wybierz zdolność</option>
                   {% for ability in active_definitions %}
-                  <option value="{{ ability.slug }}" data-requires-value="{{ 'true' if ability.requires_value else 'false' }}" data-value-type="{{ ability.value_type or '' }}" title="{{ ability.description }}">
-                    {{ ability.display_name }}
+                  <option value="{{ ability.slug }}" data-requires-value="{{ 'true' if ability.requires_value else 'false' }}" data-value-type="{{ ability.value_type or '' }}" title="{{ (ability.display_description or ability.description) | ability_description }}">
+                    {{ (ability.display_name) | ability }}
                   </option>
                   {% endfor %}
                 </select>
@@ -137,8 +137,8 @@
                 <select class="form-select ability-picker-select">
                   <option value="">Wybierz aurę</option>
                   {% for ability in aura_definitions %}
-                  <option value="{{ ability.slug }}" data-requires-value="{{ 'true' if ability.requires_value else 'false' }}" data-value-type="{{ ability.value_type or '' }}" title="{{ ability.description }}">
-                    {{ ability.display_name }}
+                  <option value="{{ ability.slug }}" data-requires-value="{{ 'true' if ability.requires_value else 'false' }}" data-value-type="{{ ability.value_type or '' }}" title="{{ (ability.display_description or ability.description) | ability_description }}">
+                    {{ (ability.display_name) | ability }}
                   </option>
                   {% endfor %}
                 </select>

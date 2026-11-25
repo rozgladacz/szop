@@ -6,6 +6,8 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 
 | Plik | Zakres |
 |------|--------|
+| [translation-glossary.md](translation-glossary.md) | Oficjalny słownik polsko-angielski zasad, obowiązujący dla kolejnych wersji |
+| [translation-guidelines.md](translation-guidelines.md) | Krótkie wytyczne tłumaczeń: wersja źródła, język, liczby, układ i kontrola jakości |
 | [overview.md](overview.md) | Cel projektu, obszary (Rozpiski/Armie/Zbrojownie), stack technologiczny |
 | [architecture.md](architecture.md) | Model danych, dziedziczenie, mapa submodułów `costs/`, hot path, baza |
 | [roadmap.md](roadmap.md) | Aktywne inicjatywy (SSOT, refaktor app.js), decyzje strategiczne |
@@ -38,3 +40,5 @@ Pozostała dokumentacja na poziomie głównym repo:
 ## Zasada
 
 **Jedno źródło prawdy per zakres.** Jeśli treść pasuje do więcej niż jednego pliku — wybierz właściwy i zostaw link z drugiego. Powtórzenia rozmywają sygnał.
+
+- [localization.md](localization.md) — katalogi PL/EN, preferencja języka, kontrakt prezentacji i pliki do pobrania.

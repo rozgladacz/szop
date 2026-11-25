@@ -1,4 +1,6 @@
 (function initSZOPRosterEditorModule(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   const textParsing = globalScope.SZOPTextParsing || (typeof globalThis !== 'undefined' ? globalThis.SZOPTextParsing : null) || {};
   const rosterRendering = globalScope.SZOPRosterRendering || (typeof globalThis !== 'undefined' ? globalThis.SZOPRosterRendering : null) || {};
   const loadoutStateApi = globalScope.SZOPLoadoutState || (typeof globalThis !== 'undefined' ? globalThis.SZOPLoadoutState : null) || {};
@@ -99,7 +101,7 @@ function initRosterEditor() {
   if (deleteForm) {
     deleteForm.addEventListener('submit', async (event) => {
       event.preventDefault();
-      if (!confirm('Usunąć pozycję?')) return;
+      if (!confirm(trUI('Usunąć pozycję?'))) return;
       const action = deleteForm.getAttribute('action');
       if (!action) return;
       try {
@@ -700,12 +702,30 @@ function initRosterEditor() {
   let activeSaveController = null;
   const SAVE_MESSAGES = {
     idle: '',
-    dirty: 'Niezapisane zmiany',
-    saving: 'Zapisywanie...',
-    saved: 'Zapisano',
-    error: 'Błąd zapisu',
+    dirty: trUI('Niezapisane zmiany'),
+    saving: trUI('Zapisywanie...'),
+    saved: trUI('Zapisano'),
+    error: trUI('Błąd zapisu'),
   };
   let currentSaveStatus = 'idle';
+  if (globalScope.SZOPI18n) {
+    globalScope.SZOPI18n.beforeLanguageChange.push(async () => {
+      if (!isEditable || !autoSaveEnabled || !activeItem) return;
+      while (isSaving) await new Promise(resolve => window.setTimeout(resolve, 25));
+      if (currentSaveStatus === 'idle' || currentSaveStatus === 'saved') return;
+      if (saveTimer) window.clearTimeout(saveTimer);
+      saveTimer = null;
+      pendingSave = false;
+      pendingSaveVersion = null;
+      const version = ++latestEditVersion;
+      latestRequestVersion = version;
+      await submitChanges(version);
+      if (currentSaveStatus !== 'saved' || version !== latestEditVersion) {
+        throw new Error('Unsaved roster changes');
+      }
+    });
+  }
+
   const customPlaceholder = customLabel ? customLabel.dataset.placeholder || '' : '';
   let rosterDatasetCache = new WeakMap();
   const UNIT_DATASET_KEYS = [
@@ -1002,7 +1022,7 @@ function initRosterEditor() {
       target.className = 'text-danger mt-2';
       emptyState.appendChild(target);
     }
-    target.textContent = message || 'Panel edycji jest obecnie niedostępny.';
+    target.textContent = message || trUI('Panel edycji jest obecnie niedostępny.');
   }
 
   function updateCustomLabelDisplay(value) {
@@ -1334,7 +1354,8 @@ function initRosterEditor() {
     if (!entry) {
       return '';
     }
-    const base = entry.label ?? entry.raw ?? entry.slug ?? '';
+    const canonical = entry.label ?? entry.raw ?? entry.slug ?? '';
+    const base = globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityLabel(canonical) : canonical;
     const custom = entry.custom_name ?? entry.customName ?? '';
     const trimmedCustom = typeof custom === 'string' ? custom.trim() : '';
     if (trimmedCustom) {
@@ -1371,7 +1392,7 @@ function initRosterEditor() {
         const badge = document.createElement('span');
         badge.className = className;
         if (entry.description) {
-          badge.title = entry.description;
+          badge.title = entry.display_description || (globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityDescription(entry.description) : entry.description);
         }
         let text = String(label);
         if (showCount) {
@@ -1388,7 +1409,7 @@ function initRosterEditor() {
     if (!hasContent) {
       const empty = document.createElement('span');
       empty.className = 'text-muted small';
-      empty.textContent = 'Brak dodatkowych zdolności';
+      empty.textContent = trUI('Brak dodatkowych zdolności');
       container.appendChild(empty);
     }
   }
@@ -1436,7 +1457,7 @@ function initRosterEditor() {
     );
     currentBaseFlags = parseFlagString(item.getAttribute('data-unit-flags'));
 
-    const unitName = item.getAttribute('data-unit-name') || 'Jednostka';
+    const unitName = item.getAttribute('data-unit-name') || trUI('Jednostka');
     const quality = item.getAttribute('data-unit-quality') || '-';
     const qualityNumeric = Number(quality);
     currentQuality = Number.isFinite(qualityNumeric) ? qualityNumeric : 4;
@@ -1450,7 +1471,7 @@ function initRosterEditor() {
       nameEl.textContent = unitName;
     }
     if (statsEl) {
-      statsEl.textContent = `Jakość ${quality} / Obrona ${defense} / Wytrzymałość ${toughness}`;
+      statsEl.textContent = `${trUI('Jakość')} ${quality} / ${trUI('Obrona')} ${defense} / ${trUI('Wytrzymałość')} ${toughness}`;
     }
 
     setCustomName(customName, {
@@ -1595,7 +1616,7 @@ function initRosterEditor() {
       if (Object.prototype.hasOwnProperty.call(unitData, 'selected_aura_items')) {
         setItemListAttribute(targetItem, 'data-selected-auras', unitData.selected_aura_items);
       }
-      const unitName = targetItem.getAttribute('data-unit-name') || 'Jednostka';
+      const unitName = targetItem.getAttribute('data-unit-name') || trUI('Jednostka');
       if (typeof unitData.count === 'number' && Number.isFinite(unitData.count)) {
         const titleEl = targetItem.querySelector('[data-roster-unit-title]');
         if (titleEl) {
@@ -1604,7 +1625,7 @@ function initRosterEditor() {
       }
       const costBadge = targetItem.querySelector('[data-roster-unit-cost]');
       if (costBadge && hasServerCachedCost) {
-        costBadge.textContent = `${formatPoints(serverCachedCost)} pkt`;
+        costBadge.textContent = `${formatPoints(serverCachedCost)} ${trUI('pkt')}`;
       }
       const loadoutEl = targetItem.querySelector('[data-roster-unit-loadout]');
       if (loadoutEl) {
@@ -1770,7 +1791,7 @@ function initRosterEditor() {
       activeItem.setAttribute('data-unit-cost', String(total));
       const listBadge = activeItem.querySelector('[data-roster-unit-cost]');
       if (listBadge) {
-        listBadge.textContent = `${formatted} pkt`;
+        listBadge.textContent = `${formatted} ${trUI('pkt')}`;
       }
     }
     return total;
@@ -1910,7 +1931,7 @@ function initRosterEditor() {
             const formatted = formatPoints(total);
             const badgeEl = item.querySelector('[data-roster-unit-cost]');
             if (badgeEl) {
-              badgeEl.textContent = `${formatted} pkt`;
+              badgeEl.textContent = `${formatted} ${trUI('pkt')}`;
             }
             item.setAttribute('data-unit-cost', String(total));
             aggregatedTotal += total;
@@ -2160,7 +2181,7 @@ function renderEditors() {
             const label =
               it.getAttribute('data-unit-custom-name') ||
               it.getAttribute('data-unit-name') ||
-              `Oddział ${id}`;
+              `${trUI('Oddział')} ${id}`;
             return { id, label };
           });
       })(),
@@ -2383,7 +2404,7 @@ function renderEditors() {
       });
     } catch (error) {
       console.error('Błąd podczas wczytywania oddziału', error);
-      showRosterEditorError('Nie udało się wczytać danych oddziału.');
+      showRosterEditorError(trUI('Nie udało się wczytać danych oddziału.'));
     }
   }
 
@@ -2405,7 +2426,7 @@ function renderEditors() {
     initializeRosterEditorState();
   } catch (error) {
     console.error('Nie udało się zainicjalizować edytora oddziału', error);
-    showRosterEditorError('Panel edycji jest obecnie niedostępny.');
+    showRosterEditorError(trUI('Panel edycji jest obecnie niedostępny.'));
   }
 
   if (countInput) {

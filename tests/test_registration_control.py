@@ -18,6 +18,7 @@ from app import models  # noqa: E402
 from app.db import Base  # noqa: E402
 from app.routers import users as users_router  # noqa: E402
 from app.security import hash_password  # noqa: E402
+from app.services import settings  # noqa: E402
 from app.services.settings import get_registration_open, set_registration_open  # noqa: E402
 
 
@@ -50,10 +51,8 @@ def _fake_request() -> SimpleNamespace:
 
 
 @pytest.fixture(autouse=True)
-def _restore_registration():
-    set_registration_open(True)
-    yield
-    set_registration_open(True)
+def _isolate_registration(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "_SETTINGS_FILE", tmp_path / "settings.json")
 
 
 # ── settings.py unit tests ────────────────────────────────────────────────────

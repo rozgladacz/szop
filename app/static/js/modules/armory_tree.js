@@ -1,4 +1,6 @@
 (function initSZOPArmoryTreeModule(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   const textParsing = globalScope.SZOPTextParsing
     || (typeof globalThis !== 'undefined' ? globalThis.SZOPTextParsing : null)
     || {};
@@ -242,7 +244,7 @@ function initArmoryWeaponTree() {
   const createInheritanceLabel = (isOverridden, indentRem = 0) => {
     const label = document.createElement('div');
     label.className = 'text-muted small';
-    label.textContent = isOverridden ? 'Nadpisano' : 'Dziedziczone';
+    label.textContent = isOverridden ? trUI('Nadpisano') : trUI('Dziedziczone');
     if (indentRem > 0) {
       label.style.paddingLeft = `${indentRem}rem`;
     }
@@ -279,7 +281,7 @@ function initArmoryWeaponTree() {
       toggle.type = 'button';
       toggle.className = 'btn btn-link btn-sm p-0 armory-tree-toggle';
       toggle.innerHTML = `<span aria-hidden="true">${isExpanded ? '▾' : '▸'}</span>`;
-      toggle.setAttribute('aria-label', isExpanded ? 'Zwiń potomne' : 'Rozwiń potomne');
+      toggle.setAttribute('aria-label', isExpanded ? 'Zwiń potomne' : trUI('Rozwiń potomne'));
       toggle.disabled = Boolean(filterQuery);
       toggle.addEventListener('click', (event) => {
         event.preventDefault();
@@ -298,7 +300,7 @@ function initArmoryWeaponTree() {
     nameWrapper.appendChild(toggleContainer);
 
     const nameText = document.createElement('span');
-    nameText.textContent = node.name || 'Bez nazwy';
+    nameText.textContent = node.name || trUI('Bez nazwy');
     nameWrapper.appendChild(nameText);
     nameCol.appendChild(nameWrapper);
     if (node.has_parent) {
@@ -345,8 +347,8 @@ function initArmoryWeaponTree() {
       node.abilities.forEach((ability) => {
         const badge = document.createElement('span');
         badge.className = 'badge text-bg-secondary';
-        badge.textContent = ability.label || ability.raw || ability.slug || '-';
-        const title = ability.description || ability.raw || '';
+        badge.textContent = globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityLabel(ability.label || ability.raw || ability.slug || '-') : ability.label || ability.raw || ability.slug || '-';
+        const title = ability.display_description || (globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityDescription(ability.description || '') : ability.description || '');
         if (title) {
           badge.title = title;
         }
@@ -377,21 +379,21 @@ function initArmoryWeaponTree() {
       const editLink = document.createElement('a');
       editLink.className = 'btn btn-outline-secondary';
       editLink.href = node.edit_url;
-      editLink.textContent = 'Edytuj';
+      editLink.textContent = trUI('Edytuj');
       group.appendChild(editLink);
 
       const deleteForm = document.createElement('form');
       deleteForm.method = 'post';
       deleteForm.action = node.delete_url;
       deleteForm.addEventListener('submit', (event) => {
-        if (!confirm('Usunąć broń?')) {
+        if (!confirm(trUI('Usunąć broń?'))) {
           event.preventDefault();
         }
       });
       const deleteButton = document.createElement('button');
       deleteButton.type = 'submit';
       deleteButton.className = 'btn btn-outline-danger';
-      deleteButton.textContent = 'Usuń';
+      deleteButton.textContent = trUI('Usuń');
       deleteForm.appendChild(deleteButton);
       group.appendChild(deleteForm);
 
@@ -399,7 +401,7 @@ function initArmoryWeaponTree() {
     } else {
       const readonly = document.createElement('span');
       readonly.className = 'text-muted small';
-      readonly.textContent = 'Tylko podgląd';
+      readonly.textContent = trUI('Tylko podgląd');
       actionsCol.appendChild(readonly);
     }
 
@@ -436,7 +438,7 @@ function initArmoryWeaponTree() {
     if (!treeData.length) {
       if (filterInput) {
         filterInput.disabled = true;
-        filterInput.placeholder = 'Brak pozycji do filtrowania';
+        filterInput.placeholder = trUI('Brak pozycji do filtrowania');
       }
       if (emptyState) {
         emptyState.classList.remove('d-none');
@@ -448,7 +450,7 @@ function initArmoryWeaponTree() {
     }
     if (filterInput && filterInput.disabled) {
       filterInput.disabled = false;
-      filterInput.placeholder = 'Wpisz nazwę, zdolność lub inną cechę';
+      filterInput.placeholder = trUI('Wpisz nazwę, zdolność lub inną cechę');
     }
     if (filterQuery && visibleCount === 0) {
       if (filterEmptyState) {

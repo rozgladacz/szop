@@ -128,6 +128,7 @@
   </div>
 </div>
 <script>
+  const adminT = text => window.SZOPI18n.t(text);
   const updateStatusEl = document.getElementById("update-status");
   const updateUpdatedAtEl = document.getElementById("update-updated-at");
   const updateLogsEl = document.getElementById("update-logs");
@@ -145,9 +146,9 @@
 
   const formatStatus = (status) => {
     if (!status) {
-      return "Brak danych.";
+      return adminT("Brak danych.");
     }
-    const detail = status.detail || status.error || "Brak szczegółów.";
+    const detail = adminT(status.detail || status.error) || adminT("Brak szczegółów.");
     return `${status.status}: ${detail}`;
   };
 
@@ -157,9 +158,9 @@
     }
     const date = new Date(timestamp);
     if (Number.isNaN(date.getTime())) {
-      return `Ostatnia aktualizacja: ${timestamp}`;
+      return `${adminT("Ostatnia aktualizacja:")} ${timestamp}`;
     }
-    return `Ostatnia aktualizacja: ${date.toLocaleString("pl-PL")}`;
+    return `${adminT("Ostatnia aktualizacja:")} ${date.toLocaleString(window.SZOPI18n?.locale || "pl-PL")}`;
   };
 
   const renderLogs = (logs, targetEl) => {
@@ -170,13 +171,13 @@
     if (!logs || logs.length === 0) {
       const emptyItem = document.createElement("li");
       emptyItem.className = "text-muted";
-      emptyItem.textContent = "Brak logów.";
+      emptyItem.textContent = adminT("Brak logów.");
       targetEl.appendChild(emptyItem);
       return;
     }
     logs.forEach((entry) => {
       const item = document.createElement("li");
-      const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString("pl-PL") : "";
+      const timestamp = entry.timestamp ? new Date(entry.timestamp).toLocaleString(window.SZOPI18n?.locale || "pl-PL") : "";
       const label = timestamp ? `[${timestamp}] ` : "";
       item.textContent = `${label}${entry.message || entry.status}`;
       targetEl.appendChild(item);
@@ -198,7 +199,7 @@
     try {
       const response = await fetch("/admin/update-status");
       if (!response.ok) {
-        throw new Error("Błąd pobierania statusu.");
+        throw new Error(adminT("Błąd pobierania statusu."));
       }
       const data = await response.json();
       updateStatusEl.textContent = formatStatus(data.status);
@@ -207,18 +208,18 @@
       const lastStatus = data.last;
       if (lastUpdateStatusEl) {
         lastUpdateStatusEl.textContent = lastStatus
-          ? `${lastStatus.status || "Brak danych."}: ${lastStatus.stop ? "zakończony" : "w toku"}`
-          : "Brak danych.";
+          ? `${lastStatus.status || adminT("Brak danych.")}: ${lastStatus.stop ? adminT("zakończony") : adminT("w toku")}`
+          : adminT("Brak danych.");
       }
       if (lastUpdateUpdatedAtEl) {
         lastUpdateUpdatedAtEl.textContent = formatTimestamp(lastStatus?.stop || lastStatus?.start);
       }
       renderLogs(normalizeLastLogs(lastStatus), lastUpdateLogsEl);
     } catch (error) {
-      updateStatusEl.textContent = "Nie udało się pobrać statusu.";
+      updateStatusEl.textContent = adminT("Nie udało się pobrać statusu.");
       updateUpdatedAtEl.textContent = "";
       if (lastUpdateStatusEl) {
-        lastUpdateStatusEl.textContent = "Nie udało się pobrać statusu.";
+        lastUpdateStatusEl.textContent = adminT("Nie udało się pobrać statusu.");
       }
       if (lastUpdateUpdatedAtEl) {
         lastUpdateUpdatedAtEl.textContent = "";

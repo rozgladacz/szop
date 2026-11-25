@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}{{ t('Pliki do pobrania') }} - SZOP{% endblock %}
+{% block content %}
+<h1>{{ t('Pliki do pobrania') }}</h1>
+<p>{{ t('Dokumenty po polsku i angielsku.') }}</p>
+<ul class="list-group">
+{% for filename in files %}
+  <li class="list-group-item d-flex justify-content-between align-items-center gap-3">
+    <span class="text-break">{{ filename }}</span>
+    <a class="btn btn-outline-primary" href="{{ url_for('static', path='/docs/' ~ (filename | urlencode)) }}" download>{{ t('Pobierz PDF') }}</a>
+  </li>
+{% else %}
+  <li class="list-group-item">{{ t('Brak plików do pobrania.') }}</li>
+{% endfor %}
+</ul>
+{% endblock %}

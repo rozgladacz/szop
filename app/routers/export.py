@@ -10,7 +10,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.templating import Jinja2Templates
+from ..templating import Jinja2Templates
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -21,6 +21,8 @@ from sqlalchemy.orm import Session, selectinload
 from .. import models
 from ..data.abilities import ABILITY_DEFINITIONS
 from ..db import get_db
+from ..i18n import language_for, translate
+from ..services.ability_presentation import ability_label, export_entries, localize_spells
 from ..paths import TEMPLATES_DIR
 from ..pdf_font_data import PDF_FONT_DATA
 from ..security import get_current_user
@@ -76,6 +78,10 @@ def _army_spell_entries(
         entry = {
             "cost": int(payload.get("cost") or 0),
             "difficulty": int(payload.get("difficulty") or 4),
+            "kind": getattr(spell, "kind", "ability"),
+            "base_label": spell.base_display_label,
+            "custom_name": spell.normalized_custom_name,
+            "value": spell.ability_value,
             "label": label,
             "description": (payload.get("description") or "").strip(),
         }
@@ -511,6 +517,7 @@ def roster_export_list(
 @router.get("/{roster_id}/pdf")
 def roster_pdf(
     roster_id: int,
+    request: Request = None,
     db: Session = Depends(get_db),
     current_user: models.User | None = Depends(get_current_user(optional=True)),
 ):
@@ -527,6 +534,13 @@ def roster_pdf(
     total_cost_rounded = utils.round_points(total_cost)
     spell_entries = _army_spell_entries(roster, roster_items)
     army_rules = _army_rule_labels(getattr(roster, "army", None))
+
+    language = language_for(request) if request is not None else getattr(current_user, 'preferred_language', None) or 'pl'
+    t = lambda text: translate(text, language)
+    if language == 'en':
+        roster_items = export_entries(roster_items, language)
+        army_rules = [ability_label(label, language) for label in army_rules]
+        spell_entries = localize_spells(spell_entries, language)
 
     _ensure_pdf_fonts()
 
@@ -547,16 +561,16 @@ def roster_pdf(
     def draw_page_header() -> None:
         nonlocal y
         pdf.setFont(PDF_BOLD_FONT, 14)
-        pdf.drawString(40, y, f"Rozpiska: {roster.name}")
+        pdf.drawString(40, y, f"{t('Rozpiska')}: {roster.name}")
         y -= 16
         pdf.setFont(PDF_BASE_FONT, 10)
         army_name = roster.army.name if roster.army else "---"
-        pdf.drawString(40, y, f"Armia: {army_name}")
+        pdf.drawString(40, y, f"{t('Armia')}: {army_name}")
         y -= 14
-        pdf.drawString(40, y, f"Suma punktów: {total_cost_rounded} pkt | Wygenerowano: {generated_at.strftime('%Y-%m-%d %H:%M')} UTC")
+        pdf.drawString(40, y, f"{t('Suma punktów:')} {total_cost_rounded} {t('pkt')} | {t('Wygenerowano:')} {generated_at.strftime('%Y-%m-%d %H:%M')} UTC")
         y -= 14
         if army_rules:
-            rule_line = f"Zasady armii: {', '.join(army_rules)}"
+            rule_line = f"{t('Zasady armii')}: {', '.join(army_rules)}"
             for segment in wrap_line(rule_line):
                 pdf.drawString(40, y, segment)
                 y -= 14
@@ -570,35 +584,35 @@ def roster_pdf(
         rounded_cost = item.get("rounded_total_cost")
         if rounded_cost is None:
             rounded_cost = utils.round_points(item.get("total_cost"))
-        header_line = f"{name} × {item.get('count', 0)} (Koszt: {rounded_cost} pkt)"
+        header_line = f"{name} × {item.get('count', 0)} ({t('Koszt')}: {rounded_cost} {t('pkt')})"
         line_specs: list[tuple[str, float, int, str]] = [
             (PDF_BOLD_FONT, 11, 40, header_line)
         ]
         if item.get("custom_name"):
-            base_line = f"Jednostka bazowa: {item.get('unit_name') or '-'}"
+            base_line = f"{t('Jednostka bazowa:')}  {item.get('unit_name') or '-'}"
             line_specs.append((PDF_BASE_FONT, 10, 40, base_line))
         stats_line = (
-            f"Jakość: {item.get('quality', '-')} | "
-            f"Obrona: {item.get('defense', '-')} | "
-            f"Wytrzymałość: {item.get('toughness', '-')}"
+            f"{t('Jakość')}: {item.get('quality', '-')} | "
+            f"{t('Obrona')}: {item.get('defense', '-')} | "
+            f"{t('Wytrzymałość')}: {item.get('toughness', '-')}"
         )
         line_specs.append((PDF_BASE_FONT, 10, 40, stats_line))
         ability_sections: list[tuple[str, list[str]]] = []
         if item.get("passive_labels"):
-            ability_sections.append(("Pasywne", item["passive_labels"]))
+            ability_sections.append((t("Pasywne"), item["passive_labels"]))
         if item.get("active_labels"):
-            ability_sections.append(("Aktywne", item["active_labels"]))
+            ability_sections.append((t("Aktywne"), item["active_labels"]))
         if item.get("aura_labels"):
-            ability_sections.append(("Aury", item["aura_labels"]))
+            ability_sections.append((t("Aury"), item["aura_labels"]))
 
         if ability_sections:
-            line_specs.append((PDF_BASE_FONT, 10, 40, "Zdolności:"))
+            line_specs.append((PDF_BASE_FONT, 10, 40, t("Zdolności:")))
             for label, values in ability_sections:
                 base = f"{label}: {', '.join(values)}"
                 for segment in wrap_line(base):
                     line_specs.append((PDF_BASE_FONT, 10, 50, segment))
 
-        line_specs.append((PDF_BASE_FONT, 10, 40, "Uzbrojenie:"))
+        line_specs.append((PDF_BASE_FONT, 10, 40, t("Uzbrojenie:")))
 
         for weapon in item.get("weapon_details", []):
             weapon_name = weapon.get("name") or "Broń"
@@ -608,8 +622,8 @@ def roster_pdf(
             ap_value = weapon.get("ap") if weapon.get("ap") is not None else "-"
             traits = weapon.get("traits") or "-"
             weapon_line = (
-                f"- {weapon_name} × {count} | Z: {range_value} | "
-                f"Ataki: {attacks} | AP: {ap_value} | Cechy: {traits}"
+                f"- {weapon_name} × {count} | {t('Z:')} {range_value} | "
+                f"{t('Ataki')}: {attacks} | AP: {ap_value} | {t('Cechy')}: {traits}"
             )
             for segment in wrap_line(weapon_line):
                 line_specs.append((PDF_BASE_FONT, 10, 50, segment))
@@ -633,7 +647,7 @@ def roster_pdf(
             y = height - 50
             draw_page_header()
         pdf.setFont(PDF_BOLD_FONT, 12)
-        pdf.drawString(margin, y, "Lista zaklęć")
+        pdf.drawString(margin, y, t("Lista zaklęć"))
         y -= 16
         pdf.setFont(PDF_BASE_FONT, 10)
         for spell in spell_entries:

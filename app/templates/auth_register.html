@@ -16,13 +16,28 @@
         <div class="alert alert-danger">{{ error }}</div>
         {% endif %}
         <form method="post">
+          {% if form_token %}
+          <input type="hidden" name="form_token" value="{{ form_token }}" />
+          <div hidden>
+            <label for="website">Strona internetowa</label>
+            <input id="website" name="website" tabindex="-1" autocomplete="off" />
+          </div>
+          {% if requires_code %}
+          <div class="mb-3">
+            <label class="form-label" for="access_code">Kod dostępu</label>
+            <input class="form-control" id="access_code" name="access_code" autocomplete="off" required />
+          </div>
+          {% endif %}
+          <p class="text-muted">Wybierz pseudonim i hasło do konta testowego.</p>
+          {% endif %}
           <div class="mb-3">
             <label class="form-label" for="username">Nazwa użytkownika</label>
-            <input class="form-control" id="username" name="username" required />
+            <input class="form-control" id="username" name="username" autocomplete="username" maxlength="64" required />
           </div>
           <div class="mb-3">
             <label class="form-label" for="password">Hasło</label>
-            <input class="form-control" id="password" name="password" type="password" required />
+            <input class="form-control" id="password" name="password" type="password" autocomplete="new-password"
+                   {% if password_min %}minlength="{{ password_min }}" maxlength="{{ password_max }}"{% endif %} required />
           </div>
           <button class="btn btn-success" type="submit">Utwórz konto</button>
         </form>

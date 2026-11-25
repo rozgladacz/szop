@@ -56,15 +56,15 @@
           {% set has_content = False %}
           {% if entry.passive_labels %}
             {% set has_content = True %}
-            <strong>Pasywne:</strong> {{ entry.passive_labels | join(', ') }}<br />
+            <strong>Pasywne:</strong> {{ entry.passive_labels | map('ability') | join(', ') }}<br />
           {% endif %}
           {% if entry.active_labels %}
             {% set has_content = True %}
-            <strong>Aktywne:</strong> {{ entry.active_labels | join(', ') }}<br />
+            <strong>Aktywne:</strong> {{ entry.active_labels | map('ability') | join(', ') }}<br />
           {% endif %}
           {% if entry.aura_labels %}
             {% set has_content = True %}
-            <strong>Aury:</strong> {{ entry.aura_labels | join(', ') }}
+            <strong>Aury:</strong> {{ entry.aura_labels | map('ability') | join(', ') }}
           {% endif %}
           {% if not has_content %}-{% endif %}
         </td>
@@ -73,7 +73,7 @@
             {% for weapon in entry.weapon_details %}
               <div class="weapon-block">
                 <strong>{{ weapon.name }}</strong> × {{ weapon.count }}<br />
-                <span class="weapon-meta">Z: {{ weapon.range or '-' }} | Ataki: {{ weapon.attacks or '-' }} | AP: {{ weapon.ap if weapon.ap is not none else '-' }} | Cechy: {{ weapon.traits or '-' }}</span>
+                <span class="weapon-meta">Z: {{ weapon.range or '-' }} | Ataki: {{ weapon.attacks or '-' }} | AP: {{ weapon.ap if weapon.ap is not none else '-' }} | Cechy: {{ (weapon.traits or '-') | ability }}</span>
               </div>
             {% endfor %}
           {% else %}
@@ -96,7 +96,7 @@
   <h2 style="margin-top: 24px;">Lista zaklęć</h2>
   <ul>
     {% for spell in spell_entries %}
-    <li><strong>{{ spell.cost }}</strong> żet. ({{ spell.difficulty }}+): {{ spell.label }}</li>
+    <li><strong>{{ spell.cost }}</strong> żet. ({{ spell.difficulty }}+): {{ spell_entry_label(spell) }}</li>
     {% endfor %}
   </ul>
   {% endif %}

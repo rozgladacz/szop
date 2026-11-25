@@ -44,6 +44,8 @@ def _make_weapon(
     return SimpleNamespace(
         id=weapon_id,
         armory_id=armory_id,
+        army_id=None,
+        parent=None,
         effective_range=range_value,
         range=None,
         range_category=None,

@@ -88,12 +88,12 @@
               </div>
             </td>
             <td>
-              <div class="fw-semibold">{{ spell.display_label or spell.base_display_label or '—' }}</div>
+              <div class="fw-semibold">{{ spell_display(spell) }}</div>
               {% if spell.normalized_custom_name and spell.base_display_label %}
-              <div class="text-muted small">Bazowo: {{ spell.base_display_label }}</div>
+              <div class="text-muted small">Bazowo: {{ spell.base_display_label if spell.kind == 'weapon' else (spell.base_display_label | ability) }}</div>
               {% endif %}
               {% if spell.description %}
-              <div class="text-muted small">{{ spell.description }}</div>
+              <div class="text-muted small">{{ spell_description(spell) }}</div>
               {% endif %}
             </td>
             <td>
@@ -146,7 +146,7 @@
                 <form
                   method="post"
                   action="/armies/{{ army.id }}/spells/{{ spell.id }}/delete"
-                  onsubmit="return confirm('Usunąć wybraną moc?');"
+                  onsubmit="return confirm({{ t("Usunąć wybraną moc?") | tojson | forceescape }});"
                 >
                   <button class="btn btn-outline-danger btn-sm" type="submit">Usuń</button>
                 </form>
@@ -202,7 +202,7 @@
                 data-value-kind="{{ ability.value_kind or '' }}"
                 {% if editing_spell and ability.ability_id == editing_spell.ability_id %}selected{% endif %}
               >
-                {{ ability.display_name }}
+                {{ (ability.display_name) | ability }}
               </option>
               {% endfor %}
             </select>
@@ -253,7 +253,7 @@
         {% if passive_definitions %}
         <datalist id="army-spell-passive-abilities">
           {% for ability in passive_definitions %}
-          <option value="{{ ability.display_name }}">{{ ability.description }}</option>
+          <option value="{{ (ability.display_name) | ability }}">{{ (ability.display_description or ability.description) | ability_description }}</option>
           {% endfor %}
         </datalist>
         {% endif %}

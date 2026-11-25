@@ -4,17 +4,17 @@ from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from .. import models
+from .. import config, models
 from ..db import get_db
 from ..paths import TEMPLATES_DIR
 from ..security import get_current_user, hash_password, is_valid_username
 from ..services import backup as backup_service
-from ..services import db_restore
+from ..services import db_restore, public_access
 from ..services.settings import get_registration_open, set_registration_open
+from ..templating import Jinja2Templates
 
 router = APIRouter(prefix="/users", tags=["users"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
@@ -88,6 +88,7 @@ def list_users(
     error_key = request.query_params.get("error")
     error_map = {
         "self-delete": "Nie można usunąć własnego konta.",
+        "public-delete-disabled": "Usuwanie kont jest wyłączone w trybie publicznym, aby zachować prywatność danych.",
         "missing-user": "Użytkownik nie istnieje.",
         "restore-error": detail or "Przywracanie bazy danych nie powiodło się.",
     }
@@ -137,12 +138,14 @@ def change_password(
         raise HTTPException(status_code=404)
 
     password = new_password.strip()
-    if len(password) < 4:
+    public_mode = bool(config.PUBLIC_ORIGIN)
+    valid_password = public_access.valid_password(password) if public_mode else len(password) >= 4
+    if not valid_password:
         return _render_user_list(
             request,
             db,
             current_user,
-            error="Hasło musi zawierać co najmniej 4 znaki.",
+            error=public_access.PASSWORD_ERROR if public_mode else "Hasło musi zawierać co najmniej 4 znaki.",
             error_user_id=user_id,
             status_code=400,
         )
@@ -169,6 +172,9 @@ def delete_user(
             url=f"/users?error=self-delete&target={user_id}",
             status_code=303,
         )
+
+    if config.PUBLIC_ORIGIN:
+        return RedirectResponse(url="/users?error=public-delete-disabled", status_code=303)
 
     _release_owned_resources(db, target_user.id)
     db.delete(target_user)
@@ -201,10 +207,12 @@ def create_user(
             create_error="Nazwa użytkownika może zawierać tylko litery, cyfry, spację oraz znaki . _ -",
             status_code=400,
         )
-    if len(password) < 4:
+    public_mode = bool(config.PUBLIC_ORIGIN)
+    valid_password = public_access.valid_password(password) if public_mode else len(password) >= 4
+    if not valid_password:
         return _render_user_list(
             request, db, current_user,
-            create_error="Hasło musi mieć co najmniej 4 znaki.",
+            create_error=public_access.PASSWORD_ERROR if public_mode else "Hasło musi mieć co najmniej 4 znaki.",
             status_code=400,
         )
 

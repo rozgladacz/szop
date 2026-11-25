@@ -11,6 +11,8 @@
 
 | Wątek (link) | Cel (1 zdanie) | Pliki zablokowane | Status |
 |---|---|---|---|
+| [HANDOFF_publiczne-testy](docs/handoffs/HANDOFF_publiczne-testy.md) | Rejestracja testowa bez e-maila i audyt przed publicznym linkiem | auth, konfiguracja publiczna, nowe tabele sesji i limitów | Gotowe lokalnie, publikacja wstrzymana |
+| [HANDOFF_wersja-angielska](docs/handoffs/HANDOFF_wersja-angielska.md) | Lokalizacja PL/EN | i18n, użytkownik, szablony, JS, eksporty | Ready for archive |
 | [HANDOFF_rozmiar-podstawki](docs/handoffs/HANDOFF_rozmiar-podstawki.md) | `Unit.base_size` (mała/średnia/duża) + zniżka kosztu broni wręcz dla modeli-nadmiaru (wpływa na klasyfikację Wojownik/Strzelec) + „Walczące modele" w Stanie Bitewnym | `app/models.py`, `app/services/costs/{_engine,crowding,quote,role_totals}.py`, `app/routers/{rosters,export,armies}.py`, `app/templates/{unit_form,roster_battle_state}.html`, `app/static/js/{battle_state,payload_adapters}.js` | In progress |
 
 
@@ -51,6 +53,18 @@
 ### 2026-11-25 — liczebnosc-desktop (archived)
 - W widoku komputerowym liczebność zmieniają natywne strzałki w polu. Na ekranach dotykowych dostępne są duże przyciski −/+.
 - Weryfikacja w Edge objęła tryb klasyczny, kolekcję i proxy oraz automatyczny zapis.
+
+### 2026-11-18 — standard-tlumaczen (archived)
+- Ustanowiono `docs/translation-glossary.md` jako oficjalne źródło terminologii wszystkich kolejnych przekładów (Caster/Casters); uzupełniono teren, karty i rozróżnienia techniczne. Dodano krótkie `docs/translation-guidelines.md` z zasadami pracy nad wersją źródła, zachowania mechaniki, liczb, znaków i układu oraz checklistą kontroli; oba pliki w indeksie docs.
+- Linki i unikalność kluczy sprawdzone, simplify/review dokumentacji oraz diff check bez uwag, pytest **370 passed**. Wyłącznie dokumentacja; bez zmian DOCX, aplikacji i bazy, bez commitu i publikacji.
+
+### 2026-11-18 — zasady-v1-en (archived)
+- Utworzono `app/static/docs/SZOP_v1_EN.docx` z jawnego źródła `SZOP_v1.docx`: pełne 626 niepustych akapitów, 7 tabel i 6 stron, z właściwymi dla v1 wzorami wyceny i terminem Caster. Słownik stałych odpowiedników w `docs/translation-glossary.md`, dodany do indeksu docs.
+- Korekta Wizard/Wizards → Caster/Casters w kopii `SZOP_v2_EN_Caster.docx`; poprzedni v2 EN otwarty i zablokowany w Wordzie, bez nadpisania. Zachowano aktualne poprawki użytkownika. Kontrola wszystkich stron, kompletności, liczb, znaków i struktury pakietów; simplify/review i call-site check (brak zmian funkcji), pytest **370 passed**, diff check czysty. Źródła, aplikacja i baza bez zmian; bez commitu i publikacji.
+
+### 2026-11-17 — zasady-angielskie (archived)
+- Utworzono `app/static/docs/SZOP_v2_EN.docx`: pełne angielskie tłumaczenie lokalnego `SZOP_v2.docx`, 619 niepustych akapitów i 7 tabel, zachowane liczby, mechanika i układ A4 z dwiema kolumnami. Źródło bez zmian; dopasowano łamanie tekstu i nagłówki tabel do języka angielskiego.
+- Weryfikacja: niezależny przegląd przekładu, kompletność slotów i wartości, zachowanie pozostałych części OOXML, natywny render Word i kontrola wszystkich 6 stron, `pytest -q` **370 passed**, `git diff --check` czysty. Bez zmian aplikacji, commitu i publikacji.
 
 ### 2026-11-04 — wydanie-poprawek (archived)
 - Poprawki zapisano jako `5950224`, opublikowano najpierw na Rozwoj, potem na main przez fast-forward po scaleniu historii (`3996723`) zachowującym aktualny SZOP, zgodnie z potwierdzeniem usera o oddzieleniu OPOS. Bez force push; stary main pozostaje w historii. Usunięto z indeksu 32 pliki cache Pythona.

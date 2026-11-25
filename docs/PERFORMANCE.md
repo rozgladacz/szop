@@ -153,3 +153,19 @@ przywróci poprzedni stan: ~14 s na zapis rostera 11-oddziałowego.
 3. **Regresja > 20%** — zatrzymaj się, zdiagnozuj cProfile, opisz w `HANDOFF.md`.
 4. **Nowy `roster_unit_role_totals` caller** = oceń, czy potrzebuje
    `include_item_costs=True`. Domyślnie `False`.
+
+## 2026-11-18 — lokalizacja PL/EN
+
+Kopia rzeczywistej bazy, bez zmiany źródłowej bazy. A/B w jednym procesie:
+formatery katalogu z HEAD vs nowe formatery domyślne PL; 7 pomiarów po rozgrzewce,
+naprzemienna kolejność. Payloady quote identyczne.
+
+| Rozpiska | Full przed / po (ms) | Badge przed / po (ms) | Dodatkowe SELECT |
+|---|---|---|---|
+| 10 | 149,54 / 149,60 (+0,0%) | 11,29 / 10,84 (−4,0%) | 0 |
+| 13 | 143,34 / 140,29 (−2,1%) | 10,31 / 10,53 (+2,2%) | 0 |
+
+Pełny HTTP widoku rozpiski, mediana 5 pomiarów po rozgrzewce:
+10: PL 64,4 ms / EN 69,0 ms (+7,1%); 13: PL 65,4 ms / EN 72,4 ms (+10,7%).
+Po 29 SELECT w obu językach. Słownik JS osobno, cache z wersją treści,
+0 zapytań DB; polska prezentacja omija kopiowanie struktur payloadu.

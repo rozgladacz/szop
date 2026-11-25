@@ -5,7 +5,6 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -15,6 +14,7 @@ from ..paths import TEMPLATES_DIR
 from ..security import get_current_user
 from ..services import collection_match
 from ..services.costs import ability_link_loadout_key
+from ..templating import Jinja2Templates
 
 router = APIRouter(prefix="/collections", tags=["collections"])
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))

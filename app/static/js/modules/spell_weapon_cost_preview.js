@@ -1,4 +1,6 @@
 (function initSZOPSpellWeaponCostPreviewModule(globalScope) {
+ const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
 // ============================================================
 // SECTION: SPELL WEAPON COST PREVIEW
 // initSpellWeaponCostPreview — podgląd kosztu broni zaklęcia.
@@ -115,7 +117,7 @@ function initSpellWeaponCostPreview() {
         const label = document.createElement('label');
         label.className = 'form-check-label text-nowrap';
         label.setAttribute('for', id);
-        label.textContent = `${d}+ — ${tokens[d]} żet.`;
+        label.textContent = `${d}+ — ${tokens[d]} ${trUI('żet.')}`;
         wrap.appendChild(radio);
         wrap.appendChild(label);
         optionsEl.appendChild(wrap);

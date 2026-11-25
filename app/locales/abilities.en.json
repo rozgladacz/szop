@@ -1,0 +1,362 @@
+{
+  "bohater": {
+    "name": "Hero",
+    "description": "May join any unit. If this gives only part of the unit abilities that affect the whole unit, the opponent chooses whether they are active. May take Regroup tests for the whole unit, but the unit uses the Defence chosen by the opponent. Cannot be returned to play. Its size is treated as though it had half its Toughness."
+  },
+  "ochroniarz": {
+    "name": "Bodyguard",
+    "description": "Hero. The unit may use your Defence. The controlling player cannot defeat other models in the unit."
+  },
+  "zasadzka": {
+    "name": "Ambush",
+    "description": "Does not deploy before the game. During the first round, instead of activating normally, deploy anywhere more than 2” from an enemy. Does not control objectives in the first round."
+  },
+  "zwiadowca": {
+    "name": "Scout",
+    "description": "If you have not deployed any units without Scout or Aircraft before this unit, you may move this unit 6” once instead of deploying the next unit."
+  },
+  "odwody": {
+    "name": "Reinforcements",
+    "description": "Before deployment, divide units with this ability without Scout, Ambush or Reserve into two groups. The opponent chooses one group; its units gain Reserve."
+  },
+  "szybki": {
+    "name": "Fast",
+    "description": "Moves +2”."
+  },
+  "wolny": {
+    "name": "Slow",
+    "description": "Moves -2”."
+  },
+  "harcownik": {
+    "name": "Skirmisher",
+    "description": "May move 2” before Healing."
+  },
+  "instynkt": {
+    "name": "Instinct",
+    "description": "Always moves towards the nearest enemy and always attacks the nearest enemy."
+  },
+  "nieruchomy": {
+    "name": "Immobile",
+    "description": "Cannot move after deployment and cannot become Pinned. When charging, may attack units within 3”."
+  },
+  "zwinny": {
+    "name": "Agile",
+    "description": "Ignores difficult and dangerous terrain."
+  },
+  "niezgrabny": {
+    "name": "Clumsy",
+    "description": "Takes an additional difficult terrain test in difficult and dangerous terrain."
+  },
+  "skok": {
+    "name": "Jump",
+    "description": "Ignores terrain and units while moving. Is still considered to pass through its destination point."
+  },
+  "samolot": {
+    "name": "Aircraft",
+    "description": "You cannot activate a unit without this ability while you have an unactivated unit with it. Its first action must be a Move of 30–36” in a straight line. Cannot control objectives, Charge, or be targeted by Charges or Indirect weapons. Does not block movement or line of sight for other units. Has cover, and units shooting at it have -12” range. Tall, Jump, Agile. If Pinned, discards that state and takes a difficult terrain test."
+  },
+  "wysoki": {
+    "name": "Tall",
+    "description": "Checks line of sight as though on elevated terrain."
+  },
+  "masywny": {
+    "name": "Sections",
+    "description": "The whole unit is represented by one model with separate sections, which may take wounds beyond its maximum."
+  },
+  "nieustraszony": {
+    "name": "Fearless",
+    "description": "Does not take Regroup tests while the unit is above half its starting Toughness."
+  },
+  "niestrudzony": {
+    "name": "Tireless",
+    "description": "May perform the same action multiple times in an activation."
+  },
+  "ucieczka": {
+    "name": "Escape",
+    "description": "Before becoming Pinned or Exhausted, may make a Move."
+  },
+  "stracency": {
+    "name": "Fanatics",
+    "description": "After failing a Regroup test, take a difficult terrain test instead of the normal consequences."
+  },
+  "furia": {
+    "name": "Fury",
+    "description": "When charging, natural rolls of 6 generate an additional normal hit."
+  },
+  "przygotowanie": {
+    "name": "Planning",
+    "description": "If Prepared, gains +1 to hit rolls."
+  },
+  "kontra": {
+    "name": "Counter",
+    "description": "May counterattack before the charging unit makes its attacks; that unit is then no longer considered to be charging."
+  },
+  "regeneracja": {
+    "name": "Regeneration",
+    "description": "Before Regrouping, recover d3 wounds, up to the number lost during this activation."
+  },
+  "dywersant": {
+    "name": "Saboteur",
+    "description": "If you are closer to the opponent’s deployment zone than the target unit is, before attacks are made the opponent chooses whether to double their number or become Pinned."
+  },
+  "szpica": {
+    "name": "Vanguard",
+    "description": "When attacking units that have not started their activation this turn, natural rolls of 6 generate an additional normal hit."
+  },
+  "delikatny": {
+    "name": "Fragile",
+    "description": "A natural roll of 6 on a Defence test is not an automatic success."
+  },
+  "niewrazliwy": {
+    "name": "Resilient",
+    "description": "A natural roll of 5 on a Defence test is an automatic success."
+  },
+  "maskowanie": {
+    "name": "Camouflage",
+    "description": "Has cover when more than 2” from enemies."
+  },
+  "waagh": {
+    "name": "Waagh!",
+    "description": "If your unit is below half its starting Toughness and there is no other friendly unit with this ability within 12”, your attacks have -1 AP and attacks against you have +1 AP."
+  },
+  "ostrozny": {
+    "name": "Cautious",
+    "description": "If there are no enemies within 12” of this model’s unit, gains +1 to hit rolls."
+  },
+  "tarcza": {
+    "name": "Shield",
+    "description": "Gains +1 to Defence tests while not Pinned."
+  },
+  "okopany": {
+    "name": "Entrenched",
+    "description": "Gains +1 to Defence tests while benefiting from terrain cover."
+  },
+  "zdobywca": {
+    "name": "Conqueror",
+    "description": "May ignore enemy units without this ability when checking mission objectives."
+  },
+  "transport": {
+    "name": "Transport",
+    "description": "Friendly units with a combined Toughness of up to X may be transported by this unit. If the unit contains several models with Transport(X), add their capacities together. As an action, a transported unit may deploy: all its models must be placed within 2” of any models of the transporting unit. It is then no longer transported. A unit with all its models within 2” of the transporting unit may, as an action, be removed from the battlefield and become transported if there is sufficient capacity. If some models of the transporting unit are destroyed, transported units may temporarily exceed its capacity. If its last model is destroyed, excess wounds pass to the transported unit with the most models; all transported units must then immediately deploy as above and become Exhausted. If the transporting unit makes a double move or the initial Aircraft move, all transported units become Pinned. Transported units deploy with their transport in one activation and must have the same abilities affecting Deployment."
+  },
+  "platforma_strzelecka": {
+    "name": "Firing Platform",
+    "description": "As Transport(X), but units may Shoot as though at the transport’s position."
+  },
+  "otwarty_transport": {
+    "name": "Open Transport",
+    "description": "As Firing Platform(X), but units may become Exhausted to attack in melee together with the transport. They may also be attacked as though at the transport’s position and in cover."
+  },
+  "straznik": {
+    "name": "Sentry",
+    "description": "May Interrupt during the opponent’s activation to Shoot. Your unit then becomes Exhausted."
+  },
+  "bastion": {
+    "name": "Bastion",
+    "description": "Does not become Exhausted after counterattacking."
+  },
+  "parowanie": {
+    "name": "Parry",
+    "description": "Has cover in melee."
+  },
+  "zemsta": {
+    "name": "Revenge",
+    "description": "Do not allocate wounds immediately; instead, allocate them before Healing during this unit’s activation. The opponent allocates wounds at the normal time, but cannot use wounds allocated earlier."
+  },
+  "dobrze_strzela": {
+    "name": "Good Shot",
+    "description": "Makes ranged attacks with Quality 4."
+  },
+  "zle_strzela": {
+    "name": "Bad Shot",
+    "description": "Makes ranged attacks with Quality 5."
+  },
+  "cierpliwy": {
+    "name": "Patient",
+    "description": "Gains +1 to Defence rolls if it has not started its activation this round."
+  },
+  "odrodzenie": {
+    "name": "Regeneration",
+    "description": "At the end of your activation, recover half the unit’s lost Toughness points, rounding up. You may use them to return defeated models from this unit to play if they can be legally deployed."
+  },
+  "rezerwa": {
+    "name": "Reserve",
+    "description": "As Ambush, but within 12” of your table edge. If the deployment rules do not specify your edge, the opponent chooses it at the start of the first round."
+  },
+  "wrak": {
+    "name": "Wreck",
+    "description": "When defeated, the terrain you occupy counts as dangerous and difficult and provides cover for the rest of the battle."
+  },
+  "roj": {
+    "name": "Swarm",
+    "description": "When this unit is targeted, ignore the weapon’s Deadly ability, but Blast(X) weapons always work at full effectiveness."
+  },
+  "zwrot": {
+    "name": "Facing",
+    "description": "At the end of a move during its own activation, chooses which way it faces; it cannot change this outside its own activation. Its position defines four overlapping 180° zones: front, rear, left and right. If an attacking unit is entirely in the rear zone, this unit has -1 Defence. At least half its weapons must be assigned to a zone and may only attack targets entirely within that zone. The remaining weapons must attack a single unit."
+  },
+  "mistrzostwo": {
+    "name": "Mastery",
+    "description": "Each of your weapons has ability X."
+  },
+  "mag": {
+    "name": "Caster",
+    "description": "Gains X power tokens at the start of each round, up to a maximum of 2X. Casters in a unit share their tokens. The army has a shared list of 6 abilities or attacks. When you could use one of them, spend its assigned number of tokens and take a test at its assigned difficulty. On a success, resolve its effect. One attempt per spell per activation."
+  },
+  "przekaznik": {
+    "name": "Relay",
+    "description": "Once per round, when a Caster within 12” casts a spell, they may cast it from your position with +1 to the roll."
+  },
+  "koordynacja": {
+    "name": "Coordination",
+    "description": "The opponent skips their next activation."
+  },
+  "latanie": {
+    "name": "Patching Up",
+    "description": "At the end of your activation, a unit within 2” recovers d3 wounds."
+  },
+  "mobilizacja": {
+    "name": "Mobilise",
+    "description": "A unit within 12” is no longer Pinned."
+  },
+  "przepowiednia": {
+    "name": "Prophecy",
+    "description": "Choose the enemy unit that will activate next, if possible."
+  },
+  "presja": {
+    "name": "Pressure",
+    "description": "A unit within 12” is no longer Exhausted."
+  },
+  "usprawnienie": {
+    "name": "Enhancement",
+    "description": "Interrupt so that a unit within 12” increases the AP of all its weapons by 1 until the end of the activation."
+  },
+  "rozkaz": {
+    "name": "Command",
+    "description": "Once per round, you may Interrupt so that a unit within 12” has, or does not have, ability X from that point until the end of the activation."
+  },
+  "klatwa": {
+    "name": "Curse",
+    "description": "Once per round, you may Interrupt so that an enemy unit within 12” has, or does not have, ability X from that point until the end of the activation."
+  },
+  "oznaczenie": {
+    "name": "Mark",
+    "description": "Once per round, you may Interrupt so that a friendly unit attacking a unit within 12” has, or does not have, ability X from that point until the end of the activation."
+  },
+  "demoralizacja": {
+    "name": "Demoralisation",
+    "description": "Once per round, you may Interrupt so that an enemy unit within 12” takes a Regroup test."
+  },
+  "aura": {
+    "name": "Aura",
+    "description": "Grant the selected ability to units in range. The 12” range variant is twice as strong."
+  },
+  "radio": {
+    "name": "Radio",
+    "description": "When a model in your unit gives a Command, it may choose a unit within 24” that also has Radio."
+  },
+  "ociezalosc": {
+    "name": "Sluggishness",
+    "description": "Terrain within 12” counts as difficult for enemy units."
+  },
+  "spaczenie": {
+    "name": "Corruption",
+    "description": "Terrain within 12” counts as dangerous for enemy units."
+  },
+  "ratownik": {
+    "name": "Medic",
+    "description": "During an activation in which your unit has taken wounds, heal one wound. At the end of its activation, if the unit has two Medics and is Prepared, heal one wound. Not cumulative."
+  },
+  "meczennik": {
+    "name": "Martyr",
+    "description": "During your activation, you may be eliminated so that your unit recovers wounds equal to your Toughness."
+  },
+  "rozprysk": {
+    "name": "Blast",
+    "description": "Before Defence tests, multiply the number of hits by X, up to the number of models in the target unit."
+  },
+  "zabojczy": {
+    "name": "Deadly",
+    "description": "Inflict X wounds instead of one, up to the lowest Toughness in the unit if the defender allocates them, or the highest if the attacker allocates them."
+  },
+  "niebezposredni": {
+    "name": "Indirect",
+    "description": "Does not require line of sight."
+  },
+  "artyleria": {
+    "name": "Artillery",
+    "description": "Every unit within 12” of a friendly unit is in range of this weapon."
+  },
+  "impet": {
+    "name": "Impact",
+    "description": "Gains +1 AP when charging."
+  },
+  "namierzanie": {
+    "name": "Targeting",
+    "description": "Ignores cover and negative modifiers to hit rolls and range."
+  },
+  "zuzywalny": {
+    "name": "Expendable",
+    "description": "May only be used once per game. Limit of one weapon type with this ability per unit."
+  },
+  "niezawodny": {
+    "name": "Reliable",
+    "description": "Attacks with Quality 2+."
+  },
+  "nieporeczny": {
+    "name": "Unwieldy",
+    "description": "Cannot attack units within 12”."
+  },
+  "rozrywajacy": {
+    "name": "Twin",
+    "description": "Natural rolls of 6 to hit generate an additional normal hit."
+  },
+  "precyzyjny": {
+    "name": "Precise",
+    "description": "The attacker allocates wounds."
+  },
+  "przebijajaca": {
+    "name": "Piercing",
+    "description": "Each hit inflicts wounds equal to the result of the Defence die."
+  },
+  "szturmowa": {
+    "name": "Assault",
+    "description": "May be used to make melee attacks."
+  },
+  "finezja": {
+    "name": "Finesse",
+    "description": "You may treat the result of a successful hit roll as the result of a Defence roll."
+  },
+  "brutalny": {
+    "name": "Brutal",
+    "description": "There are no automatic successes on Defence tests."
+  },
+  "podkrecenie": {
+    "name": "Overdrive",
+    "description": "Makes twice as many attacks in the last round."
+  },
+  "burzaca": {
+    "name": "Breakthrough",
+    "description": "Makes twice as many attacks if the target is within range of a mission objective."
+  },
+  "unik": {
+    "name": "Predictable",
+    "description": "Makes twice as many attacks if the target is Pinned."
+  },
+  "sterowany": {
+    "name": "Guided",
+    "description": "Before attacking with this weapon, for each associated marker, move it within weapon range of its current position, or attack from its position and discard it. Then make a normal attack or place a new marker within range. You may have two markers on the battlefield, shared by the whole unit. Place one marker after deployment."
+  },
+  "porazenie": {
+    "name": "Shock",
+    "description": "When determining who won melee combat, wounds inflicted by this weapon count twice."
+  },
+  "zguba": {
+    "name": "Doom",
+    "description": "Count wounds received from such weapons. Models defeated by allocating the first wounds up to that number cannot return to play."
+  },
+  "dezintegracja": {
+    "name": "Disintegration",
+    "description": "Natural rolls of 6 to hit inflict wounds without a Defence roll."
+  }
+}

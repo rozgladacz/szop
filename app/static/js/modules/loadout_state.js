@@ -1,4 +1,6 @@
 (function initSZOPLoadoutStateModule(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   const rosterRendering = globalScope.SZOPRosterRendering || (typeof globalThis !== 'undefined' ? globalThis.SZOPRosterRendering : null) || {};
   const formatPoints = rosterRendering.formatPoints || globalScope.formatPoints || function formatPointsFallback(value) {
     return value !== undefined && value !== null ? String(value) : '0';
@@ -403,7 +405,8 @@ function ensurePassiveStateEntries(map, entries) {
 }
 
 function formatAbilityDisplayLabel(baseLabel, customName) {
-  const base = typeof baseLabel === 'string' ? baseLabel.trim() : '';
+  let base = typeof baseLabel === 'string' ? baseLabel.trim() : '';
+  if (globalScope.SZOPI18n) base = globalScope.SZOPI18n.abilityLabel(base);
   const custom = typeof customName === 'string' ? customName.trim() : '';
   if (custom && base) {
     return `${custom} [${base}]`;
@@ -420,10 +423,10 @@ function normalizeLoadoutMode(mode) {
 
 function formatLoadoutCostLabel(costValue, mode) {
   if (costValue === undefined || costValue === null) {
-    return 'wliczone';
+    return trUI('wliczone');
   }
   const normalizedMode = normalizeLoadoutMode(mode);
-  const suffix = normalizedMode === 'per_model' ? 'pkt/model' : 'pkt';
+  const suffix = normalizedMode === 'per_model' ? 'pkt/model' : trUI('pkt');
   return `+${formatPoints(costValue)} ${suffix}`;
 }
 
@@ -434,8 +437,8 @@ function createModeIndicator(mode) {
   }
   const indicator = document.createElement('span');
   indicator.className = 'badge rounded-pill text-bg-light border roster-mode-indicator';
-  indicator.textContent = 'Tryb: pkt/model';
-  indicator.title = 'Wartość dotyczy pojedynczego modelu.';
+  indicator.textContent = trUI('Tryb: pkt/model');
+  indicator.title = trUI('Wartość dotyczy pojedynczego modelu.');
   return indicator;
 }
 

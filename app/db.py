@@ -345,6 +345,10 @@ def _migrate_schema() -> None:
     with engine.begin() as connection:
         inspector = inspect(connection)
         table_names = set(inspector.get_table_names())
+        if "users" in table_names:
+            user_columns = {column["name"] for column in inspector.get_columns("users")}
+            if "preferred_language" not in user_columns:
+                connection.execute(text("ALTER TABLE users ADD COLUMN preferred_language VARCHAR(2)"))
         if "armories" not in table_names:
             return
 
@@ -513,13 +517,50 @@ def _migrate_schema() -> None:
 
 
 
+def _ensure_admin(session) -> None:
+    import os
+
+    from sqlalchemy import select
+
+    from . import config, models
+    from .security import hash_password, verify_password
+    from .services.public_access import valid_password
+
+    if config.PUBLIC_ORIGIN:
+        admins = list(session.scalars(select(models.User).where(models.User.is_admin.is_(True))))
+        needs_password = not admins
+        for admin in admins:
+            if verify_password("admin", admin.password_hash):
+                if admin.username != "admin":
+                    raise RuntimeError("Change the default password on all administrator accounts before publishing")
+                needs_password = True
+        if not needs_password:
+            return
+        password = os.getenv("INITIAL_ADMIN_PASSWORD", "")
+        if not valid_password(password):
+            raise RuntimeError("Set INITIAL_ADMIN_PASSWORD to a new administrator password of 15–128 characters")
+        admin = session.scalar(select(models.User).where(models.User.username == "admin"))
+        if admin is not None and not admin.is_admin:
+            raise RuntimeError("The username 'admin' is already in use by a non-administrator")
+        if admin is None:
+            admin = models.User(username="admin", is_admin=True)
+            session.add(admin)
+        admin.password_hash = hash_password(password)
+        return
+
+    admin = session.scalar(select(models.User).where(models.User.username == "admin"))
+    if admin is None:
+        session.add(models.User(username="admin", password_hash=hash_password("admin"), is_admin=True))
+        logger.warning("Default admin user created with username 'admin' and password 'admin'. Please change it.")
+
+
 def init_db() -> None:
     from sqlalchemy import select, update
 
-    from . import models
-    from .security import hash_password
+    from . import config, models
     from .services import ability_registry, costs
 
+    config.validate_public_config()
     db_path = Path(DB_URL.split("///")[-1]) if DB_URL.startswith("sqlite") else None
     first_start = db_path is not None and not db_path.exists()
 
@@ -535,15 +576,7 @@ def init_db() -> None:
     _migrate_schema()
 
     with SessionLocal() as session:
-        admin = session.execute(select(models.User).where(models.User.username == "admin")).scalar_one_or_none()
-        if admin is None:
-            admin = models.User(
-                username="admin",
-                password_hash=hash_password("admin"),
-                is_admin=True,
-            )
-            session.add(admin)
-            logger.warning("Default admin user created with username 'admin' and password 'admin'. Please change it.")
+        _ensure_admin(session)
 
         ruleset = session.execute(select(models.RuleSet).where(models.RuleSet.name == "Default")).scalar_one_or_none()
         if ruleset is None:

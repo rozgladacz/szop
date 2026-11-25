@@ -60,7 +60,7 @@
       </div>
       {% if can_delete %}
       <hr class="my-4" />
-      <form method="post" action="/rosters/{{ roster.id }}/delete" onsubmit="return confirm('Usunąć rozpiskę? Tej operacji nie można cofnąć.');">
+      <form method="post" action="/rosters/{{ roster.id }}/delete" onsubmit="return confirm({{ t("Usunąć rozpiskę? Tej operacji nie można cofnąć.") | tojson | forceescape }});">
         <button class="btn btn-outline-danger" type="submit">Usuń rozpiskę</button>
       </form>
       {% endif %}
@@ -131,13 +131,13 @@
                   {% set aura_defaults = entry.aura_items | selectattr('default_count') | list %}
                   <div class="d-flex flex-wrap gap-1 mt-2">
                     {% for ability in passive_defaults %}
-                    <span class="badge text-bg-secondary" title="{{ ability.description }}">{{ ability.display_label or ability.label }}</span>
+                    <span class="badge text-bg-secondary" title="{{ (ability.display_description or ability.description) | ability_description }}">{{ (ability.display_label or ability.label) | ability }}</span>
                     {% endfor %}
                     {% for ability in active_defaults %}
-                    <span class="badge text-bg-info text-dark" title="{{ ability.description }}">{{ ability.label }}</span>
+                    <span class="badge text-bg-info text-dark" title="{{ (ability.display_description or ability.description) | ability_description }}">{{ (ability.label) | ability }}</span>
                     {% endfor %}
                     {% for ability in aura_defaults %}
-                    <span class="badge text-bg-warning text-dark" title="{{ ability.description }}">{{ ability.label }}</span>
+                    <span class="badge text-bg-warning text-dark" title="{{ (ability.display_description or ability.description) | ability_description }}">{{ (ability.label) | ability }}</span>
                     {% endfor %}
                     {% if not passive_defaults and not active_defaults and not aura_defaults %}
                     <span class="text-muted small">Brak dodatkowych zdolności</span>
@@ -255,7 +255,7 @@
                   {% else %}
                   {% set display_label = base_label %}
                   {% endif %}
-                  <span class="badge text-bg-secondary" title="{{ ability.description }}">{{ display_label }}</span>
+                  <span class="badge text-bg-secondary" title="{{ (ability.display_description or ability.description) | ability_description }}">{{ (display_label) | ability }}</span>
                   {% endfor %}
                   {% for ability in selected_actives %}
                   {% set base_label = ability.label or ability.raw or ability.slug %}
@@ -264,7 +264,7 @@
                   {% else %}
                   {% set display_label = base_label %}
                   {% endif %}
-                  <span class="badge text-bg-info text-dark" title="{{ ability.description }}">{{ display_label }}{% if ability.count and ability.count|int > 1 %} ×{{ ability.count }}{% endif %}</span>
+                  <span class="badge text-bg-info text-dark" title="{{ (ability.display_description or ability.description) | ability_description }}">{{ (display_label) | ability }}{% if ability.count and ability.count|int > 1 %} ×{{ ability.count }}{% endif %}</span>
                   {% endfor %}
                   {% for ability in selected_auras %}
                   {% set base_label = ability.label or ability.raw or ability.slug %}
@@ -273,7 +273,7 @@
                   {% else %}
                   {% set display_label = base_label %}
                   {% endif %}
-                  <span class="badge text-bg-warning text-dark" title="{{ ability.description }}">{{ display_label }}{% if ability.count and ability.count|int > 1 %} ×{{ ability.count }}{% endif %}</span>
+                  <span class="badge text-bg-warning text-dark" title="{{ (ability.display_description or ability.description) | ability_description }}">{{ (display_label) | ability }}{% if ability.count and ability.count|int > 1 %} ×{{ ability.count }}{% endif %}</span>
                   {% endfor %}
                   {% if not selected_passives and not selected_actives and not selected_auras %}
                   <span class="text-muted small">Brak dodatkowych zdolności</span>

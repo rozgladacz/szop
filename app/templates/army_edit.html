@@ -75,7 +75,7 @@
           </form>
           {% if can_delete %}
           <hr class="my-4" />
-          <form method="post" action="/armies/{{ army.id }}/delete" onsubmit="return confirm('Usunąć armię? Tej operacji nie można cofnąć.');">
+          <form method="post" action="/armies/{{ army.id }}/delete" onsubmit="return confirm({{ t("Usunąć armię? Tej operacji nie można cofnąć.") | tojson | forceescape }});">
             <button class="btn btn-outline-danger" type="submit">Usuń armię</button>
           </form>
           {% endif %}
@@ -129,7 +129,7 @@
     {% if army_rules %}
     <div class="d-flex flex-wrap gap-1">
       {% for rule in army_rules %}
-      <span class="badge text-bg-secondary" title="{{ rule.description }}">{{ rule.label or rule.slug }}</span>
+      <span class="badge text-bg-secondary" title="{{ rule.description | ability_description }}">{{ (rule.label or rule.slug) | ability }}</span>
       {% endfor %}
     </div>
     {% else %}
@@ -195,8 +195,8 @@
               {% else %}
               {% set display_label = base_label %}
               {% endif %}
-              <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1" title="{{ ability.description }}">
-                <span>{{ display_label }}</span>
+              <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1" title="{{ (ability.display_description or ability.description) | ability_description }}">
+                <span>{{ (display_label) | ability }}</span>
                 {% if ability.is_default %}
                 <span class="small text-uppercase ms-1">Domyślna</span>
                 {% endif %}
@@ -221,8 +221,8 @@
               {% else %}
               {% set display_label = base_label %}
               {% endif %}
-              <span class="badge text-bg-info text-dark d-inline-flex align-items-center gap-1" title="{{ ability.description }}">
-                <span>{{ display_label }}</span>
+              <span class="badge text-bg-info text-dark d-inline-flex align-items-center gap-1" title="{{ (ability.display_description or ability.description) | ability_description }}">
+                <span>{{ (display_label) | ability }}</span>
                 {% if ability.is_default %}
                 <span class="small text-uppercase ms-1">Domyślna</span>
                 {% endif %}
@@ -247,8 +247,8 @@
               {% else %}
               {% set display_label = base_label %}
               {% endif %}
-              <span class="badge text-bg-warning text-dark d-inline-flex align-items-center gap-1" title="{{ ability.description }}">
-                <span>{{ display_label }}</span>
+              <span class="badge text-bg-warning text-dark d-inline-flex align-items-center gap-1" title="{{ (ability.display_description or ability.description) | ability_description }}">
+                <span>{{ (display_label) | ability }}</span>
                 {% if ability.is_default %}
                 <span class="small text-uppercase ms-1">Domyślna</span>
                 {% endif %}
@@ -278,8 +278,8 @@
           {% else %}
           {% set display_label = base_label %}
           {% endif %}
-          <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1" title="{{ ability.description }}">
-            <span>{{ display_label }}</span>
+          <span class="badge text-bg-secondary d-inline-flex align-items-center gap-1" title="{{ (ability.display_description or ability.description) | ability_description }}">
+            <span>{{ (display_label) | ability }}</span>
             {% if ability.is_default %}
             <span class="small text-uppercase ms-1">Domyślna</span>
             {% endif %}
@@ -303,8 +303,8 @@
           {% else %}
           {% set display_label = base_label %}
           {% endif %}
-          <span class="badge text-bg-info text-dark d-inline-flex align-items-center gap-1" title="{{ ability.description }}">
-            <span>{{ display_label }}</span>
+          <span class="badge text-bg-info text-dark d-inline-flex align-items-center gap-1" title="{{ (ability.display_description or ability.description) | ability_description }}">
+            <span>{{ (display_label) | ability }}</span>
             {% if ability.is_default %}
             <span class="small text-uppercase ms-1">Domyślna</span>
             {% endif %}
@@ -328,8 +328,8 @@
           {% else %}
           {% set display_label = base_label %}
           {% endif %}
-          <span class="badge text-bg-warning text-dark d-inline-flex align-items-center gap-1" title="{{ ability.description }}">
-            <span>{{ display_label }}</span>
+          <span class="badge text-bg-warning text-dark d-inline-flex align-items-center gap-1" title="{{ (ability.display_description or ability.description) | ability_description }}">
+            <span>{{ (display_label) | ability }}</span>
             {% if ability.is_default %}
             <span class="small text-uppercase ms-1">Domyślna</span>
             {% endif %}
@@ -354,7 +354,7 @@
         {% if can_edit %}
         <div class="btn-group btn-group-sm">
           <a class="btn btn-outline-secondary" href="/armies/{{ army.id }}/units/{{ item.instance.id }}/edit">Edytuj</a>
-          <form method="post" action="/armies/{{ army.id }}/units/{{ item.instance.id }}/delete" onsubmit="return confirm('Usunąć jednostkę?');">
+          <form method="post" action="/armies/{{ army.id }}/units/{{ item.instance.id }}/delete" onsubmit="return confirm({{ t("Usunąć jednostkę?") | tojson | forceescape }});">
             <button class="btn btn-outline-danger" type="submit">Usuń</button>
           </form>
         </div>
@@ -519,9 +519,9 @@
                     value="{{ ability.slug }}"
                     data-requires-value="{{ 'true' if ability.requires_value else 'false' }}"
                     data-value-type="{{ ability.value_type or '' }}"
-                    title="{{ ability.description }}"
+                    title="{{ (ability.display_description or ability.description) | ability_description }}"
                   >
-                    {{ ability.display_name }}
+                    {{ (ability.display_name) | ability }}
                   </option>
                   {% endfor %}
                 </select>
@@ -562,9 +562,9 @@
                     data-requires-value="{{ 'true' if ability.requires_value else 'false' }}"
                     data-value-type="{{ ability.value_type or '' }}"
                     data-ability-id="{{ ability.ability_id }}"
-                    title="{{ ability.description }}"
+                    title="{{ (ability.display_description or ability.description) | ability_description }}"
                   >
-                    {{ ability.display_name }}
+                    {{ (ability.display_name) | ability }}
                   </option>
                   {% endfor %}
                 </select>
@@ -605,9 +605,9 @@
                     data-requires-value="{{ 'true' if ability.requires_value else 'false' }}"
                     data-value-type="{{ ability.value_type or '' }}"
                     data-ability-id="{{ ability.ability_id }}"
-                    title="{{ ability.description }}"
+                    title="{{ (ability.display_description or ability.description) | ability_description }}"
                   >
-                    {{ ability.display_name }}
+                    {{ (ability.display_name) | ability }}
                   </option>
                   {% endfor %}
                 </select>

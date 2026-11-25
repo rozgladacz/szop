@@ -3,6 +3,7 @@ import os
 import secrets
 import stat
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from dotenv import load_dotenv
 
@@ -75,6 +76,34 @@ TRUSTED_HOSTS = [
 ] or ["*"]
 
 SESSION_HTTPS_ONLY = os.getenv("SESSION_HTTPS_ONLY", "false").lower() in {"1", "true", "yes"}
+PUBLIC_ORIGIN = os.getenv("PUBLIC_ORIGIN", "").strip()
+PUBLIC_REGISTRATION_CODE = os.getenv("PUBLIC_REGISTRATION_CODE", "")
+LOCAL_PUBLIC_PREVIEW = os.getenv("LOCAL_PUBLIC_PREVIEW", "false").lower() in {"1", "true", "yes"}
+LOCAL_PREVIEW_HOST = "127.0.0.1"
+
+
+def validate_public_config() -> None:
+    if not PUBLIC_ORIGIN and not LOCAL_PUBLIC_PREVIEW:
+        return
+    try:
+        origin = urlsplit(PUBLIC_ORIGIN)
+        port = origin.port
+    except ValueError as exc:
+        raise RuntimeError("Invalid PUBLIC_ORIGIN") from exc
+    if (not origin.hostname or origin.username is not None
+            or PUBLIC_ORIGIN != f"{origin.scheme}://{origin.netloc.lower()}"
+            or any(ch.isspace() for ch in origin.netloc)):
+        raise RuntimeError("PUBLIC_ORIGIN must be a canonical origin without a trailing slash")
+    if LOCAL_PUBLIC_PREVIEW:
+        if (origin.scheme != "http" or origin.hostname != LOCAL_PREVIEW_HOST or not port or port == 80
+                or DEBUG or SESSION_HTTPS_ONLY or TRUSTED_HOSTS != [LOCAL_PREVIEW_HOST]):
+            raise RuntimeError("LOCAL_PUBLIC_PREVIEW requires HTTP on 127.0.0.1 with an explicit port")
+    elif origin.scheme != "https" or port == 443:
+        raise RuntimeError("PUBLIC_ORIGIN requires HTTPS without the default port in the URL")
+    elif DEBUG or not SESSION_HTTPS_ONLY or origin.hostname not in TRUSTED_HOSTS or "*" in TRUSTED_HOSTS:
+        raise RuntimeError("PUBLIC_ORIGIN requires DEBUG off, secure cookies and the public host in TRUSTED_HOSTS")
+    if not DB_URL.startswith(("sqlite://", "sqlite+")):
+        raise RuntimeError("Public registration requires SQLite")
 
 
 def _load_json_list(env_key: str, default: list) -> list:

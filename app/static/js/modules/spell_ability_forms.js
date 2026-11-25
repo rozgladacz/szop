@@ -1,4 +1,9 @@
 (function initSZOPSpellAbilityFormsModule(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
+  const ruleLabelUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityLabel(text) : text;
+  const ruleDescriptionUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityDescription(text) : text;
+
 // ============================================================
 // SECTION: SPELL ABILITY FORMS
 // initSpellAbilityForms — formularze zdolności zaklęć
@@ -56,7 +61,7 @@ function initSpellAbilityForms() {
         const label = document.createElement('label');
         label.className = 'form-check-label text-nowrap';
         label.setAttribute('for', id);
-        label.textContent = `${d}+ — ${tokens[d]} żet.`;
+        label.textContent = `${d}+ — ${tokens[d]} ${trUI('żet.')}`;
         wrap.appendChild(radio);
         wrap.appendChild(label);
         difficultyOptionsEl.appendChild(wrap);
@@ -182,16 +187,16 @@ function initSpellAbilityForms() {
       valueSelect.innerHTML = '';
       const placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = labelText ? `Wybierz (${labelText})` : 'Wybierz wartość';
+      placeholder.textContent = labelText ? `${trUI('Wybierz')} (${labelText})` : trUI('Wybierz wartość');
       valueSelect.appendChild(placeholder);
       (choices || []).forEach((choice) => {
         if (choice && typeof choice === 'object') {
           const option = document.createElement('option');
           option.value = choice.value ?? '';
-          option.textContent = choice.label ?? choice.value ?? '';
+          option.textContent = choice.display_label || ruleLabelUI(choice.label ?? choice.value ?? '');
           if (choice.description) {
             option.dataset.description = choice.description;
-            option.title = choice.description;
+            option.title = choice.display_description || ruleDescriptionUI(choice.description);
           }
           valueSelect.appendChild(option);
         } else {
@@ -218,7 +223,7 @@ function initSpellAbilityForms() {
       valueContainer.classList.remove('d-none');
       valueInput.classList.remove('d-none');
       valueInput.disabled = false;
-      valueInput.placeholder = labelText ? `Wartość (${labelText})` : 'Wartość';
+      valueInput.placeholder = labelText ? `${trUI('Wartość')} (${labelText})` : trUI('Wartość');
       valueInput.type = valueType === 'number' ? 'number' : 'text';
       setValueInputList(valueKind || '');
       if (valueSelect) {
@@ -279,7 +284,7 @@ function initSpellAbilityForms() {
       }
       const labelText = option.dataset.valueLabel || '';
       if (valueLabelEl) {
-        valueLabelEl.textContent = labelText ? `Wartość (${labelText})` : 'Wartość';
+        valueLabelEl.textContent = labelText ? `${trUI('Wartość')} (${labelText})` : trUI('Wartość');
       }
       const valueKind = option.dataset.valueKind || '';
       const choices = parseChoiceDataset(option);

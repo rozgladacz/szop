@@ -8,6 +8,10 @@ ENV APP_VERSION=${APP_VERSION}
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
+# Ogranicz równoległe obciążenie. Logowanie dostępu konfiguruje brama.
+ENV UVICORN_LIMIT_CONCURRENCY=64 \
+    UVICORN_ACCESS_LOG=false
+
 WORKDIR /app
 
 # gosu — bezpieczne drop-privilege w entrypoint (nie wymaga powłoki setuid)

@@ -1,4 +1,9 @@
 (function initSZOPAbilityPickerModule(globalScope) {
+  const ruleLabelUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityLabel(text) : text;
+  const ruleDescriptionUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityDescription(text) : text;
+
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   const rosterRendering = globalScope.SZOPRosterRendering
     || (typeof globalThis !== 'undefined' ? globalThis.SZOPRosterRendering : null)
     || {};
@@ -100,10 +105,10 @@ function initAbilityPicker(root) {
 
   function descriptionFor(item) {
     if (item.description) {
-      return item.description;
+      return item.display_description || ruleDescriptionUI(item.description);
     }
     const definition = getDefinition(item.slug);
-    return definition ? definition.description : '';
+    return definition ? definition.display_description || ruleDescriptionUI(definition.description) : '';
   }
 
   function normalizeEntry(entry) {
@@ -136,6 +141,7 @@ function initAbilityPicker(root) {
       is_default: isDefault,
       is_mandatory: isMandatory,
       description: entry.description || descriptionFor({ slug }),
+      display_description: entry.display_description || ruleDescriptionUI(entry.description || descriptionFor({ slug })),
       cost: entry.cost !== undefined ? entry.cost : undefined,
     };
   }
@@ -259,7 +265,7 @@ function initAbilityPicker(root) {
     if (!items.length) {
       const empty = document.createElement('p');
       empty.className = 'text-muted mb-0';
-      empty.textContent = 'Brak wybranych zdolności.';
+      empty.textContent = trUI('Brak wybranych zdolności.');
       listEl.appendChild(empty);
       updateSelectOptionVisibility();
       return;
@@ -293,7 +299,7 @@ function initAbilityPicker(root) {
       if (itemCost !== null && itemCost !== undefined) {
         const costSpan = document.createElement('span');
         costSpan.className = 'text-muted small';
-        costSpan.textContent = `+${formatPoints(itemCost)} pkt`;
+        costSpan.textContent = `+${formatPoints(itemCost)} ${trUI('pkt')}`;
         nameRow.appendChild(costSpan);
       }
 
@@ -305,7 +311,7 @@ function initAbilityPicker(root) {
         nameInput.type = 'text';
         nameInput.className = 'form-control form-control-sm';
         nameInput.id = inputId;
-        nameInput.placeholder = 'Nazwa własna (opcjonalnie)';
+        nameInput.placeholder = trUI('Nazwa własna (opcjonalnie)');
         nameInput.maxLength = ABILITY_NAME_MAX_LENGTH;
         nameInput.value = item.custom_name || '';
         const applyValue = (value) => {
@@ -366,7 +372,7 @@ function initAbilityPicker(root) {
 
         const selectLabel = document.createElement('label');
         selectLabel.className = 'form-label small mb-0';
-        selectLabel.textContent = 'Dołącz do:';
+        selectLabel.textContent = trUI('Dołącz do:');
         const selectId = `ability-hero-attach-${index}-${Math.random().toString(16).slice(2)}`;
         selectLabel.setAttribute('for', selectId);
         heroWrapper.appendChild(selectLabel);
@@ -376,14 +382,14 @@ function initAbilityPicker(root) {
         selectEl.id = selectId;
         const noneOpt = document.createElement('option');
         noneOpt.value = '';
-        noneOpt.textContent = '— (samodzielny)';
+        noneOpt.textContent = trUI('— (samodzielny)');
         selectEl.appendChild(noneOpt);
         attachable
           .filter((unit) => unit && unit.id && String(unit.id) !== String(heroRosterUnitId))
           .forEach((unit) => {
             const opt = document.createElement('option');
             opt.value = String(unit.id);
-            opt.textContent = unit.label || `Oddział ${unit.id}`;
+            opt.textContent = unit.label || `${trUI('Oddział')} ${unit.id}`;
             selectEl.appendChild(opt);
           });
         selectEl.value = currentParentId || '';
@@ -395,7 +401,7 @@ function initAbilityPicker(root) {
 
         const submitAttachChange = (newParentId) => {
           if (!_heroRosterId || !heroRosterUnitId) {
-            errorBox.textContent = 'Nie można ustalić oddziału do dołączenia.';
+            errorBox.textContent = trUI('Nie można ustalić oddziału do dołączenia.');
             errorBox.classList.remove('d-none');
             return;
           }
@@ -433,7 +439,7 @@ function initAbilityPicker(root) {
             })
             .catch((err) => {
               selectEl.disabled = false;
-              errorBox.textContent = `Nie udało się zmienić dołączenia: ${err && err.message ? err.message : err}`;
+              errorBox.textContent = `${trUI('Nie udało się zmienić dołączenia:')} ${err && err.message ? err.message : err}`;
               errorBox.classList.remove('d-none');
             });
         };
@@ -485,7 +491,7 @@ function initAbilityPicker(root) {
           const defaultLabel = document.createElement('label');
           defaultLabel.className = 'form-check-label small';
           defaultLabel.setAttribute('for', defaultInput.id);
-          defaultLabel.textContent = 'Domyślna';
+          defaultLabel.textContent = trUI('Domyślna');
           defaultWrapper.appendChild(defaultInput);
           defaultWrapper.appendChild(defaultLabel);
           toggleWrapper.appendChild(defaultWrapper);
@@ -512,7 +518,7 @@ function initAbilityPicker(root) {
           const mandatoryLabel = document.createElement('label');
           mandatoryLabel.className = 'form-check-label small';
           mandatoryLabel.setAttribute('for', mandatoryInput.id);
-          mandatoryLabel.textContent = 'Obowiązkowe';
+          mandatoryLabel.textContent = trUI('Obowiązkowe');
           mandatoryWrapper.appendChild(mandatoryInput);
           mandatoryWrapper.appendChild(mandatoryLabel);
           toggleWrapper.appendChild(mandatoryWrapper);
@@ -539,7 +545,7 @@ function initAbilityPicker(root) {
       moveUpBtn.type = 'button';
       moveUpBtn.className = 'btn btn-outline-secondary btn-sm';
       moveUpBtn.textContent = '↑';
-      moveUpBtn.setAttribute('aria-label', 'Przesuń w górę');
+      moveUpBtn.setAttribute('aria-label', trUI('Przesuń w górę'));
       moveUpBtn.disabled = index === 0;
       moveUpBtn.addEventListener('click', (event) => {
         event.preventDefault();
@@ -549,7 +555,7 @@ function initAbilityPicker(root) {
       moveDownBtn.type = 'button';
       moveDownBtn.className = 'btn btn-outline-secondary btn-sm';
       moveDownBtn.textContent = '↓';
-      moveDownBtn.setAttribute('aria-label', 'Przesuń w dół');
+      moveDownBtn.setAttribute('aria-label', trUI('Przesuń w dół'));
       moveDownBtn.disabled = index === items.length - 1;
       moveDownBtn.addEventListener('click', (event) => {
         event.preventDefault();
@@ -562,7 +568,7 @@ function initAbilityPicker(root) {
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'btn btn-outline-danger btn-sm';
-      removeBtn.textContent = 'Usuń';
+      removeBtn.textContent = trUI('Usuń');
       removeBtn.addEventListener('click', () => {
         items.splice(index, 1);
         updateHidden();
@@ -658,7 +664,7 @@ function initAbilityPicker(root) {
     valueSelect.innerHTML = '';
     const placeholder = document.createElement('option');
     placeholder.value = '';
-    placeholder.textContent = definition.value_label ? `Wybierz (${definition.value_label})` : 'Wybierz wartość';
+    placeholder.textContent = definition.value_label ? `${trUI('Wybierz')} (${definition.value_label})` : trUI('Wybierz wartość');
     valueSelect.appendChild(placeholder);
     (definition.value_choices || []).forEach((choice) => {
       const option = document.createElement('option');
@@ -667,9 +673,10 @@ function initAbilityPicker(root) {
         option.textContent = choice;
       } else if (choice && typeof choice === 'object') {
         option.value = choice.value ?? '';
-        option.textContent = choice.label || choice.value || '';
+        option.dataset.canonicalLabel = choice.label || choice.value || '';
+        option.textContent = choice.display_label || ruleLabelUI(choice.label || choice.value || '');
         if (choice.description) {
-          option.title = choice.description;
+          option.title = choice.display_description || ruleDescriptionUI(choice.description);
         }
       }
       valueSelect.appendChild(option);
@@ -698,7 +705,7 @@ function initAbilityPicker(root) {
         }
         if (valueInput) {
           valueInput.classList.remove('d-none');
-          valueInput.placeholder = definition.value_label ? `Wartość (${definition.value_label})` : 'Wartość';
+          valueInput.placeholder = definition.value_label ? `${trUI('Wartość')} (${definition.value_label})` : trUI('Wartość');
           valueInput.type = definition.value_type === 'number' ? 'number' : 'text';
         }
       }
@@ -740,7 +747,7 @@ function initAbilityPicker(root) {
       if (definition.value_choices && definition.value_choices.length > 0 && valueSelect) {
         rawValue = valueSelect.value || '';
         const option = valueSelect.selectedOptions[0];
-        choiceLabel = option ? option.textContent.trim() : '';
+        choiceLabel = option ? (option.dataset.canonicalLabel || '').trim() : '';
         if (!rawValue) {
           return;
         }

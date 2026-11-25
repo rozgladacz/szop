@@ -1,5 +1,7 @@
 (function () {
   "use strict";
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
 
   const STORAGE_PREFIX = "opr.battleState.";
   const MELEE_ASSAULT_TRAITS = new Set(["szturmowy", "szturmowa", "assault"]);
@@ -63,11 +65,11 @@
     const descs = window._abilityDescriptions;
     const desc = (descs && (descs[text] || descs[traitBaseName(text)])) || "";
     const s = document.createElement("span");
-    s.textContent = text + (suffix || "");
+    s.textContent = (window.SZOPI18n ? window.SZOPI18n.abilityLabel(text) : text) + (suffix || "");
     if (desc) {
       s.dataset.bsToggle = "tooltip";
       s.dataset.bsPlacement = "top";
-      s.dataset.bsTitle = desc;
+      s.dataset.bsTitle = window.SZOPI18n ? window.SZOPI18n.abilityDescription(desc) : desc;
     }
     return s;
   }
@@ -413,7 +415,7 @@
 
     const label = document.createElement("span");
     label.className = "small text-muted ms-1";
-    label.textContent = "Walczące modele";
+    label.textContent = trUI("Walczące modele");
 
     row.appendChild(counterGroup(dec, valueSpan, totalSpan, inc));
     row.appendChild(label);
@@ -507,7 +509,7 @@
         const dec = mkBtn(elimMode ? "btn-outline-danger" : "btn-outline-secondary",
           elimMode ? "✕" : "−", elimMode ? "Wyeliminuj (trwale)" : "Wycofaj", "modelMinus");
         const inc = mkBtn("btn-outline-secondary",
-          elimMode ? "↺" : "+", elimMode ? "Cofnij eliminację" : "Przywróć", "modelPlus");
+          elimMode ? "↺" : "+", elimMode ? "Cofnij eliminację" : trUI("Przywróć"), "modelPlus");
 
         const valueSpan = document.createElement("span");
         valueSpan.className = "counter-value";
@@ -549,7 +551,7 @@
       const cbLabel = document.createElement("label");
       cbLabel.className = "form-check-label";
       cbLabel.setAttribute("for", cb.id);
-      cbLabel.textContent = "Eliminacja";
+      cbLabel.textContent = trUI("Eliminacja");
       modeRow.appendChild(cb);
       modeRow.appendChild(cbLabel);
       list.appendChild(modeRow);
@@ -600,13 +602,13 @@
         labelText.className = "weapon-label ms-2";
         labelText.style.cursor = "pointer";
         const isPrimary = effectiveIsPrimary(w, entry.idx, unitState);
-        labelText.textContent = (isPrimary ? "⚑ " : "") + (w.name || "Broń");
+        labelText.textContent = (isPrimary ? "⚑ " : "") + (w.name || trUI("Broń"));
         labelText.dataset.weaponPrimaryToggle = entry.key;
-        const rangeDisp = parseRangeInt(w) || "wręcz";
+        const rangeDisp = parseRangeInt(w) || trUI("wręcz");
         const trDisp = w.traits || "-";
         labelText.dataset.bsToggle = "tooltip";
         labelText.dataset.bsPlacement = "top";
-        labelText.dataset.bsTitle = "Ataki: " + (w.attacks ?? "-") + " | Zasięg: " + rangeDisp + " | AP: " + (w.ap ?? "-") + " | Cechy: " + trDisp;
+        labelText.dataset.bsTitle = trUI("Ataki:") + " " + (w.attacks ?? "-") + " | " + trUI("Zasięg:") + " " + rangeDisp + " | AP: " + (w.ap ?? "-") + " | " + trUI("Cechy:") + " " + trDisp;
 
         // Licznik trzymamy razem (nowrap) — nie rozbija się, gdy etykieta wieloliniowa.
         labelWrap.appendChild(counterGroup(dec, valueSpan, initialSpan, inc));
@@ -618,7 +620,7 @@
         const attacks = w.attacks == null ? "-" : w.attacks;
         const ap = w.ap == null ? "-" : w.ap;
         stats.appendChild(document.createTextNode(
-          "Ataki: " + attacks + " | Zasięg: " + (range || "wręcz") + " | AP: " + ap + " | Cechy: "
+          trUI("Ataki:") + " " + attacks + " | " + trUI("Zasięg:") + " " + (range || trUI("wręcz")) + " | AP: " + ap + " | " + trUI("Cechy:") + " "
         ));
         const traits = traitsList(w);
         if (traits.length === 0) {
@@ -656,7 +658,7 @@
     if (attackFiltered.length === 0) {
       const empty = document.createElement("div");
       empty.className = "text-muted small";
-      empty.textContent = "Brak dostępnych ataków w tym trybie.";
+      empty.textContent = trUI("Brak dostępnych ataków w tym trybie.");
       summary.appendChild(empty);
       return;
     }
@@ -666,7 +668,7 @@
       row.className = "attack-summary-row";
       const total = document.createElement("span");
       total.className = "attack-summary-total";
-      total.textContent = formatAttacks(g.totalAttacks) + " ataków";
+      total.textContent = formatAttacks(g.totalAttacks) + trUI(" ataków");
       const meta = document.createElement("span");
       meta.className = "small";
       meta.appendChild(document.createTextNode("AP" + g.ap + " | "));
@@ -1211,7 +1213,7 @@
     const resetBtn = document.querySelector("[data-battle-reset]");
     if (resetBtn) {
       resetBtn.addEventListener("click", function () {
-        if (!window.confirm("Zakończyć starcie? Stan bitewny zostanie usunięty i przywrócony do wartości początkowych.")) return;
+        if (!window.confirm(trUI("Zakończyć starcie? Stan bitewny zostanie usunięty i przywrócony do wartości początkowych."))) return;
         clearState(rosterId);
         state = { units: {}, groups: {}, round: 1 };
         cards.forEach((card) => {

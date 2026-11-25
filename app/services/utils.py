@@ -201,6 +201,19 @@ def _build_weapon_tree(
     return tree, ordered_weapons
 
 
+def is_armory_catalog_weapon(weapon: models.Weapon) -> bool:
+    """Keep army spells and any legacy variants of them out of the catalogue."""
+    current = weapon
+    visited: set[int] = set()
+    while current is not None:
+        identifier = id(current)
+        if current.army_id is not None or identifier in visited:
+            return False
+        visited.add(identifier)
+        current = current.parent
+    return True
+
+
 def load_armory_weapons(db: Session, armory: models.Armory) -> ArmoryWeaponCollection:
     ensure_armory_variant_sync(db, armory)
 
@@ -235,7 +248,8 @@ def load_armory_weapons(db: Session, armory: models.Armory) -> ArmoryWeaponColle
         .all()
     )
 
-    tree, ordered_weapons = _build_weapon_tree(armory, weapons)
+    catalog_weapons = [weapon for weapon in weapons if is_armory_catalog_weapon(weapon)]
+    tree, ordered_weapons = _build_weapon_tree(armory, catalog_weapons)
     return ArmoryWeaponCollection(items=ordered_weapons, tree=tree)
 
 
@@ -455,6 +469,7 @@ def _find_local_parent_candidate_for_variant(
                 select(models.Weapon)
                 .where(
                     models.Weapon.armory_id == armory.id,
+                    models.Weapon.army_id.is_(None),
                     models.Weapon.parent_id == current_id,
                 )
                 .order_by(models.Weapon.id.asc())
@@ -543,7 +558,10 @@ def ensure_armory_variant_sync(
     parent_weapon_ids = {
         weapon_id
         for weapon_id in db.execute(
-            select(models.Weapon.id).where(models.Weapon.armory_id == armory.parent_id)
+            select(models.Weapon.id).where(
+                models.Weapon.armory_id == armory.parent_id,
+                models.Weapon.army_id.is_(None),
+            )
         ).scalars()
     }
     existing_parent_ids = {
@@ -551,6 +569,7 @@ def ensure_armory_variant_sync(
         for parent_id in db.execute(
             select(models.Weapon.parent_id).where(
                 models.Weapon.armory_id == armory.id,
+                models.Weapon.army_id.is_(None),
                 models.Weapon.parent_id.is_not(None),
             )
         )
@@ -577,7 +596,7 @@ def ensure_armory_variant_sync(
     created_new_clones = False
     for parent_weapon_id in missing_ids:
         parent_weapon = parent_weapons_map.get(parent_weapon_id)
-        if not parent_weapon:
+        if not parent_weapon or not is_armory_catalog_weapon(parent_weapon):
             continue
         clone = models.Weapon(
             armory=armory,
@@ -612,6 +631,7 @@ def ensure_armory_variant_sync(
             select(models.Weapon)
             .where(
                 models.Weapon.armory_id == armory.id,
+                models.Weapon.army_id.is_(None),
                 models.Weapon.parent_id.is_not(None),
             )
             .options(
@@ -641,6 +661,8 @@ def ensure_armory_variant_sync(
             continue
 
         if not parent:
+            continue
+        if not is_armory_catalog_weapon(weapon):
             continue
 
         if parent.armory_id != armory.id and parent.armory_id != armory.parent_id:

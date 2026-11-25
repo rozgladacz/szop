@@ -7,15 +7,9 @@ services:
     # Brak sekcji "ports" — publiczny dostęp zapewnia osobny stos brama.
     volumes:
       - ${SZOP_DATA_DIR:-./data}:/app/data
-      # Docker socket — pozwala panelowi admina na "docker compose pull + up".
-      # Usuń jeśli nie chcesz możliwości aktualizacji przez UI.
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      UPDATE_COMPOSE_FILE: /srv/szop/docker-compose.yml
-      UPDATE_SERVICE_NAME: szop-app
     env_file:
       - path: .env
-        required: false   # .env jest opcjonalny — wszystko ma rozsądne defaulty
+        required: false   # Przy publicznym dostępie skonfiguruj .env według DEPLOY.md.
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request; urllib.request.urlopen('http://localhost:8000/auth/login')"]

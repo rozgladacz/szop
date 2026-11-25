@@ -1,4 +1,6 @@
 (function () {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   "use strict";
 
   const root = document.getElementById("army-units-root");
@@ -45,7 +47,7 @@
 
   function sendReorder() {
     const payload = collectPayload();
-    setStatus("Zapisuję…");
+    setStatus(trUI("Zapisuję…"));
     return fetch(`/armies/${armyId}/reorder`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
@@ -63,7 +65,7 @@
       })
       .catch((err) => {
         console.error("[army_groups] reorder failed", err);
-        setStatus("Błąd zapisu — przeładowuję…", true);
+        setStatus(trUI("Błąd zapisu — przeładowuję…"), true);
         setTimeout(() => window.location.reload(), 1200);
       });
   }
@@ -77,7 +79,7 @@
         placeholder = document.createElement("tr");
         placeholder.className = "empty-placeholder";
         placeholder.innerHTML =
-          '<td colspan="9" class="text-muted small text-center">Przeciągnij tu jednostki…</td>';
+          `<td colspan="9" class="text-muted small text-center">${trUI('Przeciągnij tu jednostki…')}</td>`;
         tbody.appendChild(placeholder);
       } else if (hasUnits && placeholder) {
         placeholder.remove();
@@ -183,11 +185,11 @@
       })
         .then((res) => {
           if (!res.ok) throw new Error("HTTP " + res.status);
-          setStatus("Zapisano nazwę ✓");
+          setStatus(trUI("Zapisano nazwę ✓"));
           setTimeout(() => setStatus(""), 1200);
         })
         .catch(() => {
-          setStatus("Błąd zmiany nazwy", true);
+          setStatus(trUI("Błąd zmiany nazwy"), true);
           setTimeout(() => window.location.reload(), 1000);
         });
     }
@@ -212,7 +214,7 @@
     if (!gid) return;
     if (
       !window.confirm(
-        "Usunąć grupę? Jednostki zostaną przeniesione do sekcji «Bez grupy»."
+        trUI("Usunąć grupę? Jednostki zostaną przeniesione do sekcji «Bez grupy».")
       )
     ) {
       return;
@@ -228,7 +230,7 @@
         window.location.reload();
       })
       .catch(() => {
-        setStatus("Błąd usuwania grupy", true);
+        setStatus(trUI("Błąd usuwania grupy"), true);
         setTimeout(() => window.location.reload(), 1000);
       });
   });
@@ -259,7 +261,7 @@
         window.location.reload();
       })
       .catch(() => {
-        setStatus("Nie udało się dodać grupy", true);
+        setStatus(trUI("Nie udało się dodać grupy"), true);
       });
   }
   if (addBtn) addBtn.addEventListener("click", submitNewGroup);

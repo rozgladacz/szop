@@ -74,12 +74,12 @@
       <div class="strategic-card">
         <div class="strategic-card-task">
           <div class="strategic-card-label">Zadanie</div>
-          {% if cell %}{{ cell.task_text }}{% else %}<span class="strategic-card-placeholder">— brak —</span>{% endif %}
+          {% if cell %}{{ t(cell.task_text) }}{% else %}<span class="strategic-card-placeholder">— brak —</span>{% endif %}
         </div>
         <hr class="strategic-card-divider" />
         <div class="strategic-card-support">
           <div class="strategic-card-label">Wsparcie</div>
-          {% if cell %}{{ cell.support_text }}{% else %}<span class="strategic-card-placeholder">— brak —</span>{% endif %}
+          {% if cell %}{{ t(cell.support_text) }}{% else %}<span class="strategic-card-placeholder">— brak —</span>{% endif %}
         </div>
       </div>
     {% endfor %}

@@ -1,4 +1,9 @@
 (function initSZOPEditorRenderersModule(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
+  const ruleLabelUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityLabel(text) : text;
+  const ruleDescriptionUI = text => globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityDescription(text) : text;
+
   const rosterRendering = globalScope.SZOPRosterRendering || (typeof globalThis !== 'undefined' ? globalThis.SZOPRosterRendering : null) || {};
   const loadoutState = globalScope.SZOPLoadoutState || (typeof globalThis !== 'undefined' ? globalThis.SZOPLoadoutState : null) || {};
   const textParsing = globalScope.SZOPTextParsing || (typeof globalThis !== 'undefined' ? globalThis.SZOPTextParsing : null) || {};
@@ -9,7 +14,7 @@
   const resolveLoadoutEntryKey = loadoutState.resolveLoadoutEntryKey || globalScope.resolveLoadoutEntryKey;
   const formatAbilityDisplayLabel = loadoutState.formatAbilityDisplayLabel || globalScope.formatAbilityDisplayLabel || function formatAbilityDisplayLabelFallback(baseLabel, customName) { return customName || baseLabel || ''; };
   const normalizeLoadoutMode = loadoutState.normalizeLoadoutMode || globalScope.normalizeLoadoutMode || function normalizeLoadoutModeFallback(mode) { return mode === 'per_model' ? 'per_model' : 'total'; };
-  const formatLoadoutCostLabel = loadoutState.formatLoadoutCostLabel || globalScope.formatLoadoutCostLabel || function formatLoadoutCostLabelFallback(costValue) { return costValue === undefined || costValue === null ? 'wliczone' : `+${formatPoints(costValue)} pkt`; };
+  const formatLoadoutCostLabel = loadoutState.formatLoadoutCostLabel || globalScope.formatLoadoutCostLabel || function formatLoadoutCostLabelFallback(costValue) { return costValue === undefined || costValue === null ? 'wliczone' : `+${formatPoints(costValue)} ${trUI('pkt')}`; };
   const createModeIndicator = loadoutState.createModeIndicator || globalScope.createModeIndicator || function createModeIndicatorFallback() { return null; };
 
 // ============================================================
@@ -68,7 +73,7 @@ function renderAbilityEditor(
     info.className = 'roster-ability-details flex-grow-1';
     const name = document.createElement('span');
     name.className = 'roster-ability-label';
-    const baseLabel = item.label || 'Zdolność';
+    const baseLabel = item.label || trUI('Zdolność');
 
     let customName = '';
     if (safeLabelMap && safeLabelMap.has(abilityKey)) {
@@ -83,7 +88,7 @@ function renderAbilityEditor(
       customName = item.custom_name;
     }
     if (item.description) {
-      name.title = item.description;
+      name.title = item.display_description || ruleDescriptionUI(item.description);
     }
     name.textContent = formatAbilityDisplayLabel(baseLabel, customName);
 
@@ -96,7 +101,7 @@ function renderAbilityEditor(
     if (!editable && customName) {
       const customInfo = document.createElement('div');
       customInfo.className = 'text-muted small mt-1';
-      customInfo.textContent = `Nazwa własna: ${customName}`;
+      customInfo.textContent = `${trUI('Nazwa własna:')} ${customName}`;
 
       info.appendChild(customInfo);
     }
@@ -302,12 +307,12 @@ function renderWeaponEditor(
     info.className = 'roster-ability-details flex-grow-1';
     const name = document.createElement('span');
     name.className = 'roster-ability-label';
-    name.textContent = (isCurrentPrimary ? '⚑ ' : '') + (option.name || 'Broń');
+    name.textContent = (isCurrentPrimary ? '⚑ ' : '') + (option.name || trUI('Broń'));
     if (editable && typeof onPrimaryChange === 'function') {
       name.style.cursor = 'pointer';
       name.title = isCurrentPrimary
-        ? 'Broń podstawowa — kliknij aby przenieść flagę'
-        : 'Kliknij aby ustawić jako broń podstawową';
+        ? trUI('Broń podstawowa — kliknij aby przenieść flagę')
+        : trUI('Kliknij aby ustawić jako broń podstawową');
       name.addEventListener('click', () => {
         const next = Object.assign({}, safeWeapon);
         if (isCurrentPrimary) {
@@ -330,8 +335,8 @@ function renderWeaponEditor(
       ? option.attacks
       : '-';
     const apText = option.ap !== undefined && option.ap !== null && option.ap !== '' ? option.ap : 0;
-    const traitsText = option.traits ? String(option.traits) : 'Brak cech';
-    statsLine.textContent = `Zasięg: ${rangeText} • Ataki: ${attacksText} • AP: ${apText} • Cechy: ${traitsText}`;
+    const traitsText = option.traits ? String(option.traits) : trUI('Brak cech');
+    statsLine.textContent = `${trUI('Zasięg:')} ${rangeText} • ${trUI('Ataki:')} ${attacksText} • AP: ${apText} • ${trUI('Cechy:')} ${ruleLabelUI(traitsText)}`;
     info.appendChild(statsLine);
     row.appendChild(info);
 

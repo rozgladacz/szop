@@ -9,21 +9,19 @@ from __future__ import annotations
 import json
 import logging
 import os
-from pathlib import Path
 
+from .. import config
 from ..config import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
 _SETTINGS_FILE = DATA_DIR / "settings.json"
-_DEFAULTS: dict = {
-    "registration_open": True,
-}
 
 
 def _read() -> dict:
     try:
-        return json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+        data = json.loads(_SETTINGS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         return {}
     except (json.JSONDecodeError, OSError):
@@ -50,14 +48,15 @@ def get_registration_open() -> bool:
     Kolejność priorytetów:
     1. Zmienna środowiskowa REGISTRATION_OPEN (true/false/1/0/yes/no)
     2. Ustawienie w data/settings.json
-    3. Domyślna wartość True
+    3. Domyślnie zamknięta w trybie publicznym, otwarta lokalnie
     """
     env = os.getenv("REGISTRATION_OPEN", "").strip().lower()
     if env in {"true", "1", "yes"}:
         return True
     if env in {"false", "0", "no"}:
         return False
-    return _read().get("registration_open", _DEFAULTS["registration_open"])
+    configured = _read().get("registration_open")
+    return configured if isinstance(configured, bool) else not config.PUBLIC_ORIGIN
 
 
 def set_registration_open(value: bool) -> None:

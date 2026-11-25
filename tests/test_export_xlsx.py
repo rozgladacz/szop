@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import sys
+from io import BytesIO
 from pathlib import Path
 
-from openpyxl import Workbook
+import pytest
+from openpyxl import Workbook, load_workbook
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -13,6 +15,31 @@ from app import models
 from app.routers import export_xlsx
 from app.routers.export import _army_rule_labels
 from app.routers.export_xlsx import _append_roster_sheet, _append_weapons_sheet
+
+
+@pytest.mark.parametrize('language', ['pl', 'en'])
+@pytest.mark.parametrize('name', ['=1+1', '+SUM(1,1)', '-1+1', '@SUM(1,1)', '#N/A'])
+def test_user_text_is_preserved_as_text_in_saved_workbook(language, name):
+    workbook = Workbook()
+    entries = [{
+        'unit_name': name, 'custom_name': name, 'count': 2,
+        'total_cost': 37, 'weapon_details': [{'name': name, 'count': 2}],
+    }]
+    _append_roster_sheet(workbook, entries, 37, spells=[{'label': name, 'cost': 4}], language=language)
+    _append_weapons_sheet(workbook, entries, language=language)
+    buffer = BytesIO()
+    workbook.save(buffer)
+    buffer.seek(0)
+    saved = load_workbook(buffer)
+    roster, weapons = saved.worksheets
+    for cell in (roster['A2'], roster['B2'], roster['C6'], weapons['A2']):
+        assert cell.value == name
+        assert cell.data_type == 's'
+    assert roster['H2'].value.startswith(name + ' × 2')
+    assert roster['H2'].data_type == 's'
+    for cell, number in ((roster['C2'], 2), (roster['I3'], 37), (roster['A6'], 4), (weapons['B2'], 2)):
+        assert cell.value == number
+        assert cell.data_type == 'n'
 
 
 def test_army_rules_rendered_in_xlsx_header() -> None:

@@ -7,6 +7,8 @@
 // nadwyżka ponad „dostępne" = proxy tego wariantu; nowe wpisy proxy dla broni
 // nieposiadanej. Pasywne edytowalne (reuse renderPassiveEditor).
 (function () {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   const SAVE_DEBOUNCE_MS = 400;
 
   function escapeHtml(value) {
@@ -38,11 +40,22 @@
     let appliedSeq = 0;
     let pendingChanges = false;
     let savedSomething = false;
+    if (window.SZOPI18n) {
+      window.SZOPI18n.beforeLanguageChange.push(async () => {
+        if (!modelsMode || !rosterUnitId) return;
+        if (saveTimer) window.clearTimeout(saveTimer);
+        saveTimer = null;
+        if (!await doSave() || pendingChanges || saveTimer) {
+          throw new Error('Unsaved model composition');
+        }
+      });
+    }
+
 
     const hideEls = () => Array.from(editor.querySelectorAll('[data-models-hide]'));
     const getActiveItem = () => root.querySelector('[data-roster-item].active');
-    const weaponName = (wid) => ((data && data.weapon_names) || {})[String(wid)] || `Broń #${wid}`;
-    const abilityName = (aid) => ((data && data.ability_names) || {})[String(aid)] || `Zdolność #${aid}`;
+    const weaponName = (wid) => ((data && data.weapon_names) || {})[String(wid)] || `${trUI('Broń')} #${wid}`;
+    const abilityName = (aid) => (window.SZOPI18n ? window.SZOPI18n.abilityLabel(((data && data.ability_names) || {})[String(aid)]) : ((data && data.ability_names) || {})[String(aid)]) || `${trUI('Zdolność')} #${aid}`;
     const availableOf = (m) => Number(m.available != null ? m.available : m.count) || 0;
 
     // W trybie modeli chowamy CAŁY klasyczny formularz (jego puste, rozciągliwe
@@ -60,7 +73,7 @@
       modelsMode = false;
       toggle.setAttribute('aria-pressed', 'false');
       toggle.classList.remove('active');
-      toggle.textContent = 'Tryb modeli';
+      toggle.textContent = trUI('Tryb modeli');
       panel.classList.add('d-none');
       panel.innerHTML = '';
       hideEls().forEach((el) => el.classList.remove('d-none'));
@@ -94,7 +107,7 @@
       // aktywny z listy (przy ręcznym włączeniu trybu).
       const item = itemOverride || getActiveItem();
       if (!item) {
-        window.alert('Najpierw wybierz oddział z listy.');
+        window.alert(trUI('Najpierw wybierz oddział z listy.'));
         return;
       }
       const unitId = item.getAttribute('data-roster-unit-id');
@@ -106,7 +119,7 @@
       pendingChanges = false;
       toggle.setAttribute('aria-pressed', 'true');
       toggle.classList.add('active');
-      toggle.textContent = 'Tryb klasyczny';
+      toggle.textContent = trUI('Tryb klasyczny');
       hideEls().forEach((el) => el.classList.add('d-none'));
       setClassicHidden(true);
       panel.classList.remove('d-none');
@@ -119,7 +132,7 @@
         if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
         data = await resp.json();
       } catch (err) {
-        panel.innerHTML = '<div class="text-danger small">Nie udało się wczytać modeli kolekcji.</div>';
+        panel.innerHTML = `<div class="text-danger small">${escapeHtml(trUI('Nie udało się wczytać modeli kolekcji.'))}</div>`;
         return;
       }
       // Wstępna selekcja: zapisana kompozycja lub derywacja suma→modele (z serwera).
@@ -223,18 +236,18 @@
     // agregatem, w przeciwieństwie do statycznego m.summary).
     function modelDetail(m, eff) {
       const wsum = aggregateSummary(eff || effectiveWeapons(m));
-      const abil = (m.abilities || []).join(', ');
+      const abil = (m.abilities || []).map(text => window.SZOPI18n ? window.SZOPI18n.abilityLabel(text) : text).join(', ');
       return abil ? `${wsum} • ${abil}` : wsum;
     }
 
     function quantityControlHtml(kind, id, qty) {
-      const label = kind === 'models' ? 'modeli' : 'proxy';
+      const label = kind === 'models' ? trUI('modeli') : 'proxy';
       const inputId = `${kind}-qty-${id}`;
       return `<div class="input-group model-count-control" data-model-count-control data-model-count-event="input">
-        <button type="button" class="btn btn-outline-secondary" data-model-count-step="-1" aria-label="Zmniejsz liczbę ${label}" aria-controls="${inputId}">−</button>
+        <button type="button" class="btn btn-outline-secondary" data-model-count-step="-1" aria-label="${escapeHtml(trUI('Zmniejsz liczbę'))} ${label}" aria-controls="${inputId}">−</button>
         <input type="number" inputmode="numeric" class="form-control" id="${inputId}"
-               min="0" value="${qty}" data-${kind}-qty="${id}" aria-label="Liczba ${label}" />
-        <button type="button" class="btn btn-outline-secondary" data-model-count-step="1" aria-label="Zwiększ liczbę ${label}" aria-controls="${inputId}">+</button>
+               min="0" value="${qty}" data-${kind}-qty="${id}" aria-label="${escapeHtml(trUI('Liczba'))} ${label}" />
+        <button type="button" class="btn btn-outline-secondary" data-model-count-step="1" aria-label="${escapeHtml(trUI('Zwiększ liczbę'))} ${label}" aria-controls="${inputId}">+</button>
       </div>`;
     }
 
@@ -242,31 +255,31 @@
       const models = (data && data.models) || [];
       if (!models.length) {
         return '<div class="alert alert-info py-2 px-3 small mb-2">'
-          + 'Brak modeli tego oddziału w kolekcji. Dodaj je w zakładce '
-          + '<a href="/collections">Kolekcja</a> lub użyj proxy poniżej.</div>';
+          + escapeHtml(trUI('Brak modeli tego oddziału w kolekcji. Dodaj je w zakładce '))
+          + `<a href="/collections">${escapeHtml(trUI('Kolekcja'))}</a>${escapeHtml(trUI(' lub użyj proxy poniżej.'))}</div>`;
       }
       return models.map((m) => {
         const qty = selections.get(String(m.id)) || 0;
         const avail = availableOf(m);
         const overflow = Math.max(qty - avail, 0);
         const eff = effectiveWeapons(m);  // raz na wiersz — koszt i opis go współdzielą
-        const costChip = `<span class="badge text-bg-light border text-body-secondary fw-normal ms-1" data-model-cost="${m.id}">${fmtCost(modelCost(m, eff))} pkt</span>`;
+        const costChip = `<span class="badge text-bg-light border text-body-secondary fw-normal ms-1" data-model-cost="${m.id}">${fmtCost(modelCost(m, eff))} ${trUI('pkt')}</span>`;
         const labelLine = `<div class="small fw-semibold">${m.label ? escapeHtml(m.label) : 'Model'}${costChip}</div>`;
         const proxyTag = overflow > 0
-          ? ` <span class="badge text-bg-warning" title="Sztuki ponad dostępne traktowane jako proxy">proxy +${overflow}</span>`
+          ? ` <span class="badge text-bg-warning" title="${escapeHtml(trUI('Sztuki ponad dostępne traktowane jako proxy'))}">proxy +${overflow}</span>`
           : '';
         // Sloty magnetyzacji — wybór zamontowanej broni (per-oddział).
         const slotHtml = (Array.isArray(m.slots) ? m.slots : []).map((slot) => {
           const mounted = mountedByModel.get(String(m.id)) || {};
           let cur = mounted[String(slot.id)];
           if (cur === undefined) cur = slot.selected;
-          const opts = [`<option value=""${cur == null ? ' selected' : ''}>— pusty —</option>`].concat(
+          const opts = [`<option value=""${cur == null ? ' selected' : ''}>${escapeHtml(trUI('— pusty —'))}</option>`].concat(
             (slot.options || []).map((o) =>
               `<option value="${o.id}"${String(cur) === String(o.id) ? ' selected' : ''}>${escapeHtml(o.name)}</option>`),
           ).join('');
           return `<div class="d-flex align-items-center gap-1 mt-1">
               <span class="text-muted small" style="min-width:5rem">${escapeHtml(slot.name)}</span>
-              <select class="form-select form-select-sm" style="max-width:11rem" data-slot-mounted="${m.id}:${slot.id}" aria-label="Magnetyzacja: ${escapeHtml(slot.name)}">${opts}</select>
+              <select class="form-select form-select-sm" style="max-width:11rem" data-slot-mounted="${m.id}:${slot.id}" aria-label="${escapeHtml(trUI('Magnetyzacja:'))} ${escapeHtml(slot.name)}">${opts}</select>
             </div>`;
         }).join('');
         return `
@@ -289,7 +302,7 @@
         .map((wid) => `<option value="${wid}">${escapeHtml(weaponName(wid))}</option>`)
         .join('');
       const abilOpts = ((data && data.proxy_ability_options) || [])
-        .map((a) => `<option value="${a.id}">${escapeHtml(a.name)}</option>`)
+        .map((a) => `<option value="${a.id}">${escapeHtml(window.SZOPI18n ? window.SZOPI18n.abilityLabel(a.name) : a.name)}</option>`)
         .join('');
       const list = proxies.map((p, i) => {
         const wsum = aggregateSummary(
@@ -300,34 +313,34 @@
         return `
           <div class="d-flex align-items-center gap-2 border border-dashed rounded p-2 mb-2" data-proxy-row="${i}">
             <div class="flex-grow-1">
-              <div class="small fw-semibold">Proxy <span class="badge text-bg-secondary">brak w kolekcji</span>
-                <span class="badge text-bg-light border text-body-secondary fw-normal ms-1">${fmtCost(proxyCost(p))} pkt</span></div>
+              <div class="small fw-semibold">Proxy <span class="badge text-bg-secondary">${escapeHtml(trUI('brak w kolekcji'))}</span>
+                <span class="badge text-bg-light border text-body-secondary fw-normal ms-1">${fmtCost(proxyCost(p))} ${trUI('pkt')}</span></div>
               <div class="text-muted small">${detail}</div>
             </div>
             <div class="d-flex align-items-center gap-1 flex-shrink-0">
               ${quantityControlHtml('proxy', i, p.qty)}
-              <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" data-proxy-remove="${i}" title="Usuń">✕</button>
+              <button type="button" class="btn btn-outline-danger btn-sm py-0 px-1" data-proxy-remove="${i}" title="${escapeHtml(trUI('Usuń'))}">✕</button>
             </div>
           </div>`;
       }).join('');
       const abilFooter = abilOpts
         ? `<div class="d-flex align-items-center gap-2 mt-1">
             <select class="form-select form-select-sm" style="max-width:14rem" data-proxy-ability>
-              <option value="">— zdolność —</option>
+              <option value="">${escapeHtml(trUI('— zdolność —'))}</option>
               ${abilOpts}
             </select>
-            <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add-ability title="Dodaj wybraną zdolność do ostatniego modelu proxy">+ Dodaj zdolność</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add-ability title="${escapeHtml(trUI('Dodaj wybraną zdolność do ostatniego modelu proxy'))}">${escapeHtml(trUI('+ Dodaj zdolność'))}</button>
           </div>`
         : '';
       return `
         ${list}
         <div class="d-flex align-items-center gap-2 mt-1">
           <select class="form-select form-select-sm" style="max-width:14rem" data-proxy-weapon>
-            <option value="">— bez broni —</option>
+            <option value="">${escapeHtml(trUI('— bez broni —'))}</option>
             ${opts}
           </select>
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add>+ Dodaj proxy</button>
-          <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add-weapon title="Dodaj wybraną broń do ostatniego modelu proxy (proxy z wieloma broniami)">+ Dodaj broń</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add>${escapeHtml(trUI('+ Dodaj proxy'))}</button>
+          <button type="button" class="btn btn-outline-secondary btn-sm" data-proxy-add-weapon title="${escapeHtml(trUI('Dodaj wybraną broń do ostatniego modelu proxy (proxy z wieloma broniami)'))}">${escapeHtml(trUI('+ Dodaj broń'))}</button>
         </div>
         ${abilFooter}`;
     }
@@ -335,18 +348,18 @@
     function renderPanel() {
       const agg = aggregate();
       panel.innerHTML = `
-        <div class="fw-semibold small text-uppercase text-muted mb-1">Zdolności pasywne</div>
+        <div class="fw-semibold small text-uppercase text-muted mb-1">${escapeHtml(trUI('Zdolności pasywne'))}</div>
         <div data-models-passives class="mb-2"></div>
         <div class="py-2 mb-2 border-top border-bottom">
-          <div class="small">Skomponowany oddział:
-            <strong data-models-preview-count>${agg.count}</strong> modeli
+          <div class="small">${escapeHtml(trUI('Skomponowany oddział:'))}
+            <strong data-models-preview-count>${agg.count}</strong> ${escapeHtml(trUI('modeli'))}
             <span class="text-muted ms-1" data-models-status></span>
           </div>
           <div class="text-muted small" data-models-preview-weapons>${escapeHtml(aggregateSummary(agg.weapons))}</div>
         </div>
-        <div class="fw-semibold small text-uppercase text-muted mb-1">Modele</div>
+        <div class="fw-semibold small text-uppercase text-muted mb-1">${escapeHtml(trUI('Modele'))}</div>
         <div data-models-list>${ownedRowsHtml()}</div>
-        <div class="fw-semibold small text-uppercase text-muted mt-2 mb-1">Proxy (uzupełnienie braków)</div>
+        <div class="fw-semibold small text-uppercase text-muted mt-2 mb-1">${escapeHtml(trUI('Proxy (uzupełnienie braków)'))}</div>
         <div data-proxy-list>${proxyRowsHtml()}</div>`;
       renderPassives(agg.count);
     }
@@ -413,7 +426,7 @@
       const cost = unit.cached_cost;
       if (item && cost != null) {
         const badge = item.querySelector('[data-roster-unit-cost]');
-        if (badge) badge.textContent = `${cost} pkt`;
+        if (badge) badge.textContent = `${cost} ${trUI('pkt')}`;
         if (unit.count != null) {
           item.setAttribute('data-unit-count', String(unit.count));
           const title = item.querySelector('[data-roster-unit-title]');
@@ -470,7 +483,7 @@
       if (!rosterUnitId) return false;
       const agg = aggregate();
       if (agg.count <= 0) {
-        setStatus('Wybierz co najmniej jeden model.');
+        setStatus(trUI('Wybierz co najmniej jeden model.'));
         return false;
       }
       // Snapshot celu — przełączenie oddziału może zmienić activeItem/rosterUnitId
@@ -493,7 +506,7 @@
       pendingChanges = false;
       if (saveController) saveController.abort();
       saveController = new AbortController();
-      setStatus('Zapisywanie…');
+      setStatus(trUI('Zapisywanie…'));
       try {
         const resp = await fetch(`/rosters/${rosterId}/units/${targetUnitId}/update`, {
           method: 'POST',
@@ -508,13 +521,13 @@
           appliedSeq = seq;
           applyCostUpdate(payload, targetItem);
           savedSomething = true;
-          if (rosterUnitId === targetUnitId) setStatus('Zapisano');
+          if (rosterUnitId === targetUnitId) setStatus(trUI('Zapisano'));
         }
         return true;
       } catch (err) {
         if (err && err.name === 'AbortError') return false;
         pendingChanges = true;
-        setStatus('Błąd zapisu', true);
+        setStatus(trUI('Błąd zapisu'), true);
         return false;
       }
     }
@@ -573,7 +586,7 @@
       if (addWeaponBtn) {
         const sel = panel.querySelector('[data-proxy-weapon]');
         const wid = sel ? sel.value : '';
-        if (!wid) { setStatus('Wybierz broń do dodania.'); return; }
+        if (!wid) { setStatus(trUI('Wybierz broń do dodania.')); return; }
         if (proxies.length) {
           const last = proxies[proxies.length - 1];
           last.weapons = last.weapons || {};
@@ -590,7 +603,7 @@
       if (addAbilBtn) {
         const sel = panel.querySelector('[data-proxy-ability]');
         const aid = sel ? parseInt(sel.value, 10) : NaN;
-        if (!Number.isFinite(aid)) { setStatus('Wybierz zdolność do dodania.'); return; }
+        if (!Number.isFinite(aid)) { setStatus(trUI('Wybierz zdolność do dodania.')); return; }
         if (!proxies.length) proxies.push({ weapons: {}, abilities: [], qty: 1 });
         const last = proxies[proxies.length - 1];
         last.abilities = last.abilities || [];

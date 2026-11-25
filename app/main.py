@@ -1,24 +1,44 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import models
 from .config import DEBUG, SECRET_KEY, SESSION_HTTPS_ONLY, TRUSTED_HOSTS
 from .db import get_db, init_db
+from .middleware_public import PublicAccessMiddleware
+from .i18n import (
+    LanguageMiddleware,
+    javascript_catalog,
+    language_for,
+    safe_next,
+    set_language_cookie,
+    translate,
+)
 from .paths import STATIC_DIR, TEMPLATES_DIR
-from .routers import admin, armories, armies, auth, collections, export, export_xlsx, rosters, users
+from .routers import (
+    admin,
+    armies,
+    armories,
+    auth,
+    collections,
+    export,
+    export_xlsx,
+    rosters,
+    users,
+)
 from .security import get_current_user
 from .services import costs
+from .templating import Jinja2Templates
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +59,49 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+
+app.add_middleware(LanguageMiddleware)
+app.add_middleware(PublicAccessMiddleware)
+
+
+@app.get('/i18n/{language}.js', include_in_schema=False)
+def translation_script(request: Request, language: str):
+    if language not in ('pl', 'en'):
+        raise HTTPException(404)
+    request.state.language = language
+    return Response(javascript_catalog(language), media_type='text/javascript',
+                    headers={'Cache-Control': 'public, max-age=31536000, immutable'})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def localized_http_error(request: Request, exc):
+    detail = translate(exc.detail, language_for(request)) if isinstance(exc.detail, str) else exc.detail
+    return JSONResponse({'detail': detail}, status_code=exc.status_code, headers=exc.headers)
+
+
+@app.post('/language')
+def change_language(
+    request: Request,
+    language: Annotated[str, Form()],
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[models.User | None, Depends(get_current_user(optional=True))],
+    next: Annotated[str, Form()] = '/',
+):
+    if language not in ('pl', 'en'):
+        raise HTTPException(400, detail='Nieobsługiwany język')
+    if current_user:
+        current_user.preferred_language = language
+        db.commit()
+    request.state.language = language
+    return set_language_cookie(RedirectResponse(safe_next(next), status_code=303), language, secure=SESSION_HTTPS_ONLY)
+
+
+@app.get('/downloads', response_class=HTMLResponse)
+def downloads(request: Request, current_user: Annotated[models.User | None, Depends(get_current_user(optional=True))]):
+    folder = STATIC_DIR / 'docs'
+    files = sorted((p.name for p in folder.iterdir() if p.suffix.lower() == '.pdf' and p.is_file() and not p.is_symlink()), key=str.casefold) if folder.exists() else []
+    return templates.TemplateResponse('downloads.html', {'request': request, 'user': current_user, 'files': files})
 
 
 @app.on_event("startup")

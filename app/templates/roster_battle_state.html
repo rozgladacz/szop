@@ -213,7 +213,7 @@
   <div class="battle-header">
     <div>Armia: {{ roster.army.name if roster.army else '---' }}</div>
     {% if army_rules_detail %}
-    <div>Zasady armii: {% for rule in army_rules_detail %}<span{% if rule.description %} data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{{ rule.description | e }}" class="ability-tip"{% endif %}>{{ rule.label }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</div>
+    <div>Zasady armii: {% for rule in army_rules_detail %}<span{% if rule.description %} data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{{ rule.description | ability_description | e }}" class="ability-tip"{% endif %}>{{ (rule.label) | ability }}</span>{% if not loop.last %}, {% endif %}{% endfor %}</div>
     {% endif %}
   </div>
 
@@ -221,7 +221,7 @@
     {%- set key = label.split('(')[0].split(' ×')[0].strip() -%}
     {%- set desc = ability_descriptions.get(label) or ability_descriptions.get(key) or '' -%}
     {%- set toggle_key = (label + '[' + idx|string + ']') if (toggleable and idx is not none) else label -%}
-    <span{% if desc and toggleable %} class="ability-tip toggle-ability"{% elif desc %} class="ability-tip"{% elif toggleable %} class="toggle-ability"{% endif %}{% if desc %} data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{{ desc | e }}"{% endif %}{% if toggleable %} data-ability-toggle="{{ toggle_key | e }}"{% if ability_id is not none %} data-ability-id="{{ ability_id }}"{% endif %}{% endif %}>{{ label }}</span>
+    <span{% if desc and toggleable %} class="ability-tip toggle-ability"{% elif desc %} class="ability-tip"{% elif toggleable %} class="toggle-ability"{% endif %}{% if desc %} data-bs-toggle="tooltip" data-bs-placement="top" data-bs-title="{{ desc | ability_description | e }}"{% endif %}{% if toggleable %} data-ability-toggle="{{ toggle_key | e }}"{% if ability_id is not none %} data-ability-id="{{ ability_id }}"{% endif %}{% endif %}>{{ label | ability }}</span>
   {%- endmacro %}
 
   {% macro member_subblock(member, group_id, group_modes) %}
@@ -370,7 +370,7 @@
           <h6 class="mb-2 text-primary-emphasis">📜 Lista zaklęć</h6>
           {% for spell in spell_entries %}
           <div class="spell-line">
-            <span class="spell-cost">{{ spell.cost }}</span><span class="spell-difficulty">{{ spell.difficulty }}+</span><span class="fw-semibold">{{ spell.label }}</span>{% if spell.description %}<span class="text-muted"> — {{ spell.description }}</span>{% endif %}
+            <span class="spell-cost">{{ spell.cost }}</span><span class="spell-difficulty">{{ spell.difficulty }}+</span><span class="fw-semibold">{{ spell_entry_label(spell) }}</span>{% if spell.description %}<span class="text-muted"> — {{ spell_entry_description(spell) }}</span>{% endif %}
           </div>
           {% endfor %}
         </div>

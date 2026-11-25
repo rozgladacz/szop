@@ -33,8 +33,9 @@
           <div class="mb-3">
             <label class="form-label" for="new-password">Hasło</label>
             <input class="form-control" id="new-password" name="password" type="password"
-                   required minlength="4" autocomplete="new-password" />
-            <div class="form-text">Minimum 4 znaki.</div>
+                   required minlength="{{ 15 if request.state.public_mode else 4 }}"
+                   {% if request.state.public_mode %}maxlength="128"{% endif %} autocomplete="new-password" />
+            <div class="form-text">{% if request.state.public_mode %}Hasło musi mieć od 15 do 128 znaków.{% else %}Minimum 4 znaki.{% endif %}</div>
           </div>
           <button class="btn btn-primary" type="submit">Utwórz konto</button>
         </form>
@@ -113,10 +114,12 @@
                 name="new_password"
                 placeholder="Nowe hasło"
                 required
-                minlength="4"
+                minlength="{{ 15 if request.state.public_mode else 4 }}"
+                {% if request.state.public_mode %}maxlength="128"{% endif %}
               />
               <button class="btn btn-sm btn-primary" type="submit">Zmień hasło</button>
             </form>
+            {% if not request.state.public_mode %}
             <form
               method="post"
               action="/users/{{ item.id }}/delete"
@@ -128,6 +131,7 @@
                 Usuń
               </button>
             </form>
+            {% endif %}
           </div>
           {% if error and error_user_id == item.id %}
           <div class="text-danger small mt-2">{{ error }}</div>

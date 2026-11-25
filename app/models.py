@@ -49,6 +49,7 @@ class User(TimestampMixin, Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    preferred_language: Mapped[str | None] = mapped_column(String(2), nullable=True)
 
     armies: Mapped[List["Army"]] = relationship(back_populates="owner")
     armories: Mapped[List["Armory"]] = relationship(back_populates="owner")

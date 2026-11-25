@@ -7,7 +7,7 @@ from urllib.parse import quote_plus
 
 from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from ..templating import Jinja2Templates
 from pydantic import BaseModel
 
 from .. import config, models

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
 
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from ..templating import Jinja2Templates
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 
@@ -1278,7 +1278,11 @@ def _parse_weapon_payload(
     weapon_ids = {weapon_id for weapon_id, _ in pending_entries}
     weapon_stmt = (
         select(models.Weapon)
-        .where(models.Weapon.id.in_(weapon_ids))
+        .where(
+            models.Weapon.id.in_(weapon_ids),
+            models.Weapon.armory_id == armory.id,
+            models.Weapon.army_id.is_(None),
+        )
         .options(selectinload(models.Weapon.parent).selectinload(models.Weapon.parent))
     )
     weapon_map = {
@@ -1293,7 +1297,7 @@ def _parse_weapon_payload(
         if weapon_id in seen:
             continue
         weapon = weapon_map.get(weapon_id)
-        if not weapon or weapon.armory_id != armory.id:
+        if not weapon or not utils.is_armory_catalog_weapon(weapon):
             continue
         count_raw = entry.get("count")
         if count_raw is None:
@@ -2411,7 +2415,11 @@ def add_army_spell_weapon(
         return capacity_response
 
     weapon = db.get(models.Weapon, weapon_id)
-    if not weapon or weapon.armory_id != army.armory_id:
+    if (
+        not weapon
+        or weapon.armory_id != army.armory_id
+        or (weapon.army_id != army.id and not utils.is_armory_catalog_weapon(weapon))
+    ):
         context = _spell_page_context(
             request,
             army,

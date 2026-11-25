@@ -6,6 +6,9 @@ data/
 *.sqlite
 *.sqlite3
 *.bak
+.env
+.env.*
+!.env.example
 
 # Python
 __pycache__/

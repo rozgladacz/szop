@@ -1,16 +1,18 @@
 import re
-from typing import Optional
+from typing import Annotated
 
 import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
-from . import models
+from . import config, models
 from .db import get_db
+from .services import public_access
 
 pwd_context = CryptContext(
     schemes=["pbkdf2_sha256"],
+    pbkdf2_sha256__default_rounds=600_000,
     deprecated="auto",
 )
 
@@ -47,17 +49,17 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 def get_current_user(optional: bool = False, *, close_session: bool = False):
     def dependency(
-        request: Request, db: Session = Depends(get_db)
-    ) -> Optional[models.User]:
-        user_id = request.session.get("user_id")
-        if not user_id:
-            if optional:
-                return None
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
-
-        user = db.get(models.User, user_id)
+        request: Request, db: Annotated[Session, Depends(get_db)],
+    ) -> models.User | None:
+        if config.PUBLIC_ORIGIN:
+            token = request.session.get(public_access.SESSION_KEY)
+            user = public_access.session_user(db, token) if isinstance(token, str) else None
+        else:
+            user_id = request.session.get("user_id")
+            user = db.get(models.User, user_id) if user_id else None
         if user is None:
             request.session.pop("user_id", None)
+            request.session.pop(public_access.SESSION_KEY, None)
             if optional:
                 return None
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
@@ -66,6 +68,8 @@ def get_current_user(optional: bool = False, *, close_session: bool = False):
             db.expunge(user)
             db.close()
 
+        if user.preferred_language in ('pl', 'en'):
+            request.state.language = user.preferred_language
         return user
 
     return dependency

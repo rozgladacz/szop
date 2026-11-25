@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from fastapi import APIRouter, Body, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from ..templating import Jinja2Templates
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session, selectinload
 

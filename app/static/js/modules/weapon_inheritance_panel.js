@@ -1,4 +1,6 @@
 (function initSZOPWeaponInheritancePanelModule(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
 
 // ============================================================
 // SECTION: WEAPON INHERITANCE PANEL
@@ -42,7 +44,7 @@ function initWeaponTreePickerPanel(panel, cfg) {
     options.forEach((entry) => {
       const opt = document.createElement('option');
       opt.value = String(entry.armory_id);
-      opt.textContent = entry.armory_name + (entry.is_current ? ' (bieżąca)' : '');
+      opt.textContent = entry.armory_name + (entry.is_current ? trUI(' (bieżąca)') : '');
       armorySelect.appendChild(opt);
     });
     armorySelect.value = selectedArmoryId || '';
@@ -73,7 +75,7 @@ function initWeaponTreePickerPanel(panel, cfg) {
         chevBtn.className = 'btn btn-link btn-sm p-0 text-muted flex-shrink-0';
         chevBtn.style.lineHeight = '1';
         chevBtn.style.width = '1.1rem';
-        chevBtn.setAttribute('aria-label', isCollapsed ? 'Rozwiń' : 'Zwiń');
+        chevBtn.setAttribute('aria-label', isCollapsed ? 'Rozwiń' : trUI('Zwiń'));
         chevBtn.textContent = isCollapsed ? '▸' : '▾';
         chevBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -131,7 +133,7 @@ function initWeaponTreePickerPanel(panel, cfg) {
       if (!weapons.length) {
         const empty = document.createElement('div');
         empty.className = 'text-muted small';
-        empty.textContent = 'Brak broni w tej zbrojowni.';
+        empty.textContent = trUI('Brak broni w tej zbrojowni.');
         treeContainer.appendChild(empty);
         return;
       }

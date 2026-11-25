@@ -185,7 +185,7 @@ ABILITY_DEFINITIONS: List[AbilityDefinition] = [
         slug="niestrudzony",
         name="Niestrudzony",
         type="passive",
-        description="Może wykonywać tę samą akcję wielokrotnie w rundzie.",
+        description="Może wykonywać tę samą akcję wielokrotnie w aktywacji.",
     ),
 
     AbilityDefinition(
@@ -810,26 +810,35 @@ _DEFINITION_BY_SLUG: dict[str, "AbilityDefinition"] = {
 }
 
 
-def find_definition(slug: str) -> AbilityDefinition | None:
-    return _DEFINITION_BY_SLUG.get(slug)
+@lru_cache(maxsize=256)
+def find_definition(slug: str, language: str = 'pl') -> AbilityDefinition | None:
+    definition = _DEFINITION_BY_SLUG.get(slug)
+    if definition is not None and language == 'en':
+        from ..i18n import ABILITY_TRANSLATIONS
+        texts = ABILITY_TRANSLATIONS.get(slug)
+        if texts:
+            return replace(definition, name=texts['name'], description=texts['description'])
+    return definition
 
 
-def display_with_value(definition: AbilityDefinition, value: str | None) -> str:
+def display_with_value(definition: AbilityDefinition, value: str | None, language: str = 'pl') -> str:
+    definition = find_definition(definition.slug, language) or definition
+    mastery = find_definition('mistrzostwo', language).name
     if definition.slug == "mistrzostwo":
         value_text = (value or "").strip()
         weapon_slug = slug_for_name(value_text) or value_text
-        weapon_def = find_definition(weapon_slug) if weapon_slug else None
+        weapon_def = find_definition(weapon_slug, language) if weapon_slug else None
         weapon_label = weapon_def.name if weapon_def else value_text
         return f"{definition.name}({weapon_label})" if weapon_label else definition.display_name()
     if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
         value_text = (value or "").strip()
         if value_text.startswith("mistrzostwo:"):
             weapon_slug = value_text[len("mistrzostwo:"):].strip()
-            weapon_def = find_definition(weapon_slug)
+            weapon_def = find_definition(weapon_slug, language)
             weapon_label = weapon_def.name if weapon_def else weapon_slug
-            return f"{definition.name}: Mistrzostwo: {weapon_label}" if weapon_label else f"{definition.name}: Mistrzostwo"
+            return f"{definition.name}: {mastery}: {weapon_label}" if weapon_label else f"{definition.name}: {mastery}"
         ability_slug = slug_for_name(value_text) or value_text
-        ability_def = find_definition(ability_slug) if ability_slug else None
+        ability_def = find_definition(ability_slug, language) if ability_slug else None
         ability_label = ability_def.name if ability_def else value_text
         return f"{definition.name}: {ability_label}" if ability_label else definition.display_name()
     if definition.slug == "aura":
@@ -840,9 +849,9 @@ def display_with_value(definition: AbilityDefinition, value: str | None) -> str:
             aura_range_str = parts[1].strip() if len(parts) == 2 else ""
             is_long_range = aura_range_str.strip() == "12"
             prefix = f'{definition.name}(12")' if is_long_range else definition.name
-            weapon_def = find_definition(weapon_slug)
+            weapon_def = find_definition(weapon_slug, language)
             weapon_label = weapon_def.name if weapon_def else weapon_slug
-            return f"{prefix}: Mistrzostwo: {weapon_label}" if weapon_label else f"{prefix}: Mistrzostwo"
+            return f"{prefix}: {mastery}: {weapon_label}" if weapon_label else f"{prefix}: {mastery}"
         ability_ref = ""
         aura_range = ""
         if value_text:
@@ -853,7 +862,7 @@ def display_with_value(definition: AbilityDefinition, value: str | None) -> str:
             else:
                 ability_ref = value_text
         ability_slug = slug_for_name(ability_ref) or ability_ref
-        ability_def = find_definition(ability_slug) if ability_slug else None
+        ability_def = find_definition(ability_slug, language) if ability_slug else None
         ability_label = ability_def.name if ability_def else ability_ref
         range_text = aura_range.strip() if aura_range else ""
         normalized_range = range_text.replace("\"", "").replace("”", "").strip()
@@ -870,7 +879,10 @@ def display_with_value(definition: AbilityDefinition, value: str | None) -> str:
     return f"{definition.name}({value_text})"
 
 
-def description_with_value(definition: AbilityDefinition, value: str | None) -> str:
+def description_with_value(definition: AbilityDefinition, value: str | None, language: str = 'pl') -> str:
+    definition = find_definition(definition.slug, language) or definition
+    from ..i18n import translate
+    mastery = find_definition('mistrzostwo', language).name
     if not definition or not definition.description:
         return ""
 
@@ -882,7 +894,7 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
 
     if definition.slug == "mistrzostwo":
         weapon_slug = slug_for_name(value_text) or value_text
-        weapon_def = find_definition(weapon_slug) if weapon_slug else None
+        weapon_def = find_definition(weapon_slug, language) if weapon_slug else None
         weapon_label = weapon_def.name if weapon_def else value_text
         weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
         replaced = description.replace("X", weapon_label)
@@ -893,15 +905,15 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
     if definition.slug in {"rozkaz", "klatwa", "oznaczenie"}:
         if value_text.startswith("mistrzostwo:"):
             weapon_slug = value_text[len("mistrzostwo:"):].strip()
-            weapon_def = find_definition(weapon_slug)
+            weapon_def = find_definition(weapon_slug, language)
             weapon_label = weapon_def.name if weapon_def else weapon_slug
             weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
-            replaced = description.replace("X", f"Mistrzostwo({weapon_label})")
+            replaced = description.replace("X", f"{mastery}({weapon_label})")
             if weapon_description:
                 return f"{replaced.strip()} ({weapon_description})".strip()
             return replaced.strip()
         ability_slug = slug_for_name(value_text) or value_text
-        ability_def = find_definition(ability_slug) if ability_slug else None
+        ability_def = find_definition(ability_slug, language) if ability_slug else None
         ability_label = ability_def.name if ability_def else value_text
         ability_description = (ability_def.description or "").strip() if ability_def else ""
         replaced = description.replace("X", ability_label)
@@ -914,7 +926,7 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
             parts = value_text.split("|", 1)
             weapon_slug = parts[0][len("mistrzostwo:"):].strip()
             range_ref = parts[1].strip() if len(parts) == 2 else ""
-            weapon_def = find_definition(weapon_slug)
+            weapon_def = find_definition(weapon_slug, language)
             weapon_label = weapon_def.name if weapon_def else weapon_slug
             weapon_description = (weapon_def.description or "").strip() if weapon_def else ""
             range_clean = range_ref.strip()
@@ -923,10 +935,10 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
                 if range_clean == "12"
                 else "Modele w twoim oddziale otrzymują zdolność:"
             )
-            detail = f"Mistrzostwo({weapon_label})"
+            detail = f"{mastery}({weapon_label})"
             if weapon_description:
                 detail += f" ({weapon_description})"
-            return f"{prefix} {detail}".strip()
+            return f"{translate(prefix, language)} {detail}".strip()
         ability_ref = ""
         range_ref = ""
         parts = value_text.split("|", 1)
@@ -935,7 +947,7 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
         else:
             ability_ref = value_text
         ability_slug = slug_for_name(ability_ref) or ability_ref
-        ability_def = find_definition(ability_slug) if ability_slug else None
+        ability_def = find_definition(ability_slug, language) if ability_slug else None
         ability_description = ability_def.description if ability_def else ""
         range_clean = range_ref.replace("\"", "").replace("”", "").strip()
         prefix = (
@@ -944,19 +956,20 @@ def description_with_value(definition: AbilityDefinition, value: str | None) -> 
             else "Modele w twoim oddziale otrzymują zdolność:"
         )
         detail = ability_description.strip() or description
-        return f"{prefix} {detail}".strip()
+        return f"{translate(prefix, language)} {detail}".strip()
 
-    return description.replace("X", value_text)
+    return description.replace("2X", f"2 × {value_text}").replace("X", value_text)
 
 
 def combined_description(
     definition: AbilityDefinition | None,
     value: str | None,
     ability_description: str | None = None,
+    language: str = 'pl',
 ) -> str:
     parts: list[str] = []
     if definition:
-        desc = description_with_value(definition, value)
+        desc = description_with_value(definition, value, language)
         if desc:
             parts.append(desc.strip())
     extra = (ability_description or "").strip()

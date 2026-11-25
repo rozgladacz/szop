@@ -1,4 +1,6 @@
 (function initSZOPWeaponPickerModule(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   const textParsing = globalScope.SZOPTextParsing
     || (typeof globalThis !== 'undefined' ? globalThis.SZOPTextParsing : null)
     || {};
@@ -109,7 +111,7 @@ function initWeaponPicker(root) {
     (treeTrigger && treeTrigger.dataset.weaponTreePlaceholder) ||
     (treeTriggerLabel && treeTriggerLabel.textContent?.trim()) ||
     (treeTrigger && treeTrigger.textContent?.trim()) ||
-    'Wybierz broń';
+    trUI('Wybierz broń');
   const treeContainerId =
     treeContainer && (treeContainer.id || `weapon-tree-container-${pickerId}`);
   if (treeContainer && !treeContainer.id && treeContainerId) {
@@ -258,7 +260,7 @@ function initWeaponPicker(root) {
         return;
       }
       const rawName = typeof node.name === 'string' ? node.name : '';
-      const name = rawName.trim() || `Broń #${id}`;
+      const name = rawName.trim() || `${trUI('Broń')} #${id}`;
       let pathIds = Array.isArray(node.path)
         ? node.path
             .map((value) => Number.parseInt(value, 10))
@@ -366,7 +368,7 @@ function initWeaponPicker(root) {
         return;
       }
       const rawName = typeof entry.name === 'string' ? entry.name : '';
-      const name = rawName.trim() || `Broń #${id}`;
+      const name = rawName.trim() || `${trUI('Broń')} #${id}`;
       const rangeValue = normalizeRangeValue(
         entry.range_value ?? entry.range ?? entry.effective_range ?? 0,
       );
@@ -476,7 +478,7 @@ function initWeaponPicker(root) {
       toggleBtn.className = 'btn btn-sm btn-outline-secondary weapon-tree-toggle';
       const collapsed = collapsedNodes.has(String(node.id));
       toggleBtn.textContent = collapsed ? '▸' : '▾';
-      toggleBtn.setAttribute('aria-label', collapsed ? 'Rozwiń gałąź' : 'Zwiń gałąź');
+      toggleBtn.setAttribute('aria-label', collapsed ? 'Rozwiń gałąź' : trUI('Zwiń gałąź'));
       toggleBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       toggleBtn.addEventListener('click', (event) => {
         event.preventDefault();
@@ -533,11 +535,11 @@ function initWeaponPicker(root) {
     const badge = document.createElement('span');
     if (node.is_leaf) {
       badge.className = 'badge text-bg-secondary weapon-tree-meta';
-      badge.textContent = node.range_value > 0 ? `${node.range_value}"` : 'Wręcz';
+      badge.textContent = node.range_value > 0 ? `${node.range_value}"` : trUI('Wręcz');
     } else {
       badge.className = 'badge text-bg-light border text-muted weapon-tree-meta';
       badge.textContent = `${node.children.length}`;
-      badge.title = 'Liczba wariantów';
+      badge.title = trUI('Liczba wariantów');
     }
     row.appendChild(badge);
 
@@ -567,7 +569,7 @@ function initWeaponPicker(root) {
     if (!Array.isArray(treeData) || !treeData.length) {
       const empty = document.createElement('p');
       empty.className = 'text-muted mb-0 fst-italic small';
-      empty.textContent = 'Brak dostępnego uzbrojenia.';
+      empty.textContent = trUI('Brak dostępnego uzbrojenia.');
       treeRoot.appendChild(empty);
       return;
     }
@@ -687,7 +689,7 @@ function initWeaponPicker(root) {
       (selectEl && idKey !== undefined && idKey !== null
         ? selectEl.querySelector(`option[value="${String(idKey)}"]`)?.textContent
         : null) ||
-      (idKey !== undefined && idKey !== null ? `Broń #${idKey}` : 'Broń');
+      (idKey !== undefined && idKey !== null ? `${trUI('Broń')} #${idKey}` : trUI('Broń'));
     return {
       category,
       rangeValue: Number.isFinite(rangeValue) ? rangeValue : 0,
@@ -738,7 +740,7 @@ function initWeaponPicker(root) {
             entry.name ||
             meta.name ||
             weaponMap.get(String(weaponId))?.name ||
-            `Broń #${weaponId}`;
+            `${trUI('Broń')} #${weaponId}`;
           const rawCount = entry.count ?? entry.default_count ?? entry.quantity;
           let defaultCount = Number.parseInt(rawCount, 10);
           if (!Number.isFinite(defaultCount)) {
@@ -843,7 +845,7 @@ function initWeaponPicker(root) {
     if (!items.length) {
       const empty = document.createElement('p');
       empty.className = 'text-muted mb-0';
-      empty.textContent = 'Nie wybrano jeszcze żadnej broni.';
+      empty.textContent = trUI('Nie wybrano jeszcze żadnej broni.');
       listEl.appendChild(empty);
       return;
     }
@@ -862,12 +864,12 @@ function initWeaponPicker(root) {
       const nameLabel = document.createElement('span');
       nameLabel.className = 'fw-semibold';
       nameLabel.textContent =
-        item.name || weaponMap.get(String(item.weapon_id))?.name || `Broń #${item.weapon_id}`;
+        item.name || weaponMap.get(String(item.weapon_id))?.name || `${trUI('Broń')} #${item.weapon_id}`;
       nameRow.appendChild(nameLabel);
 
       const rangeBadge = document.createElement('span');
       rangeBadge.className = 'badge text-bg-secondary';
-      rangeBadge.textContent = Number(item.range_value) > 0 ? `${item.range_value}"` : 'Wręcz';
+      rangeBadge.textContent = Number(item.range_value) > 0 ? `${item.range_value}"` : trUI('Wręcz');
       nameRow.appendChild(rangeBadge);
 
       nameWrapper.appendChild(nameRow);
@@ -879,14 +881,14 @@ function initWeaponPicker(root) {
         ? weaponStats.ap : 0;
       const abilitiesDisplay = Array.isArray(weaponStats?.abilities) && weaponStats.abilities.length
         ? weaponStats.abilities.map((a) => a.label || a.raw || a.slug || '').filter(Boolean).join(', ')
-        : 'Brak cech';
+        : trUI('Brak cech');
       const costDisplay = weaponStats?.cost !== null && weaponStats?.cost !== undefined
-        ? `${formatPoints(weaponStats.cost)} pkt` : null;
+        ? `${formatPoints(weaponStats.cost)} ${trUI('pkt')}` : null;
       const statsLine = document.createElement('div');
       statsLine.className = 'text-muted small mt-1';
-      let statsText = `Ataki: ${attacksDisplay} • AP: ${apDisplay} • Cechy: ${abilitiesDisplay}`;
+      let statsText = `${trUI('Ataki:')} ${attacksDisplay} • AP: ${apDisplay} • ${trUI('Cechy:')} ${globalScope.SZOPI18n ? globalScope.SZOPI18n.abilityLabel(abilitiesDisplay) : abilitiesDisplay}`;
       if (costDisplay) {
-        statsText += ` • Koszt: ${costDisplay}`;
+        statsText += ` • ${trUI('Koszt')}: ${costDisplay}`;
       }
       statsLine.textContent = statsText;
       nameWrapper.appendChild(statsLine);
@@ -895,7 +897,7 @@ function initWeaponPicker(root) {
       defaultGroup.className = 'd-flex align-items-center gap-2 weapon-default-group';
       const defaultLabel = document.createElement('label');
       defaultLabel.className = 'form-label mb-0 small text-nowrap';
-      defaultLabel.textContent = 'Domyślnie:';
+      defaultLabel.textContent = trUI('Domyślnie:');
       defaultLabel.setAttribute('for', `weapon-default-count-${item.weapon_id}-${index}`);
       const defaultField = document.createElement('input');
       defaultField.className = 'form-control form-control-sm weapon-default-count-input';
@@ -941,7 +943,7 @@ function initWeaponPicker(root) {
       const primaryLabel = document.createElement('label');
       primaryLabel.className = 'form-check-label small';
       primaryLabel.setAttribute('for', primaryId);
-      primaryLabel.textContent = 'Podstawowa';
+      primaryLabel.textContent = trUI('Podstawowa');
       primaryWrapper.appendChild(primaryInput);
       primaryWrapper.appendChild(primaryLabel);
 
@@ -969,7 +971,7 @@ function initWeaponPicker(root) {
       moveUpBtn.type = 'button';
       moveUpBtn.className = 'btn btn-outline-secondary btn-sm';
       moveUpBtn.textContent = '↑';
-      moveUpBtn.setAttribute('aria-label', 'Przesuń w górę');
+      moveUpBtn.setAttribute('aria-label', trUI('Przesuń w górę'));
       moveUpBtn.disabled = index === 0;
       moveUpBtn.addEventListener('click', (event) => {
         event.preventDefault();
@@ -979,7 +981,7 @@ function initWeaponPicker(root) {
       moveDownBtn.type = 'button';
       moveDownBtn.className = 'btn btn-outline-secondary btn-sm';
       moveDownBtn.textContent = '↓';
-      moveDownBtn.setAttribute('aria-label', 'Przesuń w dół');
+      moveDownBtn.setAttribute('aria-label', trUI('Przesuń w dół'));
       moveDownBtn.disabled = index === items.length - 1;
       moveDownBtn.addEventListener('click', (event) => {
         event.preventDefault();
@@ -992,7 +994,7 @@ function initWeaponPicker(root) {
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.className = 'btn btn-outline-danger btn-sm';
-      removeBtn.textContent = 'Usuń';
+      removeBtn.textContent = trUI('Usuń');
       removeBtn.addEventListener('click', () => {
         items.splice(index, 1);
         updateHidden();

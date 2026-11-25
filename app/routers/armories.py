@@ -7,7 +7,7 @@ from typing import Iterable
 import json
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from ..templating import Jinja2Templates
 from sqlalchemy import delete, or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -245,6 +245,7 @@ def _resolve_local_parent_for_variant(
             select(models.Weapon)
             .where(
                 models.Weapon.armory_id == armory.id,
+                models.Weapon.army_id.is_(None),
                 models.Weapon.parent_id == current_id,
             )
         )
@@ -255,7 +256,7 @@ def _resolve_local_parent_for_variant(
             .scalars()
             .first()
         )
-        if local_candidate is not None:
+        if local_candidate is not None and utils.is_armory_catalog_weapon(local_candidate):
             return local_candidate
 
         current = current.parent
@@ -527,6 +528,8 @@ def _build_weapon_tree_options_for_chain(
 
         node_map: dict[int, dict] = {}
         for w in weapons:
+            if not utils.is_armory_catalog_weapon(w):
+                continue
             if arm.id == current_armory.id and w.id in excluded_ids:
                 continue
             node_map[w.id] = {
@@ -616,10 +619,12 @@ def _armory_descendant_chain(armory: models.Armory) -> list[models.Armory]:
     return chain
 
 
-def _build_import_options(db: Session, armory: models.Armory) -> list[dict]:
-    return _build_weapon_tree_options_for_chain(
-        db, _armory_descendant_chain(armory), armory, set()
-    )
+def _build_import_options(db: Session, armory: models.Armory, user: models.User) -> list[dict]:
+    descendants = [
+        variant for variant in _armory_descendant_chain(armory)
+        if user.is_admin or variant.owner_id in (None, user.id)
+    ]
+    return _build_weapon_tree_options_for_chain(db, descendants, armory, set())
 
 
 def _current_inheritance(weapon: models.Weapon | None) -> dict | None:
@@ -675,7 +680,7 @@ def _apply_inheritance_selection(
     if weapon.id is not None and selected_id == weapon.id:
         raise HTTPException(status_code=400, detail="Broń nie może dziedziczyć po samej sobie.")
     selected = db.get(models.Weapon, selected_id)
-    if selected is None:
+    if selected is None or not utils.is_armory_catalog_weapon(selected):
         raise HTTPException(status_code=404, detail="Wybrana broń-rodzic nie istnieje.")
     allowed_armory_ids = {arm.id for arm in _armory_ancestor_chain(armory)}
     if selected.armory_id not in allowed_armory_ids:
@@ -1117,7 +1122,11 @@ def change_armory_parent(
         .all()
     )
     for weapon in armory_weapons:
-        if weapon.parent_id is None or weapon.parent is None:
+        if (
+            weapon.parent_id is None
+            or weapon.parent is None
+            or not utils.is_armory_catalog_weapon(weapon)
+        ):
             continue
         parent_armory_id = weapon.parent.armory_id
         if parent_armory_id not in new_chain_ids:
@@ -1194,7 +1203,11 @@ def copy_armory(
         db.flush()
 
         source_weapons = (
-            db.execute(select(models.Weapon).where(models.Weapon.armory_id == source.id))
+            db.execute(
+                select(models.Weapon)
+                .where(models.Weapon.armory_id == source.id, models.Weapon.army_id.is_(None))
+                .options(selectinload(models.Weapon.parent))
+            )
             .scalars()
             .all()
         )
@@ -1212,6 +1225,8 @@ def copy_armory(
         }
 
         for weapon in source_weapons:
+            if not utils.is_armory_catalog_weapon(weapon):
+                continue
             if weapon.parent_id is not None:
                 clone = new_weapons_by_parent.get(weapon.parent_id)
                 if not clone:
@@ -1465,7 +1480,7 @@ def import_weapon_form(
             "request": request,
             "user": current_user,
             "armory": armory,
-            "import_options": _build_import_options(db, armory),
+            "import_options": _build_import_options(db, armory, current_user),
             "error": None,
         },
     )
@@ -1491,7 +1506,7 @@ def import_weapon(
                 "request": request,
                 "user": current_user,
                 "armory": armory,
-                "import_options": _build_import_options(db, armory),
+                "import_options": _build_import_options(db, armory, current_user),
                 "error": message,
             },
             status_code=400,
@@ -1503,7 +1518,7 @@ def import_weapon(
         return _render_error("Wybierz broń do zaimportowania.")
 
     source = db.get(models.Weapon, src_id)
-    if source is None or source.army_id is not None:
+    if source is None or not utils.is_armory_catalog_weapon(source):
         return _render_error("Wybrana broń nie istnieje.")
 
     descendant_ids = {arm.id for arm in _armory_descendant_chain(armory)}
@@ -1511,6 +1526,9 @@ def import_weapon(
         return _render_error("Broń musi pochodzić z podrzędnej zbrojowni.")
 
     promote = _parse_bool(set_as_parent)
+    _ensure_armory_view_access(source.armory, current_user)
+    if promote:
+        _ensure_armory_edit_access(source.armory, current_user)
 
     new_weapon = models.Weapon(
         armory=armory,
@@ -1567,7 +1585,7 @@ def import_weapon(
 
 def _get_weapon(db: Session, armory: models.Armory, weapon_id: int) -> models.Weapon:
     weapon = db.get(models.Weapon, weapon_id)
-    if not weapon or weapon.armory_id != armory.id:
+    if not weapon or weapon.armory_id != armory.id or not utils.is_armory_catalog_weapon(weapon):
         raise HTTPException(status_code=404)
     return weapon
 

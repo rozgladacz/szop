@@ -5,6 +5,8 @@
 // zmianie kosztu/liczebności oddziałów (hooki w roster_editor.js).
 // ============================================================
 (function initSZOPRosterWarnings(globalScope) {
+  const trUI = (text, values) => globalThis.SZOPI18n ? globalThis.SZOPI18n.t(text, values) : text;
+
   // Feature flags — możliwe wyłączenie przez window.SZOP_ROSTER_WARNINGS_ENABLED
   // lub window.SZOP_ROSTER_WARNINGS_HEAVY_ENABLED (warunki 6-8).
   function isEnabled() {
@@ -53,7 +55,7 @@
       var weaponCost = parseFloat(item.getAttribute('data-unit-weapon-cost') || '0') || 0;
 
       var titleEl = item.querySelector('[data-roster-unit-title]');
-      var rawTitle = titleEl ? (titleEl.textContent || '') : (item.getAttribute('data-unit-name') || 'Oddział');
+      var rawTitle = titleEl ? (titleEl.textContent || '') : (item.getAttribute('data-unit-name') || trUI('Oddział'));
       // Strip leading "Nx " prefix added by renderning (e.g. "3x Marines" → "Marines")
       var name = rawTitle.replace(/^\d+x\s+/, '');
 
@@ -112,23 +114,23 @@
 
     // 1. Za mało oddziałów
     if (framesCount < 4) {
-      warnings.push('Masz mniej niż 4 oddziały.');
+      warnings.push(trUI('Masz mniej niż 4 oddziały.'));
     }
     // 2. Za dużo oddziałów
     if (framesCount > 8) {
-      warnings.push('Masz więcej niż 8 oddziałów.');
+      warnings.push(trUI('Masz więcej niż 8 oddziałów.'));
     }
     // 3. Brak bohatera
     if (heroModels === 0) {
-      warnings.push('Nie masz żadnego bohatera.');
+      warnings.push(trUI('Nie masz żadnego bohatera.'));
     }
     // 4. Za dużo bohaterów
     if (heroModels > 4) {
-      warnings.push('Masz więcej niż 4 bohaterów.');
+      warnings.push(trUI('Masz więcej niż 4 bohaterów.'));
     }
     // 5. Przekroczony limit punktów
     if (pointsLimit > 0 && totalCost > pointsLimit) {
-      warnings.push('Przekroczyłeś limit punktów.');
+      warnings.push(trUI('Przekroczyłeś limit punktów.'));
     }
 
     if (!isHeavyEnabled()) {
@@ -147,7 +149,7 @@
       });
       if (maxFrame !== minFrame && minFrame.cost > 0 && maxFrame.cost > 4 * minFrame.cost) {
         warnings.push(
-          'Oddział ' + maxFrame.name + ' jest ponad 4 razy droższy od ' + minFrame.name + '.'
+          trUI('Oddział {expensive} jest ponad 4 razy droższy od {cheap}.', {expensive: maxFrame.name, cheap: minFrame.name})
         );
       }
     }
@@ -156,9 +158,9 @@
     frames.forEach(function (f) {
       if (f.toughness <= 0) return;
       if (f.weaponCost < 5 * f.toughness) {
-        warnings.push('Oddział ' + f.name + ' ma mało broni.');
+        warnings.push(trUI('Oddział {name} ma mało broni.', {name: f.name}));
       } else if (f.weaponCost > 25 * f.toughness) {
-        warnings.push('Oddział ' + f.name + ' ma dużo broni.');
+        warnings.push(trUI('Oddział {name} ma dużo broni.', {name: f.name}));
       }
     });
 
