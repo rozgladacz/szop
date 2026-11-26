@@ -4,6 +4,7 @@ from fastapi.templating import Jinja2Templates as BaseTemplates
 from jinja2 import pass_context
 from jinja2.ext import Extension
 
+from .config import APP_VERSION
 from .i18n import catalog, language_for, translate, translation_version
 from .services.ability_presentation import (
     ability_description,
@@ -106,6 +107,7 @@ class Jinja2Templates(BaseTemplates):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.context_processors.append(locale_context)
+        self.env.globals['app_version'] = APP_VERSION
         self.env.globals['t'] = template_translate
         self.env.globals['spell_display'] = template_spell
         self.env.globals['spell_description'] = template_spell_description

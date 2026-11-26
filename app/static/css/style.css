@@ -405,12 +405,50 @@ tbody .spell-row-chosen { background: #fff3cd !important; }
   .model-count-control > .btn {
     display: none;
   }
+}
 
+@media (min-width: 1200px), (hover: hover) and (pointer: fine) {
   .model-count-control > .form-control {
     flex-basis: 5rem;
     width: 5rem;
-    /* Bootstrap still treats the input as attached to its hidden siblings. */
     margin-left: 0 !important;
     border-radius: var(--bs-border-radius) !important;
+  }
+}
+
+@media (min-width: 1200px) and (not ((hover: hover) and (pointer: fine))) {
+  .model-count-control {
+    position: relative;
+    width: 5rem;
+  }
+
+  .model-count-control > .form-control {
+    appearance: textfield;
+    padding-inline-end: 1.5rem;
+  }
+
+  .model-count-control > .form-control::-webkit-inner-spin-button {
+    appearance: none;
+  }
+
+  .model-count-control > .btn {
+    position: absolute;
+    inset-inline-end: 0.25rem;
+    z-index: 6;
+    width: 1rem;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    font-size: 0.875rem;
+    line-height: 1;
+  }
+
+  .model-count-control > [data-model-count-step="-1"] {
+    bottom: 0.2rem;
+  }
+
+  .model-count-control > [data-model-count-step="1"] {
+    top: 0.2rem;
   }
 }
