@@ -9,6 +9,18 @@
 
 ---
 
+## Kolejka testowania z agentami — D8
+
+Kolejność **D8.1 → D8.2 → D8.3 → D8.4 → D8.5**. Wybierz pierwszy otwarty etap
+po weryfikacji jego zależności. [Plan D8](testowanie-agentami.md) podaje zakres,
+budżet, testy i artefakty przekazywane między komputerami.
+
+- [ ] **D8.1** [automation-ready] — [Oddziały projektowane przez agenta](testowanie-agentami.md#d81-oddziały-projektowane-przez-agenta). Syntetyczny katalog, wycena i walidacja przed symulacją.
+- [ ] **D8.2** [automation-ready] — [Rozpiski od agenta](testowanie-agentami.md#d82-rozpiski-od-agenta). Po D8.1 trzy różne rozpiski i jedna kontrolna we wspólnym budżecie, z testem zgodności danych z silnikiem.
+- [ ] **D8.3** [automation-ready] — [Pilot agent kontra agent](testowanie-agentami.md#d83-pilot-agent-kontra-agent). Po D8.2, z runnerem D7.1, archiwum D7.2a, oceną D7.3a i śladem D7.4c. Zamrożony pilot v1, 96 przypadków i zweryfikowane archiwum.
+- [ ] **D8.4** [automation-ready] — [Informacja zwrotna dla agenta](testowanie-agentami.md#d84-informacja-zwrotna-dla-agenta). Po D8.3 raport porównywalnych przypadków i najwyżej jedna udokumentowana zmiana.
+- [ ] **D8.5** [automation-ready] — [Ponowny test jednej zmiany](testowanie-agentami.md#d85-ponowny-test-jednej-zmiany). Po D8.4 porównanie wersji na tych samych warunkach i jednej odłożonej mapie.
+
 ## Zakończona kolejka — akceptacja 2026-11-22
 
 Użytkownik wybrał „trwała kampania testowa v1” i jawnie wznowił cykl.

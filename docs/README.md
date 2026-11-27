@@ -35,6 +35,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [kampania-ze-sladem-decyzji.md](kampania-ze-sladem-decyzji.md) | D7.4c — trwały ślad w kampanii, wznowienie, publikacja i ocena techniczna |
 | [kwalifikacja-decyzji-kampanii.md](kwalifikacja-decyzji-kampanii.md) | D7.3c — dowody dopuszczenia decyzji rozstawienia, wyłączenia i podział danych |
 | [plan-danych-testowych.md](plan-danych-testowych.md) | D7.2–D7.4: plan wspólnego archiwum, bramek jakości i pełnego eksportu decyzji |
+| [testowanie-agentami.md](testowanie-agentami.md) | D8 — projekty oddziałów, rozpiski, pilot agent kontra agent i test poprawki |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |
 | [kolejka-po-c2d1.md](kolejka-po-c2d1.md) | Pięć kolejnych przebiegów z zależnościami, zakresem i kryteriami zakończenia |
 
