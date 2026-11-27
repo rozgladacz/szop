@@ -15,6 +15,8 @@ pełny `python -X utf8 -m pytest -q` i pozostałe bramki z [AGENTS.md](../AGENTS
 
 **Wejście i zakres.** Zależności P2 i D5.3a/b są zamknięte. Przygotuj
 propozycję ADR zgodnie z [planem P13](play-vs-ai-plan.md#p13-publiczny-kontrakt-setup-i-rozstawienia).
+Przyjmij uzgodnioną pierwszą wersję kreatora dla człowieka i bota, w której
+obie rozpiski należą do jednego właściciela.
 Opisz przypisanie rozpisek i stron, mapę, teren, cele, seed, protokół,
 granice pola, wybór stref i strategii, przebieg rundy 0 oraz wznowienie
 i idempotencję tworzenia sesji. Zweryfikuj reguły bezpośrednio w
@@ -26,9 +28,10 @@ P13 z planu Play vs AI. Opisz kontrakt na istniejącej podstawie D5, w tym
 kolejność zajmowania pozycji i dzisiejszy start bitwy. Wdrożenie dotyczy
 P14 po akceptacji P13, z zachowaniem wymagań P3 i P10.
 
-**Odbiór.** Wersjonowane przykłady poprawnego setupu, ponowienia żądania,
-braku legalnej pozycji i dostępu do obcej rozpiski. Zdefiniuj, co utrwala
-transakcja i co musi odtworzyć replay rundy 0. Zmapuj propozycję na obecne
+**Odbiór.** Wersjonowane przykłady setupu z dwiema własnymi rozpiskami,
+ponowienia żądania, braku legalnej pozycji i odrzucenia obcej rozpiski.
+Zdefiniuj, co utrwala transakcja i co musi odtworzyć replay rundy 0.
+Zmapuj propozycję na obecne
 testy `tests/test_battle_creation.py`, `tests/test_agents_deployment.py`
 i `tests/test_battle_replay.py` oraz wskaż nowe testy wymagane w P14.
 
@@ -39,19 +42,32 @@ w nowej propozycji ADR. Punktem wyjścia są istniejące `User.role`,
 `AgentToken`, `AgentPrincipal`, [ADR-0025](adr/0025-agent-scoped-tokens.md)
 i narzędzia C3. Rozróżnij właściciela, uczestnika i poświadczenie.
 Stabilna tożsamość uczestnika musi pozwolić powiązać wyniki mimo wymiany
-lub odwołania tokenu. Zdefiniuj zgodę właścicieli na udział, widoczność
-wyników i sposób kwalifikacji zakończonej bitwy do rankingu. Źródłem wyniku
-jest zweryfikowana bitwa, z jednoznacznym powiązaniem z uczestnikami i
-deduplikacją ponowionych zapisów. Wskaż, jak odbudować ranking.
+lub odwołania tokenu. Źródłem wyniku jest zweryfikowana bitwa, z jednoznacznym
+powiązaniem z uczestnikami i deduplikacją ponowionych zapisów. Wskaż, jak
+odbudować ranking.
+
+**Decyzje użytkownika 2026-11-27.**
+
+- Zgoda jest udzielana raz na konkretną bitwę rankingową. Przy dwóch
+  właścicielach każdy zatwierdza udział swojego agenta. Wspólny właściciel
+  potwierdza udział obu agentów jedną zgodą. Po uzyskaniu zgody agenci grają
+  samodzielnie w ramach tej bitwy. Kontrakt określa też, jak właściciel
+  zatrzymuje dalszą grę.
+- Ranking obejmuje wszystkie zakończone, zweryfikowane bitwy rankingowe
+  dwóch agentów, zarówno tego samego właściciela, jak i różnych właścicieli.
+- Ranking jest publiczny, także bez logowania. Kontrakt określa publiczną
+  tabelę wyników i pola potrzebne do jej wyświetlenia. Odczyt szczegółów
+  bitwy podlega uprawnieniom uczestników.
 
 **Warstwy i granice.** Dokumentacja przyszłego modelu danych, backendu,
 uprawnień i testów. Opisz mały etap wdrożenia i jego budżet zapytań.
-Zaznacz decyzje wymagane przed migracją, nadaniem nowych uprawnień lub
-publikacją wyników. Na potrzeby kontraktu użyj syntetycznych przykładów.
+Opisz migrację, zakres zgody na bitwę i publiczną projekcję rankingu.
+Na potrzeby kontraktu użyj syntetycznych przykładów.
 
-**Odbiór.** ADR zawiera macierz dwóch właścicieli, dwóch agentów i osoby
-postronnej oraz przykłady remisu, wyniku niedokończonej bitwy, retry,
-odwołanego tokenu, odtworzenia rankingu i odmowy dostępu. Uwzględnij
+**Odbiór.** ADR obejmuje bitwy agentów jednego i dwóch właścicieli, brak
+wymaganej zgody, zatrzymanie gry, remis, niedokończoną bitwę, retry,
+odwołany token i odtworzenie rankingu. Uwzględnij anonimowy odczyt rankingu
+i odmowę dostępu osoby postronnej do szczegółów bitwy. Przeprowadź
 security review kontraktu. Oprzyj plan regresji o `tests/test_agent_token_security.py`,
 `tests/test_agent_tokens_router.py`, `tests/test_battle_invite_accept_router.py`
 i `tests/test_leaderboard.py`. Wskaż nowe testy przed wdrożeniem.

@@ -637,6 +637,10 @@ obrońcę, wybór kontrataku oraz oddzielną zgodę, bez ukrytej pętli.
 
 ### P13. Publiczny kontrakt setup i rozstawienia
 
+**Decyzja użytkownika 2026-11-27.** W pierwszej wersji kreator obsługuje
+człowieka grającego z botem. Obie rozpiski należą do zalogowanego właściciela.
+Obsługa bitwy dwóch niezależnych właścicieli to dalszy zakres.
+
 Zależności: P2, D5.3a/b. Dokumentacyjny ADR: rostery/strony, mapa/terrain/cele,
 seed i protokół, jawny wybór grid/objectives, granice pola i stref,
 round-0 command/checkpoint oraz restart/idempotencja tworzenia sesji.
@@ -708,7 +712,7 @@ Kontrakt P2 zaakceptowano w ADR-0060. P11 i P13 definiują przyszłe API
 i mają własne punkty akceptacji.
 
 Gra wspomagana z osobną zgodą dla każdej komendy zachowuje obecny model.
-**Automatyczne wykonywanie całych tur bota** wymaga osobnej decyzji produktowej
+**Automatyczne wykonywanie całych tur bota w Play vs AI** wymaga osobnej decyzji produktowej
 i security: zakres udzielonej zgody, strona/bitwa/okres/limity, odwołanie,
 prawo pass/kontrataku, retry i worker isolation. Nie zastępować jej wildcard
 scope, autoapprove albo ukrytym użyciem `battle:act`. Droższe boty/LLM,

@@ -27,8 +27,8 @@ Po zamknięciu D8 kolejność to **P13 → D4.2a → D5.4a**. Koordynator wybier
 pierwszy otwarty etap z całej kolejki. [Zakres i kryteria odbioru](kolejka-po-d8.md)
 określają osobny wynik i sposób weryfikacji każdego z trzech etapów.
 
-- [ ] **P13** [automation-ready] — [Kontrakt konfiguracji bitwy i rozstawienia](kolejka-po-d8.md#p13-kontrakt-konfiguracji-bitwy-i-rozstawienia). Gotowe zależności P2 i D5.3a/b. Wynik to propozycja ADR dla P14.
-- [ ] **D4.2a** [automation-ready] — [Kontrakt kont agentów i rankingu](kolejka-po-d8.md#d42a-kontrakt-kont-agentów-i-rankingu). Oparty na uprawnieniach B2 i narzędziach C3. Wynik to propozycja ADR z warunkami późniejszego wdrożenia.
+- [ ] **P13** [automation-ready] — [Kontrakt konfiguracji bitwy i rozstawienia](kolejka-po-d8.md#p13-kontrakt-konfiguracji-bitwy-i-rozstawienia). Po P2 i D5.3a/b. Propozycja ADR dla P14 obejmie kreator bitwy z botem na dwóch rozpiskach jednego właściciela.
+- [ ] **D4.2a** [automation-ready] — [Kontrakt kont agentów i rankingu](kolejka-po-d8.md#d42a-kontrakt-kont-agentów-i-rankingu). Na podstawie B2 i C3. Propozycja ADR obejmie zgodę właścicieli na konkretną bitwę, samodzielną grę agentów i publiczny ranking starć także w obrębie jednego właściciela.
 - [ ] **D5.4a** [automation-ready] — [Pilot strategii pokrycia celów](kolejka-po-d8.md#d54a-pilot-strategii-pokrycia-celów). Po D5.3a/b, E2 i E4. Wynik to deterministyczna strategia testowa i porównanie z `grid` oraz `objectives`.
 
 ## Zakończona kolejka — akceptacja 2026-11-22
