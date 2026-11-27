@@ -36,6 +36,7 @@ Indeks dokumentacji projektu. Każdy plik ma jeden, jasny zakres.
 | [kwalifikacja-decyzji-kampanii.md](kwalifikacja-decyzji-kampanii.md) | D7.3c — dowody dopuszczenia decyzji rozstawienia, wyłączenia i podział danych |
 | [plan-danych-testowych.md](plan-danych-testowych.md) | D7.2–D7.4: plan wspólnego archiwum, bramek jakości i pełnego eksportu decyzji |
 | [testowanie-agentami.md](testowanie-agentami.md) | D8 — projekty oddziałów, rozpiski, pilot agent kontra agent i test poprawki |
+| [kolejka-po-d8.md](kolejka-po-d8.md) | P13, D4.2a i D5.4a — kontrakty rozstawienia i rankingu oraz pilot strategii pokrycia celów |
 | [kolejka-po-c2d3.md](kolejka-po-c2d3.md) | Akceptacje 2026-11-19: Ostrożny, audyty, D5.3, publikacja, boty i podłączenie agentów |
 | [kolejka-po-c2d1.md](kolejka-po-c2d1.md) | Pięć kolejnych przebiegów z zależnościami, zakresem i kryteriami zakończenia |
 

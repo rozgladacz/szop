@@ -21,6 +21,16 @@ budżet, testy i artefakty przekazywane między komputerami.
 - [ ] **D8.4** [automation-ready] — [Informacja zwrotna dla agenta](testowanie-agentami.md#d84-informacja-zwrotna-dla-agenta). Po D8.3 raport porównywalnych przypadków i najwyżej jedna udokumentowana zmiana.
 - [ ] **D8.5** [automation-ready] — [Ponowny test jednej zmiany](testowanie-agentami.md#d85-ponowny-test-jednej-zmiany). Po D8.4 porównanie wersji na tych samych warunkach i jednej odłożonej mapie.
 
+## Kolejka po D8 — P13, D4 i D5
+
+Po zamknięciu D8 kolejność to **P13 → D4.2a → D5.4a**. Koordynator wybiera
+pierwszy otwarty etap z całej kolejki. [Zakres i kryteria odbioru](kolejka-po-d8.md)
+określają osobny wynik i sposób weryfikacji każdego z trzech etapów.
+
+- [ ] **P13** [automation-ready] — [Kontrakt konfiguracji bitwy i rozstawienia](kolejka-po-d8.md#p13-kontrakt-konfiguracji-bitwy-i-rozstawienia). Gotowe zależności P2 i D5.3a/b. Wynik to propozycja ADR dla P14.
+- [ ] **D4.2a** [automation-ready] — [Kontrakt kont agentów i rankingu](kolejka-po-d8.md#d42a-kontrakt-kont-agentów-i-rankingu). Oparty na uprawnieniach B2 i narzędziach C3. Wynik to propozycja ADR z warunkami późniejszego wdrożenia.
+- [ ] **D5.4a** [automation-ready] — [Pilot strategii pokrycia celów](kolejka-po-d8.md#d54a-pilot-strategii-pokrycia-celów). Po D5.3a/b, E2 i E4. Wynik to deterministyczna strategia testowa i porównanie z `grid` oraz `objectives`.
+
 ## Zakończona kolejka — akceptacja 2026-11-22
 
 Użytkownik wybrał „trwała kampania testowa v1” i jawnie wznowił cykl.
@@ -882,7 +892,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `claude_v3_player.py` — **`ClaudeV3Player` 2026-06-17** (`--players claude_v3`): **najlepsze podejście** — zamiast walczyć z polityką priority, DZIEDZICZY szkielet `PriorityPlayer` (selekcja oddziału + kolejność 1–7 + ruch na cele) i nadpisuje TYLKO wybór celu (krok 2/3): „dobij/koncentruj" (`mean + p_full_kill·30 + expected_kills·14`, ability-aware przez `expected_damage`) zamiast „najbliższy". Naprawia udokumentowaną słabość (priority strzela najbliższego — rozprasza; priority3 `x(4-x)` nie premiuje dobijania). **Depth-1, ~1.8× koszt priority** (zgodnie z „ten sam rząd"). **Wynik (3 fixtury, 120 gier/matchup):** bije priority2 60%, greedy 88%, claude_v1 75%, ~remis claude_v2 52% — **najlepszy z botów Claude vs priority (~42%) i priority3 (~33%)**. **Nadal NIE bije priority/priority3.** Sweep 10+ konfiguracji wag (finish/kill/deny/proximity): wszystkie 30–43% — sufit STRUKTURALNY: „strzel najbliższego" to mocne lokalne optimum (proximity-anchoring i odcięcie celów sprawdzone, nie pomogły; czysty focus-fire najlepszy). 5 testów.
   - **Wniosek finalny D4 (3 podejścia × ~15 wariantów):** żaden bot heurystyczny — depth-1 value-max (v1), depth-2 z modelem przeciwnika (v2), ani priority+smart-targeting (v3) — nie bije `priority`/`priority3` przy 2–130× ich kosztu. **Sufit to jakość polityki, nie głębokość ani wybór celu.** `priority` (depth-1, ~6× `priority3`... a sam priority bazowy 1×) pozostaje najlepszym stosunkiem siła/koszt. Realna droga do pobicia: nauczona polityka (imitation/RL) lub ocena kalibrowana do pkt 5.f — poza zakresem botów heurystycznych.
 - [x] Leaderboard `reports/leaderboard.md` — **DONE 2026-06-19** (wątek `faza-d-leaderboard`, ADR-0030): `scripts/leaderboard.py` — round-robin **różnych** botów (mirror self-play wykluczony) ponad fixturami, agregacja **ponad parami** w jeden standing per bot (gry/wygrane/porażki/remisy/win-rate) → markdown z tabelą rankingową + tekstowymi (unicode) słupkami. Reuse `simulate_balance` (SSOT, ADR-0032) + wspólna infrastruktura `scripts/balance_common.py` współdzielona z `balance_report.py` (cleanup 2026-06-20). Skrypt-liść, 20 testów. Real-run (5 botów × 3 fixtury, n=8): **priority3 66.7% > claude_v3 62.5% > priority 46.9% > random 26% > greedy 12.5%** — potwierdza udokumentowany wniosek D4 (priority/priority3 najsilniejsze). `reports/` gitignored. Domyślny zestaw botów = tag `useful` z `agents/registry.py` (`priority`, `priority3`, `claude_v3`); `--players all` przywraca pełny ranking z botami referencyjnymi/drogimi.
-- [x] ADR-0030: Wielu agentów konkurujących — **część 1 (ranking botów) DONE; część 2 (osobne konta + leaderboard międzykontowy) ODŁOŻONA do B2 auth.** (Accepted)
+- [x] ADR-0030: Wielu agentów konkurujących — **część 1 (ranking botów) DONE**. B2 dostarczył podstawę kont i tokenów. Część 2 otwiera [kontrakt D4.2a](kolejka-po-d8.md#d42a-kontrakt-kont-agentów-i-rankingu).
 
 ### D5. Rozstawienie jako decyzja bota — **Proste strategie DONE 2026-06-15** (wątek `faza-d-deployment`)
 
@@ -891,7 +901,7 @@ Synchronizacja 3 warstw SSOT (YAML reguł + procedural oracle + engine) po drift
 - [x] `Player.choose_deployment(state, unit_id, zone) → Position` — nowa metoda ABC (default: pozycja z roster/fikstury = wsteczna kompat). `RandomPlayer` override (losowa legalna pozycja w strefie, deterministyczna per seed).
 - [x] `simulate_from_rosters(deployment_zones=(zone_p0, zone_p1))` pyta graczy o pozycje przed `deployment_round`; waliduje całe koło oddziału w strefie (pkt 13.a MVP) przez `IllegalActionError`. Wzajemnie wykluczające z explicit `deployment` (ValueError).
 - [x] Proste strategie deploymentu (nie wymagają E4): grid równomierny w strefie (`grid_positions`), losowa-w-strefie (`random_position_in_zone`). **Boty deterministyczne** (Greedy/Priority/V2/V3) rozstawiają się gridem przez `GridDeploymentMixin` (`grid_deployment_position` — slot per oddział, grid liczony dla maks. promienia własnych oddziałów); `RandomPlayer` losuje w strefie. Wpięcie addytywne (aktywne tylko z `deployment_zones`) → B7 golden digesty bez zmian. **Uproszczenie pkt 13.a (MVP):** legalność = całe koło w prostokącie strefy; cecha Niedostępny (pkt 4.c.i) + reguła >1″ od innych oddziałów świadomie pominięte (E4 kolizje).
-- [ ] Strategie zaawansowane (wymagają E4 kolizji): rozstaw bez nachodzenia; coverage-based (maksymalizuj liczbę pokrytych celów z pozycji startowej)
+- [ ] Strategie zaawansowane — [pilot pokrycia celów D5.4a](kolejka-po-d8.md#d54a-pilot-strategii-pokrycia-celów) korzysta z gotowego walidatora D5 i geometrii E2/E4.
 - [x] Testy: pozycja poza strefą rozstawienia odrzucona; gracze dostają różne pozycje na tej samej planszy; grid deterministyczny + legalny; backward compat (None → pozycje z roster); integracja+determinizm.
 
 ---
